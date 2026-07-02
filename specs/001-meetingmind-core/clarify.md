@@ -11,14 +11,19 @@
 | Q-003 | Medium | STT 원문 기본 보존 기간은 7일, 30일, 영구 중 무엇인가? | 저장 비용, 개인정보, 삭제 작업 설계를 결정한다. | Open | |
 | Q-004 | Medium | Project Knowledge는 누가 공식 승인하고 최신화하는가? | Project AI가 공식 지식과 회의 기록을 구분하는 기준이 된다. | Open | |
 | Q-005 | Low | 보고서 파일 포맷은 Markdown, HTML, PDF, DOCX 중 무엇을 우선할까? | Report Agent 저장/다운로드 구현 방향을 결정한다. | Open | |
+| Q-006 | Medium | Target API Base URL은 `/api/v1`로 고정할까, 현재 prototype 경로와 병행할까? | Frontend client 구성과 Backend route migration 순서를 결정한다. | Open | |
+| Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
 
 ## Blocking Decisions
 
 - Q-001은 Backend 인증/인가 모델과 Frontend 로그인 흐름 구현 전에 결정해야 한다.
 - Q-002는 `MeetingParticipant.role`, 권한 필터, 회의 UI 제어 구현 전에 결정해야 한다.
+- Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다.
+- Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
 
 ## Current Assumptions
 
 - 프로토타입 단계에서는 로그인/인가를 mock 상태로 표현한다.
 - 실제 보안 구현 전에는 AI 컨텍스트에 민감 데이터를 넣지 않는다.
 - Meeting AI를 먼저 안정화한 뒤 Project AI RAG를 구현한다.
+- 실제 STT 업로드 API는 현재 Core Prototype의 확정 계약이 아니라 Future Draft로 관리한다.

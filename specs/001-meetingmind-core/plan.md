@@ -38,6 +38,14 @@
 - `POST /api/meeting-ai/ask`
   - request: `question`, `transcript`, `decisions`, `actions`
   - response: `answer`, `model`
+- Common API rules
+  - 공통 오류 응답은 `code`, `message`, `fieldErrors`, `traceId`를 포함한다.
+  - API 날짜시간은 ISO-8601, transcript 위치는 `startMs`, `endMs` 밀리초를 사용한다.
+  - 빈 배열은 `null` 대신 `[]`를 반환한다.
+- Target transcript/speaker contracts
+  - `GET /api/v1/meetings/{meetingId}/transcript`
+  - `PATCH /api/v1/meetings/{meetingId}/speakers/{speakerId}`
+  - 실제 STT 업로드/요약 재생성 API는 Future Draft로만 관리한다.
 
 ## Data Model
 
@@ -46,7 +54,8 @@
 - SpaceMember: Space별 멤버십과 역할
 - Meeting: Space 하위 회의 회차
 - MeetingParticipant: 회의별 접근 권한
-- TranscriptSegment: 시간, 발화자, 텍스트, 회의 참조
+- MeetingSpeaker: 자동 발화자 구분 label과 사용자 지정 displayName
+- TranscriptSegment: `startMs`, `endMs`, 발화자, 텍스트, 회의 참조
 - MeetingReport: 회의 요약, 결정사항, Action Item
 - ProjectKnowledge: 공식 프로젝트 지식
 - EmbeddingChunk: RAG 검색용 chunk와 vector
@@ -56,6 +65,8 @@
 - Backend API에서 Space/Meeting 접근 권한을 먼저 검증한다.
 - AI 서버로 전달하는 컨텍스트는 Backend가 권한 필터링 후 구성하는 것을 목표로 한다.
 - Project AI 구현 시 회의 데이터 retrieval 전에 MeetingParticipant 권한을 적용한다.
+- Transcript, summary, speaker 수정 API는 MeetingParticipant 권한 확인 후 처리한다.
+- Speaker 이름 수정은 `host` 또는 `editor` 권한으로 제한한다.
 - LiveKit 토큰은 짧은 만료 시간을 유지한다.
 
 ## Parallel Work Plan
@@ -90,10 +101,11 @@
 
 1. Q-001 로그인 방식과 Q-002 회의 권한 등급을 결정한다.
 2. API 계약과 데이터 모델을 확정한다.
-3. Backend 도메인 모델과 권한 필터를 먼저 구현한다.
-4. Frontend와 AI는 확정된 계약에 맞춰 병렬 구현한다.
-5. Data migration은 Backend 모델과 맞춘 뒤 순차 통합한다.
-6. Frontend, Backend, AI 권장 검증을 실행하고 통합 흐름을 수동 확인한다.
+3. 공통 오류 응답, Meeting status, transcript/speaker 계약을 확정한다.
+4. Backend 도메인 모델과 권한 필터를 먼저 구현한다.
+5. Frontend와 AI는 확정된 계약에 맞춰 병렬 구현한다.
+6. Data migration은 Backend 모델과 맞춘 뒤 순차 통합한다.
+7. Frontend, Backend, AI 권장 검증을 실행하고 통합 흐름을 수동 확인한다.
 
 ## Test Plan
 

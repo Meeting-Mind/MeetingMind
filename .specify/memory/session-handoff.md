@@ -10,6 +10,8 @@
 - Git 작업 절차, staging, commit, pull, branch, push 규칙을 `AGENTS.md`에 구체화했다.
 - 팀원/에이전트 병렬 작업을 위해 `AGENTS.md`, `plan-template.md`, `tasks-template.md`, `implement-template.md`, core `plan.md`, `tasks.md`, `implement.md`에 병렬 계획/충돌 방지 구조를 추가했다.
 - task 작성 시 milestone과 에이전트 친화 작업 단위로 나누도록 `AGENTS.md`, `tasks-template.md`, core `tasks.md`, `implement.md`를 보완했다.
+- API_SPEC 초안에서 공통 API 규칙, Meeting status, 오류 응답, transcript/speaker 계약 후보를 MeetingMind 기준으로 선별 반영했다.
+- 기존 umbrella task T010-T018을 즉시 배정 가능한 상세 task T024-T069로 분해했다.
 - `.claude` 폴더는 삭제했다. Claude 전용 commands/skills 대신 도구 중립 구조를 사용한다.
 - `CLAUDE.md`는 Claude Code 호환용 포인터로만 유지한다.
 
@@ -41,9 +43,9 @@
 - `plan.md`: React/Vite, Spring Boot, FastAPI 기반 구현 계획
 - `research.md`: 제품 방향과 기술 선택 근거
 - `data-model.md`: User, Space, Meeting, Transcript, Report, Knowledge, Embedding 모델 초안
-- `contracts/api.md`: `/api/workspace`, `/api/livekit/token`, `/api/meeting-ai/ask` 계약
+- `contracts/api.md`: 현재 prototype API, 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker target contract, async STT future draft
 - `clarify.md`: 로그인, 권한 등급, STT 보존 정책, Project Knowledge 승인 주체 등 미결정 질문
-- `tasks.md`: 다음 구현 작업 목록
+- `tasks.md`: milestone별 상세 구현 작업 목록. 실제 배정은 T024-T069 기준으로 진행한다.
 - `analyze.md`: 현재 문서 간 일관성 검증
 - `implement.md`: 문서 체계 정리 구현 기록
 - `.specify/templates/research-template.md`: 결정 근거 문서 템플릿
@@ -69,21 +71,21 @@
 - Meeting AI는 현재 회의 범위만 답해야 한다.
 - Project AI는 사용자가 접근 가능한 회의와 공식 Project Knowledge만 검색해야 한다.
 - RAG/AI 컨텍스트 구성 전 권한 필터를 먼저 적용한다.
-- 현재 문서 기준선 파일은 Git 미추적 상태이므로 커밋 전 포함 범위를 확인한다.
+- 문서 기준선은 `codex/docs-agent-collaboration-workflow` 브랜치에 push되어 있다.
+- 현재 `output/`, `tmp/`는 PDF 생성 산출물로 Git 미추적 상태다.
+- API 계약 보강 변경은 아직 커밋하지 않은 로컬 문서 변경이다.
 
 ## Next Likely Work
 
-`specs/001-meetingmind-core/tasks.md` 기준 다음 작업은 아래 항목들이다.
+`specs/001-meetingmind-core/tasks.md` 기준 다음 작업은 상세 task 기준으로 진행한다.
 
-- T010: Workspace 통합 mock API를 Space/Meeting/Report 단위 API로 분리할 계획 세분화
-- T011: User, Space, SpaceMember, Meeting, MeetingParticipant 도메인 모델 추가
-- T012: 회의 접근 권한 검증 계층 추가
-- T013: Project/Meeting 선택 상태를 URL 또는 명시적 state로 정리
-- T014: mock fallback 사용 여부를 개발자에게 표시할 내부 상태 정리
-- T015: Meeting AI 호출을 Backend 권한 필터 이후의 컨텍스트 조립 흐름으로 전환
-- T016: AI 응답에 출처 메타데이터 구조 추가
-- T017: PostgreSQL/pgvector 스키마 초안을 migration으로 추가
-- T018: `clarify.md`의 Open 질문을 결정사항으로 갱신
+- M003/T024-T028: 인증, 회의 권한, Target API base URL, 오디오 업로드 방식 결정 준비와 analysis 갱신
+- M004/T029-T034: Space/Meeting/Transcript/Report/AI API 계약 세분화
+- M005/T035-T043: Backend 구조 조사, 도메인 모델, 권한 정책, 오류 응답, backend 검증
+- M006/T044-T050: Frontend 구조 조사, API type, 선택 상태, mock fallback, frontend 검증
+- M007/T051-T057: Meeting AI context 조사, backend-to-ai 계약, source metadata, AI 검증
+- M008/T058-T064: migration 도구 조사, schema 초안, retention/RAG 필드, data 검증
+- M009/T065-T069: backend/frontend/ai 통합 검증, 수동 흐름 확인, closeout 문서 갱신
 
 ## Verification Status
 

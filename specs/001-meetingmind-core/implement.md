@@ -10,6 +10,8 @@
 - Git 작업 절차, staging, commit, pull, branch, push 규칙을 구체화했다.
 - 팀/에이전트 병렬 작업 계획, 충돌 경계, owner/agent 기반 tasks 형식을 추가했다.
 - milestone 기반 task 작성 규칙과 에이전트 친화 작업 단위 기준을 추가했다.
+- API_SPEC 초안에서 공통 API 규칙, Meeting status, 오류 응답, transcript/speaker 계약 후보를 MeetingMind 기준으로 선별 반영했다.
+- 기존 umbrella task T010-T018을 즉시 배정 가능한 상세 task T024-T069로 분해했다.
 - 실제 제품 코드는 변경하지 않았다.
 
 ## Work Allocation
@@ -18,6 +20,8 @@
 | --- | --- | --- | --- |
 | Codex | Codex | T021 | 병렬 작업 지침, 템플릿, core plan/tasks/implement/handoff 문서 보완 |
 | Codex | Codex | T022 | milestone 기반 task 작성 규칙과 에이전트 친화 작업 단위 기준 보완 |
+| Codex | Codex | T023 | API 계약, 데이터 모델, 계획, clarification 문서 보완 |
+| Codex | Codex | T024-T069 planning | milestone별 상세 구현 task 분해 |
 
 ## Files Changed
 
@@ -41,11 +45,14 @@
 - 작업별 owner/agent/dependency/files 관리는 `tasks.md`와 `tasks-template.md`에 추가했다.
 - milestone과 task granularity 기준은 `AGENTS.md`, `tasks.md`, `tasks-template.md`에 추가했다.
 - 실제 배정/충돌/통합 기록은 `implement.md`와 `implement-template.md`에 추가했다.
+- 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker 계약은 `contracts/api.md`, `data-model.md`, `plan.md`, `clarify.md`, `tasks.md`에 반영했다.
+- 실제 구현 착수는 `tasks.md`의 T024-T069 상세 task 기준으로 진행한다.
 
 ## Git Status Notes
 
-- 현재 문서 기준선 파일은 Git 미추적 상태다.
-- 커밋을 요청받으면 `.specify/`, `specs/`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md` 포함 여부를 먼저 확인한다.
+- 문서 기준선은 `codex/docs-agent-collaboration-workflow` 브랜치에 커밋되어 원격 push되었다.
+- 현재 PDF 공유 산출물인 `output/`, `tmp/`는 Git 미추적 상태다.
+- 이번 API 계약 보강은 아직 커밋하지 않은 로컬 문서 변경이다.
 
 ## Verification
 
@@ -56,5 +63,7 @@
 - `clarify.md`의 Open 질문 결정
 - 실제 인증/권한 모델 구현
 - mock API 분리
+- Target API base URL 결정
+- 실제 STT 파일 업로드 방식 결정
 - Meeting AI 권한 필터링 경로 강화
 - Project AI RAG 설계와 구현
