@@ -2945,6 +2945,91 @@ body.app-theme select {
   font-weight: 900;
 }
 
+.lk-live-room-term-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lk-live-room-term-actions button,
+.lk-live-room-dictionary-term button,
+.lk-live-room-term-form button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #dfd8f3;
+  border-radius: 999px;
+  background: #f6f3ff;
+  color: #655de0;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.lk-live-room-dictionary-term button {
+  margin-top: 12px;
+}
+
+.lk-live-room-term-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.lk-live-room-term-form input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #e4def5;
+  border-radius: 14px;
+  background: #fbfaff;
+  color: #3d4063;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.lk-live-room-term-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e4def5;
+  border-radius: 18px;
+  background: #fbfaff;
+}
+
+.lk-live-room-term-result div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lk-live-room-term-result div strong {
+  margin: 0;
+}
+
+.lk-live-room-term-result span,
+.lk-live-room-term-result small {
+  color: #9a95b4;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lk-live-room-term-result p,
+.lk-live-room-term-error {
+  margin: 0;
+  color: #464a67;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.lk-live-room-term-error {
+  margin-top: 12px;
+  color: #c45f4b;
+  font-weight: 800;
+}
+
 .workspace-project-modal-backdrop,
 .project-meetings-modal-backdrop {
   position: fixed;

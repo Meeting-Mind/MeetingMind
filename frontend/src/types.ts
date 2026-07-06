@@ -14,6 +14,26 @@ export interface LabeledItem {
   meta: string;
 }
 
+export interface AiSourceMetadata {
+  sourceId: string;
+  type: "transcript" | "decision" | "action" | "projectKnowledge" | "glossary" | string;
+  title?: string | null;
+  speaker?: string | null;
+  time?: string | null;
+  startMs?: number | null;
+  endMs?: number | null;
+  text: string;
+}
+
+export interface TermExplanationResponse {
+  term: string;
+  explanation: string;
+  sourceType: string;
+  sources: AiSourceMetadata[];
+  unsupported: boolean;
+  model: string;
+}
+
 export interface MeetingOverview {
   title: string;
   subtitle: string;
