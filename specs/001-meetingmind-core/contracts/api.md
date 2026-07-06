@@ -239,7 +239,9 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 ```json
 {
+  "projectId": "project-001",
   "meetingId": "meeting-001",
+  "meetingTitle": "3회차 API 설계 회의",
   "term": "pgvector",
   "selectedText": "pgvector 기반으로 회의별 임베딩을 분리하겠습니다.",
   "glossary": [
@@ -283,6 +285,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 ```json
 {
+  "projectId": "project-001",
   "meetingId": "meeting-001",
   "title": "Sprint Planning #12",
   "transcript": [
@@ -334,7 +337,9 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 ```json
 {
+  "projectId": "project-001",
   "meetingId": "meeting-001",
+  "meetingTitle": "Sprint Planning #12",
   "question": "김진수가 맡은 후속 작업이 뭐야?",
   "transcript": [
     { "time": "06:10:03", "speaker": "김진수", "text": "ERD 구조를 수정해야 합니다." }
@@ -354,7 +359,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
   "sources": [
     {
       "sourceId": "action-001",
-      "type": "action",
+      "type": "actionItem",
       "text": "김진수 · ERD 수정안 문서화"
     }
   ],
@@ -416,7 +421,9 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 ```json
 {
+  "projectId": "project-001",
   "meetingId": "meeting-001",
+  "title": "Sprint Planning #12",
   "transcript": [
     { "time": "06:10:03", "speaker": "김진수", "text": "제가 ERD 수정안을 문서화하겠습니다." }
   ],
