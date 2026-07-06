@@ -27,3 +27,10 @@
 - 실제 보안 구현 전에는 AI 컨텍스트에 민감 데이터를 넣지 않는다.
 - Meeting AI를 먼저 안정화한 뒤 Project AI RAG를 구현한다.
 - 실제 STT 업로드 API는 현재 Core Prototype의 확정 계약이 아니라 Future Draft로 관리한다.
+
+## Decisions
+
+- D-001: 현재 AI 담당 범위는 `ai/**`와 AI 관련 문서로 제한한다. `backend/**` 권한 필터, 컨텍스트 조립, 저장 API 구현과 `frontend/**` 화면 연결은 다른 담당자가 맡을 때까지 `TBD`로 둔다.
+- D-002: 문서 원칙상 최종 구조는 Backend가 권한 필터를 적용한 뒤 AI 서버에 컨텍스트를 전달하는 방식이다. 다만 AI 담당 prototype 작업은 백엔드 구현 전까지 mock 또는 이미 권한 필터링된 데모 컨텍스트만 사용한다.
+- D-003: AI prototype API는 우선 AI 서버 직접 호출 계약으로 정의한다. Backend route, 저장, 권한 필터 구현은 후속 담당자 작업이므로 현재 계약에는 already-filtered context 전제를 명시한다.
+- D-004: 실제 STT 저장 API, DB schema, pgvector migration은 후속 담당자 작업을 기다린다. AI 담당은 그 전까지 `TranscriptSegment` 유사 mock 데이터에서 `RagChunk`를 생성하는 adapter 경계와 in-memory retriever를 먼저 구현한다.

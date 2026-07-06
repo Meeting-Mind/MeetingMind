@@ -71,15 +71,15 @@
 
 ## Parallel Work Plan
 
-- Team Members: TBD
-- Agents: TBD
+- Team Members: AI 담당 1명 확정, 나머지 TBD
+- Agents: AI workstream은 Codex 사용, 나머지 TBD
 
 | Workstream | Owner | Agent | Scope | Expected Files | Dependencies |
 | --- | --- | --- | --- | --- | --- |
 | Docs/Contracts | TBD | TBD | Open 질문 결정, API 계약, 데이터 모델, 작업 계획 갱신 | `specs/001-meetingmind-core/*` | - |
 | Backend | TBD | TBD | Space/Meeting API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/api.md`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002, Docs/Contracts |
 | Frontend | TBD | TBD | Project/Meeting 선택 상태, mock fallback 표시, 화면 연동 | `frontend/**` | API 계약 확정 |
-| AI | TBD | TBD | Meeting AI 컨텍스트 조립 경로, 출처 메타데이터 | `ai/**`, `backend/**` | Backend 권한 필터 계약 |
+| AI | 사용자 | Codex | 백엔드/프론트엔드 구현 없이 AI 서버에서 RAG chunk 형식, mock/in-memory retriever, 용어 설명, 회의 요약/보고서 생성, 회의별/프로젝트별 챗봇, 태스크 추출 prototype API를 준비한다. Backend 권한 필터 이후 컨텍스트 조립은 target architecture로 유지한다. | `ai/**`, `specs/001-meetingmind-core/*` | Backend 권한 필터, 실제 STT 저장 API, pgvector migration, Frontend 화면 연결은 후속 담당자 작업. 그 전까지 mock 또는 권한 필터링된 prototype context만 사용 |
 | Data | TBD | TBD | PostgreSQL/pgvector 스키마 초안과 migration | `backend/**`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002 |
 
 ## Conflict Boundaries
@@ -103,9 +103,10 @@
 2. API 계약과 데이터 모델을 확정한다.
 3. 공통 오류 응답, Meeting status, transcript/speaker 계약을 확정한다.
 4. Backend 도메인 모델과 권한 필터를 먼저 구현한다.
-5. Frontend와 AI는 확정된 계약에 맞춰 병렬 구현한다.
-6. Data migration은 Backend 모델과 맞춘 뒤 순차 통합한다.
-7. Frontend, Backend, AI 권장 검증을 실행하고 통합 흐름을 수동 확인한다.
+5. AI 담당은 실제 STT/DB를 기다리지 않고 `TranscriptSegment` 유사 mock 데이터에서 RAG chunk를 만드는 adapter와 in-memory retriever를 먼저 구현한다.
+6. Frontend와 AI는 확정된 계약에 맞춰 병렬 구현한다.
+7. Data migration은 Backend 모델과 맞춘 뒤 순차 통합한다.
+8. Frontend, Backend, AI 권장 검증을 실행하고 통합 흐름을 수동 확인한다.
 
 ## Test Plan
 
