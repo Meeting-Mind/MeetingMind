@@ -12,7 +12,7 @@
 - milestone 기반 task 작성 규칙과 에이전트 친화 작업 단위 기준을 추가했다.
 - API_SPEC 초안에서 공통 API 규칙, Meeting status, 오류 응답, transcript/speaker 계약 후보를 MeetingMind 기준으로 선별 반영했다.
 - 기존 umbrella task T010-T018을 즉시 배정 가능한 상세 task T024-T069로 분해했다.
-- AI 담당 workstream을 T070-T077로 분리하고, 용어 설명 prototype의 AI 서버 endpoint와 Live Room 연결을 추가했다.
+- AI 담당 workstream을 T070-T077로 분리하고, 용어 설명 prototype의 AI 서버 endpoint를 추가했다.
 
 ## Work Allocation
 
@@ -22,7 +22,7 @@
 | Codex | Codex | T022 | milestone 기반 task 작성 규칙과 에이전트 친화 작업 단위 기준 보완 |
 | Codex | Codex | T023 | API 계약, 데이터 모델, 계획, clarification 문서 보완 |
 | Codex | Codex | T024-T069 planning | milestone별 상세 구현 task 분해 |
-| 사용자 | Codex | T070-T077 | 백엔드 구현 없이 AI 서버와 프론트 AI 화면 중심으로 용어 설명, 요약/보고서 생성, 챗봇, 태스크 추출 prototype 작업 착수 |
+| 사용자 | Codex | T070-T077 | 백엔드/프론트엔드 구현 없이 AI 서버 중심으로 용어 설명, 요약/보고서 생성, 챗봇, 태스크 추출 prototype 작업 착수 |
 | 사용자 | Codex | T070-T071 | 현재 AI 코드 경계 기록과 AI prototype API 계약 문서화 |
 | 사용자 | Codex | T072 | 회의 중 transcript 용어 설명 prototype 구현 |
 | 사용자 | Codex | T078-T088 | STT/DB 구현 전 RAG chunk 형식, in-memory retriever, RAG 기반 AI 기능 전환 작업 |
@@ -39,13 +39,10 @@
 - `specs/001-meetingmind-core/*`: MeetingMind 핵심 프로토타입 스펙 세트
 - `ai/app/main.py`: `POST /api/meeting-ai/explain-term` endpoint와 Domain Dictionary 우선 응답, AI fallback 추가
 - `ai/app/rag.py`: RAG chunk/source/search request/result 타입과 retriever protocol 추가
-- `frontend/src/pages/LiveRoomPage.tsx`: STT 용어 후보 버튼, 직접 용어 입력, 설명 결과 패널 연결
-- `frontend/src/types.ts`: AI source metadata와 term explanation response type 추가
-- `frontend/src/styles/app.css`: Live Room 용어 설명 UI 스타일 추가
 
 ## Conflict Notes
 
-- 제품 코드 변경 범위는 AI 서버와 Live Room 화면으로 제한했다. `backend/**`는 변경하지 않았다.
+- 제품 코드 변경 범위는 AI 서버로 제한했다. `backend/**`와 `frontend/**`는 변경하지 않는다.
 - 현재 문서 기준선 전체가 미추적 상태이므로 커밋 전 포함 범위를 확인해야 한다.
 
 ## Integration Result
@@ -57,7 +54,7 @@
 - 실제 배정/충돌/통합 기록은 `implement.md`와 `implement-template.md`에 추가했다.
 - 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker 계약은 `contracts/api.md`, `data-model.md`, `plan.md`, `clarify.md`, `tasks.md`에 반영했다.
 - 실제 구현 착수는 `tasks.md`의 T024-T069 상세 task 기준으로 진행한다.
-- AI 담당 workstream은 `tasks.md`의 T070-T077로 분리했다. T070-T072를 완료 상태로 두고, `backend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다.
+- AI 담당 workstream은 `tasks.md`의 T070-T077로 분리했다. T070-T072를 완료 상태로 두고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다.
 - AI prototype API 계약은 `contracts/api.md`에 추가했다. 범위는 용어 설명, 회의 요약/보고서 생성, 회의별 챗봇, 프로젝트별 챗봇, 회의 종료 태스크 후보 추출이다.
 - 용어 설명 prototype은 `pgvector` 같은 Domain Dictionary 항목을 로컬 응답으로 먼저 처리하고, dictionary에 없지만 transcript 근거가 있는 용어는 AI fallback으로 설명한다.
 - RAG 기반 작업은 `tasks.md`의 M011/T078-T088로 세분화했다. T078-T079를 완료하고 T080을 시작 상태로 두었으며, 실제 STT 저장 API/DB schema/pgvector migration은 후속 담당자 작업으로 남긴다.
@@ -65,10 +62,9 @@
 ## Current AI Workstream Notes
 
 - AI 서버 현재 진입점은 `ai/app/main.py`의 `/api/meeting-ai/ask`이며, question, transcript, decisions, actions를 받아 OpenAI Responses API를 직접 호출한다.
-- Meeting AI 화면은 `frontend/src/pages/MeetingAiPage.tsx`에서 AI 서버를 직접 호출한다.
-- Project AI 화면은 `frontend/src/pages/ProjectOverviewPage.tsx`에서 같은 `/api/meeting-ai/ask`를 재사용하며, 프로젝트 회의 목록을 프론트에서 prototype transcript로 변환한다.
-- Live Room 화면은 `frontend/src/pages/LiveRoomPage.tsx`에서 mock transcript를 실시간 STT처럼 순환 표시하고, Domain Dictionary는 `pgvector` 항목 하나를 하드코딩한다.
-- Report Agent 화면은 `frontend/src/pages/ReportAgentPage.tsx`에서 실제 AI 서버를 호출하지 않고 로컬 키워드 규칙으로 변경안을 만든다.
+- 프론트 화면 연결 지점은 읽기 전용으로 확인했다. 실제 `frontend/**` 구현은 Frontend 담당자 작업으로 남긴다.
+- 현재 Meeting AI 화면은 AI 서버를 직접 호출하고, Project AI 화면은 같은 `/api/meeting-ai/ask`를 재사용한다. 이 분리는 AI 서버 endpoint/contract부터 정리한다.
+- Live Room의 STT 표시와 Report Agent의 로컬 편집 흐름은 현재 프론트 구현을 유지하고, AI 담당 브랜치에서는 수정하지 않는다.
 - 백엔드 권한 필터, Meeting/Project context 조립, AI 응답 저장, 태스크 저장 API는 아직 구현되지 않았고 현재 AI 담당 범위에서 제외한다.
 - Prototype AI 계약은 `POST /api/meeting-ai/explain-term`, `POST /api/meeting-ai/generate-report`, `POST /api/meeting-ai/chat`, `POST /api/project-ai/chat`, `POST /api/meeting-ai/extract-tasks`로 정의했다.
 - `POST /api/meeting-ai/explain-term` 구현을 추가했다. glossary 일치 시 `local-glossary` 모델 라벨로 즉시 응답하고, transcript 근거가 있으면 OpenAI fallback을 호출한다.
@@ -96,7 +92,6 @@
 
 ## Verification
 
-- Passed: `cd frontend && npm run build`
 - Passed: `cd ai && python3 -m compileall app`
 - Passed: `git diff --check`
 - Passed: `cd ai && .venv/bin/python -c "from app.main import ExplainTermRequest, explain_term; ..."`로 Domain Dictionary 우선 응답 확인
@@ -113,5 +108,6 @@
 - 실제 STT 파일 업로드 방식 결정
 - Meeting AI 권한 필터링 경로 강화
 - Project AI RAG 설계와 구현
-- AI prototype 구현: 요약/보고서 생성, 회의별/프로젝트별 챗봇 분리, 회의 종료 태스크 후보 추출
+- AI prototype 구현: 요약/보고서 생성, 회의별/프로젝트별 챗봇 분리, 회의 종료 태스크 후보 추출 API
+- Frontend 연결: Live Room 용어 설명 UI, Meeting/Project AI source 표시, Report Agent 연결은 Frontend 담당 TBD
 - RAG prototype 구현: `ai/app/rag.py` 추가, mock retriever 연결, sources/citations UI 표시

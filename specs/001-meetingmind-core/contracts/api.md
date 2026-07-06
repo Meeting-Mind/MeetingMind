@@ -145,7 +145,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 ## AI Prototype Contracts
 
-이 섹션은 현재 AI 담당 workstream의 prototype 계약이다. Backend 권한 필터와 저장 API가 준비되기 전까지 프론트엔드는 `VITE_AI_API_BASE_URL`의 AI 서버로 직접 요청할 수 있다. 모든 요청 컨텍스트는 mock 데이터 또는 이미 권한 필터링된 데모 데이터로 간주한다.
+이 섹션은 현재 AI 담당 workstream의 prototype 계약이다. Backend 권한 필터와 저장 API가 준비되기 전까지 AI 서버는 `VITE_AI_API_BASE_URL`로 직접 호출 가능한 계약을 제공한다. 실제 Frontend 화면 연결은 Frontend 담당 작업으로 남기며, 모든 요청 컨텍스트는 mock 데이터 또는 이미 권한 필터링된 데모 데이터로 간주한다.
 
 ### Common AI Source Metadata
 
@@ -365,7 +365,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 ## POST /api/project-ai/chat
 
-프로젝트별 챗봇이다. 프로젝트 지식과 접근 가능한 회의 요약만 context로 사용한다. prototype 단계에서는 프론트엔드가 전달한 프로젝트 context를 이미 필터링된 것으로 간주한다.
+프로젝트별 챗봇이다. 프로젝트 지식과 접근 가능한 회의 요약만 context로 사용한다. prototype 단계에서는 호출자가 전달한 프로젝트 context를 이미 필터링된 것으로 간주한다.
 
 ### Request
 

@@ -79,7 +79,7 @@
 | Docs/Contracts | TBD | TBD | Open 질문 결정, API 계약, 데이터 모델, 작업 계획 갱신 | `specs/001-meetingmind-core/*` | - |
 | Backend | TBD | TBD | Space/Meeting API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/api.md`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002, Docs/Contracts |
 | Frontend | TBD | TBD | Project/Meeting 선택 상태, mock fallback 표시, 화면 연동 | `frontend/**` | API 계약 확정 |
-| AI | 사용자 | Codex | 백엔드 구현 없이 AI 서버와 프론트 AI 화면에서 RAG chunk 형식, mock/in-memory retriever, 용어 설명, 회의 요약/보고서 생성, 회의별/프로젝트별 챗봇, 태스크 추출 prototype을 준비한다. Backend 권한 필터 이후 컨텍스트 조립은 target architecture로 유지한다. | `ai/**`, `frontend/src/pages/LiveRoomPage.tsx`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/types.ts`, `specs/001-meetingmind-core/*` | Backend 권한 필터, 실제 STT 저장 API, pgvector migration은 후속 담당자 작업. 그 전까지 mock 또는 권한 필터링된 prototype context만 사용 |
+| AI | 사용자 | Codex | 백엔드/프론트엔드 구현 없이 AI 서버에서 RAG chunk 형식, mock/in-memory retriever, 용어 설명, 회의 요약/보고서 생성, 회의별/프로젝트별 챗봇, 태스크 추출 prototype API를 준비한다. Backend 권한 필터 이후 컨텍스트 조립은 target architecture로 유지한다. | `ai/**`, `specs/001-meetingmind-core/*` | Backend 권한 필터, 실제 STT 저장 API, pgvector migration, Frontend 화면 연결은 후속 담당자 작업. 그 전까지 mock 또는 권한 필터링된 prototype context만 사용 |
 | Data | TBD | TBD | PostgreSQL/pgvector 스키마 초안과 migration | `backend/**`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002 |
 
 ## Conflict Boundaries

@@ -8,10 +8,9 @@ import {
 } from "livekit-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import type { TermExplanationResponse, WorkspaceData } from "../types";
+import type { WorkspaceData } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
-const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL ?? "http://localhost:8000";
 const PREJOIN_STORAGE_KEY = "meetingmind-prejoin";
 
 type RoomTokenResponse = {
@@ -43,21 +42,6 @@ type ParticipantProfile = {
   cameraEnabled: boolean;
   micEnabled: boolean;
 };
-
-const DOMAIN_GLOSSARY = [
-  {
-    term: "pgvector",
-    definition: "벡터 검색을 위한 PostgreSQL 확장입니다. MeetingMind에서는 회의/프로젝트 지식 임베딩 검색 후보로 사용합니다.",
-    sourceId: "glossary-pgvector"
-  }
-];
-
-const TERM_CANDIDATES = ["ERD", "API", "RAG", "STT", "pgvector", "PostgreSQL", "LiveKit"];
-
-function getTermCandidates(text: string) {
-  const normalized = text.toLocaleLowerCase();
-  return TERM_CANDIDATES.filter((term) => normalized.includes(term.toLocaleLowerCase()));
-}
 
 function MicGlyph({ off = false }: { off?: boolean }) {
   return (
@@ -292,10 +276,6 @@ export function LiveRoomPage({
   const [participantCards, setParticipantCards] = useState<ParticipantCard[]>([]);
   const [activeSpeakerSid, setActiveSpeakerSid] = useState<string | null>(null);
   const [liveTranscriptRows, setLiveTranscriptRows] = useState(meetingAi.transcript.slice(0, 2));
-  const [termInput, setTermInput] = useState("pgvector");
-  const [termExplanation, setTermExplanation] = useState<TermExplanationResponse | null>(null);
-  const [termLoading, setTermLoading] = useState(false);
-  const [termError, setTermError] = useState("");
 
   const participantProfile = useMemo(() => loadParticipantProfile(location.search), [location.search]);
   const roleLookup = useMemo(
@@ -522,45 +502,6 @@ export function LiveRoomPage({
     setMeetingAiNotice("Meeting AI 페이지는 회의 종료 후 확인할 수 있습니다.");
   }
 
-  async function explainTerm(term: string, selectedText = "") {
-    const trimmed = term.trim();
-    if (!trimmed || termLoading) {
-      return;
-    }
-
-    setTermInput(trimmed);
-    setTermLoading(true);
-    setTermError("");
-
-    try {
-      const response = await fetch(`${AI_API_BASE_URL}/api/meeting-ai/explain-term`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          meetingId: liveMeeting.roomCode,
-          term: trimmed,
-          selectedText,
-          glossary: DOMAIN_GLOSSARY,
-          transcript: meetingAi.transcript
-        })
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || `용어 설명 요청 실패 (${response.status})`);
-      }
-
-      const result = (await response.json()) as TermExplanationResponse;
-      setTermExplanation(result);
-    } catch (error) {
-      setTermError(error instanceof Error ? error.message : "용어 설명을 가져오지 못했습니다.");
-    } finally {
-      setTermLoading(false);
-    }
-  }
-
   const localParticipant = participantCards.find((participant) => participant.isLocal) ?? null;
   const micEnabled = localParticipant?.isMicrophoneEnabled ?? false;
   const cameraEnabled = localParticipant?.isCameraEnabled ?? false;
@@ -670,15 +611,6 @@ export function LiveRoomPage({
                     <strong>{row.speaker}</strong>
                   </div>
                   <p>{row.text}</p>
-                  {getTermCandidates(row.text).length > 0 ? (
-                    <div className="lk-live-room-term-actions">
-                      {getTermCandidates(row.text).map((term) => (
-                        <button key={term} onClick={() => void explainTerm(term, row.text)} type="button">
-                          {term}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
                 </article>
               ))}
             </div>
@@ -688,43 +620,7 @@ export function LiveRoomPage({
               <div className="lk-live-room-dictionary-term">
                 <h4>pgvector</h4>
                 <p>벡터 검색을 위한 PostgreSQL 확장</p>
-                <button onClick={() => void explainTerm("pgvector")} type="button">
-                  회의 맥락으로 설명
-                </button>
               </div>
-              <form
-                className="lk-live-room-term-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void explainTerm(termInput);
-                }}
-              >
-                <input
-                  aria-label="설명할 회의 용어"
-                  onChange={(event) => setTermInput(event.target.value)}
-                  placeholder="용어 입력"
-                  type="text"
-                  value={termInput}
-                />
-                <button disabled={termInput.trim().length === 0 || termLoading} type="submit">
-                  {termLoading ? "확인 중" : "설명"}
-                </button>
-              </form>
-              {termExplanation ? (
-                <div className="lk-live-room-term-result">
-                  <div>
-                    <strong>{termExplanation.term}</strong>
-                    <span>{termExplanation.model}</span>
-                  </div>
-                  <p>{termExplanation.explanation}</p>
-                  {termExplanation.sources[0] ? (
-                    <small>
-                      출처: {termExplanation.sources[0].title ?? termExplanation.sources[0].speaker ?? termExplanation.sources[0].type}
-                    </small>
-                  ) : null}
-                </div>
-              ) : null}
-              {termError ? <div className="lk-live-room-term-error">{termError}</div> : null}
             </div>
           </aside>
         </main>
