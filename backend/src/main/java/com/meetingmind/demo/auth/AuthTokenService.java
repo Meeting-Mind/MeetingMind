@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -25,6 +26,7 @@ public class AuthTokenService {
     private final Clock clock;
     private final SecureRandom secureRandom;
 
+    @Autowired
     public AuthTokenService(AuthEnvironment environment) {
         this(environment, Clock.systemUTC(), new SecureRandom());
     }

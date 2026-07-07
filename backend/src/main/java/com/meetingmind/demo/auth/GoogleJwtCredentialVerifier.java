@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +30,7 @@ public class GoogleJwtCredentialVerifier implements GoogleCredentialVerifier {
     private final HttpClient httpClient;
     private final Clock clock;
 
+    @Autowired
     public GoogleJwtCredentialVerifier(AuthEnvironment environment) {
         this(environment, HttpClient.newHttpClient(), Clock.systemUTC());
     }

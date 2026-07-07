@@ -17,6 +17,9 @@
 - Q-001을 Google OAuth와 자체 회원가입/로그인 병행, access/refresh token 발급, `/api/v1/auth/*`, `sessionStorage`, 랜딩 외 보호 route로 확정했다.
 - LiveKit token 발급 로직에 JUnit 단위 테스트를 추가하고, AI 용어 설명/RAG source mapping에 Python 표준 unittest를 추가했다.
 - Backend Auth API를 `/api/v1/auth/*`로 추가했다. 자체 signup/login, Google credential login, refresh, me, logout endpoint와 access/refresh token 발급을 구현했다.
+- Frontend Auth 연결을 추가했다. 자체 로그인/회원가입과 Google credential exchange를 `/api/v1/auth/*`로 보내고, token pair는 `sessionStorage`에 저장한다.
+- 랜딩(`/`) 외 앱 route를 보호 route로 감싸 비로그인 사용자는 로그인 모달로 유도하고, 로그인 성공 후 요청했던 route로 복귀하게 했다.
+- Backend Auth runtime smoke 중 `AuthTokenService`, `GoogleJwtCredentialVerifier`의 테스트용 보조 생성자 때문에 Spring이 런타임 생성자를 선택하지 못하는 문제를 발견했다. 런타임 생성자에 `@Autowired`를 명시하고 context smoke test를 추가했다.
 
 ## Work Allocation
 
@@ -51,13 +54,18 @@
 - `backend/src/main/java/com/meetingmind/demo/auth/**`: in-memory Auth store, PBKDF2 password hash, HMAC access token, refresh token hash/revoke, Google ID token verifier, Auth controller/error response 추가
 - `backend/src/test/java/com/meetingmind/demo/service/LiveKitTokenServiceTest.java`: LiveKit JWT claim/signature 성공 케이스와 설정 누락 실패 케이스 테스트
 - `backend/src/test/java/com/meetingmind/demo/auth/AuthServiceTest.java`: signup/me, 중복 이메일, 비밀번호 실패, refresh rotation, Google identity 연결 테스트
+- `backend/src/test/java/com/meetingmind/demo/MeetingMindApplicationTest.java`: Spring bean wiring context smoke 테스트 추가
+- `frontend/src/auth/session.ts`: Auth API client, `sessionStorage` 저장/조회, `Authorization` header helper 추가
+- `frontend/src/components/GoogleLoginModal.tsx`: Google 로그인 모달을 자체 로그인/회원가입과 Google Backend exchange가 가능한 auth modal로 확장
+- `frontend/src/App.tsx`: auth session 상태, protected route, `/api/workspace` Authorization header 전달 추가
+- `frontend/src/styles/app.css`: auth modal form/tab style 추가
 - `ai/tests/test_meeting_ai.py`: glossary 우선순위, 근거 없음 응답, transcript source 제한, RAG source mapping 테스트
 
 ## Conflict Notes
 
-- 제품 코드 변경 범위는 AI 서버로 제한했다. `backend/**`와 `frontend/**`는 변경하지 않는다.
+- 제품 코드 변경 범위는 AI prototype, Backend Auth, Frontend Auth로 확장되었다. Auth 외 `backend/**`, `frontend/**` 변경은 각 workstream owner와 합의한다.
 - Auth/Login workstream은 `GoogleLoginModal.tsx`, future `frontend/src/auth/**`, future `backend/**/auth/**`를 우선 소유한다. Frontend/Backend 담당자는 auth token 저장/전달, auth endpoint, backend auth package를 수정하기 전에 Auth owner와 합의한다.
-- 현재 문서 기준선 전체가 미추적 상태이므로 커밋 전 포함 범위를 확인해야 한다.
+- 현재 `.idea/`, `output/`, `tmp/`는 Auth 작업 범위 밖 미추적 파일로 유지한다. 커밋 전 포함하지 않는다.
 
 ## Integration Result
 
@@ -86,8 +94,10 @@
 - Auth API는 기존 prototype API와 충돌하지 않도록 `/api/v1/auth/*`로 시작한다.
 - Frontend는 access token과 refresh token을 `sessionStorage`에 저장한다.
 - 공개 route는 랜딩(`/`)만 두고, `/spaces`, `/project-overview`, `/live-meeting`, `/live-room`, `/meeting-ai`, `/report-agent`, `/team-members`는 로그인 필요 대상으로 둔다.
+- 로그인 성공 후에는 비로그인 상태에서 요청했던 보호 route로 복귀한다.
 - Backend Auth runtime 환경변수는 `MEETINGMIND_JWT_SECRET` 또는 `AUTH_JWT_SECRET`, Google 검증용 `GOOGLE_CLIENT_ID` 또는 `VITE_GOOGLE_CLIENT_ID`를 사용한다.
 - 현재 Auth 저장소는 prototype용 in-memory store다. 서버 재시작 시 사용자, identity, refresh session은 사라지며, DB 영속화는 Data/Backend 후속 작업이다.
+- LiveKit token을 인증 사용자와 회의 접근 권한에 연결하는 T094는 T040/Q-002 회의 권한 정책 확정 전까지 구현하지 않는다.
 
 ## Current AI Workstream Notes
 
@@ -133,7 +143,7 @@
 
 - 문서 기준선은 `codex/docs-agent-collaboration-workflow` 브랜치에 커밋되어 원격 push되었다.
 - 현재 PDF 공유 산출물인 `output/`, `tmp/`는 Git 미추적 상태다.
-- 현재 Auth 문서/테스트 변경과 AI prototype 착수 변경은 아직 커밋하지 않은 로컬 변경이다.
+- `c15ca74 feat: add backend auth prototype` 이후 Frontend Auth 연결, Backend Auth runtime wiring fix, context smoke test, Auth 검증 문서 갱신을 후속 Auth 변경으로 정리했다.
 
 ## Verification
 
@@ -148,15 +158,26 @@
 - Passed: `cd ai && python3 -m unittest discover -s tests`
 - Passed: `cd ai && python3 -m compileall app tests`
 - Passed: `cd frontend && npm run build`
+- Passed: `cd frontend && npm run build` after Frontend Auth route guard changes
+- Passed: `cd backend && mvn test` after Spring context smoke test addition, total 8 backend tests
+- Passed: `cd frontend && npm run build` after Auth runtime fix and docs update candidate
+- Passed: `cd ai && python3 -m unittest discover -s tests`, 4 tests
+- Passed: `cd ai && python3 -m compileall app tests`
+- Passed: `git diff --check`
+- Passed: local runtime smoke with `MEETINGMIND_JWT_SECRET=dev-test-secret GOOGLE_CLIENT_ID=dev-google-client mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=18080`
+- Passed: `curl -fsS http://127.0.0.1:18080/api/workspace`
+- Passed: `curl -fsS http://127.0.0.1:18080/api/v1/auth/signup -H 'Content-Type: application/json' -d '{"email":"api-smoke-18080@meetingmind.ai","password":"password-123","displayName":"API Smoke"}'`
+- Not run: Browser automation verification. `agent-browser` CLI and Playwright packages are not available in this environment; adding a new browser test library was avoided because existing frontend test framework is not present.
 - Not run: `cd ai && python -m compileall app`는 이 환경에 `python` 명령이 없어 `python3`로 대체했다.
 - Note: 첫 `mvn -Dtest=LiveKitTokenServiceTest test` 실행은 Maven이 `~/.m2`에 Surefire provider를 쓸 권한이 없어 실패했고, 승인 후 재실행해 통과했다.
 - Note: `npm ci` 후 `npm audit`이 moderate 1건, high 1건을 보고했다. `npm audit fix --force`는 breaking change 가능성이 있어 실행하지 않았다.
+- Note: `8080`, `8081`, `5173`, `5174`는 기존 로컬 프로세스가 사용 중이었다. Auth runtime smoke는 충돌을 피하려고 Backend `18080`, Frontend `5176`으로 실행했다.
 
 ## Remaining Work
 
 - `clarify.md`의 Open 질문 결정
 - Backend Auth 영속화: 현재 in-memory Auth store를 DB 기반 User/AuthIdentity/RefreshTokenSession 저장소로 전환
-- Frontend Auth 구현(T092-T093): 로그인/회원가입 UI 흐름, `sessionStorage` token pair 저장, 랜딩 외 route 보호
+- LiveKit token auth 연결(T094): T040/Q-002 회의 접근 권한 정책 확정 후 인증 사용자와 회의 권한을 확인하도록 전환
 - mock API 분리
 - Target API base URL 결정
 - 실제 STT 파일 업로드 방식 결정

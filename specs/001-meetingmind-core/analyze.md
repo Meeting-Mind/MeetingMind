@@ -23,12 +23,12 @@
 | Medium | Project AI 실제 RAG는 범위 밖이다. | 현재 문서는 원칙과 목표 모델만 정의한다. | Meeting AI 안정화 이후 별도 feature spec으로 분리한다. | future `specs/*` | Deferred |
 | Low | Async STT Processing API는 Future Draft다. | 현재 Core Prototype의 확정 구현 계약으로 오해하면 scope creep이 생길 수 있다. | 실제 STT 작업 전 별도 milestone 또는 feature spec으로 승격한다. | `contracts/api.md`, future `specs/*` | Deferred |
 | Low | `/api/workspace`는 현재 프로토타입 통합 API다. | 실제 확장 시 API 분리가 필요하다. | T010에서 Space/Meeting/Report API 분리 계획을 세분화한다. | `contracts/api.md`, `tasks.md` | Open |
-| Low | 검증 명령은 문서화되어 있으나 아직 실행 결과는 없다. | 현재 문서 기준선이 실제 앱 빌드 상태와 연결되지 않았다. | 코드 변경 작업 전후에 권장 검증을 실행하거나 미실행 사유를 남긴다. | `tasks.md`, `implement.md` | Open |
+| Low | Auth workstream의 backend/frontend/AI 회귀 검증과 Auth API smoke가 실행됐다. | 핵심 auth token 발급, Spring bean wiring, frontend build 회귀는 확인됐다. 브라우저 자동화 도구는 현재 환경에 없어 UI 클릭 흐름은 자동 검증하지 못했다. | Browser automation 도구가 준비되면 보호 route redirect와 자체 회원가입 UI 흐름을 추가 확인한다. | `tasks.md`, `implement.md` | Auth Verified |
 
 ## Recommendation
 
-1. T091 Backend Auth 구현에서 Auth 계약을 코드로 만든다.
-2. Q-002 회의 권한 등급을 확정한다.
-3. Backend 도메인 모델과 권한 필터를 만든다.
+1. Q-002 회의 권한 등급을 확정한다.
+2. T040 Backend 도메인 모델과 회의 권한 필터를 만든다.
+3. T094 LiveKit token 발급을 인증 사용자와 회의 접근 권한 확인 뒤로 이동한다.
 4. Meeting AI 컨텍스트 조립을 Backend 권한 검증 뒤로 이동한다.
 5. 그 다음 Project AI RAG를 도입한다.
