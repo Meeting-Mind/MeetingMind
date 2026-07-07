@@ -40,7 +40,7 @@ class ExplainTermTest(unittest.TestCase):
         self.assertEqual(response.sources, [])
         self.assertIn("확인할 수 없습니다", response.explanation)
 
-    def test_transcript_evidence_is_limited_and_external_call_is_mocked(self):
+    def test_transcript_evidence_uses_rag_window_and_external_call_is_mocked(self):
         payload = ExplainTermRequest(
             term="RAG",
             transcript=[
@@ -58,9 +58,10 @@ class ExplainTermTest(unittest.TestCase):
         self.assertFalse(response.unsupported)
         self.assertEqual(response.sourceType, "transcript")
         self.assertEqual(response.model, "test-model")
-        self.assertEqual(len(response.sources), 4)
+        self.assertEqual(len(response.sources), 1)
         self.assertEqual(response.sources[0].sourceId, "segment-001")
-        self.assertEqual(response.sources[-1].sourceId, "segment-004")
+        self.assertIn("RAG 후보 chunk", response.sources[0].text)
+        self.assertIn("RAG 외 질문", response.sources[0].text)
 
 
 class RagMappingTest(unittest.TestCase):
