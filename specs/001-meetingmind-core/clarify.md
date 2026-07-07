@@ -6,7 +6,7 @@
 
 | ID | Priority | Question | Why It Matters | Status | Decision |
 | --- | --- | --- | --- | --- | --- |
-| Q-001 | High | 로그인은 Google OAuth 단독으로 시작할까, 자체 계정/JWT를 병행할까? | Backend 보안 구조와 Frontend 인증 흐름을 결정한다. | Open | |
+| Q-001 | High | 로그인은 Google OAuth 단독으로 시작할까, 자체 계정/JWT를 병행할까? | Backend 보안 구조와 Frontend 인증 흐름을 결정한다. | Decided | Google OAuth와 자체 회원가입/로그인을 모두 지원한다. Backend는 access token과 refresh token을 발급하고, Frontend는 둘 다 `sessionStorage`에 저장한다. |
 | Q-002 | High | 회의 권한 등급은 host/editor/participant/viewer로 충분한가? | API 권한 모델과 UI 제어 범위를 결정한다. | Open | |
 | Q-003 | Medium | STT 원문 기본 보존 기간은 7일, 30일, 영구 중 무엇인가? | 저장 비용, 개인정보, 삭제 작업 설계를 결정한다. | Open | |
 | Q-004 | Medium | Project Knowledge는 누가 공식 승인하고 최신화하는가? | Project AI가 공식 지식과 회의 기록을 구분하는 기준이 된다. | Open | |
@@ -16,14 +16,32 @@
 
 ## Blocking Decisions
 
-- Q-001은 Backend 인증/인가 모델과 Frontend 로그인 흐름 구현 전에 결정해야 한다.
 - Q-002는 `MeetingParticipant.role`, 권한 필터, 회의 UI 제어 구현 전에 결정해야 한다.
-- Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다.
+- Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다. 단, Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 먼저 시작한다.
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
+
+## Q-001 Authentication Options
+
+| Option | Summary | Pros | Cons | Impact |
+| --- | --- | --- | --- | --- |
+| Google OAuth only | Frontend Google Identity Services 결과를 로그인 상태의 중심으로 둔다. | 빠르게 시작할 수 있고 비밀번호 저장이 없다. | Backend가 앱 고유 권한 token을 갖지 못해 Space/Meeting 권한, 만료, 감사 로그 확장이 약하다. Frontend에서 credential을 decode하는 것은 표시용일 뿐 신뢰 경계가 될 수 없다. | `frontend/src/components/GoogleLoginModal.tsx`, auth guard |
+| Own account/JWT only | 이메일/비밀번호 또는 자체 가입과 JWT를 직접 운영한다. | Google 계정 없이도 사용할 수 있고 token 정책을 완전히 통제한다. | 비밀번호 저장, 가입/재설정, 보안 운영 범위가 커져 prototype 목적에 비해 무겁다. | Backend security, User credential model, Frontend signup/login UI |
+| Google OAuth + own account + access/refresh token | Google OAuth와 자체 이메일/비밀번호 계정을 모두 지원하고 Backend가 access token과 refresh token을 발급한다. | 사용자는 Google 또는 자체 계정으로 진입할 수 있고, Backend가 Space/Meeting 권한 판단에 쓸 앱 내부 subject를 안정적으로 가진다. refresh token으로 세션 연장이 가능하다. | 비밀번호 hash 저장, refresh token 폐기, token rotation, Google token 검증을 모두 다뤄야 해서 구현 범위가 커진다. | `contracts/api.md`, `data-model.md`, `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/**/auth/**`, `application.yml` |
+
+### Final Direction
+
+- Prototype 구현은 Google OAuth와 자체 회원가입/로그인을 모두 지원한다.
+- Frontend의 Google credential decode는 사용자 표시용으로만 사용하고, 실제 인증은 Backend 검증 결과만 신뢰한다.
+- Access token은 `Authorization: Bearer {accessToken}`로 전달한다.
+- Backend는 access token과 refresh token을 모두 발급한다.
+- Frontend는 access token과 refresh token을 모두 `sessionStorage`에 저장한다.
+- Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 새로 만든다. 기존 prototype API는 당분간 유지한다.
+- 랜딩(`/`)만 공개하고, `/spaces`, `/project-overview`, `/live-meeting`, `/live-room`, `/meeting-ai`, `/report-agent`, `/team-members`는 로그인 필요 대상으로 둔다.
+- LiveKit token 발급은 후속 단계에서 인증된 사용자와 `MeetingParticipant` 권한 확인 뒤 허용한다.
 
 ## Current Assumptions
 
-- 프로토타입 단계에서는 로그인/인가를 mock 상태로 표현한다.
+- 프로토타입 단계에서는 로그인/인가를 mock 상태로 표현했으나, Auth workstream에서는 Backend 검증 기반 로그인으로 전환한다.
 - 실제 보안 구현 전에는 AI 컨텍스트에 민감 데이터를 넣지 않는다.
 - Meeting AI를 먼저 안정화한 뒤 Project AI RAG를 구현한다.
 - 실제 STT 업로드 API는 현재 Core Prototype의 확정 계약이 아니라 Future Draft로 관리한다.
@@ -34,3 +52,4 @@
 - D-002: 문서 원칙상 최종 구조는 Backend가 권한 필터를 적용한 뒤 AI 서버에 컨텍스트를 전달하는 방식이다. 다만 AI 담당 prototype 작업은 백엔드 구현 전까지 mock 또는 이미 권한 필터링된 데모 컨텍스트만 사용한다.
 - D-003: AI prototype API는 우선 AI 서버 직접 호출 계약으로 정의한다. Backend route, 저장, 권한 필터 구현은 후속 담당자 작업이므로 현재 계약에는 already-filtered context 전제를 명시한다.
 - D-004: 실제 STT 저장 API, DB schema, pgvector migration은 후속 담당자 작업을 기다린다. AI 담당은 그 전까지 `TranscriptSegment` 유사 mock 데이터에서 `RagChunk`를 생성하는 adapter 경계와 in-memory retriever를 먼저 구현한다.
+- D-005: Auth는 Google OAuth와 자체 회원가입/로그인을 모두 지원한다. Auth API는 `/api/v1/auth/*`로 시작하고, Backend가 access token과 refresh token을 발급하며, Frontend는 두 token을 `sessionStorage`에 저장한다. 랜딩(`/`)만 공개 route로 둔다.

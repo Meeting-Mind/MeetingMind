@@ -24,6 +24,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - Workspace에서 참여 중인 Space와 최근 업데이트를 확인한다.
 - Space 내 회의 목록, 문서, Action Item, Project AI 진입점을 제공한다.
 - 회의방 입장 전 참여자와 권한 상태를 확인한다.
+- Google OAuth와 자체 회원가입/로그인 기반의 최소 인증 흐름을 제공한다.
 - LiveKit 토큰을 발급해 실시간 회의방 연결 준비를 한다.
 - Meeting AI는 현재 회의 맥락만 사용해 질문에 답한다.
 - Report Agent는 AI 생성 회의 보고서 편집 흐름을 제공한다.
@@ -31,7 +32,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 
 ### Out of Scope
 
-- 완전한 사용자 인증/인가
+- 조직 관리, 초대 승인 정책, 감사 로그까지 포함한 완전한 사용자/관리자 인가
 - 실제 STT 파이프라인
 - PostgreSQL/pgvector 영속화
 - S3 파일 저장
@@ -48,6 +49,8 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - FR-006: AI 응답은 한국어로 간결하게 작성하고 근거가 없으면 확인 불가라고 답해야 한다.
 - FR-007: 프론트엔드는 backend API 실패 시 데모용 mock 데이터로 동작할 수 있어야 한다.
 - FR-008: Report Agent 화면은 보고서 초안, 결정사항, 편집 대화 흐름을 보여야 한다.
+- FR-009: 사용자는 Google OAuth 또는 자체 이메일/비밀번호 계정으로 로그인할 수 있어야 한다.
+- FR-010: 랜딩 페이지를 제외한 앱 화면은 로그인된 사용자만 접근할 수 있어야 한다.
 
 ## Non-Functional Requirements
 
@@ -74,7 +77,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 
 ## Open Questions
 
-- Q-001: 로그인은 Google OAuth 단독으로 시작할지, 자체 계정/JWT를 병행할지 결정해야 한다.
+- Q-001: Google OAuth와 자체 회원가입/로그인을 병행하고 access/refresh token을 사용하기로 결정했다.
 - Q-002: 회의별 권한 등급은 host/editor/participant/viewer로 충분한지 결정해야 한다.
 - Q-003: STT 원문 기본 보존 기간의 제품 기본값을 정해야 한다.
 - Q-004: Project Knowledge의 승인/갱신 주체를 정해야 한다.
