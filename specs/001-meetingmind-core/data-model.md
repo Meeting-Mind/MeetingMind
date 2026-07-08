@@ -9,8 +9,34 @@
 - `id`
 - `email`
 - `displayName`
-- `provider`
+- `pictureUrl`
+- `status`: active, disabled
 - `createdAt`
+- `lastLoginAt`
+
+Backend가 발급하는 MeetingMind access token의 subject는 `User.id`다. 사용자는 여러 인증 방식을 가질 수 있으므로 Google OAuth와 자체 계정 정보는 `AuthIdentity`로 분리한다.
+
+### AuthIdentity
+
+- `id`
+- `userId`
+- `provider`: google, local
+- `providerUserId`: Google `sub` 또는 local email
+- `passwordHash`: local provider에서만 사용, Google provider는 null
+- `createdAt`
+- `lastUsedAt`
+
+### RefreshTokenSession
+
+- `id`
+- `userId`
+- `refreshTokenHash`
+- `issuedAt`
+- `expiresAt`
+- `revokedAt`
+- `userAgent`
+
+Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장한다. Backend는 refresh token 원문을 저장하지 않고 hash와 revoke 상태만 저장한다.
 
 ### Space
 

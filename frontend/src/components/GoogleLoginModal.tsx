@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { loginWithGoogle, loginWithPassword, signupWithPassword, type AuthSession } from "../auth/session";
 
 type GoogleCredentialResponse = {
   credential?: string;
@@ -60,12 +61,35 @@ export function GoogleLoginModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (user: GoogleAuthUser) => void;
+  onSuccess: (session: AuthSession) => void;
 }) {
   const buttonRef = useRef<HTMLDivElement | null>(null);
   const [scriptReady, setScriptReady] = useState(Boolean(window.google));
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+
+  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const session =
+        mode === "signup"
+          ? await signupWithPassword({ email: email.trim(), password, displayName: displayName.trim() })
+          : await loginWithPassword({ email: email.trim(), password });
+      onSuccess(session);
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "로그인 요청을 처리하지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (window.google) {
@@ -96,7 +120,7 @@ export function GoogleLoginModal({
 
     window.google.accounts.id.initialize({
       client_id: clientId,
-      callback: (response) => {
+      callback: async (response) => {
         if (!response.credential) {
           setError("Google 로그인 응답을 확인하지 못했습니다.");
           return;
@@ -108,7 +132,16 @@ export function GoogleLoginModal({
           return;
         }
 
-        onSuccess(user);
+        setError("");
+        setLoading(true);
+        try {
+          const session = await loginWithGoogle(response.credential);
+          onSuccess(session);
+        } catch (exception) {
+          setError(exception instanceof Error ? exception.message : `${user.email} Google 로그인을 완료하지 못했습니다.`);
+        } finally {
+          setLoading(false);
+        }
       }
     });
 
@@ -133,8 +166,56 @@ export function GoogleLoginModal({
         </button>
 
         <p className="auth-modal-kicker">Sign In Required</p>
-        <h2 id="auth-modal-title">Google 로그인 후 이용할 수 있습니다</h2>
+        <h2 id="auth-modal-title">로그인 후 이용할 수 있습니다</h2>
         <p className="auth-modal-copy">프로젝트 생성, 회의 입장, 워크스페이스 접근은 로그인 후 진행됩니다.</p>
+
+        <div className="auth-modal-tabs" role="tablist" aria-label="인증 방식">
+          <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")} type="button">
+            로그인
+          </button>
+          <button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")} type="button">
+            회원가입
+          </button>
+        </div>
+
+        <form className="auth-modal-form" onSubmit={handlePasswordSubmit}>
+          {mode === "signup" ? (
+            <label>
+              이름
+              <input
+                autoComplete="name"
+                onChange={(event) => setDisplayName(event.target.value)}
+                required
+                type="text"
+                value={displayName}
+              />
+            </label>
+          ) : null}
+          <label>
+            이메일
+            <input
+              autoComplete="email"
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              type="email"
+              value={email}
+            />
+          </label>
+          <label>
+            비밀번호
+            <input
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              minLength={8}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+          <button className="auth-modal-submit" disabled={loading} type="submit">
+            {mode === "signup" ? "계정 만들기" : "로그인"}
+          </button>
+        </form>
 
         {!clientId ? (
           <div className="auth-modal-warning">
@@ -145,6 +226,7 @@ export function GoogleLoginModal({
 
         {error ? <div className="auth-modal-warning">{error}</div> : null}
 
+        <div className="auth-modal-divider">또는</div>
         <div className="auth-modal-button" ref={buttonRef} />
       </section>
     </div>

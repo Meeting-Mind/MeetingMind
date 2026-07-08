@@ -12,9 +12,9 @@
 
 | Rule | Value |
 | --- | --- |
-| Base URL | Current Prototype은 기존 경로 유지. Target Contract는 `/api/v1` 후보로 검토한다. |
+| Base URL | Current Prototype은 기존 경로 유지. Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 시작한다. 나머지 Target Contract는 `/api/v1` 후보로 검토한다. |
 | Content-Type | 기본 `application/json; charset=utf-8`. 파일 업로드 후보 API만 `multipart/form-data`. |
-| Auth | 인증 방식은 `clarify.md` Q-001 결정 전까지 확정하지 않는다. 인증 도입 후에는 `Authorization: Bearer {accessToken}` 후보를 우선 검토한다. |
+| Auth | Google OAuth와 자체 이메일/비밀번호 로그인을 모두 지원한다. 인증된 API는 `Authorization: Bearer {accessToken}`를 사용한다. |
 | Time | API 날짜시간은 ISO-8601, transcript 위치는 `startMs`, `endMs` 밀리초를 사용한다. |
 | Empty arrays | 배열 값이 없으면 `null` 대신 `[]`를 반환한다. |
 | Error body | 클라이언트 분기를 위해 고정 `code`를 포함한다. 내부 예외명, stack trace, SQL은 응답에 포함하지 않는다. |
@@ -34,6 +34,8 @@
 | --- | --- | --- |
 | 400 | `INVALID_REQUEST` | 요청값이 잘못됨 |
 | 401 | `UNAUTHORIZED` | 인증 실패 또는 토큰 만료 |
+| 401 | `INVALID_CREDENTIALS` | 이메일/비밀번호 또는 Google credential 검증 실패 |
+| 401 | `REFRESH_TOKEN_INVALID` | refresh token 없음, 만료, 위조, 폐기됨 |
 | 403 | `SPACE_ACCESS_DENIED` | Space 접근 권한 없음 |
 | 403 | `MEETING_ACCESS_DENIED` | 회의 참여자 또는 명시 권한 없음 |
 | 403 | `AI_CONTEXT_FORBIDDEN` | 권한 필터 전 데이터가 AI 컨텍스트로 요청됨 |
@@ -42,6 +44,7 @@
 | 404 | `SPEAKER_NOT_FOUND` | 발화자를 찾을 수 없음 |
 | 409 | `MEETING_NOT_COMPLETED` | 처리 완료 전 전사본/보고서/요약 요청 |
 | 409 | `MEETING_ALREADY_PROCESSING` | 이미 처리 중인 회의에 중복 처리 요청 |
+| 409 | `EMAIL_ALREADY_REGISTERED` | 이미 가입된 이메일 |
 | 413 | `AUDIO_FILE_TOO_LARGE` | 향후 파일 업로드 용량 초과 |
 | 422 | `TRANSCRIPTION_FAILED` | 향후 STT/발화자 구분 처리 실패 |
 | 503 | `LIVEKIT_NOT_CONFIGURED` | LiveKit 환경변수가 설정되지 않음 |
@@ -58,6 +61,186 @@
 | `PROCESSING` | STT, 보고서, 요약, embedding 등 비동기 처리 중 |
 | `COMPLETED` | 회의 처리 완료, transcript/report/summary 조회 가능 |
 | `FAILED` | 처리 실패. `failureReason` 참조 |
+
+## Auth Target Contracts
+
+Auth API는 기존 prototype API와 충돌하지 않도록 `/api/v1/auth/*`에서 먼저 시작한다. 랜딩(`/`)만 공개 route로 두고, 나머지 앱 화면은 로그인 필요 대상으로 둔다.
+
+### Token Rules
+
+- Backend는 access token과 refresh token을 모두 발급한다.
+- Frontend는 access token과 refresh token을 `sessionStorage`에 저장한다.
+- 인증된 API 요청은 `Authorization: Bearer {accessToken}`를 사용한다.
+- Refresh token 원문은 Backend에 저장하지 않는다. Backend는 `RefreshTokenSession.refreshTokenHash`와 revoke 상태를 저장한다.
+- Prototype 기본 만료 후보는 access token 1시간, refresh token 14일이다.
+
+### Auth User Shape
+
+```json
+{
+  "id": "user-001",
+  "email": "miju@meetingmind.ai",
+  "displayName": "이미주",
+  "pictureUrl": "https://...",
+  "status": "active"
+}
+```
+
+### Auth Token Response
+
+```json
+{
+  "accessToken": "eyJ...",
+  "refreshToken": "mmr_...",
+  "tokenType": "Bearer",
+  "expiresIn": 3600,
+  "refreshExpiresIn": 1209600,
+  "user": {
+    "id": "user-001",
+    "email": "miju@meetingmind.ai",
+    "displayName": "이미주",
+    "pictureUrl": "https://...",
+    "status": "active"
+  }
+}
+```
+
+### POST /api/v1/auth/signup
+
+자체 이메일/비밀번호 계정을 생성하고 token pair를 발급한다.
+
+#### Request
+
+```json
+{
+  "email": "miju@meetingmind.ai",
+  "password": "minimum-8-characters",
+  "displayName": "이미주"
+}
+```
+
+#### Response
+
+- `Auth Token Response`
+
+#### Errors
+
+- `400 INVALID_REQUEST`: email, password, displayName validation 실패
+- `409 EMAIL_ALREADY_REGISTERED`: 이미 가입된 이메일
+
+### POST /api/v1/auth/login
+
+자체 이메일/비밀번호 계정으로 로그인하고 token pair를 발급한다.
+
+#### Request
+
+```json
+{
+  "email": "miju@meetingmind.ai",
+  "password": "minimum-8-characters"
+}
+```
+
+#### Response
+
+- `Auth Token Response`
+
+#### Errors
+
+- `400 INVALID_REQUEST`: request validation 실패
+- `401 INVALID_CREDENTIALS`: 이메일 또는 비밀번호 불일치
+
+### POST /api/v1/auth/google
+
+Google ID token을 Backend에서 검증하고, User/AuthIdentity를 생성 또는 조회한 뒤 token pair를 발급한다.
+
+#### Request
+
+```json
+{
+  "credential": "google-id-token"
+}
+```
+
+#### Response
+
+- `Auth Token Response`
+
+#### Rules
+
+- Frontend에서 decode한 Google payload는 표시용으로만 사용한다.
+- Backend는 Google ID token의 signature, expiry, audience를 검증한다.
+- Google `sub`는 `AuthIdentity.providerUserId`로 저장한다.
+
+#### Errors
+
+- `400 INVALID_REQUEST`: credential 누락
+- `401 INVALID_CREDENTIALS`: Google credential 검증 실패
+
+### POST /api/v1/auth/refresh
+
+Refresh token으로 새 token pair를 발급한다.
+
+#### Request
+
+```json
+{
+  "refreshToken": "mmr_..."
+}
+```
+
+#### Response
+
+- `Auth Token Response`
+
+#### Errors
+
+- `401 REFRESH_TOKEN_INVALID`: refresh token 없음, 만료, 위조, 폐기됨
+
+### GET /api/v1/auth/me
+
+현재 access token의 사용자 정보를 반환한다.
+
+#### Headers
+
+- `Authorization: Bearer {accessToken}`
+
+#### Response
+
+- `Auth User Shape`
+
+#### Errors
+
+- `401 UNAUTHORIZED`: access token 없음 또는 만료
+
+### POST /api/v1/auth/logout
+
+현재 refresh token session을 폐기한다.
+
+#### Headers
+
+- `Authorization: Bearer {accessToken}`
+
+#### Request
+
+```json
+{
+  "refreshToken": "mmr_..."
+}
+```
+
+#### Response
+
+```json
+{
+  "revoked": true
+}
+```
+
+#### Errors
+
+- `401 UNAUTHORIZED`: access token 없음 또는 만료
+- `401 REFRESH_TOKEN_INVALID`: refresh token 없음, 만료, 위조, 이미 폐기됨
 
 ## GET /api/workspace
 

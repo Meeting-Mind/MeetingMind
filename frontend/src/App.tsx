@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { buildAuthHeaders, readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
+import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
 import { LiveMeetingPage } from "./pages/LiveMeetingPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
@@ -125,12 +127,52 @@ function buildMeeting(projectName: string, description: string, count: number): 
   };
 }
 
+function ProtectedRoute({
+  children,
+  onRequestLogin,
+  session
+}: {
+  children: ReactNode;
+  onRequestLogin: () => void;
+  session: AuthSession | null;
+}) {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!session) {
+      onRequestLogin();
+    }
+  }, [location.pathname, onRequestLogin, session]);
+
+  if (!session) {
+    return <Navigate replace state={{ requestedPath: location.pathname }} to="/" />;
+  }
+
+  return <>{children}</>;
+}
+
 export function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [data, setData] = useState<WorkspaceData>(mockData);
   const [projectMeetings, setProjectMeetings] = useState<Record<string, ProjectMeeting[]>>(initialProjectMeetings);
   const [projectMembers, setProjectMembers] = useState<Record<string, TeamMember[]>>(initialProjectMembers);
   const [projectRequests, setProjectRequests] = useState<Record<string, JoinRequest[]>>(initialProjectRequests);
   const [projectInvites, setProjectInvites] = useState<Record<string, InviteMeta>>(initialProjectInvites);
+  const openAuthModal = useCallback(() => setAuthModalOpen(true), []);
+
+  function handleAuthSuccess(session: AuthSession) {
+    saveAuthSession(session);
+    setAuthSession(session);
+    setAuthModalOpen(false);
+
+    const requestedPath = (location.state as { requestedPath?: string } | null)?.requestedPath;
+    if (requestedPath && requestedPath !== "/") {
+      navigate(requestedPath, { replace: true });
+    }
+  }
 
   function handleCreateProject({ name, description }: { name: string; description: string }) {
     const normalizedName = name.trim();
@@ -252,9 +294,15 @@ export function App() {
   }
 
   useEffect(() => {
+    if (!authSession) {
+      return;
+    }
+
     let active = true;
 
-    fetch(`${API_BASE_URL}/api/workspace`)
+    fetch(`${API_BASE_URL}/api/workspace`, {
+      headers: buildAuthHeaders(authSession)
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`API request failed with ${response.status}`);
@@ -279,44 +327,84 @@ export function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [authSession]);
 
   return (
     <>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/spaces" element={<WorkspaceHomePage data={data.workspaceHome} onCreateProject={handleCreateProject} />} />
-        <Route path="/live-meeting" element={<LiveMeetingPage data={data.liveMeeting} />} />
-        <Route path="/live-room" element={<LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} />} />
+        <Route
+          path="/spaces"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <WorkspaceHomePage data={data.workspaceHome} onCreateProject={handleCreateProject} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/live-meeting"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <LiveMeetingPage data={data.liveMeeting} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/live-room"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/project-overview"
           element={
-            <ProjectOverviewPage
-              data={data.projectOverview}
-              onCreateMeeting={handleCreateMeeting}
-              onCreateProject={handleCreateProject}
-              projectMeetings={projectMeetings}
-              spaces={data.workspaceHome.spaces}
-            />
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <ProjectOverviewPage
+                data={data.projectOverview}
+                onCreateMeeting={handleCreateMeeting}
+                onCreateProject={handleCreateProject}
+                projectMeetings={projectMeetings}
+                spaces={data.workspaceHome.spaces}
+              />
+            </ProtectedRoute>
           }
         />
         <Route
           path="/team-members"
           element={
-            <TeamMembersPage
-              inviteMeta={projectInvites}
-              onApproveRequest={handleApproveJoinRequest}
-              onCreateProject={handleCreateProject}
-              onRejectRequest={handleRejectJoinRequest}
-              pendingRequests={projectRequests}
-              projectMembers={projectMembers}
-              spaces={data.workspaceHome.spaces}
-            />
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <TeamMembersPage
+                inviteMeta={projectInvites}
+                onApproveRequest={handleApproveJoinRequest}
+                onCreateProject={handleCreateProject}
+                onRejectRequest={handleRejectJoinRequest}
+                pendingRequests={projectRequests}
+                projectMembers={projectMembers}
+                spaces={data.workspaceHome.spaces}
+              />
+            </ProtectedRoute>
           }
         />
-        <Route path="/meeting-ai" element={<MeetingAiPage data={data.meetingAi} />} />
-        <Route path="/report-agent" element={<ReportAgentPage data={data.reportAgent} />} />
+        <Route
+          path="/meeting-ai"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <MeetingAiPage data={data.meetingAi} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/report-agent"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              <ReportAgentPage data={data.reportAgent} />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
+      <GoogleLoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} onSuccess={handleAuthSuccess} />
     </>
   );
 }
