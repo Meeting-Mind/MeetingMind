@@ -116,7 +116,7 @@
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`
-- Backend: `cd backend && mvn test`
+- Backend: `cd backend && ./gradlew test`
 - AI: `cd ai && python -m compileall app`
 - Manual: 워크스페이스 홈, 회의 대기, 라이브룸, Meeting AI, Report Agent 화면 이동 확인
 
