@@ -3,9 +3,11 @@ package com.meetingmind.demo.controller;
 import com.meetingmind.demo.config.DotenvConfig;
 import com.meetingmind.demo.dto.SttStreamStartRequest;
 import com.meetingmind.demo.dto.SttStreamStartResponse;
+import com.meetingmind.demo.dto.TranscriptEntryResponse;
 import com.meetingmind.demo.service.LiveKitEgressService;
 import com.meetingmind.demo.service.SttSessionRegistry;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
-@RequestMapping("/api/stt/stream")
+@RequestMapping("/api/stt")
 public class SttStreamController {
 
     private final SttSessionRegistry sessionRegistry;
@@ -28,9 +30,9 @@ public class SttStreamController {
         this.liveKitEgressService = liveKitEgressService;
     }
 
-    @PostMapping("/start")
+    @PostMapping("/stream/start")
     public SttStreamStartResponse start(@Valid @RequestBody SttStreamStartRequest request) {
-        String sessionId = sessionRegistry.create();
+        String sessionId = sessionRegistry.create(request.roomName(), request.speaker());
         try {
             String publicWsBaseUrl = DotenvConfig.require("PUBLIC_WS_BASE_URL");
             String websocketUrl = publicWsBaseUrl + "/ws/egress-audio/" + sessionId;
@@ -43,7 +45,7 @@ public class SttStreamController {
         }
     }
 
-    @PostMapping("/{sessionId}/stop")
+    @PostMapping("/stream/{sessionId}/stop")
     public void stop(@PathVariable String sessionId) {
         String egressId = sessionRegistry.getEgressId(sessionId);
         if (egressId != null) {
@@ -52,12 +54,17 @@ public class SttStreamController {
         sessionRegistry.close(sessionId);
     }
 
-    @GetMapping("/{sessionId}/transcript")
-    public String transcript(@PathVariable String sessionId) {
+    @GetMapping("/stream/{sessionId}/transcript")
+    public List<TranscriptEntryResponse> transcript(@PathVariable String sessionId) {
         try {
-            return sessionRegistry.getTranscript(sessionId);
+            return sessionRegistry.getSessionTranscript(sessionId);
         } catch (NoSuchElementException exception) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, exception.getMessage(), exception);
         }
+    }
+
+    @GetMapping("/room/{roomName}/transcript")
+    public List<TranscriptEntryResponse> roomTranscript(@PathVariable String roomName) {
+        return sessionRegistry.getRoomTranscript(roomName);
     }
 }
