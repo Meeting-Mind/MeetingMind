@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -43,6 +44,16 @@ public class SttStreamController {
             sessionRegistry.close(sessionId);
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), exception);
         }
+    }
+
+    // ponytail: LiveKit egress 없이 브라우저 마이크로 바로 붙는 수동 테스트용 엔트리포인트.
+    // /ws/egress-audio/{sessionId}에 48kHz PCM을 직접 흘려보내 Clova 스트리밍 경로만 검증한다.
+    // 실제 LiveKit 연동 검증이 필요해지면 /stream/start로 대체.
+    @PostMapping("/stream/test-start")
+    public SttStreamStartResponse testStart(
+            @RequestParam(defaultValue = "test-room") String roomName,
+            @RequestParam(defaultValue = "tester") String speaker) {
+        return new SttStreamStartResponse(sessionRegistry.create(roomName, speaker), null);
     }
 
     @PostMapping("/stream/{sessionId}/stop")
