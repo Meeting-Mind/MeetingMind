@@ -9,6 +9,8 @@ tmp/
 __pycache__/
 *.py[cod]
 backend/target/
+backend/.gradle/
+backend/build/
 .env
 .env.*
 !.env.example

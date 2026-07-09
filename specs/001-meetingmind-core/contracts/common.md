@@ -65,6 +65,7 @@ Endpoint별 문서에는 위 공통 오류 중 해당 endpoint에서 반환 가�
 | `TaskCard.status` | `TODO`, `IN_PROGRESS`, `DONE` |
 | `SpaceInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |
 | `MeetingInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |
+| `MeetingParticipant.accessStatus` | `ACTIVE`, `REVOKED` |
 | `ProjectKnowledge.embeddingStatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
 
 ## Source Reference Shape

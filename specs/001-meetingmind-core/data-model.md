@@ -75,7 +75,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `userId`
 - `role`: HOST, EDITOR, VIEWER
 - `participantType`: member, guest
-- `accessStatus`
+- `accessStatus`: ACTIVE, REVOKED
 
 회의 게스트는 SpaceMember가 아닐 수 있지만 특정 회의의 `MeetingParticipant`로 등록된다. 회의 게스트는 지정된 회의 밖의 STT, 보고서, Meeting AI, 회의 파일, Project Knowledge, Project AI에 기본 접근할 수 없다.
 
@@ -237,6 +237,9 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - 발화자 이름 수정은 회의 `HOST` 또는 `EDITOR` 권한이 있는 사용자만 수행한다.
 - transcript, report, summary 조회는 `MeetingParticipant` 권한 확인 후 허용한다.
 - AI 서버로 전달되는 transcript segment는 Backend 권한 필터 이후에 구성한다.
+- `MeetingParticipant.accessStatus=ACTIVE`만 회의 접근 권한으로 인정한다. `REVOKED`는 조회, 수정, LiveKit token, Meeting AI, Project AI meeting context 접근을 모두 차단한다.
+- SpaceMember 제거 시 같은 Space에 속한 `participantType=member` MeetingParticipant는 `REVOKED`로 전환한다. `participantType=guest`는 SpaceMember가 아니므로 이 정책으로 회수하지 않는다.
+- HOST의 회의방 일시 퇴장은 `MeetingParticipant` 권한을 바꾸지 않는다. 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 
 ## API Representation Rules
 

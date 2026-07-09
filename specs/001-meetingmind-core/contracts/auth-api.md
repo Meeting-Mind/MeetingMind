@@ -8,7 +8,7 @@ Auth API는 target backend 계약이며 `/api/v1/auth/*`에서 시작한다. 현
 | --- | --- |
 | Status | Current Prototype, Target Backend |
 | Owner | Auth/Login |
-| Related requirements | FR-AUTH-01, FR-AUTH-02, FR-AUTH-04, FR-AUTH-05, FR-AUTH-06, FR-AUTH-07, FR-AUTH-08, FR-AUTH-09, FR-AUTH-10, FR-AUTH-13, FR-AUTH-16, NFR-SEC-01, NFR-SEC-02, NFR-SEC-03, NFR-SEC-06, POL-TOKEN-01 |
+| Related requirements | FR-AUTH-01, FR-AUTH-02, FR-AUTH-03, FR-AUTH-04, FR-AUTH-05, FR-AUTH-06, FR-AUTH-07, FR-AUTH-08, FR-AUTH-09, FR-AUTH-10, FR-AUTH-13, FR-AUTH-16, NFR-SEC-01, NFR-SEC-02, NFR-SEC-03, NFR-SEC-06, POL-PW-01, POL-TOKEN-01 |
 | Related data model | User, AuthIdentity, AuthSession |
 
 ## Token Rules
@@ -51,7 +51,7 @@ Auth API는 target backend 계약이며 `/api/v1/auth/*`에서 시작한다. 현
 ### Validation
 
 - `email`: required, email format, unique
-- `password`: required, 정책 길이/복잡도 후보 적용
+- `password`: required, `POL-PW-01` 적용. 최소 8자이며 영대문자, 영소문자, 숫자, 특수문자 중 3종 이상 포함.
 - `displayName`: required, blank 금지
 
 ### Response
@@ -87,7 +87,7 @@ Auth API는 target backend 계약이며 `/api/v1/auth/*`에서 시작한다. 현
 
 - FR-AUTH-01: 자체 계정 가입
 - FR-AUTH-02: 이메일 형식/중복 검증
-- FR-AUTH-03: 비밀번호 정책 후보
+- FR-AUTH-03 / POL-PW-01: 비밀번호 정책 적용
 - FR-AUTH-07: token pair 발급
 - NFR-SEC-06: 서버측 입력 검증
 - POL-TOKEN-01: access/refresh token 기준

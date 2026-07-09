@@ -41,6 +41,10 @@
 - 회의 참여자로 지정되는 즉시 해당 회의에 대한 STT, AI 보고서, Meeting AI 접근 권한이 부여된다.
 - 권한이 해제되면 해당 회의 데이터와 AI 컨텍스트 접근도 즉시 차단된다.
 - 회의 산출물 열람은 VIEWER 이상이 가능하지만, AI 보고서 편집과 발화자 이름 수정은 EDITOR/HOST 또는 Space OWNER/ADMIN override 권한이 필요하다.
+- HOST가 회의방에서 일시 퇴장해도 MeetingParticipant role과 accessStatus는 유지된다.
+- HOST가 회의를 종료하면 Meeting status를 `ENDED`로 전환한다.
+- 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다. 마지막 HOST를 없애려면 다른 참여자를 먼저 HOST로 승격해야 한다.
+- 회의 삭제 권한은 기본 `OWNER` 또는 해당 회의 `HOST` 전용이다. `ADMIN` 삭제는 기본 권한이 아니며 명시적 예외 정책이 있을 때만 허용한다.
 - STT 보관 정책 설정은 오너 권한으로 제한한다.
 - 모든 AI 기능은 사용자 권한을 검증한 후 데이터를 조회해야 한다.
 - 권한이 없는 회의 데이터는 검색 결과, AI 컨텍스트, AI 응답에 포함하지 않는다.

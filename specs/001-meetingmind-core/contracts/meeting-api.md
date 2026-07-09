@@ -274,6 +274,7 @@ None.
 
 - 인증 필요
 - 기본 `OWNER` 또는 `HOST`
+- `ADMIN` 삭제는 기본 권한이 아니며, 명시적 예외 정책이 있을 때만 허용한다.
 - 진행 중/종료 회의 삭제 가능 범위는 정책으로 제한
 
 ### Data Scope
@@ -317,6 +318,7 @@ None.
 ### Notes
 
 - soft delete와 cancel 상태 전환 기준은 Backend/Data owner가 확정한다.
+- `ADMIN`은 회의 생성/참여자 관리/수정 override를 가질 수 있지만, 삭제는 기본 권한에 포함하지 않는다.
 
 ## GET /api/v1/meetings/{meetingId}/participants
 
@@ -354,7 +356,7 @@ None.
       "displayName": "이미주",
       "role": "HOST",
       "participantType": "member",
-      "accessStatus": "active"
+      "accessStatus": "ACTIVE"
     }
   ]
 }
@@ -418,7 +420,7 @@ None.
 {
   "participantId": "participant-002",
   "role": "VIEWER",
-  "accessStatus": "active"
+  "accessStatus": "ACTIVE"
 }
 ```
 
@@ -645,15 +647,15 @@ None.
 ```json
 {
   "role": "EDITOR",
-  "accessStatus": "active"
+  "accessStatus": "ACTIVE"
 }
 ```
 
 ### Validation
 
 - `role`: optional `HOST`, `EDITOR`, `VIEWER`
-- `accessStatus`: optional `active`, `revoked`
-- 마지막 `HOST` 제거 금지 후보
+- `accessStatus`: optional `ACTIVE`, `REVOKED`
+- 변경 후에도 active `HOST`가 최소 1명 남아야 한다. 마지막 active `HOST`의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 
 ### Response
 
@@ -661,7 +663,7 @@ None.
 {
   "participantId": "participant-001",
   "role": "EDITOR",
-  "accessStatus": "active"
+  "accessStatus": "ACTIVE"
 }
 ```
 
@@ -683,6 +685,7 @@ None.
 ### Notes
 
 - Space role 변경과 Meeting role 변경은 분리한다.
+- 마지막 HOST를 없애려면 다른 active participant를 먼저 `HOST`로 승격한 뒤 기존 HOST를 변경한다.
 
 ## GET /api/v1/meetings/{meetingId}/transcript
 

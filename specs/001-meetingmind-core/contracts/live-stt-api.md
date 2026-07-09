@@ -184,6 +184,7 @@ None.
 ### Notes
 
 - 실제 WebRTC room 생성은 LiveKit token 발급과 분리한다.
+- HOST가 회의방에서 일시 퇴장해도 MeetingParticipant role과 accessStatus는 유지된다.
 
 ## POST /api/v1/meetings/{meetingId}/end
 
@@ -234,6 +235,8 @@ None.
 - FR-CALL-06: 회의 종료/퇴장
 
 ### Notes
+
+- HOST의 회의 종료는 Meeting status를 `ENDED`로 전환하는 관리 동작이다. 회의방 일시 퇴장과 구분한다.
 
 - 보고서/태스크 후보 생성은 비동기 처리 후보로 둔다.
 

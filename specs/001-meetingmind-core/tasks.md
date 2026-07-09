@@ -185,6 +185,13 @@
 | T116 | M015 | [x] | docs/decision | 사용자 | Codex | T115 | `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/contracts/*`, `specs/001-meetingmind-core/erd.md`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/analyze.md` | Invitation 분리, current confirmed report, ProjectKnowledge embedding 재생성 방식을 결정하고 문서에 반영한다. | `SPACE_INVITATION`/`MEETING_INVITATION` 분리, current confirmed report 1개, 비동기 embedding 재생성 기준이 문서화되어 있다. |
 | T117 | M015 | [ ] | docs/owner-review | TBD | TBD | T116 | `specs/001-meetingmind-core/contracts/*`, `specs/001-meetingmind-core/erd.md`, `specs/001-meetingmind-core/analyze.md` | 기능 owner가 결정 반영된 API/ERD를 최종 확인한다. | Backend/Frontend/AI/Data owner가 endpoint, 권한, 데이터 관계를 확인하고 남은 구현 결정을 analyze.md에 닫는다. |
 
+### M016: Test and CI Baseline
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T118 | M016 | [x] | backend/test | 사용자(Auth 담당) | Codex | D-014 | `backend/src/test/java/com/meetingmind/demo/auth/**` | 비밀번호 정책 단위 테스트와 signup 거부 테스트를 추가한다. | `POL-PW-01` 통과/거부 케이스와 signup validation이 backend test로 검증된다. |
+| T119 | M016 | [x] | ci | 사용자 | Codex | T118 | `.github/workflows/ci.yml`, `.gitignore` | Backend, Frontend, AI 검증을 GitHub Actions CI로 작성한다. | PR/push 시 `./gradlew test`, `npm run build`, `python -m compileall app tests`, `python -m unittest discover -s tests`가 실행된다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -193,6 +200,7 @@
 - [x] V004 PR #8 문서 검증: `git diff --check`, stale enum/role/source pattern search, task dependency scan
 - [x] V006 AI RAG safety 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests`
 - [ ] V005 주요 화면 라우팅 수동 확인
+- [x] V006 Auth policy/CI 기준선 검증: `cd backend && ./gradlew test`, `cd frontend && npm run build`, `cd ai && python3 -m compileall app tests`, `cd ai && python3 -m unittest discover -s tests`, `git diff --check`
 
 ## Notes
 

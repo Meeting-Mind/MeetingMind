@@ -121,6 +121,14 @@
 - 2026-07-09: `contracts/api.md`를 legacy snapshot으로 명확히 하고, `plan.md`, `tasks.md`, `analyze.md`의 API 문서 참조를 분리 contract 파일 기준으로 갱신했다. 검증은 문서 포맷 중심으로 수행한다.
 - 2026-07-09: API 문서의 `Requirement Trace`를 실제 `requirements/functional-requirements.md` ID와 대조해 수정하고, 누락된 `knowledge-api.md`를 추가했다. `erd.md`에는 ProjectKnowledge/DomainTerm 상태 필드와 주요 unique/index/nullable 제약을 보강했다.
 - 2026-07-09: Invitation은 `SPACE_INVITATION`/`MEETING_INVITATION`으로 분리, MeetingReport는 회의당 current confirmed 1개, ProjectKnowledge embedding은 비동기 재생성으로 결정했다. 관련 결정은 `clarify.md` D-010~D-012와 API/ERD/data-model에 반영했다.
+- 2026-07-09: Q-005 보고서 파일 포맷은 Markdown 우선으로 결정했다. PDF/DOCX export는 후속 옵션으로 둔다.
+- 2026-07-09: 자체 회원가입 비밀번호 정책을 `POL-PW-01` 수준으로 올렸다. Backend signup은 최소 8자와 영대문자/영소문자/숫자/특수문자 중 3종 이상 포함을 서버에서 검증한다.
+- 2026-07-09: Backend auth/권한 후속 구현 순서는 `T039/T040` Space/Meeting 접근 검증 service, `T094` LiveKit token 권한 연동, Auth store DB 영속화 순서로 확정했다.
+- 2026-07-09: GitHub Actions CI 기준선을 추가했다. PR/push에서 Backend test, Frontend build, AI compile/unit test를 분리 job으로 실행한다.
+- 2026-07-09: SpaceMember 제거 시 같은 Space의 member MeetingParticipant를 `REVOKED`로 전환하는 정책을 확정했다. `MeetingParticipant.accessStatus` canonical 값은 `ACTIVE`, `REVOKED`로 status-values, data-model, ERD, contracts에 반영했다.
+- 2026-07-09: HOST 일시 퇴장, 회의 종료, 마지막 HOST 회수/강등/삭제 금지 정책을 확정했다. `ADMIN`은 서비스 전체 운영자가 아니라 SpaceRole의 프로젝트 관리자임을 용어집과 결정 로그에 명시했다.
+- 2026-07-09: 회의 삭제 권한은 기본 `OWNER`/`HOST` 전용으로 확정하고, `ADMIN` 삭제는 명시적 예외 정책이 있을 때만 허용하도록 정책/권한/API 계약에 반영했다.
+- 2026-07-09: `AuthIdentity.provider` 표기를 `local`, `google`로 통일했다. ERD의 로컬 인증 provider 제약도 같은 기준으로 맞췄다.
 
 ## Current Auth Workstream Notes
 
@@ -210,6 +218,11 @@
 - Passed: `cd ai && python3 -m unittest discover -s tests`, 4 tests
 - Passed: `cd ai && python3 -m compileall app tests`
 - Passed: `git diff --check`
+- Passed: `cd backend && ./gradlew test` after `POL-PW-01` password policy and CI baseline changes
+- Passed: `cd frontend && npm run build` after CI baseline changes
+- Passed: `cd ai && python3 -m compileall app tests` after CI baseline changes
+- Passed: `cd ai && python3 -m unittest discover -s tests`, 4 tests, after CI baseline changes
+- Passed: `git diff --check` after CI baseline changes
 - Passed: local runtime smoke with `MEETINGMIND_JWT_SECRET=dev-test-secret GOOGLE_CLIENT_ID=dev-google-client mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=18080` before Gradle conversion
 - Passed: `curl -fsS http://127.0.0.1:18080/api/workspace`
 - Passed: `curl -fsS http://127.0.0.1:18080/api/v1/auth/signup -H 'Content-Type: application/json' -d '{"email":"api-smoke-18080@meetingmind.ai","password":"password-123","displayName":"API Smoke"}'`

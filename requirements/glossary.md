@@ -14,7 +14,7 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | 프로젝트 | 프로젝트 멤버 | SpaceMember | 특정 프로젝트에 소속된 사용자와 그 프로젝트 역할의 연결. | User와 Space의 조인 엔티티. role은 OWNER/ADMIN/MEMBER 등. | space_members, /spaces/{spaceId}/members | User와 혼용 금지 | FR-DASH-02, FR-PERM-01 |
 | 프로젝트 | 프로젝트 역할 | SpaceRole | 프로젝트 단위 권한 묶음. OWNER, ADMIN, MEMBER를 기본값으로 한다. | 회의 ACL보다 상위 계층에서 먼저 평가된다. | space_members.role | Permission과 혼용 금지 | FR-AUTH-15, NFR-AZ-06 |
 | 프로젝트 | 오너 | Owner | 프로젝트의 최상위 책임 역할. 프로젝트 삭제, 멤버 역할 변경, 오너 이양, 회의 ACL override 권한을 가진다. | SpaceRole의 한 값. '회의 오너'라는 표현은 쓰지 않고 회의 단위는 Host로 구분한다. | role=OWNER 또는 ownerUserId 정책 중 하나로 확정 | 생성자/관리자/호스트와 혼용 금지 | FR-DASH-01, FR-DASH-05, FR-OWN-01~03 |
-| 프로젝트 | 관리자 | Admin | 오너가 위임한 프로젝트 운영 역할. 멤버/회의 관리 권한을 가질 수 있으나 오너 이양·프로젝트 삭제 같은 최상위 행위는 정책으로 제한한다. | SpaceRole의 한 값. owner/admin override 범위는 권한 매트릭스에 명시한다. | role=ADMIN | 오너와 동급 표현 금지 | FR-PERM-03, FR-ACL-05 |
+| 프로젝트 | 관리자 | Admin | 오너가 위임한 프로젝트 운영 역할. 멤버/회의 관리 권한을 가질 수 있으나 오너 이양·프로젝트 삭제 같은 최상위 행위는 정책으로 제한한다. | SpaceRole의 한 값. 서비스 전체 운영자나 시스템 관리자가 아니라 특정 Space 안의 프로젝트 관리자다. owner/admin override 범위는 권한 매트릭스에 명시한다. | role=ADMIN | 오너/서비스 운영자/시스템 관리자와 혼용 금지 | FR-PERM-03, FR-ACL-05 |
 | 프로젝트 | 일반 멤버 | Member | 프로젝트에 소속되어 기본 기능을 사용할 수 있는 역할. | 회의 접근은 MeetingParticipant ACL이 있어야 가능하다. | role=MEMBER | 회의 참여자와 혼용 금지 | FR-PERM-01~05 |
 | 프로젝트 | 초대 | Invitation | 프로젝트 또는 회의에 사용자를 참여시키기 위한 초대 기록. | 초대 수락 시 SpaceMember 또는 MeetingParticipant가 생성된다. | invitations, /invitations | 알림(Notification)과 혼용 금지 | FR-PERM-02, FR-PERM-05, FR-MREG-03 |
 | 회의 | 회의 | Meeting | 프로젝트 안에서 일정, 참여자, 전사, 회의록, AI 질의응답을 가지는 업무 회의 단위. | Space에 속하며 MeetingParticipant, TranscriptSegment, MeetingReport를 포함한다. | meetings, /spaces/{spaceId}/meetings | 회의방/세션/회의록과 혼용 금지 | FR-MREG-01~07 |

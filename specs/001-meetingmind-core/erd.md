@@ -302,6 +302,8 @@ erDiagram
 
 - `SpaceMember`와 `MeetingParticipant`는 분리한다. Space 멤버라도 MeetingParticipant 또는 owner/admin override 없이는 특정 회의 데이터에 접근할 수 없다.
 - 회의 게스트는 `MeetingParticipant.participantType=guest`로 표현하고 Space 전체 권한을 갖지 않는다.
+- SpaceMember 제거 시 같은 Space의 `participantType=member` MeetingParticipant는 `accessStatus=REVOKED`로 전환한다. 회의 guest participant는 SpaceMember 제거로 회수하지 않는다.
+- HOST의 회의방 일시 퇴장은 `MEETING_PARTICIPANT`를 변경하지 않는다. 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 - `TranscriptSegment`는 원본 전사 단위이고 `EmbeddingChunk`는 RAG 검색 단위다.
 - 짧은 transcript 발화는 `EmbeddingChunk` 하나에 3-8개 segment를 묶고 `CHUNK_SOURCE_SEGMENT`로 원본을 추적한다.
 - AI 응답과 candidate 산출물은 `SOURCE_REFERENCE` 또는 `sourceIds`로 근거를 추적한다.
@@ -314,7 +316,7 @@ erDiagram
 
 - `USER.email`은 unique다. 탈퇴/비활성 계정 재가입 정책은 Auth owner가 결정한다.
 - `AUTH_IDENTITY(provider, providerUserId)`는 unique다.
-- `AUTH_IDENTITY.passwordHash`는 `provider=password`일 때만 required다.
+- `AUTH_IDENTITY.passwordHash`는 `provider=local`일 때만 required다.
 - `AUTH_SESSION.refreshTokenHash`는 unique이며 refresh token 원문은 저장하지 않는다.
 - `AUTH_SESSION(userId, revokedAt, expiresAt)` index를 둔다.
 
@@ -336,7 +338,7 @@ erDiagram
 - `MEETING_PARTICIPANT(meetingId, userId)`는 active participant 기준 unique다.
 - `MEETING_PARTICIPANT.role`은 `HOST`, `EDITOR`, `VIEWER` 중 하나다.
 - `MEETING_PARTICIPANT.participantType`은 `member`, `guest` 중 하나다.
-- `MEETING_PARTICIPANT.accessStatus`는 `active`, `revoked` 중 하나다.
+- `MEETING_PARTICIPANT.accessStatus`는 `ACTIVE`, `REVOKED` 중 하나다. 회의 접근 평가는 `ACTIVE`만 허용한다.
 - `MEETING_SPEAKER(meetingId, label)`은 unique다.
 - `TRANSCRIPT_SEGMENT(meetingId, sequence)`은 unique다.
 - `TRANSCRIPT_SEGMENT(meetingId, startMs)` index를 둔다.

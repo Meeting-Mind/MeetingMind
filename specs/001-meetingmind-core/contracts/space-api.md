@@ -740,7 +740,7 @@ Space 초대 링크를 생성한다.
 ### Data Scope
 
 - SpaceMember scope
-- 제거된 사용자의 MeetingParticipant 유지/회수 정책은 권한 문서와 맞춘다.
+- 제거된 사용자의 같은 Space 내 `participantType=member` MeetingParticipant는 `accessStatus=REVOKED`로 전환한다.
 
 ### Request
 
@@ -776,6 +776,7 @@ None.
 ### Notes
 
 - 회의별 guest participant는 이 API로 제거하지 않는다.
+- SpaceMember 제거 후 해당 사용자의 프로젝트, 회의, LiveKit, Meeting AI, Project AI meeting context 접근은 즉시 차단한다.
 
 ## POST /api/v1/spaces/{spaceId}/owner-transfer
 
