@@ -208,5 +208,5 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 ## 권장 검증
 
 - Frontend: `cd frontend && npm run build`
-- Backend: `cd backend && mvn test`
+- Backend: `cd backend && ./gradlew test`
 - AI: `cd ai && python -m compileall app`

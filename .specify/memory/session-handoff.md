@@ -80,9 +80,8 @@
 - Meeting AI는 현재 회의 범위만 답해야 한다.
 - Project AI는 사용자가 접근 가능한 회의와 공식 Project Knowledge만 검색해야 한다.
 - RAG/AI 컨텍스트 구성 전 권한 필터를 먼저 적용한다.
-- 문서 기준선은 `codex/docs-agent-collaboration-workflow` 브랜치에 push되어 있다.
-- 현재 `output/`, `tmp/`는 PDF 생성 산출물로 Git 미추적 상태다.
-- 요구사항 기준선 반영 변경은 아직 커밋하지 않은 로컬 문서 변경이다.
+- 요구사항 기준선 반영 변경은 PR #8의 `agent/requirements-docs-baseline` 브랜치에 커밋되어 원격 push되어 있다.
+- 현재 로컬에는 개인 IDE 설정인 `.idea/`만 Git 미추적 상태로 남아 있으며 PR에는 포함하지 않는다.
 
 ## Next Likely Work
 
@@ -130,8 +129,9 @@
 
 ## Verification Status
 
-- 문서 작업 위주라 앱 빌드는 아직 실행하지 않았다.
+- PR #8 문서 변경은 `git diff --check`, stale enum/role/source pattern search, task dependency scan으로 검증했다.
+- 앱 빌드/테스트는 이번 docs-only PR에서 새로 실행하지 않았다.
 - 권장 검증 명령:
   - `cd frontend && npm run build`
-  - `cd backend && mvn test`
-  - `cd ai && python -m compileall app`
+  - `cd backend && ./gradlew test`
+  - `cd ai && python3 -m compileall app`
