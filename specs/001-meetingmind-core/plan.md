@@ -8,6 +8,7 @@
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
 - 영속 DB, 인증, 실제 STT, pgvector RAG는 아직 없다.
+- 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Target Architecture
 
@@ -15,6 +16,7 @@
 - Backend: Space, Meeting, Membership, Report, Action Item, Knowledge API를 단계적으로 추가한다.
 - AI: Meeting AI 컨텍스트 제한을 유지하고, 이후 retrieval 계층을 별도 모듈로 분리한다.
 - Data: PostgreSQL + pgvector를 기본 영속 저장소로 설계하고, 파일성 원문/보고서는 S3 연계를 고려한다.
+- Requirements: 용어는 `requirements/glossary.md`, 권한은 `requirements/permissions.md`, 상태값은 `requirements/status-values.md`, 성능/토큰 목표는 `requirements/performance.md`를 따른다.
 
 ## Technical Decisions
 
@@ -66,8 +68,10 @@
 - AI 서버로 전달하는 컨텍스트는 Backend가 권한 필터링 후 구성하는 것을 목표로 한다.
 - Project AI 구현 시 회의 데이터 retrieval 전에 MeetingParticipant 권한을 적용한다.
 - Transcript, summary, speaker 수정 API는 MeetingParticipant 권한 확인 후 처리한다.
-- Speaker 이름 수정은 `host` 또는 `editor` 권한으로 제한한다.
+- Speaker 이름 수정은 `HOST` 또는 `EDITOR` 권한으로 제한한다.
 - LiveKit 토큰은 짧은 만료 시간을 유지한다.
+- 회의 게스트는 특정 회의의 MeetingParticipant로만 접근하며 Space 전체 권한, Project Knowledge, Project AI 권한을 기본으로 갖지 않는다.
+- Meeting status는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED`를 기준으로 하고, Transcript/Report 후처리 상태는 별도 status로 관리한다.
 
 ## Parallel Work Plan
 
@@ -102,10 +106,10 @@
 
 ## Integration Order
 
-1. Q-001 로그인 방식과 Auth API 경계를 확정한다.
-2. Auth/Login owner가 확정된 Auth API, token 전달 방식, Frontend guard 경계에 맞춰 구현한다.
-3. Q-002 회의 권한 등급을 결정한다.
-4. API 계약과 데이터 모델을 확정한다.
+1. `requirements/INDEX.md`에서 작업별 요구사항 문서를 확인한다.
+2. Q-001 로그인 방식과 Auth API 경계는 확정된 기준을 따른다.
+3. 회의 권한 등급은 `HOST`, `EDITOR`, `VIEWER`와 회의 게스트 기준을 따른다.
+4. API 계약과 데이터 모델을 요구사항 용어/상태/권한 기준으로 맞춘다.
 5. 공통 오류 응답, Meeting status, transcript/speaker 계약을 확정한다.
 6. Backend 도메인 모델과 권한 필터를 먼저 구현한다.
 7. AI 담당은 실제 STT/DB를 기다리지 않고 `TranscriptSegment` 유사 mock 데이터에서 RAG chunk를 만드는 adapter와 in-memory retriever를 먼저 구현한다.

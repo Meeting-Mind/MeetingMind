@@ -6,6 +6,18 @@
 
 MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회의 단위 접근 모델, Meeting AI, Project AI, AI 보고서 편집 흐름을 하나의 제품 경험으로 정리한다.
 
+## Requirements Baseline
+
+이 스펙의 제품 기준선은 `requirements/INDEX.md`에서 라우팅되는 요구사항 Markdown이다.
+
+- 용어는 `requirements/glossary.md`를 따른다.
+- 권한은 `requirements/permissions.md`를 따른다.
+- 상태값은 `requirements/status-values.md`를 따른다.
+- 기능/비기능 요구사항 ID는 `requirements/functional-requirements.md`, `requirements/non-functional-requirements.md`를 따른다.
+- 정책과 성능/토큰 목표는 `requirements/policies.md`, `requirements/performance.md`를 따른다.
+
+이 파일의 축약 요구사항과 요구사항 Markdown이 충돌하면 요구사항 Markdown을 우선하고, 이 스펙을 갱신한다.
+
 ## Why
 
 - 기존 AI 회의록 서비스는 회의 단위 기록에 머무르며 프로젝트 전체 맥락을 보존하기 어렵다.
@@ -41,6 +53,8 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 
 ## Functional Requirements
 
+상세 기능 요구사항은 `requirements/functional-requirements.md`를 canonical 기준으로 삼는다. 아래 항목은 Core Prototype 단계의 축약 범위다.
+
 - FR-001: 사용자는 워크스페이스 홈에서 참여 중인 Space와 오늘 회의를 볼 수 있어야 한다.
 - FR-002: 사용자는 Space 개요에서 회의 목록, 최신 문서, Project AI 질문 예시를 볼 수 있어야 한다.
 - FR-003: 사용자는 회의 입장 전 참여자 상태와 접근 권한을 확인할 수 있어야 한다.
@@ -53,6 +67,8 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - FR-010: 랜딩 페이지를 제외한 앱 화면은 로그인된 사용자만 접근할 수 있어야 한다.
 
 ## Non-Functional Requirements
+
+상세 비기능 요구사항은 `requirements/non-functional-requirements.md`, 성능/토큰 목표는 `requirements/performance.md`를 canonical 기준으로 삼는다.
 
 - NFR-001: secret은 환경변수 또는 로컬 `.env`에서만 읽고 저장소에 커밋하지 않는다.
 - NFR-002: AI 컨텍스트는 권한 필터링된 데이터만 포함해야 한다.
@@ -78,6 +94,6 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 ## Open Questions
 
 - Q-001: Google OAuth와 자체 회원가입/로그인을 병행하고 access/refresh token을 사용하기로 결정했다.
-- Q-002: 회의별 권한 등급은 host/editor/participant/viewer로 충분한지 결정해야 한다.
-- Q-003: STT 원문 기본 보존 기간의 제품 기본값을 정해야 한다.
-- Q-004: Project Knowledge의 승인/갱신 주체를 정해야 한다.
+- Q-002: 회의별 권한 등급은 `VIEWER`, `EDITOR`, `HOST`를 기본값으로 결정했다. 회의 게스트는 SpaceRole이 아니라 특정 회의의 MeetingParticipant로 처리한다.
+- Q-003: STT 원문 기본 보존 기간은 30일로 결정했다. 선택지는 7일/30일/영구다.
+- Q-004: Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정한다. 회의 게스트는 기본 접근할 수 없다.

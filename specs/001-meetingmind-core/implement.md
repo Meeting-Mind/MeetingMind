@@ -20,6 +20,15 @@
 - Frontend Auth 연결을 추가했다. 자체 로그인/회원가입과 Google credential exchange를 `/api/v1/auth/*`로 보내고, token pair는 `sessionStorage`에 저장한다.
 - 랜딩(`/`) 외 앱 route를 보호 route로 감싸 비로그인 사용자는 로그인 모달로 유도하고, 로그인 성공 후 요청했던 route로 복귀하게 했다.
 - Backend Auth runtime smoke 중 `AuthTokenService`, `GoogleJwtCredentialVerifier`의 테스트용 보조 생성자 때문에 Spring이 런타임 생성자를 선택하지 못하는 문제를 발견했다. 런타임 생성자에 `@Autowired`를 명시하고 context smoke test를 추가했다.
+- Google Sheets 요구사항 정의서를 `requirements/*` Markdown 기준선으로 분할했다.
+- 기능/비기능 요구사항은 요약 카탈로그와 전체 우선순위 상세 문서로 분리했다. 상세 문서에는 P2를 포함해 인수 기준, 조건/권한, 실패/예외, 검증 기준 또는 측정 방법을 보존했다.
+- 요구사항 읽기 전략을 `AGENTS.md`와 constitution에 반영했다. 구현자는 `requirements/INDEX.md`를 먼저 읽고 필요한 요구사항 문서만 추가로 읽는다.
+- 용어집, 권한 매트릭스, 상태값 기준으로 core spec, plan, data-model, contracts, clarify, tasks, analyze를 갱신했다.
+- 권한 role enum 표기는 용어집 기준인 `OWNER`/`ADMIN`/`MEMBER`, `HOST`/`EDITOR`/`VIEWER`로 정리했다.
+- 정책, 성능지표, 용어집, 상태값 문서는 Google Sheets의 전체 컬럼을 보존하는 상세 스냅샷으로 보강했다.
+- Q-002 회의 권한 등급은 `HOST`, `EDITOR`, `VIEWER`로 결정했고, 회의 게스트는 특정 회의의 `MeetingParticipant`로만 접근한다.
+- Q-003 STT 원문 보존 기본값은 30일로 결정했다.
+- Q-004 Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정하며, 회의 게스트는 기본 접근할 수 없도록 정리했다.
 
 ## Work Allocation
 
@@ -37,7 +46,7 @@
 | 사용자(Auth 담당) | Codex | T024 | Google OAuth 단독, 자체 계정/JWT, Google OAuth + 자체 계정 + access/refresh token 병행안 비교와 결정 정리 |
 | 사용자(Auth 담당) | Codex | T089-T096 | 로그인/인증 기반 구축 작업 경계, Auth API 계약, Backend 검증, Frontend auth 상태, 보호 route guard 계획 |
 | 사용자(Auth 담당) | Codex | T089 | 현재 Frontend Google 로그인 모달과 Backend auth/security 부재 상태 조사 |
-| 사용자(Auth 담당) | Codex | T090 | `/api/v1/auth/*` Auth API, User/AuthIdentity/RefreshTokenSession 모델, token storage/protected route 계약 문서화 |
+| 사용자(Auth 담당) | Codex | T090 | `/api/v1/auth/*` Auth API, User/AuthIdentity/AuthSession 모델, token storage/protected route 계약 문서화 |
 
 ## Files Changed
 
@@ -48,6 +57,7 @@
 - `.specify/templates/*`: 반복 작업용 템플릿
 - `.specify/skills/qa-checklist.md`: 도구 중립 QA 체크리스트
 - `specs/001-meetingmind-core/*`: MeetingMind 핵심 프로토타입 스펙 세트
+- `requirements/*`: Google Sheets 요구사항 정의서의 로컬 Markdown 기준선
 - `ai/app/main.py`: `POST /api/meeting-ai/explain-term` endpoint와 Domain Dictionary 우선 응답, AI fallback 추가
 - `ai/app/rag.py`: RAG chunk/source/search request/result 타입과 retriever protocol 추가
 - `backend/src/main/java/com/meetingmind/demo/service/LiveKitTokenService.java`: 안정적인 단위 테스트를 위해 clock/config provider 주입 경계 추가
@@ -75,18 +85,20 @@
 - milestone과 task granularity 기준은 `AGENTS.md`, `tasks.md`, `tasks-template.md`에 추가했다.
 - 실제 배정/충돌/통합 기록은 `implement.md`와 `implement-template.md`에 추가했다.
 - 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker 계약은 `contracts/api.md`, `data-model.md`, `plan.md`, `clarify.md`, `tasks.md`에 반영했다.
-- 실제 구현 착수는 `tasks.md`의 T024-T096 상세 task 기준으로 진행한다.
-- AI 담당 workstream은 `tasks.md`의 T070-T077로 분리했다. T070-T072를 완료 상태로 두고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다.
+- 실제 구현 착수는 `tasks.md`의 T024-T106 상세 task 기준으로 진행한다.
+- AI 담당 workstream은 `tasks.md`의 T070-T088로 분리했다. T070-T072와 T078-T086은 완료했고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다. RAG safety와 최종 검증은 T087-T088로 남긴다.
 - AI prototype API 계약은 `contracts/api.md`에 추가했다. 범위는 용어 설명, 회의 요약/보고서 생성, 회의별 챗봇, 프로젝트별 챗봇, 회의 종료 태스크 후보 추출이다.
 - 용어 설명 prototype은 `pgvector` 같은 Domain Dictionary 항목을 로컬 응답으로 먼저 처리하고, dictionary에 없지만 transcript 근거가 있는 용어는 AI fallback으로 설명한다.
-- RAG 기반 작업은 `tasks.md`의 M011/T078-T088로 세분화했다. T078-T079를 완료하고 T080을 시작 상태로 두었으며, 실제 STT 저장 API/DB schema/pgvector migration은 후속 담당자 작업으로 남긴다.
-- Auth/Login 기반 작업은 `tasks.md`의 M012/T089-T096으로 세분화했다. T024, T089, T090을 완료 상태로 두고, 실제 Backend Auth 구현은 T091부터 진행한다.
+- RAG 기반 작업은 `tasks.md`의 M011/T078-T088로 세분화했다. T078-T086은 완료했고, 실제 STT 저장 API/DB schema/pgvector migration은 후속 담당자 작업으로 남긴다.
+- Auth/Login 기반 작업은 `tasks.md`의 M012/T089-T096으로 세분화했다. T089-T093, T095-T096은 완료했고, LiveKit token을 회의 접근 권한과 연결하는 T094는 T040 이후로 남긴다.
+- 요구사항 기준선 반영 작업은 `tasks.md`의 M013/T097-T106으로 세분화했다. T097-T101은 완료했고, backend/frontend/ai/data 영향도 점검은 T102-T105로 남긴다.
+- T102-T105는 도메인 구현과 실제 코드 영향도 점검이므로 각 영역 팀원이 담당한다. Codex는 문서 기준선, 상세 요구사항 스냅샷, 용어/enum 정합성까지만 정리했다.
 
 ## Current Auth Workstream Notes
 
-- 현재 Frontend에는 `frontend/src/components/GoogleLoginModal.tsx`가 있으며, Google Identity Services script를 로드하고 credential payload를 decode해 `onSuccess`로 사용자 표시 정보를 넘긴다.
-- 현재 `GoogleLoginModal.tsx`는 import 사용처가 없어 실제 route guard와 연결되지 않았다.
-- 현재 `frontend/src/App.tsx`는 `/api/workspace`를 호출하고 실패 시 mock data를 유지하며, auth state 또는 `Authorization` header 전달 경계는 없다.
+- 현재 Frontend에는 `frontend/src/components/GoogleLoginModal.tsx`가 있으며, 자체 로그인/회원가입과 Google Backend exchange를 처리한다.
+- `frontend/src/App.tsx`는 auth session 상태와 protected route를 관리하고, `/api/workspace` 호출에 `Authorization` header를 전달한다.
+- 기존 mock fallback은 유지되지만 로그인 상태는 Backend auth 응답 기준으로 관리한다.
 - 현재 Backend Auth 구현은 새 외부 dependency 없이 Java 표준 crypto/Jackson/Spring MVC 기반으로 작성했다. Spring Security는 아직 도입하지 않았다.
 - 현재 Backend Auth package는 `backend/src/main/java/com/meetingmind/demo/auth/**`다.
 - 확정 구현 방향대로 Google OAuth와 자체 회원가입/로그인을 모두 지원하고, Backend가 access token과 refresh token, user profile을 반환한다.
@@ -97,7 +109,7 @@
 - 로그인 성공 후에는 비로그인 상태에서 요청했던 보호 route로 복귀한다.
 - Backend Auth runtime 환경변수는 `MEETINGMIND_JWT_SECRET` 또는 `AUTH_JWT_SECRET`, Google 검증용 `GOOGLE_CLIENT_ID` 또는 `VITE_GOOGLE_CLIENT_ID`를 사용한다.
 - 현재 Auth 저장소는 prototype용 in-memory store다. 서버 재시작 시 사용자, identity, refresh session은 사라지며, DB 영속화는 Data/Backend 후속 작업이다.
-- LiveKit token을 인증 사용자와 회의 접근 권한에 연결하는 T094는 T040/Q-002 회의 권한 정책 확정 전까지 구현하지 않는다.
+- LiveKit token을 인증 사용자와 회의 접근 권한에 연결하는 T094는 T040 회의 접근 검증 계층 구현 전까지 구현하지 않는다.
 
 ## Current AI Workstream Notes
 
@@ -176,13 +188,14 @@
 ## Remaining Work
 
 - `clarify.md`의 Open 질문 결정
-- Backend Auth 영속화: 현재 in-memory Auth store를 DB 기반 User/AuthIdentity/RefreshTokenSession 저장소로 전환
-- LiveKit token auth 연결(T094): T040/Q-002 회의 접근 권한 정책 확정 후 인증 사용자와 회의 권한을 확인하도록 전환
+- Backend Auth 영속화: 현재 in-memory Auth store를 DB 기반 User/AuthIdentity/AuthSession 저장소로 전환
+- LiveKit token auth 연결(T094): T040 회의 접근 검증 계층 구현 후 인증 사용자와 회의 권한을 확인하도록 전환
+- 요구사항 기준선 영향도 점검: T102-T105에서 backend/frontend/ai/data가 새 용어, 권한, 상태값, 성능/토큰 기준과 충돌하는지 확인
 - mock API 분리
 - Target API base URL 결정
 - 실제 STT 파일 업로드 방식 결정
 - Meeting AI 권한 필터링 경로 강화
 - Project AI RAG 설계와 구현
-- AI prototype 구현: 요약/보고서 생성, 회의별/프로젝트별 챗봇 분리, 회의 종료 태스크 후보 추출 API
+- AI RAG safety/final verification: T087-T088에서 scope 혼입과 근거 없음 처리를 검증
 - Frontend 연결: Live Room 용어 설명 UI, Meeting/Project AI source 표시, Report Agent 연결은 Frontend 담당 TBD
-- RAG prototype 구현: `ai/app/rag.py` 추가, mock retriever 연결, sources/citations UI 표시
+- Frontend/Backend 연결: AI prototype endpoint를 권한 필터 이후 Backend route와 화면에 연결

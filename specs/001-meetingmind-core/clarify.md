@@ -7,16 +7,15 @@
 | ID | Priority | Question | Why It Matters | Status | Decision |
 | --- | --- | --- | --- | --- | --- |
 | Q-001 | High | 로그인은 Google OAuth 단독으로 시작할까, 자체 계정/JWT를 병행할까? | Backend 보안 구조와 Frontend 인증 흐름을 결정한다. | Decided | Google OAuth와 자체 회원가입/로그인을 모두 지원한다. Backend는 access token과 refresh token을 발급하고, Frontend는 둘 다 `sessionStorage`에 저장한다. |
-| Q-002 | High | 회의 권한 등급은 host/editor/participant/viewer로 충분한가? | API 권한 모델과 UI 제어 범위를 결정한다. | Open | |
-| Q-003 | Medium | STT 원문 기본 보존 기간은 7일, 30일, 영구 중 무엇인가? | 저장 비용, 개인정보, 삭제 작업 설계를 결정한다. | Open | |
-| Q-004 | Medium | Project Knowledge는 누가 공식 승인하고 최신화하는가? | Project AI가 공식 지식과 회의 기록을 구분하는 기준이 된다. | Open | |
+| Q-002 | High | 회의 권한 등급은 어떤 값으로 정할까? | API 권한 모델과 UI 제어 범위를 결정한다. | Decided | MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다. `participant`는 role 값으로 쓰지 않고, 회의 게스트는 SpaceRole이 아니라 특정 회의의 MeetingParticipant로 등록한다. |
+| Q-003 | Medium | STT 원문 기본 보존 기간은 7일, 30일, 영구 중 무엇인가? | 저장 비용, 개인정보, 삭제 작업 설계를 결정한다. | Decided | STT 원문 보존 선택지는 7일/30일/영구이며 기본값은 30일이다. 음성 원본은 기본 장기 보관하지 않는다. |
+| Q-004 | Medium | Project Knowledge는 누가 공식 승인하고 최신화하는가? | Project AI가 공식 지식과 회의 기록을 구분하는 기준이 된다. | Decided | Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정한다. 회의 게스트는 기본 접근할 수 없다. |
 | Q-005 | Low | 보고서 파일 포맷은 Markdown, HTML, PDF, DOCX 중 무엇을 우선할까? | Report Agent 저장/다운로드 구현 방향을 결정한다. | Open | |
 | Q-006 | Medium | Target API Base URL은 `/api/v1`로 고정할까, 현재 prototype 경로와 병행할까? | Frontend client 구성과 Backend route migration 순서를 결정한다. | Open | |
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
 
 ## Blocking Decisions
 
-- Q-002는 `MeetingParticipant.role`, 권한 필터, 회의 UI 제어 구현 전에 결정해야 한다.
 - Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다. 단, Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 먼저 시작한다.
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
 
@@ -53,3 +52,7 @@
 - D-003: AI prototype API는 우선 AI 서버 직접 호출 계약으로 정의한다. Backend route, 저장, 권한 필터 구현은 후속 담당자 작업이므로 현재 계약에는 already-filtered context 전제를 명시한다.
 - D-004: 실제 STT 저장 API, DB schema, pgvector migration은 후속 담당자 작업을 기다린다. AI 담당은 그 전까지 `TranscriptSegment` 유사 mock 데이터에서 `RagChunk`를 생성하는 adapter 경계와 in-memory retriever를 먼저 구현한다.
 - D-005: Auth는 Google OAuth와 자체 회원가입/로그인을 모두 지원한다. Auth API는 `/api/v1/auth/*`로 시작하고, Backend가 access token과 refresh token을 발급하며, Frontend는 두 token을 `sessionStorage`에 저장한다. 랜딩(`/`)만 공개 route로 둔다.
+- D-006: 요구사항 기준선은 `requirements/*` Markdown으로 관리한다. 작업자는 `requirements/INDEX.md`를 먼저 읽고 관련 요구사항 문서만 추가로 읽는다.
+- D-007: MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다. `participant`는 MeetingRole 값으로 쓰지 않고, 일반 참석자는 `VIEWER` 또는 별도 `participantType=member`로 표현한다.
+- D-008: 회의 게스트는 특정 회의의 `MeetingParticipant`로 등록되며 Space 전체 권한, Project Knowledge, Project AI 권한을 기본으로 갖지 않는다.
+- D-009: Meeting status는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED`를 기준으로 한다. 전사/보고서 후처리는 `Transcript.status`, `MeetingReport.status`로 분리한다.
