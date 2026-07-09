@@ -37,6 +37,7 @@
 | 404 | `SPEAKER_NOT_FOUND` | 발화자를 찾을 수 없음 |
 | 409 | `MEETING_NOT_COMPLETED` | 처리 완료 전 transcript/report/summary 요청 |
 | 409 | `MEETING_ALREADY_PROCESSING` | 이미 처리 중인 회의에 중복 처리 요청 |
+| 409 | `LAST_ACTIVE_HOST_REQUIRED` | 마지막 active HOST 강등, 접근 회수, 제거 요청 |
 | 409 | `EMAIL_ALREADY_REGISTERED` | 이미 가입된 이메일 |
 | 413 | `AUDIO_FILE_TOO_LARGE` | 파일 업로드 용량 초과 |
 | 422 | `TRANSCRIPTION_FAILED` | STT/발화자 구분 처리 실패 |

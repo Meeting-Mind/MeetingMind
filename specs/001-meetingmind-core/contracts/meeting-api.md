@@ -672,6 +672,7 @@ None.
 - `400 INVALID_REQUEST`: role/status 오류
 - `403 MEETING_ACCESS_DENIED`: role 변경 권한 없음
 - `404 MEETING_NOT_FOUND`: 회의 또는 participant 없음
+- `409 LAST_ACTIVE_HOST_REQUIRED`: 마지막 active HOST 강등, 접근 회수, 제거 요청
 
 ### Audit
 
