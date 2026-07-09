@@ -94,7 +94,7 @@ public class AuthService {
         return issueTokenPair(user, userAgent);
     }
 
-    AuthUserResponse currentUser(String authorizationHeader) {
+    public AuthUserResponse currentUser(String authorizationHeader) {
         String userId = tokenService.resolveSubject(authorizationHeader);
         return store.findUserById(userId)
                 .map(AuthUserResponse::from)

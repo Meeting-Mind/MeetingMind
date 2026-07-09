@@ -47,7 +47,7 @@
 ```json
 {
   "serverUrl": "wss://...",
-  "token": "jwt",
+  "participantToken": "jwt",
   "roomName": "meeting-001",
   "identity": "user-001",
   "name": "이미주"
@@ -104,7 +104,7 @@ None.
 ```json
 {
   "serverUrl": "wss://...",
-  "token": "jwt",
+  "participantToken": "jwt",
   "roomName": "meeting-001",
   "identity": "user-001",
   "name": "이미주",
@@ -114,6 +114,7 @@ None.
 
 ### Errors
 
+- `401 UNAUTHORIZED`: 인증 실패
 - `403 MEETING_ACCESS_DENIED`: 회의 접근 권한 없음
 - `404 MEETING_NOT_FOUND`: 회의 없음
 - `503 LIVEKIT_NOT_CONFIGURED`: LiveKit 환경변수 누락
