@@ -52,8 +52,10 @@ export function TeamMembersPage({
   }, []);
 
   const [searchParams] = useSearchParams();
-  const projectName = searchParams.get("project") ?? spaces[0]?.name ?? "";
-  const selectedSpace = spaces.find((space) => space.name === projectName) ?? spaces[0];
+  const spaceId = searchParams.get("spaceId");
+  const projectParam = searchParams.get("project");
+  const selectedSpace = spaces.find((space) => space.id === spaceId) ?? spaces.find((space) => space.name === projectParam) ?? spaces[0];
+  const projectName = selectedSpace?.name ?? "";
   const members = projectMembers[projectName] ?? [];
   const requests = pendingRequests[projectName] ?? [];
   const invite = inviteMeta[projectName] ?? {
@@ -79,6 +81,7 @@ export function TeamMembersPage({
         mode="catalog"
         onCreateProject={onCreateProject}
         projectName={projectName}
+        spaceId={selectedSpace?.id}
       />
 
       <main className="workspace-catalog-main project-detail-main">

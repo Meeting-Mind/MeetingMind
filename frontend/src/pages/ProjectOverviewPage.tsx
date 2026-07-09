@@ -167,9 +167,10 @@ function buildProjectView(
   base: WorkspaceData["projectOverview"],
   projectMeetings: Record<string, ProjectMeeting[]>,
   spaces: WorkspaceData["workspaceHome"]["spaces"],
+  spaceId?: string | null,
   projectName?: string | null
 ) {
-  const selectedSpace = spaces.find((space) => space.name === projectName) ?? spaces[0];
+  const selectedSpace = spaces.find((space) => space.id === spaceId) ?? spaces.find((space) => space.name === projectName) ?? spaces[0];
 
   if (!selectedSpace) {
     return null;
@@ -197,10 +198,11 @@ function buildProjectView(
   };
 }
 
-function getMeetingDestination(projectName: string, meeting: ProjectMeeting) {
+function getMeetingDestinationForSpace(space: WorkspaceData["workspaceHome"]["spaces"][number], meeting: ProjectMeeting) {
   const path = meeting.state === "예정" ? "/live-meeting" : "/report-agent";
   const params = new URLSearchParams({
-    project: projectName,
+    spaceId: space.id,
+    project: space.name,
     meeting: meeting.title,
     round: meeting.index.replace("#", "")
   });
@@ -229,8 +231,9 @@ export function ProjectOverviewPage({
   }, []);
 
   const [searchParams] = useSearchParams();
+  const spaceId = searchParams.get("spaceId");
   const projectName = searchParams.get("project");
-  const viewData = buildProjectView(data, projectMeetings, spaces, projectName);
+  const viewData = buildProjectView(data, projectMeetings, spaces, spaceId, projectName);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const projectPromptFallback = viewData
     ? `${viewData.selectedSpace.name} 프로젝트 기준으로 일정, 결정사항, 다음 회의 흐름을 정리해드릴게요.`
@@ -426,6 +429,7 @@ export function ProjectOverviewPage({
         mode="catalog"
         onCreateProject={onCreateProject}
         projectName={viewData.selectedSpace.name}
+        spaceId={viewData.selectedSpace.id}
       />
 
       <main className="workspace-catalog-main project-overview-main">
@@ -459,7 +463,7 @@ export function ProjectOverviewPage({
                     {nextMeeting.index.replace("#", "")}회차 - {nextMeeting.title} ({nextMeeting.date} 예정)
                   </strong>
                 </div>
-                <Link to={getMeetingDestination(viewData.selectedSpace.name, nextMeeting)}>바로가기 →</Link>
+                <Link to={getMeetingDestinationForSpace(viewData.selectedSpace, nextMeeting)}>바로가기 →</Link>
               </section>
             ) : (
               <section className="project-next-banner empty">
@@ -485,7 +489,7 @@ export function ProjectOverviewPage({
                     <Link
                       key={meeting.index}
                       className="project-flow-row"
-                      to={getMeetingDestination(viewData.selectedSpace.name, meeting)}
+                      to={getMeetingDestinationForSpace(viewData.selectedSpace, meeting)}
                     >
                       <div className={`project-flow-index tone-${(index % 4) + 1}`}>{meeting.index.replace("#", "")}</div>
                       <div className="project-flow-copy">
@@ -619,7 +623,7 @@ export function ProjectOverviewPage({
                   key={`modal-${meeting.index}`}
                   className="project-meetings-modal-row"
                   onClick={() => setIsMeetingsModalOpen(false)}
-                  to={getMeetingDestination(viewData.selectedSpace.name, meeting)}
+                  to={getMeetingDestinationForSpace(viewData.selectedSpace, meeting)}
                 >
                   <div className={`project-flow-index tone-${(index % 4) + 1}`}>{meeting.index.replace("#", "")}</div>
                   <div className="project-flow-copy">

@@ -53,6 +53,10 @@
 | 사용자(Auth 담당) | Codex | T089 | 현재 Frontend Google 로그인 모달과 Backend auth/security 부재 상태 조사 |
 | 사용자(Auth 담당) | Codex | T090 | `/api/v1/auth/*` Auth API, User/AuthIdentity/AuthSession 모델, token storage/protected route 계약 문서화 |
 | 사용자 | Codex | T107-T109 | 기능군별 API 명세 분리, backend 전체 도메인 ERD 초안, API/ERD 변경 로그 지침 보강 |
+| 사용자(Frontend 담당) | Codex | T044 | Frontend route, API client, mock fallback 위치 조사 |
+| 사용자(Frontend 담당) | Codex | T045 | Frontend target API TypeScript type 추가 |
+| 사용자(Frontend 담당) | Codex | T046 | Frontend project 선택 상태를 stable `spaceId` query 우선으로 정리 |
+| 사용자(Frontend 담당) | Codex | T047 | Frontend legacy workspace snapshot client와 target Space/Meeting API client 경계 분리 |
 | 사용자(Data 담당) | Codex | T058 | Backend DB/migration 도구 현황 조사와 Flyway SQL migration 위치 문서화 |
 | 사용자(Data 담당) | Codex | T059 | Flyway 기반 User, Space, SpaceMember V1 schema migration 작성 |
 | 사용자(Data 담당) | Codex | T060 | Flyway 기반 Meeting, MeetingParticipant, MeetingSpeaker V2 schema migration 작성 |
@@ -151,6 +155,23 @@
 - 2026-07-09: T041 target API 전환 지점으로 `/api/v1/spaces`, `/api/v1/spaces/{spaceId}/meetings`를 추가했다. 기존 `/api/workspace` 통합 mock 응답은 그대로 유지하고, target endpoint는 `AuthService.currentUser`와 `WorkspaceDomainService.ensureUser`를 거쳐 in-memory Space/Meeting read/write model을 사용한다.
 - 2026-07-09: T042 공통 오류 응답 경계를 보강했다. `AuthExceptionHandler`는 전역 advice로 `AuthException`, `AuthorizationException`, validation error를 처리하고, legacy LiveKit 설정 누락도 `LIVEKIT_NOT_CONFIGURED` code로 변환한다.
 - 2026-07-09: T038로 `TranscriptSegment`, `MeetingReport`, `ProjectKnowledge`, `EmbeddingChunk`와 관련 enum을 추가했다. Transcript는 `startMs/endMs`, speaker/source/sequence를 보존하고, MeetingReport decision/action item은 `sourceIds`를 보존하며, ProjectKnowledge는 `sourceMeetingId`, `embeddingStatus`, `embeddingJobId`를 갖는다. EmbeddingChunk는 meeting/project scope, source metadata, transcript source segment 목록, speakerNames, embeddingText, metadata, vector placeholder를 가진다.
+- 2026-07-09: T044 Frontend discovery를 수행했다. `frontend/src/App.tsx`가 보호 route, `/api/workspace` 통합 fetch, mock fallback, 프로젝트/회의/멤버 임시 생성 상태를 함께 관리한다. `frontend/src/auth/session.ts`는 인증 API와 Authorization header helper만 갖고, Space/Meeting API client는 아직 분리되어 있지 않다. `frontend/src/types.ts`의 `WorkspaceData`는 legacy `/api/workspace` 응답 shape에 묶여 있어 T045에서 target `Space`, `Meeting`, `Report`, `AI` 타입과 분리해야 한다.
+- 2026-07-09: T045로 `frontend/src/types.ts`에 target API용 `SpaceSummary`, `SpaceDetail`, `MeetingSummary`, `MeetingDetail`, `TranscriptResponse`, `ReportSummary`, `TaskCard`, `AiSource`, `ProjectAiChatRequest`, `AiChatResponse` 타입을 추가했다. 기존 `WorkspaceData`는 `/api/workspace` legacy mock fallback용으로 유지한다.
+- 2026-07-09: T046으로 legacy `WorkspaceSpace`에 stable `id`를 추가하고, `/spaces` 카드, `WorkspaceSidebar`, `ProjectOverviewPage`, `TeamMembersPage`, `LiveMeetingPage`의 프로젝트 선택 route를 `spaceId` query 우선으로 정리했다. 기존 `project` name query는 fallback과 표시용으로 유지한다.
+- 2026-07-09: T047로 `frontend/src/api/workspace.ts`를 추가했다. `fetchLegacyWorkspaceSnapshot`은 기존 `/api/workspace` fallback 경계를 담당하고, `fetchSpaces`, `createSpace`, `fetchSpaceDetail`, `fetchMeetings`, `createMeeting`은 target `/api/v1` Space/Meeting API 전환 지점으로 분리했다. `App.tsx`의 inline `/api/workspace` fetch는 legacy client 호출로 교체했다.
+
+## Current Frontend Workstream Notes
+
+- Route 진입점은 `frontend/src/App.tsx`다. 공개 route는 `/`, 보호 route는 `/spaces`, `/project-overview`, `/team-members`, `/live-meeting`, `/live-room`, `/meeting-ai`, `/report-agent`다.
+- 현재 데이터 로딩은 로그인 후 `GET /api/workspace` 한 번으로 동작한다. 실패 시 `frontend/src/data/mockData.ts`의 local mock을 유지한다.
+- `frontend/src/App.tsx` 안에 `handleCreateProject`, `handleCreateMeeting`, join request approve/reject 등 임시 in-memory 상태 변경 로직이 있다.
+- `frontend/src/pages/WorkspaceHomePage.tsx`는 프로젝트 목록 화면처럼 보이지만 현재 UI 문구와 계산은 회의 카탈로그 중심이다. FR-DASH-01/02/06/07과 연결될 첫 수정 대상이다.
+- `frontend/src/pages/ProjectOverviewPage.tsx`는 `project` query param으로 선택된 Space를 찾고, 회의 목록/최근 문서/Project AI prompt/회의 생성 모달을 표시한다. FR-DASH-03, FR-CAL-02/03, FR-MREG-01/05, FR-PBOT-01의 화면 진입점이다.
+- `frontend/src/components/WorkspaceSidebar.tsx`는 프로젝트 생성 모달과 project/team navigation을 가진다. 프로젝트 생성 API 연결 시 공통 생성 진입점으로 사용한다.
+- `frontend/src/pages/TeamMembersPage.tsx`는 멤버/초대/요청 승인 UI를 갖고 있어 FR-PERM-01~05, FR-OWN-01~03 후속 연결 대상이다.
+- `frontend/src/pages/MeetingAiPage.tsx`, `ProjectOverviewPage.tsx`, `ReportAgentPage.tsx`는 각각 Meeting AI, Project AI, report 편집/확정 흐름의 화면 진입점이다.
+- 다음 작업 T045에서는 `WorkspaceData` 중심 타입을 유지하되, target API용 `SpaceSummary`, `SpaceDetail`, `MeetingSummary`, `ReportSummary`, `ProjectAiSource` 타입을 별도로 추가해 기존 mock fallback과 실제 API shape가 섞이지 않게 한다.
+- 다음 작업 T047에서는 `/api/workspace` legacy fetch와 target `/api/v1/spaces`, `/api/v1/spaces/{spaceId}/meetings` 호출 경계를 분리한다. 기존 mock fallback은 유지한다.
 - 2026-07-09: T058 Data discovery를 수행했다. 현재 backend에는 JDBC/JPA, PostgreSQL driver, Flyway, Liquibase 의존성과 datasource 설정이 없다. Data migration 도구는 Flyway SQL migration으로 결정하고, 파일 위치는 `backend/src/main/resources/db/migration`으로 기록했다. T058 범위에서는 의존성, datasource 설정, schema 파일을 추가하지 않고 T059 이후 schema 작업에서 적용한다.
 - 2026-07-09: T059로 Flyway V1 migration을 추가했다. 기본 profile에서는 DB 없이 기존 prototype이 실행되도록 `spring.flyway.enabled=false`로 두고, `db` profile에서 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`로 Flyway를 실행한다. `users`, `spaces`, `space_members`는 text id 기반 PK, FK, enum check, active member unique index, active OWNER partial unique index를 가진다.
 - 2026-07-09: T060으로 Flyway V2 migration을 추가했다. `meetings`는 Space FK, `SCHEDULED`/`IN_PROGRESS`/`ENDED`/`CANCELED` status check, `space_id, scheduled_at` index를 가진다. `meeting_participants`는 User/Meeting FK, `HOST`/`EDITOR`/`VIEWER`, `member`/`guest`, `ACTIVE`/`REVOKED` check와 active participant unique index를 가진다. `meeting_speakers`는 meeting별 speaker label unique index와 nullable displayName 제약을 가진다.
@@ -256,6 +277,12 @@
 - Passed: `cd backend && ./gradlew test` after target LiveKit authorization path, total 41 backend tests
 - Passed: `cd backend && ./gradlew test` after target Space/Meeting API and common error handling, total 44 backend tests
 - Passed: `cd backend && ./gradlew test` after artifact/RAG domain model, total 48 backend tests
+- Passed: `cd frontend && npm run build` after T045 target frontend API types
+- Passed: `git diff --check` after T044-T045 frontend workstream docs/types
+- Passed: `cd frontend && npm run build` after T046 stable project route state
+- Passed: `git diff --check` after T046 stable project route state
+- Passed: `cd frontend && npm run build` after T047 frontend workspace API client split
+- Passed: `git diff --check` after T047 frontend workspace API client split
 - Passed: `git diff --check` after T058 data discovery docs
 - Passed: `cd backend && ./gradlew test` after T059 Flyway V1 migration setup
 - Passed: `git diff --check` after T059 Flyway V1 migration setup
