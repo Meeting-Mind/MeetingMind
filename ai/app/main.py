@@ -785,7 +785,7 @@ def parse_report_response(
                 assignee=optional_str(item.get("assignee")),
                 dueDate=optional_str(item.get("dueDate")),
                 sourceIds=filter_source_ids(item.get("sourceIds"), source_ids),
-                confirmationState=str(item.get("confirmationState") or "candidate"),
+                confirmationState="candidate",
             )
             for item in data.get("actionItems", [])
             if isinstance(item, dict) and str(item.get("title") or "").strip()

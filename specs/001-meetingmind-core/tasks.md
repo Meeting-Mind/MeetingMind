@@ -138,8 +138,8 @@
 | T084 | M011 | [x] | ai/project-chat-rag | 사용자 | Codex | T081 | `ai/app/main.py`, `ai/app/rag.py` | 프로젝트별 챗봇을 RAG scope `project`로 구현한다. | ProjectKnowledge와 prototype에서 허용된 meeting chunk만 검색하고, 응답에 공식 지식과 회의 기록 출처가 구분된다. |
 | T085 | M011 | [x] | ai/report-rag | 사용자 | Codex | T080 | `ai/app/main.py`, `ai/app/rag.py` | 회의 요약/보고서 생성 prototype API를 RAG chunk/source metadata 구조에 맞춰 구현한다. | summary, decisions, actionItems, markdown draft가 sourceIds와 함께 생성되고 화면 연결은 Frontend 담당 TBD로 남는다. |
 | T086 | M011 | [x] | ai/task-candidates | 사용자 | Codex | T085 | `ai/app/main.py` | 회의 종료 태스크 후보 추출 prototype API를 구현한다. | assignee, title, dueDate, sourceIds, confirmationState=`candidate`가 반환되고 저장과 화면 연결은 backend/frontend TBD로 남는다. |
-| T087 | M011 | [ ] | ai/rag-safety | 사용자 | Codex | T082, T083, T084, T085, T086 | `ai/**`, `specs/001-meetingmind-core/implement.md` | RAG scope와 컨텍스트 밖 질문 방어를 검증한다. | meeting/project scope 혼입이 없고, 근거 없는 질문은 확인 불가로 처리되며 결과가 implement.md에 기록된다. |
-| T088 | M011 | [ ] | ai/rag-verification | 사용자 | Codex | T087 | `ai/**`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/tasks.md` | RAG workstream 검증과 작업 상태를 정리한다. | `cd ai && python3 -m compileall app`, 필요한 endpoint curl 결과 또는 미실행 사유가 기록된다. |
+| T087 | M011 | [x] | ai/rag-safety | 사용자 | Codex | T082, T083, T084, T085, T086 | `ai/**`, `specs/001-meetingmind-core/implement.md` | RAG scope와 컨텍스트 밖 질문 방어를 검증한다. | meeting/project scope 혼입 방지, 근거 없는 질문 LLM 미호출, sourceId 필터링, candidate 정규화를 unittest로 검증했다. |
+| T088 | M011 | [x] | ai/rag-verification | 사용자 | Codex | T087 | `ai/**`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/tasks.md` | RAG workstream 검증과 작업 상태를 정리한다. | `cd ai && python3 -m compileall app tests`, `cd ai && ./.venv/bin/python -m unittest discover -s tests` 결과를 implement.md에 기록했다. |
 | T089 | M012 | [x] | auth/discovery | 사용자(Auth 담당) | Codex | T024 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, `backend/src/main/java/com/meetingmind/demo/**`, `backend/build.gradle`, `specs/001-meetingmind-core/implement.md` | 현재 Frontend Google 로그인 모달, App route 상태, Backend controller/config/dependency 경계를 조사한다. | 현재 인증은 Frontend 모달 표시용이고 Backend auth/security 계층은 없다는 점이 implement.md에 기록되어 있다. |
 | T090 | M012 | [x] | auth/contracts | 사용자(Auth 담당) | Codex | T024 | `specs/001-meetingmind-core/contracts/auth-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/implement.md` | Auth API target contract를 정의한다: Google credential 교환, 자체 회원가입/로그인, refresh, 현재 사용자 조회, 로그아웃, 인증 오류. | endpoint, request/response, access/refresh token 전달, User/AuthIdentity/AuthSession 필드, 401/409 오류가 문서화되어 있다. |
 | T091 | M012 | [x] | auth/backend | 사용자(Auth 담당) | Codex | T090 | `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `backend/build.gradle` | Backend에서 Google ID token 검증, 자체 회원가입/로그인, access/refresh token 발급 service/controller/dto를 추가한다. | Google credential 또는 자체 계정을 Backend가 검증하고 access token, refresh token, user profile을 반환한다. 현재 prototype 저장소는 in-memory이며 영속 DB 전환은 후속 Data/Backend 작업이다. |
@@ -160,7 +160,7 @@
 | T101 | M013 | [x] | contracts | 사용자 | Codex | T100 | `specs/001-meetingmind-core/contracts/*` | API contract의 role/status/permission 표현을 요구사항 기준선과 맞춘다. | `participant` role, 구형 Meeting status, AuthSession 명칭이 계약에서 정리되어 있다. |
 | T102 | M013 | [ ] | backend/impact | TBD | TBD | T101 | `backend/**`, `specs/001-meetingmind-core/implement.md` | Backend auth/LiveKit/meeting 권한 구현이 요구사항 권한 매트릭스와 충돌하는지 점검한다. | 충돌 목록과 수정 필요 파일이 implement.md에 기록되어 있다. |
 | T103 | M013 | [ ] | frontend/impact | TBD | TBD | T101 | `frontend/**`, `specs/001-meetingmind-core/implement.md` | Frontend route guard, 회의 입장, Project AI/Meeting AI UI가 요구사항 권한 범위와 충돌하는지 점검한다. | 화면별 권한 노출/차단 gap이 기록되어 있다. |
-| T104 | M013 | [ ] | ai/impact | TBD | TBD | T101 | `ai/**`, `specs/001-meetingmind-core/implement.md` | AI/RAG prototype의 Meeting AI, Project AI, token 전략이 요구사항 기준과 충돌하는지 점검한다. | scope, source, token budget, unsupported 처리 gap이 기록되어 있다. |
+| T104 | M013 | [x] | ai/impact | 사용자 | Codex | T101 | `ai/**`, `specs/001-meetingmind-core/implement.md` | AI/RAG prototype의 Meeting AI, Project AI, token 전략이 요구사항 기준과 충돌하는지 점검한다. | scope/source/unsupported는 구현과 테스트 기준으로 정합하고, token budget/observability는 후속 gap으로 기록했다. |
 | T105 | M013 | [ ] | data/impact | TBD | TBD | T100 | `specs/001-meetingmind-core/data-model.md`, future migration files | DB enum, retention, MeetingGuest/MeetingParticipant 모델을 migration 기준으로 구체화한다. | migration 전 필요한 enum/field 변경 목록이 확정되어 있다. |
 | T106 | M013 | [ ] | docs/closeout | TBD | TBD | T101, T102, T103, T104, T105 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/analyze.md`, `specs/001-meetingmind-core/implement.md` | 요구사항 반영 후속 영향도를 닫고 다음 구현 milestone으로 넘긴다. | contracts/analyze/implement/tasks가 요구사항 기준선과 실제 구현 상태를 함께 반영한다. |
 
@@ -191,6 +191,7 @@
 - [x] V002 이전 구현 검증: `cd backend && ./gradlew test`
 - [x] V003 이전 구현 검증: `cd ai && python3 -m compileall app tests`
 - [x] V004 PR #8 문서 검증: `git diff --check`, stale enum/role/source pattern search, task dependency scan
+- [x] V006 AI RAG safety 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests`
 - [ ] V005 주요 화면 라우팅 수동 확인
 
 ## Notes
