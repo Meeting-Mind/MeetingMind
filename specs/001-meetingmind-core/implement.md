@@ -180,7 +180,7 @@
 ## Git Status Notes
 
 - 요구사항 기준선 반영 변경은 PR #8의 `agent/requirements-docs-baseline` 브랜치에 커밋되어 원격 push되었다.
-- 현재 로컬에는 개인 IDE 설정인 `.idea/`만 Git 미추적 상태로 남아 있으며 PR에는 포함하지 않는다.
+- 개인 IDE 설정과 에이전트 산출물 디렉터리인 `.idea/`, `output/`, `tmp/`는 Git에 올리지 않고 루트 `.gitignore`에서 제외한다.
 - `c15ca74 feat: add backend auth prototype` 이후 Frontend Auth 연결, Backend Auth runtime wiring fix, context smoke test, Auth 검증 문서 갱신을 후속 Auth 변경으로 정리했다.
 
 ## Verification

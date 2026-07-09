@@ -91,7 +91,9 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - AC-003: 향후 구현자가 mock 데이터 제거, 인증 추가, RAG 도입의 순서를 이해할 수 있다.
 - AC-004: 최소 검증 명령이 문서화되어 있다.
 
-## Open Questions
+## Resolved Decisions
+
+열린 질문과 결정 이력의 canonical 기록은 `clarify.md`를 따른다. 이 섹션은 Core Prototype 스펙에 직접 영향을 주는 확정 결정만 요약한다.
 
 - Q-001: Google OAuth와 자체 회원가입/로그인을 병행하고 access/refresh token을 사용하기로 결정했다.
 - Q-002: 회의별 권한 등급은 `VIEWER`, `EDITOR`, `HOST`를 기본값으로 결정했다. 회의 게스트는 SpaceRole이 아니라 특정 회의의 MeetingParticipant로 처리한다.
