@@ -1,5 +1,6 @@
 package com.meetingmind.demo.auth;
 
+import com.meetingmind.demo.authz.AuthorizationException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -8,11 +9,18 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice(assignableTypes = AuthController.class)
+@RestControllerAdvice
 public class AuthExceptionHandler {
 
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<AuthErrorResponse> handleAuthException(AuthException exception) {
+        return ResponseEntity
+                .status(exception.status())
+                .body(new AuthErrorResponse(exception.code(), exception.getMessage(), List.of(), UUID.randomUUID().toString()));
+    }
+
+    @ExceptionHandler(AuthorizationException.class)
+    public ResponseEntity<AuthErrorResponse> handleAuthorizationException(AuthorizationException exception) {
         return ResponseEntity
                 .status(exception.status())
                 .body(new AuthErrorResponse(exception.code(), exception.getMessage(), List.of(), UUID.randomUUID().toString()));

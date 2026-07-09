@@ -1,5 +1,6 @@
 package com.meetingmind.demo.controller;
 
+import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.dto.LiveKitTokenRequest;
 import com.meetingmind.demo.dto.LiveKitTokenResponse;
 import com.meetingmind.demo.service.LiveKitTokenService;
@@ -9,7 +10,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/livekit")
@@ -26,7 +26,7 @@ public class LiveKitController {
         try {
             return liveKitTokenService.issueToken(request);
         } catch (IllegalStateException exception) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), exception);
+            throw new AuthorizationException(HttpStatus.SERVICE_UNAVAILABLE, "LIVEKIT_NOT_CONFIGURED", exception.getMessage());
         }
     }
 }
