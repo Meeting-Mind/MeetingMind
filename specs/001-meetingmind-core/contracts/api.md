@@ -1,6 +1,8 @@
-이 문서는 MeetingMind Core Prototype의 API 계약을 정의하기 위한 Markdown 문서이다.
+이 문서는 MeetingMind Core Prototype의 과거 통합 API 초안과 prototype 기록을 보존하기 위한 legacy snapshot이다.
 
 # API Contracts: MeetingMind Core Prototype
+
+> Legacy Snapshot: 이 파일은 기존 통합 초안과 prototype 기록을 보존한다. 신규 구현, API shape 변경, 권한/오류/요구사항 trace 변경은 이 파일이 아니라 `contracts/README.md`에서 라우팅되는 기능별 API 명세(`common.md`, `auth-api.md`, `space-api.md`, `meeting-api.md`, `kanban-api.md`, `ai-api.md`, `live-stt-api.md`)를 우선 수정한다. 이 파일을 수정해야 하는 경우는 legacy prototype 기록 자체가 달라질 때로 제한한다.
 
 ## Contract Status
 

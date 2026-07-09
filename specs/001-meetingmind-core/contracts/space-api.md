@@ -1,0 +1,842 @@
+# Space, Dashboard, Calendar, Permission API Contract
+
+프로젝트는 코드/DB에서 `Space`로 표현한다. 화면 문구는 "프로젝트"를 사용한다.
+
+## Document Status
+
+| Field | Value |
+| --- | --- |
+| Status | Target Backend |
+| Owner | Backend, Frontend |
+| Related requirements | FR-DASH-01, FR-DASH-02, FR-DASH-03, FR-DASH-04, FR-DASH-05, FR-DASH-06, FR-DASH-07, FR-CAL-01, FR-CAL-02, FR-CAL-03, FR-CAL-04, FR-PERM-01, FR-PERM-02, FR-PERM-03, FR-PERM-04, FR-PERM-05, FR-OWN-01, FR-OWN-02, FR-OWN-03, NFR-SEC-06 |
+| Related data model | Space, SpaceMember, SpaceInvitation, Meeting, AuditLog |
+
+## GET /api/v1/spaces
+
+사용자가 참여 중인 Space 목록을 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `SpaceMember` 기준 필터링
+- 삭제/비활성 Space 제외
+
+### Data Scope
+
+- User scope
+- 사용자의 활성 Space membership만 반환한다.
+
+### Query
+
+- `keyword`: optional, name/description 검색
+- `role`: optional `OWNER`, `ADMIN`, `MEMBER`
+- `sort`: optional `updatedAtDesc`, `nameAsc`
+
+### Validation
+
+- `role`, `sort`는 허용 enum만 받는다.
+
+### Response
+
+```json
+{
+  "spaces": [
+    {
+      "id": "space-001",
+      "name": "MeetingMind",
+      "description": "AI 회의 지식화 프로젝트",
+      "role": "OWNER",
+      "meetingCount": 12,
+      "updatedAt": "2026-07-09T10:00:00+09:00"
+    }
+  ]
+}
+```
+
+### Errors
+
+- `401 UNAUTHORIZED`: 인증 실패
+- `400 INVALID_REQUEST`: query enum 오류
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- FR-DASH-02: 프로젝트 목록
+- FR-DASH-06: 검색/필터
+- NFR-MNT-03: mock/실 API 응답 shape 일관성
+
+### Notes
+
+- 빈 목록은 `spaces: []`로 반환한다.
+
+## POST /api/v1/spaces
+
+새 Space를 생성한다. 생성자는 `OWNER`가 된다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- 생성자는 자동으로 `SpaceMember.role=OWNER`
+
+### Data Scope
+
+- User scope에서 새 Space scope를 생성한다.
+
+### Request
+
+```json
+{
+  "name": "MeetingMind",
+  "description": "AI 회의 지식화 프로젝트"
+}
+```
+
+### Validation
+
+- `name`: required, blank 금지
+- `description`: optional
+
+### Response
+
+```json
+{
+  "id": "space-001",
+  "name": "MeetingMind",
+  "description": "AI 회의 지식화 프로젝트",
+  "role": "OWNER",
+  "createdAt": "2026-07-09T10:00:00+09:00"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- `401 UNAUTHORIZED`: 인증 실패
+
+### Audit
+
+- `SPACE_CREATED`
+
+### Requirement Trace
+
+- FR-DASH-01: 프로젝트 생성
+- NFR-SEC-06: 서버측 입력 검증
+
+### Notes
+
+- Space 생성과 owner membership 생성은 하나의 transaction으로 처리한다.
+
+## GET /api/v1/spaces/{spaceId}
+
+Space 상세와 프로젝트 개요 데이터를 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- 해당 Space의 활성 `SpaceMember`
+
+### Data Scope
+
+- Space scope
+- Meeting 요약은 사용자가 접근 가능한 회의만 포함한다.
+
+### Request
+
+None.
+
+### Validation
+
+- `spaceId` 존재 및 접근 권한 확인
+
+### Response
+
+```json
+{
+  "id": "space-001",
+  "name": "MeetingMind",
+  "description": "AI 회의 지식화 프로젝트",
+  "role": "OWNER",
+  "upcomingMeetings": [],
+  "recentReports": [],
+  "actionItems": [],
+  "aiEntrypoints": ["project-ai", "meeting-ai"]
+}
+```
+
+### Errors
+
+- `401 UNAUTHORIZED`: 인증 실패
+- `403 SPACE_ACCESS_DENIED`: Space 접근 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 없음
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- FR-DASH-03: 프로젝트 상세
+- FR-PBOT-01: Project AI 진입점
+
+### Notes
+
+- `recentReports`는 회의 ACL을 통과한 회의록만 포함한다.
+
+## PATCH /api/v1/spaces/{spaceId}
+
+Space 정보를 수정한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 또는 `ADMIN`
+
+### Data Scope
+
+- Space scope
+
+### Request
+
+```json
+{
+  "name": "MeetingMind Core",
+  "description": "프로젝트 설명"
+}
+```
+
+### Validation
+
+- `name`: optional, 제공 시 blank 금지
+- `description`: optional
+
+### Response
+
+```json
+{
+  "id": "space-001",
+  "name": "MeetingMind Core",
+  "description": "프로젝트 설명",
+  "updatedAt": "2026-07-09T10:10:00+09:00"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- `403 SPACE_ACCESS_DENIED`: 수정 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 없음
+
+### Audit
+
+- `SPACE_UPDATED`
+
+### Requirement Trace
+
+- FR-DASH-04: 프로젝트 수정
+- NFR-SEC-06: 서버측 입력 검증
+
+### Notes
+
+- name 중복 허용 여부는 Backend owner가 결정한다.
+
+## DELETE /api/v1/spaces/{spaceId}
+
+Space를 soft delete 한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 전용
+- 진행 중 회의가 있으면 정책에 따라 거부 가능
+
+### Data Scope
+
+- Space scope
+- 삭제 시 meeting/report/embedding/vector/cache 삭제 또는 비활성화 정책을 Data owner와 맞춘다.
+
+### Request
+
+None.
+
+### Validation
+
+- `spaceId` 존재 및 owner 권한 확인
+- 진행 중 회의 존재 여부 확인
+
+### Response
+
+```json
+{
+  "deleted": true
+}
+```
+
+### Errors
+
+- `403 SPACE_ACCESS_DENIED`: 삭제 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 없음
+- `409 MEETING_ALREADY_PROCESSING`: 진행 중 회의 또는 처리 중 데이터가 있어 삭제 거부
+
+### Audit
+
+- `SPACE_DELETED`
+
+### Requirement Trace
+
+- FR-DASH-05: 프로젝트 삭제
+- POL-RETENTION-01: 삭제/보존 정책
+
+### Notes
+
+- 실제 hard delete는 보존 정책 문서와 migration 결정 이후 확정한다.
+
+## GET /api/v1/dashboard
+
+대시보드 홈 요약을 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- 사용자가 접근 가능한 Space/Meeting만 집계한다.
+
+### Data Scope
+
+- User scope
+
+### Request
+
+None.
+
+### Validation
+
+- 인증 사용자 확인
+
+### Response
+
+```json
+{
+  "todayMeetings": [],
+  "recentActivities": [],
+  "spaces": []
+}
+```
+
+### Errors
+
+- `401 UNAUTHORIZED`: 인증 실패
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- FR-DASH-07: 메인 대시보드
+- FR-CAL-02: 오늘 회의 표시
+
+### Notes
+
+- `recentActivities`는 감사 로그와 별도 read model로 둘 수 있다.
+
+## GET /api/v1/calendar/events
+
+사용자가 접근 가능한 회의 일정을 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- Space membership 및 meeting ACL 필터 적용
+
+### Data Scope
+
+- User scope
+- optional `spaceId`를 받으면 해당 Space 내 접근 가능한 Meeting만 반환한다.
+
+### Query
+
+- `from`: ISO-8601
+- `to`: ISO-8601
+- `spaceId`: optional
+
+### Validation
+
+- `from`, `to`: required, ISO-8601
+- `from <= to`
+- `spaceId` 제공 시 접근 권한 확인
+
+### Response
+
+```json
+{
+  "events": [
+    {
+      "id": "meeting-001",
+      "spaceId": "space-001",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12",
+      "startsAt": "2026-07-10T10:00:00+09:00",
+      "endsAt": "2026-07-10T11:00:00+09:00",
+      "status": "SCHEDULED"
+    }
+  ]
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 기간 형식 오류
+- `403 SPACE_ACCESS_DENIED`: Space 접근 권한 없음
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- FR-CAL-01: 캘린더 일정 조회
+- FR-CAL-02: 회의 일정 표시
+- FR-CAL-03: 일정에서 회의 상세 이동
+
+### Notes
+
+- 일정 생성은 `POST /api/v1/spaces/{spaceId}/meetings`를 사용한다. 별도 calendar event 생성 API가 필요하면 Meeting API와 분리 여부를 다시 결정한다.
+
+## GET /api/v1/spaces/{spaceId}/members
+
+Space 멤버 목록을 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- Space 접근 권한 필요
+
+### Data Scope
+
+- Space scope
+
+### Request
+
+None.
+
+### Validation
+
+- `spaceId` 접근 권한 확인
+
+### Response
+
+```json
+{
+  "members": [
+    {
+      "id": "member-001",
+      "userId": "user-001",
+      "displayName": "이미주",
+      "email": "miju@meetingmind.ai",
+      "role": "OWNER",
+      "joinedAt": "2026-07-09T10:00:00+09:00"
+    }
+  ]
+}
+```
+
+### Errors
+
+- `403 SPACE_ACCESS_DENIED`: Space 접근 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 없음
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- FR-PERM-01: 프로젝트 멤버/권한 조회
+
+### Notes
+
+- 게스트 회의 참여자는 SpaceMember 목록에 포함하지 않는다.
+
+## POST /api/v1/spaces/{spaceId}/invitations
+
+Space 초대 링크를 생성한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 또는 `ADMIN`
+
+### Data Scope
+
+- Space scope
+
+### Request
+
+```json
+{
+  "email": "new@meetingmind.ai",
+  "role": "MEMBER"
+}
+```
+
+### Validation
+
+- `email`: required, email format
+- `role`: `ADMIN` 또는 `MEMBER`; `OWNER` 초대 금지
+
+### Response
+
+```json
+{
+  "invitationId": "invite-001",
+  "status": "PENDING",
+  "expiresAt": "2026-07-16T10:00:00+09:00"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- `403 SPACE_ACCESS_DENIED`: 초대 권한 없음
+
+### Audit
+
+- `SPACE_MEMBER_INVITED`
+
+### Requirement Trace
+
+- FR-PERM-02: 멤버 초대
+- NFR-SEC-06: 서버측 입력 검증
+
+### Notes
+
+- 초대 token 원문 저장 여부와 만료 기간은 정책 문서에 맞춘다.
+- Space invitation은 수락 시 `SpaceMember`를 생성한다. 회의 단독 초대는 `meeting-api.md`의 Meeting invitation endpoint를 사용한다.
+
+## POST /api/v1/spaces/{spaceId}/invitations/{invitationId}/accept
+
+초대를 수락하고 SpaceMember로 등록한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- 초대 대상 이메일 또는 초대 token 정책과 일치해야 한다.
+
+### Data Scope
+
+- SpaceInvitation scope에서 SpaceMember scope로 전환한다.
+
+### Request
+
+```json
+{
+  "token": "invite-token"
+}
+```
+
+### Validation
+
+- 초대 상태가 `PENDING`
+- 만료되지 않은 초대
+- 이미 멤버인 사용자는 idempotent 처리 또는 `409` 정책 중 하나를 선택한다.
+
+### Response
+
+```json
+{
+  "memberId": "member-002",
+  "role": "MEMBER",
+  "status": "ACCEPTED"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: token 누락
+- `403 SPACE_ACCESS_DENIED`: 초대 대상 불일치
+- `404 SPACE_NOT_FOUND`: Space 없음
+- `409 INVALID_REQUEST`: 만료 또는 이미 처리된 초대
+
+### Audit
+
+- `SPACE_INVITATION_RESOLVED`
+
+### Requirement Trace
+
+- FR-PERM-05: 초대 수락
+
+### Notes
+
+- 공개 초대 링크 방식이면 인증 전 token 확인과 가입/로그인 후 수락 흐름을 분리할 수 있다.
+- Space invitation 수락은 Space membership을 생성한다. Meeting guest 권한은 생성하지 않는다.
+
+## POST /api/v1/spaces/{spaceId}/invitations/{invitationId}/decline
+
+초대를 거절한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- 초대 대상자 또는 초대 token 보유자
+
+### Data Scope
+
+- SpaceInvitation scope
+
+### Request
+
+```json
+{
+  "token": "invite-token"
+}
+```
+
+### Validation
+
+- 초대 상태가 `PENDING`
+
+### Response
+
+```json
+{
+  "invitationId": "invite-001",
+  "status": "DECLINED"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: token 누락 또는 상태 오류
+- `403 SPACE_ACCESS_DENIED`: 초대 대상 불일치
+
+### Audit
+
+- `SPACE_INVITATION_RESOLVED`
+
+### Requirement Trace
+
+- FR-PERM-05: 초대 거절
+
+### Notes
+
+- 거절 후 같은 이메일 재초대 허용 정책은 Backend owner가 결정한다.
+
+## PATCH /api/v1/spaces/{spaceId}/members/{memberId}
+
+멤버 role을 변경한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 전용
+
+### Data Scope
+
+- SpaceMember scope
+
+### Request
+
+```json
+{
+  "role": "ADMIN"
+}
+```
+
+### Validation
+
+- `role`: `ADMIN` 또는 `MEMBER`
+- 자기 자신을 `OWNER`에서 낮추는 변경은 owner transfer API를 사용한다.
+
+### Response
+
+```json
+{
+  "memberId": "member-002",
+  "role": "ADMIN"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: role 값 오류
+- `403 SPACE_ACCESS_DENIED`: role 변경 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 또는 member 없음
+
+### Audit
+
+- `SPACE_MEMBER_ROLE_CHANGED`
+
+### Requirement Trace
+
+- FR-PERM-03: 역할 변경
+
+### Notes
+
+- owner 이양은 `POST /owner-transfer`만 사용한다.
+
+## DELETE /api/v1/spaces/{spaceId}/members/{memberId}
+
+멤버를 제거한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 또는 정책상 허용된 `ADMIN`
+
+### Data Scope
+
+- SpaceMember scope
+- 제거된 사용자의 MeetingParticipant 유지/회수 정책은 권한 문서와 맞춘다.
+
+### Request
+
+None.
+
+### Validation
+
+- owner 제거 금지
+- 대상 member가 해당 Space에 속해야 한다.
+
+### Response
+
+```json
+{
+  "removed": true
+}
+```
+
+### Errors
+
+- `403 SPACE_ACCESS_DENIED`: 제거 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 또는 member 없음
+- `409 INVALID_REQUEST`: owner 제거 시도
+
+### Audit
+
+- `SPACE_MEMBER_REMOVED`
+
+### Requirement Trace
+
+- FR-PERM-04: 멤버 제거
+
+### Notes
+
+- 회의별 guest participant는 이 API로 제거하지 않는다.
+
+## POST /api/v1/spaces/{spaceId}/owner-transfer
+
+오너 권한을 다른 멤버에게 이양한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- 현재 `OWNER`
+- 대상은 활성 SpaceMember
+
+### Data Scope
+
+- SpaceMember role scope
+
+### Request
+
+```json
+{
+  "targetMemberId": "member-002",
+  "confirmationText": "TRANSFER OWNER"
+}
+```
+
+### Validation
+
+- `targetMemberId`: required, active member
+- `confirmationText`: exact match
+- transaction 내 기존 owner와 신규 owner role을 함께 갱신한다.
+
+### Response
+
+```json
+{
+  "transferred": true,
+  "newOwnerMemberId": "member-002",
+  "previousOwnerRole": "ADMIN"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 확인 문구 또는 대상 오류
+- `403 SPACE_ACCESS_DENIED`: owner 아님
+- `404 SPACE_NOT_FOUND`: Space 또는 member 없음
+
+### Audit
+
+- `SPACE_OWNER_TRANSFERRED`
+
+### Requirement Trace
+
+- FR-OWN-01: 오너 권한 이양
+- FR-OWN-02: 이양 확인 절차
+- FR-OWN-03: 기존 오너 강등
+- NFR-SEC-06: 확인 문구 검증
+
+### Notes
+
+- owner transfer는 되돌리기 어려운 작업이므로 프론트에서도 별도 확인 UI를 둔다.
