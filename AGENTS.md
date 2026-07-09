@@ -85,6 +85,7 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 - 프론트엔드 문구는 제품 도메인에 맞게 업무형 협업 도구 톤을 유지한다.
 - 기능 변경은 `spec.md`의 사용자 가치와 `plan.md`의 기술 결정에 연결되어야 한다.
 - 기능 변경은 관련 `requirements/*`의 FR/NFR/정책/권한/상태 기준과 충돌하지 않아야 한다.
+- API, ERD, 데이터 모델을 바꾸는 구현은 `specs/<feature>/contracts/*`, `specs/<feature>/erd.md`, `specs/<feature>/data-model.md`를 먼저 확인하고, 계약이나 관계가 달라지면 구현 전에 해당 문서를 갱신한다.
 
 ## Spec Kit 작업 방식
 
@@ -100,6 +101,7 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 - `spec.md`의 사용자 가치, 범위, 요구사항이 바뀌면 `plan.md`, `tasks.md`, `analyze.md` 영향 여부를 확인한다.
 - `plan.md`의 기술 결정, API, 데이터 모델, 보안 방식이 바뀌면 `research.md`, `data-model.md`, `contracts/*`, `tasks.md` 영향 여부를 확인한다.
 - `contracts/*` 또는 `data-model.md`가 바뀌면 권한 규칙, 입력 검증, AI 컨텍스트 범위가 `spec.md`, `plan.md`, `tasks.md`와 일치하는지 확인한다.
+- `contracts/*`, `erd.md`, `data-model.md` 중 하나라도 바뀌면 나머지 두 문서의 영향 여부를 확인하고, 변경 이유와 검증/미실행 사유를 `implement.md`에 남긴다.
 - Open 질문이 구현 판단을 막으면 `clarify.md`에 질문을 추가하거나 기존 질문을 결정사항으로 갱신한 뒤 구현한다.
 - 작업을 완료로 표시하려면 관련 검증 결과 또는 미실행 사유를 `tasks.md`와 `implement.md`에 남긴다.
 - `analyze.md`에서 발견한 문제는 `analyze.md`만 고치지 않고 원본 문서에 반영한 뒤 추적 상태를 남긴다.
@@ -123,6 +125,7 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 - task는 한 명 또는 한 에이전트가 독립적으로 수행하고 검증할 수 있는 단위로 쪼갠다.
 - task는 가능한 한 하나의 area와 제한된 파일 범위를 가진다.
 - shared contract, migration, 공통 타입, 권한 규칙 변경은 별도 task로 분리한다.
+- API 명세, ERD, 데이터 모델 변경은 shared contract 작업으로 취급하고, 관련 구현 task보다 먼저 완료한다.
 - task가 너무 크면 planning, contract, implementation, verification task로 나눈다.
 - task마다 milestone, owner, agent, dependency, 예상 수정 파일, 완료 기준을 드러낸다.
 - 여러 에이전트가 병렬 처리하기 쉽도록 dependency가 없는 task와 순차 처리 task를 구분한다.

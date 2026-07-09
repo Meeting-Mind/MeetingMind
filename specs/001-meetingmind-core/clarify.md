@@ -25,7 +25,7 @@
 | --- | --- | --- | --- | --- |
 | Google OAuth only | Frontend Google Identity Services 결과를 로그인 상태의 중심으로 둔다. | 빠르게 시작할 수 있고 비밀번호 저장이 없다. | Backend가 앱 고유 권한 token을 갖지 못해 Space/Meeting 권한, 만료, 감사 로그 확장이 약하다. Frontend에서 credential을 decode하는 것은 표시용일 뿐 신뢰 경계가 될 수 없다. | `frontend/src/components/GoogleLoginModal.tsx`, auth guard |
 | Own account/JWT only | 이메일/비밀번호 또는 자체 가입과 JWT를 직접 운영한다. | Google 계정 없이도 사용할 수 있고 token 정책을 완전히 통제한다. | 비밀번호 저장, 가입/재설정, 보안 운영 범위가 커져 prototype 목적에 비해 무겁다. | Backend security, User credential model, Frontend signup/login UI |
-| Google OAuth + own account + access/refresh token | Google OAuth와 자체 이메일/비밀번호 계정을 모두 지원하고 Backend가 access token과 refresh token을 발급한다. | 사용자는 Google 또는 자체 계정으로 진입할 수 있고, Backend가 Space/Meeting 권한 판단에 쓸 앱 내부 subject를 안정적으로 가진다. refresh token으로 세션 연장이 가능하다. | 비밀번호 hash 저장, refresh token 폐기, token rotation, Google token 검증을 모두 다뤄야 해서 구현 범위가 커진다. | `contracts/api.md`, `data-model.md`, `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/**/auth/**`, `application.yml` |
+| Google OAuth + own account + access/refresh token | Google OAuth와 자체 이메일/비밀번호 계정을 모두 지원하고 Backend가 access token과 refresh token을 발급한다. | 사용자는 Google 또는 자체 계정으로 진입할 수 있고, Backend가 Space/Meeting 권한 판단에 쓸 앱 내부 subject를 안정적으로 가진다. refresh token으로 세션 연장이 가능하다. | 비밀번호 hash 저장, refresh token 폐기, token rotation, Google token 검증을 모두 다뤄야 해서 구현 범위가 커진다. | `contracts/auth-api.md`, `contracts/common.md`, `data-model.md`, `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/**/auth/**`, `application.yml` |
 
 ### Final Direction
 
@@ -56,3 +56,6 @@
 - D-007: MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다. `participant`는 MeetingRole 값으로 쓰지 않고, 일반 참석자는 `VIEWER` 또는 별도 `participantType=member`로 표현한다.
 - D-008: 회의 게스트는 특정 회의의 `MeetingParticipant`로 등록되며 Space 전체 권한, Project Knowledge, Project AI 권한을 기본으로 갖지 않는다.
 - D-009: Meeting status는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED`를 기준으로 한다. 전사/보고서 후처리는 `Transcript.status`, `MeetingReport.status`로 분리한다.
+- D-010: Space 초대와 Meeting 초대는 `SPACE_INVITATION`, `MEETING_INVITATION`으로 분리한다. Space 초대 수락은 `SpaceMember`를 만들고, Meeting 초대 수락은 `MeetingParticipant`만 만든다.
+- D-011: 회의당 현재 공식 회의록은 `status=CONFIRMED`와 `isCurrent=true`를 만족하는 report 최대 1개로 제한한다. 과거 버전은 version history로 보존한다.
+- D-012: ProjectKnowledge 변경 후 embedding 재생성은 비동기로 처리한다. 기존 chunk는 유지하고 새 chunk가 `COMPLETED`가 되면 교체한다.

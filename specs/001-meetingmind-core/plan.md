@@ -31,6 +31,9 @@
 
 ## API Contracts
 
+- 기능별 target API 초안은 `contracts/README.md`에서 라우팅한다.
+- 기존 통합 `contracts/api.md`는 prototype 기록과 과거 통합 초안으로 유지한다.
+- Project Knowledge와 Domain Term 관리는 `contracts/knowledge-api.md`를 기준으로 한다.
 - `GET /api/workspace`
   - 현재: 전체 데모 화면 데이터를 한 번에 반환
   - 목표: Space/Meeting/Report API로 분리
@@ -51,6 +54,7 @@
 
 ## Data Model
 
+- 전체 관계 초안은 `erd.md`에 Mermaid ERD로 기록한다.
 - User: 사용자 식별, 이름, 이메일, 인증 공급자
 - Space: 프로젝트 단위 컨테이너
 - SpaceMember: Space별 멤버십과 역할
@@ -81,8 +85,8 @@
 | Workstream | Owner | Agent | Scope | Expected Files | Dependencies |
 | --- | --- | --- | --- | --- | --- |
 | Docs/Contracts | TBD | TBD | Open 질문 결정, API 계약, 데이터 모델, 작업 계획 갱신 | `specs/001-meetingmind-core/*` | - |
-| Auth/Login | 사용자(Auth 담당) | Codex | Google OAuth와 자체 회원가입/로그인, Backend 검증 기반 access/refresh token 계약/구현, Frontend 로그인 상태 연결, 보호 route 경계 정의 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `specs/001-meetingmind-core/contracts/api.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/research.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Q-001 decided. Auth API는 `/api/v1/auth/*`로 시작하며 Q-006 전체 API 결정과 분리 |
-| Backend | TBD | TBD | Space/Meeting API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/api.md`, `specs/001-meetingmind-core/data-model.md` | Auth/Login contract, Q-002, Docs/Contracts |
+| Auth/Login | 사용자(Auth 담당) | Codex | Google OAuth와 자체 회원가입/로그인, Backend 검증 기반 access/refresh token 계약/구현, Frontend 로그인 상태 연결, 보호 route 경계 정의 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `specs/001-meetingmind-core/contracts/auth-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/research.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Q-001 decided. Auth API는 `/api/v1/auth/*`로 시작하며 Q-006 전체 API 결정과 분리 |
+| Backend | TBD | TBD | Space/Meeting/Knowledge API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/space-api.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/contracts/kanban-api.md`, `specs/001-meetingmind-core/contracts/knowledge-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/data-model.md` | Auth/Login contract, Q-002, Docs/Contracts |
 | Frontend | TBD | TBD | Project/Meeting 선택 상태, mock fallback 표시, 화면 연동 | `frontend/**` | API 계약 확정, Auth/Login guard 경계 |
 | AI | 사용자 | Codex | 백엔드/프론트엔드 구현 없이 AI 서버에서 RAG chunk 형식, mock/in-memory retriever, 용어 설명, 회의 요약/보고서 생성, 회의별/프로젝트별 챗봇, 태스크 추출 prototype API를 준비한다. Backend 권한 필터 이후 컨텍스트 조립은 target architecture로 유지한다. | `ai/**`, `specs/001-meetingmind-core/*` | Backend 권한 필터, 실제 STT 저장 API, pgvector migration, Frontend 화면 연결은 후속 담당자 작업. 그 전까지 mock 또는 권한 필터링된 prototype context만 사용 |
 | Data | TBD | TBD | PostgreSQL/pgvector 스키마 초안과 migration | `backend/**`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002 |
@@ -91,7 +95,8 @@
 
 - Single-owner files:
   - Auth/Login owner: `frontend/src/components/GoogleLoginModal.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`
-  - `specs/001-meetingmind-core/contracts/api.md`: Docs/Contracts owner가 변경하고 Backend/Frontend/AI가 따른다.
+  - `specs/001-meetingmind-core/contracts/*`: Docs/Contracts owner가 형식과 shared contract를 관리하고, 기능별 owner가 담당 API 파일을 변경한다.
+  - `specs/001-meetingmind-core/contracts/api.md`: legacy snapshot이다. 신규 구현 기준으로 수정하지 않는다.
   - `specs/001-meetingmind-core/data-model.md`: Docs/Contracts 또는 Data owner가 변경하고 Backend가 따른다.
   - migration 파일: Data owner가 순차 생성한다.
 - Shared contracts:
@@ -101,7 +106,7 @@
   - 같은 API endpoint 구현 파일
   - 같은 migration 파일
   - 같은 화면 route/component 파일
-  - `specs/001-meetingmind-core/contracts/api.md`
+  - 같은 `specs/001-meetingmind-core/contracts/*.md` 파일
   - `specs/001-meetingmind-core/data-model.md`
 
 ## Integration Order
