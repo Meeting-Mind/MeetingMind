@@ -31,6 +31,7 @@
 | Low | Space invitation과 Meeting invitation 분리를 결정했다. | 회의 게스트 초대가 Space membership을 만들지 않도록 API/ERD 경계가 명확해졌다. | Backend migration 구현 시 `SPACE_INVITATION`, `MEETING_INVITATION`을 별도 테이블로 만든다. | `clarify.md`, `erd.md`, `space-api.md`, `meeting-api.md` | Decided |
 | Low | 회의당 current confirmed report 1개 정책을 결정했다. | Project Knowledge 승격, 다운로드, Project AI source 연결 시 공식 회의록이 중복되는 위험이 줄었다. | Backend migration 구현 시 partial unique index 또는 애플리케이션 제약을 둔다. | `clarify.md`, `erd.md`, `data-model.md`, `meeting-api.md` | Decided |
 | Low | ProjectKnowledge embedding 재생성은 비동기로 결정했다. | Knowledge 수정 API 응답 지연과 embedding provider 장애 영향을 줄이고 기존 chunk로 검색 안정성을 유지한다. | Backend/Data 구현 시 `embeddingStatus`, `embeddingJobId`, 비동기 worker 또는 job 경계를 설계한다. | `clarify.md`, `erd.md`, `data-model.md`, `knowledge-api.md` | Decided |
+| Medium | AI/RAG prototype을 분리 API/ERD 기준으로 재검토했다. | Meeting AI scope, Project AI source 분리, 근거 없음 처리, candidate 산출물 원칙은 코드와 테스트로 확인됐다. token budget과 observability log는 아직 구현되지 않았다. | Backend 권한 필터와 실제 RAG 저장소 도입 시 token 축소 정책, 처리 시간/모델/근거 수 로그를 별도 task로 추가한다. | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `contracts/ai-api.md`, `knowledge-api.md`, `erd.md`, `data-model.md`, `tasks.md`, `implement.md` | AI Reviewed |
 
 ## Recommendation
 
