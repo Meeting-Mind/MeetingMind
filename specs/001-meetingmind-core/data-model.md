@@ -26,7 +26,7 @@ Backend가 발급하는 MeetingMind access token의 subject는 `User.id`다. 사
 - `createdAt`
 - `lastUsedAt`
 
-### RefreshTokenSession
+### AuthSession
 
 - `id`
 - `userId`
@@ -51,7 +51,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `id`
 - `spaceId`
 - `userId`
-- `role`: owner, admin, member
+- `role`: OWNER, ADMIN, MEMBER
 - `joinedAt`
 
 ### Meeting
@@ -62,7 +62,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `scheduledAt`
 - `startedAt`
 - `endedAt`
-- `status`: CREATED, SCHEDULED, LIVE, PROCESSING, COMPLETED, FAILED
+- `status`: SCHEDULED, IN_PROGRESS, ENDED, CANCELED
 - `failureReason`
 - `retentionPolicy`
 
@@ -71,8 +71,11 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `id`
 - `meetingId`
 - `userId`
-- `role`: host, editor, participant, viewer
+- `role`: HOST, EDITOR, VIEWER
+- `participantType`: member, guest
 - `accessStatus`
+
+회의 게스트는 SpaceMember가 아닐 수 있지만 특정 회의의 `MeetingParticipant`로 등록된다. 회의 게스트는 지정된 회의 밖의 STT, 보고서, Meeting AI, 회의 파일, Project Knowledge, Project AI에 기본 접근할 수 없다.
 
 ### MeetingSpeaker
 
@@ -96,6 +99,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 
 - `id`
 - `meetingId`
+- `status`: CANDIDATE, DRAFT, CONFIRMED
 - `title`
 - `summary`
 - `decisions`
@@ -190,9 +194,12 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 
 - Space 접근은 `SpaceMember`로 판단한다.
 - 회의 접근은 `MeetingParticipant`로 판단한다.
+- SpaceRole은 `OWNER`, `ADMIN`, `MEMBER`를 기본값으로 한다.
+- MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다.
 - Meeting AI는 `meetingId` 하나에 속한 데이터만 사용한다.
-- Project AI는 `ProjectKnowledge`와 사용자가 접근 가능한 `meetingId` 목록의 chunk만 사용한다.
-- 발화자 이름 수정은 회의 `host` 또는 `editor` 권한이 있는 사용자만 수행한다.
+- Project AI는 `ProjectKnowledge`와 사용자가 접근 가능한 `meetingId` 목록의 chunk만 사용한다. 회의 게스트는 Project AI를 기본 사용할 수 없다.
+- Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정한다. 회의 게스트는 기본 접근할 수 없다.
+- 발화자 이름 수정은 회의 `HOST` 또는 `EDITOR` 권한이 있는 사용자만 수행한다.
 - transcript, report, summary 조회는 `MeetingParticipant` 권한 확인 후 허용한다.
 - AI 서버로 전달되는 transcript segment는 Backend 권한 필터 이후에 구성한다.
 
@@ -205,5 +212,5 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 ## Retention
 
 - 음성 원본: 기본 장기 보관 없음
-- STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상
+- STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상. 선택지는 7일/30일/영구이며 기본값은 30일이다.
 - 보고서/공식 지식: Space 정책에 따른 보존

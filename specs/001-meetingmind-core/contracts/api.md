@@ -55,12 +55,20 @@
 
 | status | Meaning |
 | --- | --- |
-| `CREATED` | 회의가 생성되었지만 시작/처리 전 |
-| `SCHEDULED` | 회의가 예약됨 |
-| `LIVE` | 실시간 회의 중 |
-| `PROCESSING` | STT, 보고서, 요약, embedding 등 비동기 처리 중 |
-| `COMPLETED` | 회의 처리 완료, transcript/report/summary 조회 가능 |
-| `FAILED` | 처리 실패. `failureReason` 참조 |
+| `SCHEDULED` | 회의 일정이 생성되었지만 아직 시작되지 않은 상태 |
+| `IN_PROGRESS` | 실시간 회의방이 열리고 회의가 진행 중인 상태 |
+| `ENDED` | 회의가 종료되어 전사/회의록 후처리 대상으로 전환된 상태 |
+| `CANCELED` | 예정 회의가 진행 전 취소된 상태 |
+
+전사와 보고서 후처리는 Meeting status가 아니라 `Transcript.status`와 `MeetingReport.status`로 분리한다.
+
+## Role Values
+
+| scope | values | Notes |
+| --- | --- | --- |
+| SpaceRole | `OWNER`, `ADMIN`, `MEMBER` | 프로젝트 단위 RBAC |
+| MeetingRole | `HOST`, `EDITOR`, `VIEWER` | 회의 단위 ACL |
+| Meeting participant type | `member`, `guest` | 회의 게스트는 특정 회의에만 접근하며 Space 전체 권한을 갖지 않는다. |
 
 ## Auth Target Contracts
 
@@ -71,7 +79,7 @@ Auth API는 기존 prototype API와 충돌하지 않도록 `/api/v1/auth/*`에�
 - Backend는 access token과 refresh token을 모두 발급한다.
 - Frontend는 access token과 refresh token을 `sessionStorage`에 저장한다.
 - 인증된 API 요청은 `Authorization: Bearer {accessToken}`를 사용한다.
-- Refresh token 원문은 Backend에 저장하지 않는다. Backend는 `RefreshTokenSession.refreshTokenHash`와 revoke 상태를 저장한다.
+- Refresh token 원문은 Backend에 저장하지 않는다. Backend는 `AuthSession.refreshTokenHash`와 revoke 상태를 저장한다.
 - Prototype 기본 만료 후보는 access token 1시간, refresh token 14일이다.
 
 ### Auth User Shape
@@ -506,7 +514,19 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
     }
   ],
   "markdown": "## 요약\n회의/프로젝트 권한 분리와 ERD 수정 필요성이 논의되었습니다.",
-  "sources": [],
+  "sources": [
+    {
+      "sourceId": "decision-001",
+      "type": "decision",
+      "title": "회의/프로젝트 권한 분리",
+      "text": "회의 접근 권한과 프로젝트 지식 접근 범위를 분리해야 한다."
+    },
+    {
+      "sourceId": "action-001",
+      "type": "actionItem",
+      "text": "김진수 · ERD 수정안 문서화"
+    }
+  ],
   "unsupported": false,
   "model": "gpt-4.1-mini"
 }
@@ -612,7 +632,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
   ],
   "summary": "ERD 수정안 문서화가 필요합니다.",
   "participants": [
-    { "name": "김진수", "role": "participant" }
+    { "name": "김진수", "role": "VIEWER", "participantType": "member" }
   ]
 }
 ```
@@ -648,7 +668,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 `GET /api/v1/meetings/{meetingId}/transcript`
 
-회의 접근 권한이 있는 사용자만 조회할 수 있다. `status`가 `COMPLETED`가 아니면 `409 MEETING_NOT_COMPLETED`를 반환한다.
+회의 접근 권한이 있는 사용자만 조회할 수 있다. `Transcript.status`가 `COMPLETED`가 아니면 `409 MEETING_NOT_COMPLETED`를 반환한다.
 
 ### Response
 
@@ -683,7 +703,7 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 `PATCH /api/v1/meetings/{meetingId}/speakers/{speakerId}`
 
-회의 `host` 또는 `editor` 권한을 가진 사용자만 자동 구분된 발화자 이름을 수정할 수 있다.
+회의 `HOST` 또는 `EDITOR` 권한을 가진 사용자만 자동 구분된 발화자 이름을 수정할 수 있다.
 
 ### Request
 
@@ -717,9 +737,9 @@ LiveKit 회의방 입장을 위한 JWT를 발급한다.
 
 1. `POST /api/v1/spaces/{spaceId}/meetings`로 회의 메타데이터를 생성한다.
 2. `POST /api/v1/meetings/{meetingId}/audio`로 오디오 파일을 업로드한다.
-3. 서버는 `PROCESSING` 상태로 전환하고 STT, 발화자 구분, 요약을 비동기 처리한다.
+3. 서버는 `Transcript.status=PROCESSING`으로 전환하고 STT, 발화자 구분, 요약을 비동기 처리한다.
 4. 클라이언트는 `GET /api/v1/meetings/{meetingId}`로 상태를 polling한다.
-5. `COMPLETED` 이후 transcript, report, summary를 조회한다.
+5. `Transcript.status=COMPLETED`와 `MeetingReport.status` 전이에 따라 transcript, report, summary를 조회한다.
 
 ### Candidate Endpoints
 

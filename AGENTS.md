@@ -35,6 +35,8 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 | Layer 6 Spec | 무엇을 만들 것인가 | `specs/<feature>/spec.md` | 기능 작업 시 |
 | Layer 7 Tasks | 지금 무엇을 할 것인가 | `specs/<feature>/tasks.md` | 구현 작업 시 |
 
+요구사항 정의서는 전체를 항상 읽지 않는다. Google Sheets 기준선을 `requirements/*` Markdown으로 나누어 보관하고, 기능 작업 시 `requirements/INDEX.md`에서 필요한 요구사항 문서만 선택해 읽는다.
+
 ### Always Read
 
 - `AGENTS.md`: 프로젝트 공통 실행, Process, Git 협업 지침
@@ -46,6 +48,12 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 - `.specify/templates/*`: 새 스펙/계획/작업 문서를 만들 때
 - `.specify/skills/*`: 특정 도메인 절차가 필요할 때
 - `.specify/memory/session-handoff.md`: 이전 세션 작업 맥락을 이어받을 때
+- `requirements/INDEX.md`: 새 기능, API, 데이터 모델, 권한, AI 동작을 판단할 때
+- `requirements/glossary.md`: 도메인 용어, entity, API/DB 이름을 정할 때
+- `requirements/permissions.md`: SpaceRole, MeetingParticipant, 회의 게스트, AI/RAG 접근 권한을 바꿀 때
+- `requirements/status-values.md`: 상태 enum, 상태 전이, DB status 필드를 바꿀 때
+- `requirements/functional-requirements.md`, `requirements/non-functional-requirements.md`: 기능/비기능 요구사항 ID를 확인할 때
+- `requirements/policies.md`, `requirements/performance.md`: 정책값, 보존, 인증 토큰, 성능, 토큰 관리 기준을 바꿀 때
 - `specs/<feature>/spec.md`: 기능의 무엇/왜를 확인할 때
 - `specs/<feature>/research.md`, `plan.md`: 결정 근거와 구현 방식을 확인할 때
 - `specs/<feature>/data-model.md`, `contracts/*`: 데이터/API를 바꿀 때
@@ -67,6 +75,7 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 
 - 작업 시작 시 `AGENTS.md`, `AGENT.md`, `.specify/memory/constitution.md`를 기본 규칙으로 읽는다.
 - 필요한 경우에만 feature 문서와 skill 문서를 추가로 읽는다.
+- 요구사항은 `requirements/INDEX.md`로 라우팅해 필요한 문서만 읽고, 전체 요구사항 문서를 무조건 읽지 않는다.
 - 새 기능, 새 코드, 새 의존성 판단은 `AGENT.md`의 구현 판단 순서를 따른다.
 - 변경 전 관련 코드를 먼저 읽고 실제 흐름을 확인한다.
 - 기존 패턴과 파일 경계를 우선한다.
@@ -75,6 +84,7 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 - 보안/권한/데이터 보존 정책은 UI 편의보다 우선한다.
 - 프론트엔드 문구는 제품 도메인에 맞게 업무형 협업 도구 톤을 유지한다.
 - 기능 변경은 `spec.md`의 사용자 가치와 `plan.md`의 기술 결정에 연결되어야 한다.
+- 기능 변경은 관련 `requirements/*`의 FR/NFR/정책/권한/상태 기준과 충돌하지 않아야 한다.
 
 ## Spec Kit 작업 방식
 
@@ -86,6 +96,7 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 
 ### Specs 변경 동반 갱신 규칙
 
+- `requirements/*`가 바뀌면 `requirements/INDEX.md`의 라우팅과 관련 `specs/*` 문서 영향 여부를 확인한다.
 - `spec.md`의 사용자 가치, 범위, 요구사항이 바뀌면 `plan.md`, `tasks.md`, `analyze.md` 영향 여부를 확인한다.
 - `plan.md`의 기술 결정, API, 데이터 모델, 보안 방식이 바뀌면 `research.md`, `data-model.md`, `contracts/*`, `tasks.md` 영향 여부를 확인한다.
 - `contracts/*` 또는 `data-model.md`가 바뀌면 권한 규칙, 입력 검증, AI 컨텍스트 범위가 `spec.md`, `plan.md`, `tasks.md`와 일치하는지 확인한다.

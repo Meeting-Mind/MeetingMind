@@ -6,6 +6,18 @@
 
 [한 문장으로 기능과 사용자 가치를 설명한다.]
 
+## Requirement Sources
+
+- Requirements index: `requirements/INDEX.md`
+- Glossary: [필요 시 `requirements/glossary.md`]
+- Permissions: [필요 시 `requirements/permissions.md`]
+- Status values: [필요 시 `requirements/status-values.md`]
+- Functional requirements: [관련 FR ID와 문서]
+- Non-functional requirements: [관련 NFR ID와 문서]
+- Policies/performance: [필요 시 `requirements/policies.md`, `requirements/performance.md`]
+
+이 섹션에는 현재 기능 작업 전에 실제로 읽은 요구사항 문서와 관련 ID만 남긴다. 요구사항 전체를 무조건 나열하지 않는다.
+
 ## Why
 
 - [해결할 문제]
