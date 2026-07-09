@@ -113,11 +113,16 @@ export function LiveMeetingPage({ data }: { data: WorkspaceData["liveMeeting"] }
   const [mediaError, setMediaError] = useState("");
   const [hasCameraStream, setHasCameraStream] = useState(false);
   const [hasMicStream, setHasMicStream] = useState(false);
+  const spaceId = searchParams.get("spaceId");
   const projectName = searchParams.get("project") ?? "FinPilot Renewal";
   const meetingTitle = searchParams.get("meeting") ?? data.overview.title;
 
   function handleCancelEntry() {
-    navigate(`/project-overview?project=${encodeURIComponent(projectName)}`);
+    const params = new URLSearchParams({ project: projectName });
+    if (spaceId) {
+      params.set("spaceId", spaceId);
+    }
+    navigate(`/project-overview?${params.toString()}`);
   }
 
   useEffect(() => {

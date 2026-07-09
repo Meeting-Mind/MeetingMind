@@ -7,25 +7,42 @@ type CreateProjectPayload = {
   description: string;
 };
 
-function buildProjectOverviewHref(projectName?: string) {
-  if (!projectName) {
+function buildProjectOverviewHref(projectName?: string, spaceId?: string) {
+  if (!projectName && !spaceId) {
     return "/project-overview";
   }
 
-  return `/project-overview?project=${encodeURIComponent(projectName)}`;
+  const params = new URLSearchParams();
+  if (spaceId) {
+    params.set("spaceId", spaceId);
+  }
+  if (projectName) {
+    params.set("project", projectName);
+  }
+
+  return `/project-overview?${params.toString()}`;
 }
 
-function buildTeamMembersHref(projectName?: string) {
-  if (!projectName) {
+function buildTeamMembersHref(projectName?: string, spaceId?: string) {
+  if (!projectName && !spaceId) {
     return "/team-members";
   }
 
-  return `/team-members?project=${encodeURIComponent(projectName)}`;
+  const params = new URLSearchParams();
+  if (spaceId) {
+    params.set("spaceId", spaceId);
+  }
+  if (projectName) {
+    params.set("project", projectName);
+  }
+
+  return `/team-members?${params.toString()}`;
 }
 
 export function WorkspaceSidebar({
   activeItem,
   projectName,
+  spaceId,
   disableMembers = false,
   mode = "catalog",
   contextOverride,
@@ -33,13 +50,14 @@ export function WorkspaceSidebar({
 }: {
   activeItem: SidebarItem;
   projectName?: string;
+  spaceId?: string;
   disableMembers?: boolean;
   mode?: "catalog" | "project";
   contextOverride?: string;
   onCreateProject?: (payload: CreateProjectPayload) => void;
 }) {
-  const projectHref = buildProjectOverviewHref(projectName);
-  const teamMembersHref = buildTeamMembersHref(projectName);
+  const projectHref = buildProjectOverviewHref(projectName, spaceId);
+  const teamMembersHref = buildTeamMembersHref(projectName, spaceId);
   const primaryItem = mode === "project" ? "project" : "catalog";
   const contextText = contextOverride ?? (mode === "project" ? projectName : "3회차 진행중");
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
