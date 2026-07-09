@@ -90,8 +90,8 @@
 | T036 | M005 | [ ] | backend/domain | TBD | TBD | T035 | `backend/**`, `specs/001-meetingmind-core/data-model.md` | User, Space, SpaceMember 도메인 모델/DTO를 기존 backend 패턴에 맞춰 추가한다. | 모델 필드가 data-model.md와 일치하고 compile/test 대상에 포함된다. |
 | T037 | M005 | [ ] | backend/domain | TBD | TBD | T036 | `backend/**`, `specs/001-meetingmind-core/data-model.md` | Meeting, MeetingParticipant, MeetingSpeaker 도메인 모델/DTO를 추가한다. | Meeting status enum, role enum, speaker label/displayName이 구현되어 있다. |
 | T038 | M005 | [ ] | backend/domain | TBD | TBD | T037 | `backend/**`, `specs/001-meetingmind-core/data-model.md` | TranscriptSegment, MeetingReport, ProjectKnowledge, EmbeddingChunk 모델/DTO를 추가한다. | `startMs/endMs`, source metadata, retention 관련 필드가 반영되어 있다. |
-| T039 | M005 | [ ] | backend/security | TBD | TBD | T037 | `backend/**` | Space 접근 검증 service 또는 policy 계층을 추가한다. | SpaceMember 기준 접근 허용/거부 함수와 실패 오류 코드가 있다. |
-| T040 | M005 | [ ] | backend/security | TBD | TBD | T039 | `backend/**` | Meeting 접근 검증 service 또는 policy 계층을 추가한다. | MeetingParticipant 기준 조회/수정/AI 컨텍스트 권한 함수가 있다. |
+| T039 | M005 | [ ] | backend/security | TBD | TBD | T037 | `backend/**` | Space 접근 검증 service 또는 policy 계층을 추가한다. | SpaceMember 기준 접근 허용/거부 함수와 실패 오류 코드가 있고 `test-matrix.md`의 T039 필수 케이스를 통과한다. |
+| T040 | M005 | [ ] | backend/security | TBD | TBD | T039 | `backend/**` | Meeting 접근 검증 service 또는 policy 계층을 추가한다. | MeetingParticipant 기준 조회/수정/AI 컨텍스트 권한 함수가 있고 `test-matrix.md`의 T040 필수 케이스를 통과한다. |
 | T041 | M005 | [ ] | backend/api | TBD | TBD | T029, T039 | `backend/**`, `specs/001-meetingmind-core/contracts/space-api.md`, `specs/001-meetingmind-core/contracts/meeting-api.md` | `/api/workspace` 통합 mock 응답을 Space/Meeting/Report read model로 분리할 backend plan 또는 adapter를 구현한다. | 기존 frontend mock fallback을 깨지 않고 target API 전환 지점이 생긴다. |
 | T042 | M005 | [ ] | backend/errors | TBD | TBD | T039, T040 | `backend/**`, `specs/001-meetingmind-core/contracts/common.md` | 공통 오류 응답(`code`, `message`, `fieldErrors`, `traceId`) 처리 방식을 추가한다. | INVALID_REQUEST, ACCESS_DENIED, NOT_FOUND 계열 오류가 일관된 body로 반환된다. |
 | T043 | M005 | [ ] | backend/verification | TBD | TBD | T036, T037, T038, T039, T040, T041, T042 | `backend/**`, `specs/001-meetingmind-core/implement.md` | Backend 테스트 또는 최소 검증을 실행하고 결과를 기록한다. | `cd backend && ./gradlew test` 결과 또는 미실행 사유가 implement.md에 기록되어 있다. |
@@ -145,7 +145,7 @@
 | T091 | M012 | [x] | auth/backend | 사용자(Auth 담당) | Codex | T090 | `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `backend/build.gradle` | Backend에서 Google ID token 검증, 자체 회원가입/로그인, access/refresh token 발급 service/controller/dto를 추가한다. | Google credential 또는 자체 계정을 Backend가 검증하고 access token, refresh token, user profile을 반환한다. 현재 prototype 저장소는 in-memory이며 영속 DB 전환은 후속 Data/Backend 작업이다. |
 | T092 | M012 | [x] | auth/frontend | 사용자(Auth 담당) | Codex | T090, T091 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**` | Frontend 로그인/회원가입 성공 처리를 Backend auth exchange로 전환하고 access/refresh token 저장/전달 경계를 만든다. | Google credential decode는 표시용으로만 남고, 앱 로그인 상태는 Backend 응답 기준으로 관리되며 token pair는 `sessionStorage`에 저장된다. |
 | T093 | M012 | [x] | auth/frontend-guard | 사용자(Auth 담당) | Codex | T092 | `frontend/src/App.tsx`, future `frontend/src/auth/**`, route 대상 page files only if needed | `/spaces`, 회의 입장, 팀원 관리 등 보호 route 또는 action guard를 최소 범위로 적용한다. | 비로그인 사용자는 로그인 모달로 유도되고, 기존 mock fallback route는 깨지지 않는다. |
-| T094 | M012 | [ ] | auth/livekit | 사용자(Auth 담당) | Codex | T091, T040 | `backend/src/main/java/com/meetingmind/demo/controller/LiveKitController.java`, `backend/src/main/java/com/meetingmind/demo/service/LiveKitTokenService.java`, auth package | LiveKit token 발급을 인증된 사용자와 회의 접근 권한 확인 뒤 허용하도록 전환한다. | 인증되지 않았거나 회의 권한이 없는 사용자는 LiveKit token을 받을 수 없다. |
+| T094 | M012 | [ ] | auth/livekit | 사용자(Auth 담당) | Codex | T091, T040 | `backend/src/main/java/com/meetingmind/demo/controller/LiveKitController.java`, `backend/src/main/java/com/meetingmind/demo/service/LiveKitTokenService.java`, auth package | LiveKit token 발급을 인증된 사용자와 회의 접근 권한 확인 뒤 허용하도록 전환한다. | 인증되지 않았거나 회의 권한이 없는 사용자는 LiveKit token을 받을 수 없고 `test-matrix.md`의 T094 필수 케이스를 통과한다. |
 | T095 | M012 | [x] | auth/verification | 사용자(Auth 담당) | Codex | T091, T092, T093 | `frontend/**`, `backend/**`, `specs/001-meetingmind-core/implement.md` | Auth workstream 검증을 실행한다. | `cd frontend && npm run build`, `cd backend && ./gradlew test`, AI regression checks, Auth API smoke 결과와 브라우저 자동화 미실행 사유가 implement.md에 기록되어 있다. |
 | T096 | M012 | [x] | auth/closeout | 사용자(Auth 담당) | Codex | T095 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md` | Auth 작업 상태, 충돌 여부, 검증 결과, 후속 권한 작업을 정리한다. | T094는 T040 회의 접근 검증 계층 구현 전까지 남은 작업으로 유지하고, Auth 관련 tasks/implement/analyze가 실제 구현 상태와 일치한다. |
 
@@ -191,6 +191,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T118 | M016 | [x] | backend/test | 사용자(Auth 담당) | Codex | D-014 | `backend/src/test/java/com/meetingmind/demo/auth/**` | 비밀번호 정책 단위 테스트와 signup 거부 테스트를 추가한다. | `POL-PW-01` 통과/거부 케이스와 signup validation이 backend test로 검증된다. |
 | T119 | M016 | [x] | ci | 사용자 | Codex | T118 | `.github/workflows/ci.yml`, `.gitignore` | Backend, Frontend, AI 검증을 GitHub Actions CI로 작성한다. | PR/push 시 `./gradlew test`, `npm run build`, `python -m compileall app tests`, `python -m unittest discover -s tests`가 실행된다. |
+| T120 | M016 | [x] | docs/test | 사용자(Auth 담당) | Codex | D-015 | `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | T039/T040/T094 구현 전에 권한/LiveKit 단위 테스트 성공/실패 matrix를 문서화한다. | Space access, Meeting access, HOST 보호, SpaceMember 제거, LiveKit token 발급의 성공/실패 케이스가 요구사항 ID와 연결되어 있다. |
 
 ## Verification
 
@@ -201,6 +202,7 @@
 - [x] V006 AI RAG safety 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests`
 - [ ] V005 주요 화면 라우팅 수동 확인
 - [x] V006 Auth policy/CI 기준선 검증: `cd backend && ./gradlew test`, `cd frontend && npm run build`, `cd ai && python3 -m compileall app tests`, `cd ai && python3 -m unittest discover -s tests`, `git diff --check`
+- [x] V007 Authz test matrix 문서 검증: `git diff --check`
 
 ## Notes
 
