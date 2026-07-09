@@ -4,3 +4,17 @@ server:
 spring:
   application:
     name: meetingmind-backend
+  flyway:
+    enabled: false
+
+---
+spring:
+  config:
+    activate:
+      on-profile: db
+  flyway:
+    enabled: true
+    url: ${SPRING_DATASOURCE_URL}
+    user: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    locations: classpath:db/migration

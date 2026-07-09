@@ -28,6 +28,16 @@
 | Realtime meeting | LiveKit | 현재 토큰 발급 코드와 `livekit-client` 의존성이 존재한다. | WebRTC 직접 구현 |
 | Vector search | PostgreSQL + pgvector | 기획서와 일치하고 관계형 권한 모델과 같이 운용하기 좋다. | Pinecone, OpenSearch |
 | File storage | S3 | STT 원문/보고서/첨부 파일 분리에 적합하다. | DB BLOB |
+| DB migration | Flyway SQL migration | Spring Boot 통합이 단순하고 PostgreSQL/pgvector extension, index, partial unique 제약을 SQL로 명확히 리뷰할 수 있다. | Liquibase, 수동 SQL 적용 |
+
+### Data Migration Discovery
+
+- 2026-07-09 기준 backend에는 `spring-boot-starter-data-jdbc`, `spring-boot-starter-data-jpa`, PostgreSQL driver, Flyway, Liquibase 의존성이 없다.
+- 2026-07-09 기준 `backend/src/main/resources/application.yml`에는 datasource 또는 migration 설정이 없다.
+- migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
+- schema migration은 SQL 파일로 작성한다. 예상 순서는 `V1__create_users_spaces.sql`, `V2__create_meetings_acl.sql`, `V3__create_transcripts_reports.sql`, `V4__create_knowledge_embeddings.sql`이다.
+- PostgreSQL datasource 설정은 후속 schema 작업에서 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` 환경변수를 기준으로 추가한다.
+- T058은 discovery 문서화 단계이므로 dependency, datasource 설정, 실제 schema 파일은 추가하지 않는다. 해당 변경은 T059 이후 schema 작업에서 수행한다.
 
 ## API Contracts
 
