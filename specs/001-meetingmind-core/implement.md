@@ -88,7 +88,7 @@
 - 실제 배정/충돌/통합 기록은 `implement.md`와 `implement-template.md`에 추가했다.
 - 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker 계약은 `contracts/api.md`, `data-model.md`, `plan.md`, `clarify.md`, `tasks.md`에 반영했다.
 - 실제 구현 착수는 `tasks.md`의 T024-T106 상세 task 기준으로 진행한다.
-- AI 담당 workstream은 `tasks.md`의 T070-T088로 분리했다. T070-T072와 T078-T086은 완료했고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다. RAG safety와 최종 검증은 T087-T088로 남긴다.
+- AI 담당 workstream은 `tasks.md`의 T070-T088로 분리했다. T070-T086은 완료했고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다. RAG safety와 최종 검증은 T087-T088로 남긴다.
 - AI prototype API 계약은 `contracts/api.md`에 추가했다. 범위는 용어 설명, 회의 요약/보고서 생성, 회의별 챗봇, 프로젝트별 챗봇, 회의 종료 태스크 후보 추출이다.
 - 용어 설명 prototype은 `pgvector` 같은 Domain Dictionary 항목을 로컬 응답으로 먼저 처리하고, dictionary에 없지만 transcript 근거가 있는 용어는 AI fallback으로 설명한다.
 - RAG 기반 작업은 `tasks.md`의 M011/T078-T088로 세분화했다. T078-T086은 완료했고, 실제 STT 저장 API/DB schema/pgvector migration은 후속 담당자 작업으로 남긴다.
@@ -156,7 +156,7 @@
 ## Git Status Notes
 
 - 요구사항 기준선 반영 변경은 PR #8의 `agent/requirements-docs-baseline` 브랜치에 커밋되어 원격 push되었다.
-- 현재 로컬에는 개인 IDE 설정인 `.idea/`만 Git 미추적 상태로 남아 있으며 PR에는 포함하지 않는다.
+- 개인 IDE 설정과 에이전트 산출물 디렉터리인 `.idea/`, `output/`, `tmp/`는 Git에 올리지 않고 루트 `.gitignore`에서 제외한다.
 - `c15ca74 feat: add backend auth prototype` 이후 Frontend Auth 연결, Backend Auth runtime wiring fix, context smoke test, Auth 검증 문서 갱신을 후속 Auth 변경으로 정리했다.
 
 ## Verification
