@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package com.nbp.cdncp.nest.grpc.proto.v1;
+
 option java_package = "com.meetingmind.demo.clova.grpc";
 option java_multiple_files = true;
 

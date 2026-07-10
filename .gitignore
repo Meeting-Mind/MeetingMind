@@ -5,3 +5,10 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 backend/target/
 /MeetingMind_페이지_모달_정리.md
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+.idea/
