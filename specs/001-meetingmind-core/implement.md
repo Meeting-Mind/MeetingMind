@@ -60,6 +60,12 @@
 | 사용자(Frontend 담당) | Codex | T121 | FR-DASH/FR-CAL 상세 요구 기반 dashboard/calendar frontend 구현 계획과 M017 task 분해 |
 | 사용자(Frontend 담당) | Codex | T131 | FR-MREG/FR-ACL/FR-KAN/FR-PBOT/FR-PERM/FR-OWN 상세 요구 기반 project workspace 구현 계획과 M018 task 분해 |
 | 사용자(Frontend 담당) | Codex | T145 | FR-RPT/FR-MBOT/FR-TASK 상세 요구 기반 meeting workspace 구현 계획과 M019 task 분해 |
+| 사용자(Data 담당) | Codex | T058 | Backend DB/migration 도구 현황 조사와 Flyway SQL migration 위치 문서화 |
+| 사용자(Data 담당) | Codex | T059 | Flyway 기반 User, Space, SpaceMember V1 schema migration 작성 |
+| 사용자(Data 담당) | Codex | T060 | Flyway 기반 Meeting, MeetingParticipant, MeetingSpeaker V2 schema migration 작성 |
+| 사용자(Data 담당) | Codex | T061 | Flyway 기반 TranscriptSegment, MeetingReport, report decision/action item V3 schema migration 작성 |
+| 사용자(Data 담당) | Codex | T062 | Flyway 기반 ProjectKnowledge, EmbeddingChunk, chunk source segment V4 schema migration 작성 |
+| 팀원(STT/Audio 담당) | TBD | T063 | retentionPolicy, failureReason, STT 원문 보존 정책 field/default 전략 정리 |
 
 ## Files Changed
 
@@ -86,6 +92,10 @@
 - `backend/src/main/java/com/meetingmind/demo/service/LiveKitTokenService.java`: 안정적인 단위 테스트를 위해 clock/config provider 주입 경계 추가
 - `backend/build.gradle`, `backend/settings.gradle`, `backend/gradlew*`, `backend/gradle/wrapper/*`: Backend 빌드를 Maven에서 Gradle로 전환
 - `backend/src/main/java/com/meetingmind/demo/auth/**`: in-memory Auth store, PBKDF2 password hash, HMAC access token, refresh token hash/revoke, Google ID token verifier, Auth controller/error response 추가
+- `backend/src/main/resources/db/migration/V1__create_users_spaces.sql`: User, Space, SpaceMember schema 초안과 active membership/owner partial unique index 추가
+- `backend/src/main/resources/db/migration/V2__create_meetings_acl.sql`: Meeting, MeetingParticipant, MeetingSpeaker schema 초안과 회의 ACL/speaker 제약 추가
+- `backend/src/main/resources/db/migration/V3__create_transcripts_reports.sql`: TranscriptSegment, MeetingReport, report decision/action item schema 초안과 source id JSON 저장 제약 추가
+- `backend/src/main/resources/db/migration/V4__create_knowledge_embeddings.sql`: ProjectKnowledge, EmbeddingChunk, chunk source segment schema 초안과 pgvector column 준비 추가
 - `backend/src/test/java/com/meetingmind/demo/service/LiveKitTokenServiceTest.java`: LiveKit JWT claim/signature 성공 케이스와 설정 누락 실패 케이스 테스트
 - `backend/src/test/java/com/meetingmind/demo/auth/AuthServiceTest.java`: signup/me, 중복 이메일, 비밀번호 실패, refresh rotation, Google identity 연결 테스트
 - `backend/src/test/java/com/meetingmind/demo/MeetingMindApplicationTest.java`: Spring bean wiring context smoke 테스트 추가
@@ -174,6 +184,11 @@
 - `frontend/src/pages/MeetingAiPage.tsx`, `ProjectOverviewPage.tsx`, `ReportAgentPage.tsx`는 각각 Meeting AI, Project AI, report 편집/확정 흐름의 화면 진입점이다.
 - 다음 작업 T045에서는 `WorkspaceData` 중심 타입을 유지하되, target API용 `SpaceSummary`, `SpaceDetail`, `MeetingSummary`, `ReportSummary`, `ProjectAiSource` 타입을 별도로 추가해 기존 mock fallback과 실제 API shape가 섞이지 않게 한다.
 - 다음 작업 T047에서는 `/api/workspace` legacy fetch와 target `/api/v1/spaces`, `/api/v1/spaces/{spaceId}/meetings` 호출 경계를 분리한다. 기존 mock fallback은 유지한다.
+- 2026-07-09: T058 Data discovery를 수행했다. 현재 backend에는 JDBC/JPA, PostgreSQL driver, Flyway, Liquibase 의존성과 datasource 설정이 없다. Data migration 도구는 Flyway SQL migration으로 결정하고, 파일 위치는 `backend/src/main/resources/db/migration`으로 기록했다. T058 범위에서는 의존성, datasource 설정, schema 파일을 추가하지 않고 T059 이후 schema 작업에서 적용한다.
+- 2026-07-09: T059로 Flyway V1 migration을 추가했다. 기본 profile에서는 DB 없이 기존 prototype이 실행되도록 `spring.flyway.enabled=false`로 두고, `db` profile에서 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`로 Flyway를 실행한다. `users`, `spaces`, `space_members`는 text id 기반 PK, FK, enum check, active member unique index, active OWNER partial unique index를 가진다.
+- 2026-07-09: T060으로 Flyway V2 migration을 추가했다. `meetings`는 Space FK, `SCHEDULED`/`IN_PROGRESS`/`ENDED`/`CANCELED` status check, `space_id, scheduled_at` index를 가진다. `meeting_participants`는 User/Meeting FK, `HOST`/`EDITOR`/`VIEWER`, `member`/`guest`, `ACTIVE`/`REVOKED` check와 active participant unique index를 가진다. `meeting_speakers`는 meeting별 speaker label unique index와 nullable displayName 제약을 가진다.
+- 2026-07-09: T061로 Flyway V3 migration을 추가했다. `transcript_segments`는 `start_ms/end_ms` 시간 범위, meeting별 sequence unique, meeting별 start time index를 가진다. `meeting_reports`는 version unique, current confirmed partial unique index, `CANDIDATE`/`DRAFT`/`CONFIRMED` status check를 가진다. 결정사항과 액션아이템은 `report_decisions`, `report_action_items`로 분리하고, 출처 추적은 `source_ids jsonb` 배열 제약으로 저장한다.
+- 2026-07-09: T062로 Flyway V4 migration을 추가했다. `project_knowledge`는 Space FK, `report`/`decision`/`manual`/`external` type, `PUBLISHED`/`ARCHIVED` status, `PENDING`/`PROCESSING`/`COMPLETED`/`FAILED` embedding status, `(space_id, type, updated_at)` index를 가진다. `embedding_chunks`는 `space_id`, `meeting_id`, `scope`, `source_type`, `source_id`, `embedding_text`, `metadata`, nullable pgvector `embedding`을 저장하고, meeting scope는 `meeting_id`가 required다. `chunk_source_segments`는 chunk와 transcript segment 관계를 unique로 추적한다.
 
 ## Dashboard and Calendar Frontend Notes
 
@@ -255,6 +270,8 @@
 - 2026-07-09: T104 영향도 점검 결과, token budget 축소 정책과 AI/API observability log는 아직 구현되어 있지 않다. 이는 Backend 권한 필터, 실제 RAG 저장소, 운영 로깅이 들어오는 후속 milestone에서 처리한다.
 - 2026-07-09: RAG safety unittest를 추가했다. Meeting scope가 다른 meeting/projectKnowledge chunk를 제외하고, Project scope가 허용되지 않은 meeting chunk를 제외하며, 근거 없는 Meeting AI/task extraction은 OpenAI를 호출하지 않는다.
 - 2026-07-09: Report action item도 저장 전 산출물 원칙에 맞게 `confirmationState=candidate`로 정규화하도록 수정했다. LLM이 임의 sourceId를 반환해도 제공된 source 목록에 없는 값은 제거된다.
+- 2026-07-10: AI prototype endpoint observability를 추가했다. `/api/meeting-ai/*`와 `/api/project-ai/chat` wrapper가 처리 시간, model, source count, unsupported 여부와 reason을 `meetingmind.ai` logger에 기록하며, 질문/본문 같은 입력 원문은 로그에 포함하지 않는다.
+- 2026-07-10: `AiObservabilityTest`를 추가해 unsupported 응답의 `NO_SOURCES` reason, model/source count/durationMs 로그 필드, 입력 원문 비노출, 지원 응답의 source count를 검증했다.
 
 ## AI RAG Task Priority
 
@@ -289,6 +306,8 @@
 - Passed: `cd ai && python3 -m compileall app tests`
 - Passed: `cd ai && python3 -m compileall app tests` after AI RAG safety tests
 - Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 9 tests
+- Passed: `cd ai && python3 -m compileall app tests` after AI observability logging
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 11 tests, after AI observability logging
 - Passed: `cd frontend && npm run build`
 - Passed: `cd frontend && npm run build` after Frontend Auth route guard changes
 - Passed: `cd backend && ./gradlew test` after Gradle conversion, total 8 backend tests
@@ -317,11 +336,21 @@
 - Passed: `cd frontend && npm run build` after M017 dashboard/calendar UI, M018 project workspace local ACL/kanban slice, and M019 Meeting AI/report candidate UI changes
 - Passed: `git diff --check` after M017-M019 frontend changes
 - Passed: local frontend HTTP smoke on `http://127.0.0.1:5173/`, `/project-overview`, `/report-agent`, `/meeting-ai` with HTTP 200. Initial sandboxed dev server/curl attempts failed with localhost permission restrictions, then passed after approved local dev server/curl execution.
+- Passed: `git diff --check` after T058 data discovery docs
+- Passed: `cd backend && ./gradlew test` after T059 Flyway V1 migration setup
+- Passed: `git diff --check` after T059 Flyway V1 migration setup
+- Passed: `cd backend && ./gradlew test` after T060 Flyway V2 meeting ACL migration
+- Passed: `git diff --check` after T060 Flyway V2 meeting ACL migration
+- Passed: `cd backend && ./gradlew test` after T061 Flyway V3 transcript/report migration
+- Passed: `git diff --check` after T061 Flyway V3 transcript/report migration
+- Passed: `cd backend && ./gradlew test` after T062 Flyway V4 knowledge/embedding migration
+- Passed: `git diff --check` after T062 Flyway V4 knowledge/embedding migration
 - Passed: local runtime smoke with `MEETINGMIND_JWT_SECRET=dev-test-secret GOOGLE_CLIENT_ID=dev-google-client mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=18080` before Gradle conversion
 - Passed: `curl -fsS http://127.0.0.1:18080/api/workspace`
 - Passed: `curl -fsS http://127.0.0.1:18080/api/v1/auth/signup -H 'Content-Type: application/json' -d '{"email":"api-smoke-18080@meetingmind.ai","password":"password-123","displayName":"API Smoke"}'`
 - Not run: Browser automation verification. `agent-browser` CLI and Playwright packages are not available in this environment; adding a new browser test library was avoided because existing frontend test framework is not present.
 - Not run: `cd ai && python -m compileall app`는 이 환경에 `python` 명령이 없어 `python3`로 대체했다.
+- Not run: Flyway migration against a real PostgreSQL datasource after T059-T062. Local `db` profile datasource is not configured in this environment; migration 적용 검증은 T064에서 수행한다.
 - Note: 첫 `mvn -Dtest=LiveKitTokenServiceTest test` 실행은 Maven이 `~/.m2`에 Surefire provider를 쓸 권한이 없어 실패했고, 승인 후 재실행해 통과했다.
 - Note: `npm ci` 후 `npm audit`이 moderate 1건, high 1건을 보고했다. `npm audit fix --force`는 breaking change 가능성이 있어 실행하지 않았다.
 - Note: `8080`, `8081`, `5173`, `5174`는 기존 로컬 프로세스가 사용 중이었다. Auth runtime smoke는 충돌을 피하려고 Backend `18080`, Frontend `5176`으로 실행했다.
