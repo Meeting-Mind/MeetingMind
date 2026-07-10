@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { chatMeetingAi } from "../api/workspace";
 import type { WorkspaceData } from "../types";
 
-const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL ?? "http://localhost:8000";
-
-type ChatMessage = { role: "user" | "ai"; text: string };
-
-type MeetingAiAskResponse = {
-  answer: string;
-  model: string;
-};
+type ChatMessage = { role: "user" | "ai"; text: string; sources?: string[]; unsupported?: boolean };
 
 export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
+  const [searchParams] = useSearchParams();
+  const projectId = searchParams.get("projectId") ?? "project-local";
+  const meetingId = searchParams.get("meetingId") ?? "meeting-local-current";
+  const meetingTitle = searchParams.get("meeting") ?? data.overview.title;
   const [messages, setMessages] = useState<ChatMessage[]>(data.chat);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,27 +47,25 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
     setLoading(true);
 
     try {
-      const response = await fetch(`${AI_API_BASE_URL}/api/meeting-ai/ask`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          question: trimmed,
-          transcript: payloadSource.transcript,
-          decisions: payloadSource.decisions,
-          actions: payloadSource.actions
-        })
+      const result = await chatMeetingAi({
+        projectId,
+        meetingId,
+        meetingTitle,
+        question: trimmed,
+        transcript: payloadSource.transcript,
+        decisions: payloadSource.decisions,
+        actions: payloadSource.actions
       });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || `Meeting AI 요청 실패 (${response.status})`);
-      }
-
-      const result = (await response.json()) as MeetingAiAskResponse;
       setModelLabel(result.model);
-      setMessages((previous) => [...previous, { role: "ai", text: result.answer }]);
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "ai",
+          text: result.unsupported ? "확인 가능한 근거가 없어 답변할 수 없습니다." : result.answer,
+          sources: result.sources.map((source) => `${source.title} · ${source.type}`),
+          unsupported: result.unsupported
+        }
+      ]);
     } catch (fetchError) {
       const message =
         fetchError instanceof Error
@@ -195,6 +191,14 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
               {messages.map((message, index) => (
                 <div key={`${message.role}-${index}`} className={`bubble ${message.role}`}>
                   {message.text}
+                  {message.sources?.length ? (
+                    <div className="meeting-ai-source-list">
+                      {message.sources.map((source) => (
+                        <span key={`${message.role}-${index}-${source}`}>{source}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.unsupported ? <div className="meeting-ai-unsupported">근거 없음</div> : null}
                 </div>
               ))}
               {loading ? <div className="bubble ai">답변 생성 중입니다...</div> : null}

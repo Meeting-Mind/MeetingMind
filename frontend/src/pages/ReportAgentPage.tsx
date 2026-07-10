@@ -37,6 +37,23 @@ type PendingChange = {
   commitDetails: string[];
 };
 
+type ReportCandidateDraft = {
+  id: string;
+  summary: string;
+  markdown: string;
+  status: "candidate" | "confirmed";
+  sources: string[];
+};
+
+type TaskCandidateDraft = {
+  id: string;
+  title: string;
+  assignee: string;
+  dueDate: string;
+  status: "candidate" | "registered";
+  sourceIds: string[];
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "ai";
@@ -75,6 +92,40 @@ function createChatMessage(message: Omit<ChatMessage, "id">): ChatMessage {
     id: `${message.role}-${Math.random().toString(36).slice(2, 10)}`,
     ...message
   };
+}
+
+function buildReportMarkdown(report: ReportView) {
+  return [
+    `# ${report.title}`,
+    "",
+    "## 요약",
+    report.summary,
+    "",
+    "## 회의 주제",
+    ...report.subjectLines.map((line) => `- ${line}`),
+    "",
+    "## 결정 사항",
+    ...report.decisions.map((decision) => `- ${decision.item}: ${decision.decision} (${decision.note})`),
+    "",
+    "## Action Item",
+    ...report.actions.map((action) => `- ${action}`)
+  ].join("\n");
+}
+
+function buildTaskCandidatesFromReport(report: ReportView): TaskCandidateDraft[] {
+  return report.actions.map((action, index) => {
+    const [assignee, ...titleParts] = action.split("—");
+    const title = titleParts.join("—").trim() || action.trim();
+
+    return {
+      id: `candidate-local-${index + 1}`,
+      title,
+      assignee: assignee.trim() || "미지정",
+      dueDate: "",
+      status: "candidate",
+      sourceIds: [`${report.breadcrumb} Action Item ${index + 1}`]
+    };
+  });
 }
 
 function inferReportTrack(projectName: string, meetingTitle: string) {
@@ -331,6 +382,8 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
   const [saveLabel, setSaveLabel] = useState("● 자동 저장됨 · 방금 전");
   const [isCommitListOpen, setIsCommitListOpen] = useState(false);
   const [selectedCommitId, setSelectedCommitId] = useState<string | null>(null);
+  const [reportCandidate, setReportCandidate] = useState<ReportCandidateDraft | null>(null);
+  const [taskCandidates, setTaskCandidates] = useState<TaskCandidateDraft[]>([]);
   const changeCommits = reportState.commits;
 
   const selectedCommit = changeCommits.find((commit) => commit.id === selectedCommitId) ?? null;
@@ -348,6 +401,8 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
     setSaveLabel("● 자동 저장됨 · 방금 전");
     setIsCommitListOpen(false);
     setSelectedCommitId(null);
+    setReportCandidate(null);
+    setTaskCandidates([]);
   }, [projectName, meetingTitle, reportView, round]);
 
   function buildCommitId(seed: number) {
@@ -580,6 +635,45 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
     ];
     localStorage.setItem(key, JSON.stringify(next));
     setSaveLabel("● 프로젝트 문서로 저장됨 · 방금 전");
+  }
+
+  function handleGenerateReportCandidate() {
+    setReportCandidate({
+      id: `report-candidate-${Date.now()}`,
+      summary: reportState.summary,
+      markdown: buildReportMarkdown(reportState),
+      status: "candidate",
+      sources: [reportState.breadcrumb, "현재 회의 보고서 본문", "Action Item"]
+    });
+    setSaveLabel("● 회의록 candidate 생성됨 · 확정 대기");
+  }
+
+  function handleConfirmReportCandidate() {
+    if (!reportCandidate) {
+      return;
+    }
+
+    setReportCandidate({ ...reportCandidate, status: "confirmed" });
+    handleProjectDocumentSave();
+    setSaveLabel("● candidate 확정됨 · backend confirm 연결 대기");
+  }
+
+  function handleExtractTaskCandidates() {
+    setTaskCandidates(buildTaskCandidatesFromReport(reportState));
+    setSaveLabel("● 태스크 candidate 추출됨 · 검토 대기");
+  }
+
+  function handleUpdateTaskCandidate(candidateId: string, updates: Partial<Pick<TaskCandidateDraft, "assignee" | "dueDate" | "title">>) {
+    setTaskCandidates((current) =>
+      current.map((candidate) => (candidate.id === candidateId ? { ...candidate, ...updates } : candidate))
+    );
+  }
+
+  function handleRegisterTaskCandidate(candidateId: string) {
+    setTaskCandidates((current) =>
+      current.map((candidate) => (candidate.id === candidateId ? { ...candidate, status: "registered" } : candidate))
+    );
+    setSaveLabel("● 태스크 candidate 승인됨 · 칸반 API 연결 대기");
   }
 
   function handleExportPdf() {
@@ -920,6 +1014,91 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
                 />
                 <button type="submit">→</button>
               </form>
+            </section>
+
+            <section className="report-agent-candidate-card">
+              <div className="report-agent-candidate-head">
+                <div>
+                  <strong>Candidate Review</strong>
+                  <p>저장성 결과는 확정 전 후보로만 다룹니다</p>
+                </div>
+                <span>frontend local</span>
+              </div>
+
+              <div className="report-agent-candidate-actions">
+                <button onClick={handleGenerateReportCandidate} type="button">회의록 candidate 생성</button>
+                <button onClick={handleExtractTaskCandidates} type="button">태스크 후보 추출</button>
+              </div>
+
+              {reportCandidate ? (
+                <div className="report-agent-report-candidate">
+                  <div className="report-agent-report-candidate-top">
+                    <strong>회의록 후보</strong>
+                    <span>{reportCandidate.status === "candidate" ? "candidate" : "confirmed local"}</span>
+                  </div>
+                  <p>{reportCandidate.summary}</p>
+                  <div className="report-agent-bubble-tags">
+                    {reportCandidate.sources.map((source) => (
+                      <span key={source}>{source}</span>
+                    ))}
+                  </div>
+                  <button
+                    disabled={reportCandidate.status === "confirmed"}
+                    onClick={handleConfirmReportCandidate}
+                    type="button"
+                  >
+                    프로젝트 문서로 확정
+                  </button>
+                </div>
+              ) : null}
+
+              {taskCandidates.length ? (
+                <div className="report-agent-task-candidates">
+                  {taskCandidates.map((candidate) => (
+                    <div key={candidate.id} className="report-agent-task-candidate">
+                      <div className="report-agent-task-candidate-top">
+                        <strong>{candidate.status === "candidate" ? "검토 대기" : "등록 승인"}</strong>
+                        <span>{candidate.sourceIds[0]}</span>
+                      </div>
+                      <label>
+                        <span>제목</span>
+                        <input
+                          onChange={(event) => handleUpdateTaskCandidate(candidate.id, { title: event.target.value })}
+                          value={candidate.title}
+                        />
+                      </label>
+                      <div className="report-agent-task-candidate-grid">
+                        <label>
+                          <span>담당자</span>
+                          <input
+                            onChange={(event) => handleUpdateTaskCandidate(candidate.id, { assignee: event.target.value })}
+                            value={candidate.assignee}
+                          />
+                        </label>
+                        <label>
+                          <span>마감일</span>
+                          <input
+                            onChange={(event) => handleUpdateTaskCandidate(candidate.id, { dueDate: event.target.value })}
+                            type="date"
+                            value={candidate.dueDate}
+                          />
+                        </label>
+                      </div>
+                      <button
+                        disabled={candidate.status === "registered"}
+                        onClick={() => handleRegisterTaskCandidate(candidate.id)}
+                        type="button"
+                      >
+                        칸반 등록 승인
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <p className="report-agent-candidate-gap">
+                실제 저장, 확정, 칸반 등록은 Backend report/task-candidate API 연결 후 서버 권한 검증과 감사 로그로 처리합니다.
+              </p>
             </section>
           </aside>
         </main>

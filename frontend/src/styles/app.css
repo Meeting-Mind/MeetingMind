@@ -510,6 +510,321 @@ body.app-theme select {
   cursor: not-allowed;
 }
 
+.workspace-catalog-data-source {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid #ded9ee;
+  border-radius: 999px;
+  background: #faf9ff;
+  color: #8c86a6;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.dashboard-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.dashboard-summary-grid article,
+.workspace-dashboard-primary,
+.workspace-dashboard-activity,
+.workspace-calendar-shell {
+  border: 1px solid var(--app-line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--app-shadow);
+}
+
+.dashboard-summary-grid article {
+  min-height: 132px;
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+}
+
+.dashboard-summary-grid span,
+.workspace-dashboard-section-head span {
+  color: #9d98b7;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.dashboard-summary-grid strong {
+  color: #303455;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.dashboard-summary-grid p,
+.workspace-dashboard-primary p,
+.workspace-calendar-upcoming p {
+  margin: 0;
+  color: #8d89a6;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.workspace-dashboard-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.workspace-dashboard-primary,
+.workspace-dashboard-activity {
+  padding: 22px;
+}
+
+.workspace-dashboard-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.workspace-dashboard-section-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #303455;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.workspace-dashboard-section-head a {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 16px;
+  border-radius: 14px;
+  background: #eef5ff;
+  color: #356fb8;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.workspace-dashboard-activity {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-dashboard-activity-row,
+.workspace-calendar-upcoming-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid #eeeaf7;
+}
+
+.workspace-dashboard-activity-row strong,
+.workspace-calendar-upcoming-row strong {
+  color: #454967;
+  font-size: 15px;
+}
+
+.workspace-dashboard-activity-row span,
+.workspace-calendar-upcoming-row span {
+  color: #a09bb7;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.workspace-action-summary {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid #dce8f2;
+  border-radius: 24px;
+  background: #f7fbff;
+}
+
+.workspace-action-summary-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workspace-action-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 58px;
+  align-items: center;
+  padding: 0 16px;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.workspace-action-summary-row strong {
+  color: #3d435e;
+  font-size: 15px;
+}
+
+.workspace-action-summary-row span {
+  color: #7d8fa8;
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.workspace-calendar-shell {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 22px;
+}
+
+.workspace-calendar-view-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.workspace-calendar-view-tabs button,
+.workspace-calendar-toolbar select,
+.workspace-calendar-toolbar input,
+.workspace-calendar-create select,
+.workspace-calendar-create input,
+.workspace-calendar-create button,
+.project-overview-actions .secondary {
+  border: 1px solid var(--app-line-strong);
+  border-radius: 14px;
+  background: #fff;
+  color: #5e5b78;
+  font-weight: 900;
+}
+
+.workspace-calendar-view-tabs button {
+  min-width: 46px;
+  min-height: 38px;
+}
+
+.workspace-calendar-view-tabs button.active {
+  background: #303455;
+  color: #fff;
+}
+
+.workspace-calendar-toolbar {
+  display: flex;
+  gap: 12px;
+}
+
+.workspace-calendar-toolbar select,
+.workspace-calendar-toolbar input {
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.workspace-calendar-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-calendar-grid.month {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.workspace-calendar-grid.week {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.workspace-calendar-grid.day {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-calendar-day {
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e7e2f5;
+  border-radius: 16px;
+  background: #fbfaff;
+}
+
+.workspace-calendar-day.today {
+  border-color: #93b7e9;
+  background: #f5f9ff;
+}
+
+.workspace-calendar-day > span {
+  color: #777393;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.workspace-calendar-day a {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-radius: 12px;
+  background: #fff;
+  color: #343856;
+}
+
+.workspace-calendar-day a strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.workspace-calendar-day a small,
+.workspace-calendar-day em {
+  color: #9d98b7;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.workspace-calendar-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+
+.workspace-calendar-upcoming,
+.workspace-calendar-create {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #eeeaf7;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.workspace-calendar-upcoming > strong,
+.workspace-calendar-create > strong {
+  color: #303455;
+  font-size: 17px;
+}
+
+.workspace-calendar-create select,
+.workspace-calendar-create input,
+.workspace-calendar-create button {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.workspace-calendar-create button {
+  background: #303455;
+  color: #fff;
+}
+
+.workspace-calendar-create button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .project-overview-shell .workspace-catalog-main,
 .project-detail-main {
   height: calc(100vh / var(--app-scale));
@@ -900,6 +1215,36 @@ body.app-theme select {
   font-weight: 800;
 }
 
+.meeting-ai-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.meeting-ai-source-list span,
+.meeting-ai-unsupported {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.meeting-ai-source-list span {
+  background: rgba(255, 255, 255, 0.64);
+  color: #5a5478;
+}
+
+.meeting-ai-unsupported {
+  width: fit-content;
+  margin-top: 8px;
+  background: #fff1f1;
+  color: #d64545;
+}
+
 .chat-input-row {
   display: flex;
   gap: 12px;
@@ -1242,13 +1587,261 @@ body.app-theme select {
   color: #a7a2bd;
 }
 
+.project-operations-section,
+.project-kanban-section {
+  gap: 16px;
+}
+
+.project-list-head span {
+  color: #9b96b6;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.project-operation-toolbar,
+.project-acl-add {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(140px, 0.8fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.project-operation-toolbar label,
+.project-acl-add label {
+  display: grid;
+  gap: 7px;
+  color: #77728f;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.project-operation-toolbar select,
+.project-acl-add select,
+.project-task-form input,
+.project-task-form select,
+.project-task-form textarea,
+.project-kanban-card-actions select {
+  min-width: 0;
+  border: 1px solid #e5e1f0;
+  border-radius: 14px;
+  background: #fff;
+  color: #34375b;
+  font: inherit;
+  font-weight: 800;
+  outline: none;
+}
+
+.project-operation-toolbar select,
+.project-acl-add select,
+.project-task-form input,
+.project-task-form select {
+  height: 44px;
+  padding: 0 12px;
+}
+
+.project-operation-danger,
+.project-acl-add button,
+.project-task-form button,
+.project-kanban-card-actions button {
+  height: 44px;
+  border: 0;
+  border-radius: 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.project-operation-danger,
+.project-kanban-card-actions button {
+  background: #fff1f1;
+  color: #d64545;
+}
+
+.project-acl-add button,
+.project-task-form button {
+  background: #282b49;
+  color: #fff;
+}
+
+.project-acl-add button:disabled,
+.project-task-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.project-acl-note {
+  padding: 12px 14px;
+  border: 1px solid #ebe7f5;
+  border-radius: 16px;
+  background: #faf9fd;
+  color: #79738f;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.project-acl-list {
+  display: grid;
+  gap: 8px;
+}
+
+.project-acl-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px 84px;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid #f0edf8;
+}
+
+.project-acl-row div {
+  min-width: 0;
+}
+
+.project-acl-row strong,
+.project-kanban-card strong {
+  display: block;
+  color: #34375b;
+  font-weight: 900;
+}
+
+.project-acl-row span {
+  display: block;
+  margin-top: 4px;
+  color: #9f9ab5;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-acl-row select,
+.project-kanban-card-actions select {
+  height: 38px;
+  padding: 0 8px;
+}
+
+.project-acl-row button {
+  height: 38px;
+  border: 0;
+  border-radius: 12px;
+  background: #fff1f1;
+  color: #d64545;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.project-acl-row button.project-acl-restore {
+  background: #eaf8ef;
+  color: #2d9d5c;
+}
+
+.project-task-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.8fr) 140px minmax(160px, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.project-task-form textarea {
+  grid-column: 1 / -2;
+  min-height: 78px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.project-kanban-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 300px;
+}
+
+.project-kanban-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #ece8f5;
+  border-radius: 18px;
+  background: #fbfafd;
+}
+
+.project-kanban-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #34375b;
+}
+
+.project-kanban-column-head span {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #eef5ff;
+  color: #3d74bd;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.project-kanban-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.project-kanban-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #eeeaf6;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.project-kanban-card p {
+  margin: 0;
+  color: #827c96;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.project-kanban-meta,
+.project-kanban-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-kanban-meta span {
+  color: #9c96b1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.project-kanban-card-actions button {
+  width: 54px;
+  height: 38px;
+}
+
 .project-overview-side {
-  min-height: 0;
+  position: sticky;
+  top: 28px;
+  align-self: start;
+  min-height: 520px;
+  height: calc((100vh / var(--app-scale)) - 96px);
 }
 
 .project-side-block.ask {
   height: 100%;
   min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 20px;
@@ -1309,7 +1902,7 @@ body.app-theme select {
 
 .project-chat-history {
   flex: 1;
-  min-height: 0;
+  min-height: 180px;
   overflow-y: auto;
   display: grid;
   gap: 12px;
@@ -1367,12 +1960,13 @@ body.app-theme select {
 }
 
 .project-chat-form {
-  position: sticky;
-  bottom: 0;
+  flex: 0 0 auto;
   display: flex;
   gap: 12px;
-  padding-top: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 26%);
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid #f0edf8;
+  background: #fff;
 }
 
 .project-chat-form input {
@@ -3297,6 +3891,74 @@ body.app-theme select {
   min-height: 96px;
 }
 
+.project-overview-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.project-overview-actions .secondary,
+.project-overview-actions .primary {
+  min-height: 54px;
+  padding: 0 18px;
+  font-size: 16px;
+}
+
+.project-overview-actions .primary {
+  border: 0;
+  background: linear-gradient(135deg, #6b5cf6, #5a47de);
+  color: #fff;
+}
+
+.project-settings-modal {
+  gap: 18px;
+}
+
+.project-settings-danger {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #ffd5cc;
+  border-radius: 18px;
+  background: #fff7f5;
+}
+
+.project-settings-danger strong {
+  color: #8f3f2e;
+  font-size: 18px;
+}
+
+.project-settings-danger p {
+  margin: 0;
+  color: #9b6658;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.project-settings-danger input {
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid #efc3b8;
+  border-radius: 14px;
+  background: #fff;
+  color: #543b35;
+}
+
+.project-settings-danger button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  background: #c14d39;
+  color: #fff;
+  font-weight: 900;
+}
+
+.project-settings-danger button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
 .report-agent-page {
   padding: 20px;
   overflow-y: auto;
@@ -3797,6 +4459,118 @@ body.app-theme select {
   font-weight: 900;
 }
 
+.report-agent-candidate-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #e6e0f1;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 40px rgba(65, 57, 98, 0.1);
+}
+
+.report-agent-candidate-head,
+.report-agent-report-candidate-top,
+.report-agent-task-candidate-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report-agent-candidate-head strong,
+.report-agent-report-candidate-top strong,
+.report-agent-task-candidate-top strong {
+  color: #25283f;
+  font-weight: 900;
+}
+
+.report-agent-candidate-head p,
+.report-agent-report-candidate p,
+.report-agent-candidate-gap {
+  margin: 4px 0 0;
+  color: #858098;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.report-agent-candidate-head span,
+.report-agent-report-candidate-top span,
+.report-agent-task-candidate-top span {
+  color: #9b96b2;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.report-agent-candidate-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.report-agent-candidate-actions button,
+.report-agent-report-candidate button,
+.report-agent-task-candidate button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: #282b49;
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.report-agent-report-candidate,
+.report-agent-task-candidate {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #ece8f5;
+  border-radius: 18px;
+  background: #fbfafd;
+}
+
+.report-agent-report-candidate button:disabled,
+.report-agent-task-candidate button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.report-agent-task-candidates {
+  display: grid;
+  gap: 10px;
+}
+
+.report-agent-task-candidate label {
+  display: grid;
+  gap: 6px;
+}
+
+.report-agent-task-candidate label span {
+  color: #77728f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.report-agent-task-candidate input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid #e5e0ef;
+  border-radius: 12px;
+  padding: 0 10px;
+  color: #2d3049;
+  font: inherit;
+  font-weight: 800;
+  outline: none;
+}
+
+.report-agent-task-candidate-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 8px;
+}
+
 .report-agent-commit-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -4037,11 +4811,17 @@ body.app-theme select {
 
   .project-overview-content,
   .project-overview-center,
+  .project-overview-side,
   .project-side-block.ask,
   .meeting-prejoin-camera-stage,
   .lk-live-room-frame,
   .report-agent-frame {
     min-height: auto;
+  }
+
+  .project-overview-side {
+    position: static;
+    height: auto;
   }
 
   .report-agent-side {

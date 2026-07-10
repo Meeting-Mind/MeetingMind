@@ -17,7 +17,36 @@ type MeetingAiAskResponse = {
 };
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
+type MeetingParticipantState = {
+  id: string;
+  meetingKey: string;
+  name: string;
+  email: string;
+  role: "HOST" | "EDITOR" | "VIEWER";
+  accessStatus: "ACTIVE" | "REVOKED";
+  participantType: "member" | "guest";
+};
+type ProjectTaskState = {
+  id: string;
+  title: string;
+  description: string;
+  status: "TODO" | "IN_PROGRESS" | "DONE";
+  assignee: string;
+  dueDate: string;
+  meetingKey: string | null;
+  sourceCandidateId: string | null;
+};
+type TeamMemberState = {
+  name: string;
+  email: string;
+  role: string;
+  since: string;
+  access: string;
+  rank: string;
+  status: "active" | "away";
+};
 type MeetingSort = "recent" | "oldest" | "state";
+type TaskStatus = ProjectTaskState["status"];
 
 type ProjectKnowledge = {
   finalDecision: string;
@@ -198,6 +227,22 @@ function buildProjectView(
   };
 }
 
+function buildMeetingKey(projectName: string, meetingIndex: string) {
+  return `${projectName}:${meetingIndex}`;
+}
+
+function buildDefaultMeetingParticipants(members: TeamMemberState[], meetingKey: string): MeetingParticipantState[] {
+  return members.slice(0, 3).map((member, index) => ({
+    id: `${meetingKey}-${member.email}`,
+    meetingKey,
+    name: member.name,
+    email: member.email,
+    role: index === 0 ? "HOST" : index === 1 ? "EDITOR" : "VIEWER",
+    accessStatus: "ACTIVE",
+    participantType: "member"
+  }));
+}
+
 function getMeetingDestinationForSpace(space: WorkspaceData["workspaceHome"]["spaces"][number], meeting: ProjectMeeting) {
   const path = meeting.state === "예정" ? "/live-meeting" : "/report-agent";
   const params = new URLSearchParams({
@@ -212,16 +257,49 @@ function getMeetingDestinationForSpace(space: WorkspaceData["workspaceHome"]["sp
 
 export function ProjectOverviewPage({
   data,
+  onDeleteProject,
+  meetingParticipants,
+  onAddMeetingParticipant,
   projectMeetings,
+  projectMembers,
+  projectTasks,
   spaces,
   onCreateMeeting,
-  onCreateProject
+  onCreateProject,
+  onCreateProjectTask,
+  onDeleteMeeting,
+  onDeleteProjectTask,
+  onMoveProjectTask,
+  onUpdateMeetingParticipant,
+  onUpdateMeetingStatus,
+  onUpdateProject
 }: {
   data: WorkspaceData["projectOverview"];
+  onDeleteProject?: (spaceId: string) => void;
+  meetingParticipants: Record<string, MeetingParticipantState[]>;
+  onAddMeetingParticipant?: (
+    projectName: string,
+    meetingIndex: string,
+    participant: Pick<MeetingParticipantState, "email" | "name" | "role" | "participantType">
+  ) => void;
   projectMeetings: Record<string, ProjectMeeting[]>;
+  projectMembers: Record<string, TeamMemberState[]>;
+  projectTasks: Record<string, ProjectTaskState[]>;
   spaces: WorkspaceData["workspaceHome"]["spaces"];
   onCreateMeeting?: (projectName: string) => void;
   onCreateProject?: (payload: { name: string; description: string }) => void;
+  onCreateProjectTask?: (projectName: string, task: Omit<ProjectTaskState, "id" | "sourceCandidateId">) => void;
+  onDeleteMeeting?: (projectName: string, meetingIndex: string) => void;
+  onDeleteProjectTask?: (projectName: string, taskId: string) => void;
+  onMoveProjectTask?: (projectName: string, taskId: string, status: TaskStatus) => void;
+  onUpdateMeetingParticipant?: (
+    projectName: string,
+    meetingIndex: string,
+    participantId: string,
+    updates: Pick<MeetingParticipantState, "accessStatus" | "role">
+  ) => void;
+  onUpdateMeetingStatus?: (projectName: string, meetingIndex: string, state: ProjectMeeting["state"]) => void;
+  onUpdateProject?: (spaceId: string, payload: { name: string; description: string }) => void;
 }) {
   useEffect(() => {
     document.body.className = "app-theme project-overview-body";
@@ -251,8 +329,20 @@ export function ProjectOverviewPage({
   const [error, setError] = useState("");
   const [modelLabel, setModelLabel] = useState("");
   const [isMeetingsModalOpen, setIsMeetingsModalOpen] = useState(false);
+  const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
+  const [projectTitle, setProjectTitle] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState("");
   const [meetingSearch, setMeetingSearch] = useState("");
   const [meetingSort, setMeetingSort] = useState<MeetingSort>("recent");
+  const [selectedMeetingIndex, setSelectedMeetingIndex] = useState("");
+  const [selectedMemberEmail, setSelectedMemberEmail] = useState("");
+  const [selectedMemberRole, setSelectedMemberRole] = useState<MeetingParticipantState["role"]>("VIEWER");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [taskAssignee, setTaskAssignee] = useState("");
+  const [taskDueDate, setTaskDueDate] = useState("2026-07-20");
+  const [taskMeetingIndex, setTaskMeetingIndex] = useState("");
 
   useEffect(() => {
     if (!viewData) {
@@ -268,6 +358,13 @@ export function ProjectOverviewPage({
     setInput("");
     setError("");
     setModelLabel("");
+    setProjectTitle(viewData.selectedSpace.name);
+    setProjectDescription(viewData.selectedSpace.description);
+    setDeleteConfirm("");
+    setSelectedMeetingIndex(viewData.meetings[0]?.index ?? "");
+    setTaskMeetingIndex(viewData.meetings[0]?.index ?? "");
+    setSelectedMemberEmail("");
+    setTaskAssignee("");
   }, [viewData?.selectedSpace.name]);
 
   const payloadSource = useMemo(() => {
@@ -359,6 +456,21 @@ export function ProjectOverviewPage({
   const contextMeeting = viewData.meetings.find((meeting) => meeting.state === "보고서 생성됨") ?? viewData.meetings[0] ?? null;
   const contextMeetingTag = contextMeeting ? `관련 ${contextMeeting.index.replace("#", "")}회차` : "프로젝트 초기 상태";
   const canSubmit = input.trim().length > 0 && !loading;
+  const selectedProjectName = viewData.selectedSpace.name;
+  const selectedMeeting = viewData.meetings.find((meeting) => meeting.index === selectedMeetingIndex) ?? contextMeeting;
+  const selectedMeetingKey = selectedMeeting ? buildMeetingKey(selectedProjectName, selectedMeeting.index) : "";
+  const members = projectMembers[selectedProjectName] ?? [];
+  const defaultParticipants = selectedMeetingKey ? buildDefaultMeetingParticipants(members, selectedMeetingKey) : [];
+  const visibleParticipants = selectedMeetingKey
+    ? meetingParticipants[selectedMeetingKey] ?? defaultParticipants
+    : [];
+  const selectedProjectTasks = projectTasks[selectedProjectName] ?? [];
+  const availableMember = members.find((member) => member.email === selectedMemberEmail) ?? members[0] ?? null;
+  const taskColumns: Array<{ key: TaskStatus; label: string }> = [
+    { key: "TODO", label: "Todo" },
+    { key: "IN_PROGRESS", label: "In progress" },
+    { key: "DONE", label: "Done" }
+  ];
 
   async function askProjectAi(question: string) {
     const trimmed = question.trim();
@@ -422,6 +534,97 @@ export function ProjectOverviewPage({
     void askProjectAi(input);
   }
 
+  function handleProjectSettingsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!viewData || !projectTitle.trim()) {
+      return;
+    }
+
+    onUpdateProject?.(viewData.selectedSpace.id, {
+      name: projectTitle,
+      description: projectDescription
+    });
+    setIsProjectSettingsOpen(false);
+  }
+
+  function handleDeleteProject() {
+    if (!viewData) {
+      return;
+    }
+
+    if (deleteConfirm !== viewData.selectedSpace.name) {
+      return;
+    }
+
+    onDeleteProject?.(viewData.selectedSpace.id);
+  }
+
+  function handleAddParticipant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMeeting || !availableMember) {
+      return;
+    }
+
+    onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+      email: availableMember.email,
+      name: availableMember.name,
+      role: selectedMemberRole,
+      participantType: "member"
+    });
+    setSelectedMemberEmail("");
+    setSelectedMemberRole("VIEWER");
+  }
+
+  function handleParticipantRoleChange(participant: MeetingParticipantState, role: MeetingParticipantState["role"]) {
+    if (!selectedMeeting) {
+      return;
+    }
+
+    onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+      email: participant.email,
+      name: participant.name,
+      role,
+      participantType: participant.participantType
+    });
+  }
+
+  function handleParticipantAccessChange(participant: MeetingParticipantState, accessStatus: MeetingParticipantState["accessStatus"]) {
+    if (!selectedMeeting) {
+      return;
+    }
+
+    onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+      email: participant.email,
+      name: participant.name,
+      role: participant.role,
+      participantType: participant.participantType
+    });
+    onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
+      accessStatus,
+      role: participant.role
+    });
+  }
+
+  function handleCreateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!taskTitle.trim()) {
+      return;
+    }
+
+    const meetingKey = taskMeetingIndex ? buildMeetingKey(selectedProjectName, taskMeetingIndex) : null;
+    onCreateProjectTask?.(selectedProjectName, {
+      title: taskTitle.trim(),
+      description: taskDescription.trim() || "상세 설명이 아직 작성되지 않았습니다.",
+      status: "TODO",
+      assignee: taskAssignee || "미지정",
+      dueDate: taskDueDate,
+      meetingKey
+    });
+    setTaskTitle("");
+    setTaskDescription("");
+    setTaskAssignee("");
+  }
+
   return (
     <div className="workspace-catalog-shell project-overview-shell">
       <WorkspaceSidebar
@@ -446,6 +649,9 @@ export function ProjectOverviewPage({
           </div>
 
           <div className="project-overview-actions">
+            <button className="secondary" onClick={() => setIsProjectSettingsOpen(true)} type="button">
+              프로젝트 설정
+            </button>
             <button className="primary" onClick={() => onCreateMeeting?.(viewData.selectedSpace.name)} type="button">
               + 새 회의 만들기
             </button>
@@ -508,6 +714,221 @@ export function ProjectOverviewPage({
                     <p>우측 상단의 새 회의 만들기 버튼으로 첫 회의를 생성해보세요.</p>
                   </div>
                 )}
+              </div>
+            </section>
+
+            <section className="project-list-section project-operations-section">
+              <div className="project-list-head">
+                <strong>회의 운영 / 접근 제어</strong>
+                <span>local state · target API 대기</span>
+              </div>
+
+              {selectedMeeting ? (
+                <>
+                  <div className="project-operation-toolbar">
+                    <label>
+                      <span>대상 회의</span>
+                      <select
+                        onChange={(event) => setSelectedMeetingIndex(event.target.value)}
+                        value={selectedMeeting.index}
+                      >
+                        {viewData.meetings.map((meeting) => (
+                          <option key={`meeting-select-${meeting.index}`} value={meeting.index}>
+                            {meeting.index} {meeting.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>회의 상태</span>
+                      <select
+                        onChange={(event) =>
+                          onUpdateMeetingStatus?.(
+                            viewData.selectedSpace.name,
+                            selectedMeeting.index,
+                            event.target.value as ProjectMeeting["state"]
+                          )
+                        }
+                        value={selectedMeeting.state}
+                      >
+                        <option value="예정">예정</option>
+                        <option value="완료">완료</option>
+                        <option value="보고서 생성됨">보고서 생성됨</option>
+                      </select>
+                    </label>
+
+                    <button
+                      className="project-operation-danger"
+                      onClick={() => onDeleteMeeting?.(viewData.selectedSpace.name, selectedMeeting.index)}
+                      type="button"
+                    >
+                      회의 삭제
+                    </button>
+                  </div>
+
+                  <div className="project-acl-note">
+                    default-deny 기준 화면입니다. 명시 참여자만 회의 접근 대상으로 보이며, 실제 판정과 감사 기록은 백엔드 연결 후 처리합니다.
+                  </div>
+
+                  <form className="project-acl-add" onSubmit={handleAddParticipant}>
+                    <label>
+                      <span>멤버</span>
+                      <select
+                        onChange={(event) => setSelectedMemberEmail(event.target.value)}
+                        value={selectedMemberEmail}
+                      >
+                        <option value="">멤버 선택</option>
+                        {members.map((member) => (
+                          <option key={`member-option-${member.email}`} value={member.email}>
+                            {member.name} · {member.role}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>회의 role</span>
+                      <select
+                        onChange={(event) => setSelectedMemberRole(event.target.value as MeetingParticipantState["role"])}
+                        value={selectedMemberRole}
+                      >
+                        <option value="VIEWER">VIEWER</option>
+                        <option value="EDITOR">EDITOR</option>
+                        <option value="HOST">HOST</option>
+                      </select>
+                    </label>
+                    <button disabled={!selectedMemberEmail} type="submit">권한 부여</button>
+                  </form>
+
+                  <div className="project-acl-list">
+                    {visibleParticipants.map((participant) => (
+                      <div key={participant.id} className="project-acl-row">
+                        <div>
+                          <strong>{participant.name}</strong>
+                          <span>{participant.email}</span>
+                        </div>
+                        <select
+                          aria-label={`${participant.name} 회의 role`}
+                          onChange={(event) =>
+                            handleParticipantRoleChange(participant, event.target.value as MeetingParticipantState["role"])
+                          }
+                          value={participant.role}
+                        >
+                          <option value="VIEWER">VIEWER</option>
+                          <option value="EDITOR">EDITOR</option>
+                          <option value="HOST">HOST</option>
+                        </select>
+                        <button
+                          className={participant.accessStatus === "ACTIVE" ? "secondary" : "project-acl-restore"}
+                          onClick={() =>
+                            handleParticipantAccessChange(
+                              participant,
+                              participant.accessStatus === "ACTIVE" ? "REVOKED" : "ACTIVE"
+                            )
+                          }
+                          type="button"
+                        >
+                          {participant.accessStatus === "ACTIVE" ? "회수" : "복구"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="project-flow-empty">
+                  <strong>회의 ACL을 설정할 회의가 없습니다</strong>
+                  <p>먼저 이 프로젝트의 회의를 생성하세요.</p>
+                </div>
+              )}
+            </section>
+
+            <section className="project-list-section project-kanban-section">
+              <div className="project-list-head">
+                <strong>프로젝트 칸반</strong>
+                <span>카드 {selectedProjectTasks.length}개</span>
+              </div>
+
+              <form className="project-task-form" onSubmit={handleCreateTask}>
+                <input
+                  aria-label="태스크 제목"
+                  onChange={(event) => setTaskTitle(event.target.value)}
+                  placeholder="태스크 제목"
+                  type="text"
+                  value={taskTitle}
+                />
+                <input
+                  aria-label="담당자"
+                  onChange={(event) => setTaskAssignee(event.target.value)}
+                  placeholder="담당자"
+                  type="text"
+                  value={taskAssignee}
+                />
+                <input
+                  aria-label="마감일"
+                  onChange={(event) => setTaskDueDate(event.target.value)}
+                  type="date"
+                  value={taskDueDate}
+                />
+                <select
+                  aria-label="연결 회의"
+                  onChange={(event) => setTaskMeetingIndex(event.target.value)}
+                  value={taskMeetingIndex}
+                >
+                  <option value="">회의 연결 없음</option>
+                  {viewData.meetings.map((meeting) => (
+                    <option key={`task-meeting-${meeting.index}`} value={meeting.index}>
+                      {meeting.index} {meeting.title}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  aria-label="태스크 설명"
+                  onChange={(event) => setTaskDescription(event.target.value)}
+                  placeholder="설명"
+                  value={taskDescription}
+                />
+                <button disabled={!taskTitle.trim()} type="submit">카드 생성</button>
+              </form>
+
+              <div className="project-kanban-board">
+                {taskColumns.map((column) => (
+                  <div key={column.key} className="project-kanban-column">
+                    <div className="project-kanban-column-head">
+                      <strong>{column.label}</strong>
+                      <span>{selectedProjectTasks.filter((task) => task.status === column.key).length}</span>
+                    </div>
+                    <div className="project-kanban-cards">
+                      {selectedProjectTasks
+                        .filter((task) => task.status === column.key)
+                        .map((task) => (
+                          <article key={task.id} className="project-kanban-card">
+                            <strong>{task.title}</strong>
+                            <p>{task.description}</p>
+                            <div className="project-kanban-meta">
+                              <span>{task.assignee}</span>
+                              <span>{task.dueDate}</span>
+                            </div>
+                            <div className="project-kanban-card-actions">
+                              <select
+                                aria-label={`${task.title} 상태 변경`}
+                                onChange={(event) =>
+                                  onMoveProjectTask?.(viewData.selectedSpace.name, task.id, event.target.value as TaskStatus)
+                                }
+                                value={task.status}
+                              >
+                                <option value="TODO">TODO</option>
+                                <option value="IN_PROGRESS">IN_PROGRESS</option>
+                                <option value="DONE">DONE</option>
+                              </select>
+                              <button onClick={() => onDeleteProjectTask?.(viewData.selectedSpace.name, task.id)} type="button">
+                                삭제
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
 
@@ -637,6 +1058,66 @@ export function ProjectOverviewPage({
                 </Link>
               ))}
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isProjectSettingsOpen ? (
+        <div className="project-meetings-modal-backdrop" role="presentation">
+          <section
+            aria-labelledby="project-settings-modal-title"
+            aria-modal="true"
+            className="project-meetings-modal project-settings-modal"
+            role="dialog"
+          >
+            <div className="project-meetings-modal-top">
+              <div>
+                <p className="project-meetings-modal-kicker">Project Settings</p>
+                <h3 id="project-settings-modal-title">프로젝트 정보</h3>
+              </div>
+              <button
+                aria-label="프로젝트 설정 닫기"
+                className="project-meetings-modal-close"
+                onClick={() => setIsProjectSettingsOpen(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+
+            <form className="workspace-project-modal-form" onSubmit={handleProjectSettingsSubmit}>
+              <label className="workspace-project-field">
+                <span>프로젝트명</span>
+                <input onChange={(event) => setProjectTitle(event.target.value)} type="text" value={projectTitle} />
+              </label>
+              <label className="workspace-project-field">
+                <span>설명</span>
+                <textarea onChange={(event) => setProjectDescription(event.target.value)} value={projectDescription} />
+              </label>
+              <div className="workspace-project-modal-actions">
+                <button className="secondary" onClick={() => setIsProjectSettingsOpen(false)} type="button">
+                  취소
+                </button>
+                <button className="primary" disabled={!projectTitle.trim()} type="submit">
+                  저장
+                </button>
+              </div>
+            </form>
+
+            <section className="project-settings-danger">
+              <strong>프로젝트 삭제</strong>
+              <p>오너 전용 작업입니다. 현재 프론트엔드에서는 local state에서 제외하고, 실제 삭제는 target API 연결 후 서버 권한 검증을 따릅니다.</p>
+              <input
+                aria-label="삭제 확인 프로젝트명"
+                onChange={(event) => setDeleteConfirm(event.target.value)}
+                placeholder={viewData.selectedSpace.name}
+                type="text"
+                value={deleteConfirm}
+              />
+              <button disabled={deleteConfirm !== viewData.selectedSpace.name} onClick={handleDeleteProject} type="button">
+                프로젝트 삭제
+              </button>
+            </section>
           </section>
         </div>
       ) : null}
