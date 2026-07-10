@@ -21,6 +21,38 @@ type RoomTokenResponse = {
   name: string;
 };
 
+type SttStreamStartResponse = {
+  sessionId: string;
+  egressId: string;
+};
+
+type SttTranscriptEntry = {
+  time: string;
+  speaker: string;
+  text: string;
+};
+
+// ponytail: 실제 도메인 사전/키워드 추출 API 붙기 전까지 하드코딩된 목록으로 간단히 하이라이트.
+const STT_KEYWORDS = ["RAG", "Vector DB", "Embedding", "pgvector", "Chunking", "LiveKit", "gRPC", "STT"];
+const STT_KEYWORD_PATTERN = new RegExp(
+  `(${STT_KEYWORDS.map((keyword) => keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
+  "gi"
+);
+
+function renderHighlightedText(text: string) {
+  const parts = text.split(STT_KEYWORD_PATTERN);
+
+  return parts.map((part, index) =>
+    STT_KEYWORDS.some((keyword) => keyword.toLowerCase() === part.toLowerCase()) ? (
+      <span className="lk-live-room-keyword-tag" key={index}>
+        {part}
+      </span>
+    ) : (
+      <span key={index}>{part}</span>
+    )
+  );
+}
+
 type ParticipantCard = {
   sid: string;
   identity: string;
@@ -99,6 +131,23 @@ function SparkGlyph() {
   return (
     <svg aria-hidden="true" fill="none" height="20" viewBox="0 0 24 24" width="20">
       <path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function BookmarkGlyph({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg aria-hidden="true" fill={filled ? "currentColor" : "none"} height="16" viewBox="0 0 24 24" width="16">
+      <path d="M6 3.5h12a1 1 0 0 1 1 1V21l-7-4-7 4V4.5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function SearchGlyph() {
+  return (
+    <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="2" />
+      <path d="m20 20-3.6-3.6" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
     </svg>
   );
 }
@@ -275,7 +324,11 @@ export function LiveRoomPage({
   const [meetingAiNotice, setMeetingAiNotice] = useState("");
   const [participantCards, setParticipantCards] = useState<ParticipantCard[]>([]);
   const [activeSpeakerSid, setActiveSpeakerSid] = useState<string | null>(null);
-  const [liveTranscriptRows, setLiveTranscriptRows] = useState(meetingAi.transcript.slice(0, 2));
+  const [liveTranscriptRows, setLiveTranscriptRows] = useState<SttTranscriptEntry[]>([]);
+  const [sttSearchQuery, setSttSearchQuery] = useState("");
+  const [bookmarkedKeys, setBookmarkedKeys] = useState<Set<string>>(new Set());
+  const sttSessionIdRef = useRef<string | null>(null);
+  const sttStartedRef = useRef(false);
 
   const participantProfile = useMemo(() => loadParticipantProfile(location.search), [location.search]);
   const roleLookup = useMemo(
@@ -306,23 +359,78 @@ export function LiveRoomPage({
   }, []);
 
   useEffect(() => {
-    if (meetingAi.transcript.length <= 2) {
+    if (!roomReady) {
       return;
     }
 
-    let currentIndex = 2;
-    const intervalId = window.setInterval(() => {
-      setLiveTranscriptRows((previous) => {
-        const nextRow = meetingAi.transcript[currentIndex % meetingAi.transcript.length];
-        currentIndex += 1;
-        return [nextRow, ...previous].slice(0, 6);
-      });
-    }, 2400);
+    const roomName = liveMeeting.roomCode.toLowerCase();
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/stt/room/${encodeURIComponent(roomName)}/transcript`);
+        if (!response.ok || cancelled) {
+          return;
+        }
+        const entries = (await response.json()) as SttTranscriptEntry[];
+        if (!cancelled) {
+          setLiveTranscriptRows([...entries].reverse());
+        }
+      } catch {
+        // ponytail: 폴링 실패는 조용히 무시하고 다음 주기에 재시도.
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(poll, 2500);
 
     return () => {
+      cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [meetingAi.transcript]);
+  }, [roomReady, liveMeeting.roomCode]);
+
+  async function startSttStream(roomName: string, trackId: string, speaker: string) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/stt/stream/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomName, trackId, speaker })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const data = (await response.json()) as SttStreamStartResponse;
+      sttSessionIdRef.current = data.sessionId;
+    } catch (error) {
+      console.warn("[LiveRoomPage] STT stream start failed", error);
+    }
+  }
+
+  function stopSttStream() {
+    const sessionId = sttSessionIdRef.current;
+    sttSessionIdRef.current = null;
+
+    if (!sessionId) {
+      return;
+    }
+
+    void fetch(`${API_BASE_URL}/api/stt/stream/${sessionId}/stop`, { method: "POST" }).catch(() => {});
+  }
+
+  function toggleBookmark(key: string) {
+    setBookmarkedKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -400,7 +508,13 @@ export function LiveRoomPage({
           .on(RoomEvent.TrackUnsubscribed, () => syncSnapshot(room))
           .on(RoomEvent.TrackMuted, () => syncSnapshot(room))
           .on(RoomEvent.TrackUnmuted, () => syncSnapshot(room))
-          .on(RoomEvent.LocalTrackPublished, () => syncSnapshot(room))
+          .on(RoomEvent.LocalTrackPublished, (publication) => {
+            syncSnapshot(room);
+            if (!sttStartedRef.current && publication.source === Track.Source.Microphone && publication.trackSid) {
+              sttStartedRef.current = true;
+              void startSttStream(liveMeeting.roomCode.toLowerCase(), publication.trackSid, participantProfile.name);
+            }
+          })
           .on(RoomEvent.LocalTrackUnpublished, () => syncSnapshot(room))
           .on(RoomEvent.ActiveSpeakersChanged, () => syncSnapshot(room))
           .on(RoomEvent.Disconnected, () => syncSnapshot(room));
@@ -441,6 +555,8 @@ export function LiveRoomPage({
       if (room) {
         void room.disconnect();
       }
+      sttStartedRef.current = false;
+      stopSttStream();
     };
   }, [liveMeeting.roomCode, participantProfile, roleLookup]);
 
@@ -506,6 +622,11 @@ export function LiveRoomPage({
   const micEnabled = localParticipant?.isMicrophoneEnabled ?? false;
   const cameraEnabled = localParticipant?.isCameraEnabled ?? false;
   const sharingEnabled = localParticipant?.isScreenShareEnabled ?? false;
+
+  const trimmedSttQuery = sttSearchQuery.trim().toLowerCase();
+  const visibleTranscriptRows = trimmedSttQuery
+    ? liveTranscriptRows.filter((row) => `${row.speaker} ${row.text}`.toLowerCase().includes(trimmedSttQuery))
+    : liveTranscriptRows;
 
   return (
     <div className="lk-live-room-shell">
@@ -604,24 +725,47 @@ export function LiveRoomPage({
             </div>
 
             <div className="lk-live-room-sidebar-list">
-              {liveTranscriptRows.map((row, index) => (
-                <article key={`${row.time}-${row.speaker}-${index}`} className={`lk-live-room-sidebar-feed-item ${index === 0 ? "latest" : ""}`}>
-                  <div className="lk-live-room-sidebar-feed-meta">
-                    <span>{row.time}</span>
-                    <strong>{row.speaker}</strong>
-                  </div>
-                  <p>{row.text}</p>
-                </article>
-              ))}
+              {visibleTranscriptRows.length === 0 ? (
+                <p className="lk-live-room-sidebar-empty">
+                  {sttSearchQuery.trim() ? "검색 결과가 없습니다." : "STT 연결 대기 중입니다."}
+                </p>
+              ) : (
+                visibleTranscriptRows.map((row, index) => {
+                  const rowKey = `${row.time}-${row.speaker}-${index}`;
+                  const bookmarked = bookmarkedKeys.has(rowKey);
+
+                  return (
+                    <article key={rowKey} className={`lk-live-room-sidebar-feed-item ${index === 0 ? "latest" : ""}`}>
+                      <button
+                        aria-label={bookmarked ? "북마크 해제" : "북마크"}
+                        className={`lk-live-room-bookmark ${bookmarked ? "is-active" : ""}`}
+                        onClick={() => toggleBookmark(rowKey)}
+                        type="button"
+                      >
+                        <BookmarkGlyph filled={bookmarked} />
+                      </button>
+                      <div className="lk-live-room-sidebar-feed-meta">
+                        <span>{row.time}</span>
+                        <strong>{row.speaker}</strong>
+                      </div>
+                      <p>{renderHighlightedText(row.text)}</p>
+                    </article>
+                  );
+                })
+              )}
             </div>
 
-            <div className="lk-live-room-sidebar-card">
-              <strong>Domain Dictionary</strong>
-              <div className="lk-live-room-dictionary-term">
-                <h4>pgvector</h4>
-                <p>벡터 검색을 위한 PostgreSQL 확장</p>
-              </div>
-            </div>
+            <form className="lk-live-room-sidebar-search" onSubmit={(event) => event.preventDefault()}>
+              <input
+                onChange={(event) => setSttSearchQuery(event.target.value)}
+                placeholder="회의 기록 검색..."
+                type="text"
+                value={sttSearchQuery}
+              />
+              <span aria-hidden="true" className="lk-live-room-sidebar-search-icon">
+                <SearchGlyph />
+              </span>
+            </form>
           </aside>
         </main>
 
