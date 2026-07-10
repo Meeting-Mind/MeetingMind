@@ -8,6 +8,7 @@
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
 - 영속 DB, 인증, 실제 STT, pgvector RAG는 아직 없다.
+- 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Target Architecture
 
@@ -15,6 +16,7 @@
 - Backend: Space, Meeting, Membership, Report, Action Item, Knowledge API를 단계적으로 추가한다.
 - AI: Meeting AI 컨텍스트 제한을 유지하고, 이후 retrieval 계층을 별도 모듈로 분리한다.
 - Data: PostgreSQL + pgvector를 기본 영속 저장소로 설계하고, 파일성 원문/보고서는 S3 연계를 고려한다.
+- Requirements: 용어는 `requirements/glossary.md`, 권한은 `requirements/permissions.md`, 상태값은 `requirements/status-values.md`, 성능/토큰 목표는 `requirements/performance.md`를 따른다.
 
 ## Technical Decisions
 
@@ -26,9 +28,22 @@
 | Realtime meeting | LiveKit | 현재 토큰 발급 코드와 `livekit-client` 의존성이 존재한다. | WebRTC 직접 구현 |
 | Vector search | PostgreSQL + pgvector | 기획서와 일치하고 관계형 권한 모델과 같이 운용하기 좋다. | Pinecone, OpenSearch |
 | File storage | S3 | STT 원문/보고서/첨부 파일 분리에 적합하다. | DB BLOB |
+| DB migration | Flyway SQL migration | Spring Boot 통합이 단순하고 PostgreSQL/pgvector extension, index, partial unique 제약을 SQL로 명확히 리뷰할 수 있다. | Liquibase, 수동 SQL 적용 |
+
+### Data Migration Discovery
+
+- 2026-07-09 기준 backend에는 `spring-boot-starter-data-jdbc`, `spring-boot-starter-data-jpa`, PostgreSQL driver, Flyway, Liquibase 의존성이 없다.
+- 2026-07-09 기준 `backend/src/main/resources/application.yml`에는 datasource 또는 migration 설정이 없다.
+- migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
+- schema migration은 SQL 파일로 작성한다. 예상 순서는 `V1__create_users_spaces.sql`, `V2__create_meetings_acl.sql`, `V3__create_transcripts_reports.sql`, `V4__create_knowledge_embeddings.sql`이다.
+- PostgreSQL datasource 설정은 후속 schema 작업에서 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` 환경변수를 기준으로 추가한다.
+- T058은 discovery 문서화 단계이므로 dependency, datasource 설정, 실제 schema 파일은 추가하지 않는다. 해당 변경은 T059 이후 schema 작업에서 수행한다.
 
 ## API Contracts
 
+- 기능별 target API 초안은 `contracts/README.md`에서 라우팅한다.
+- 기존 통합 `contracts/api.md`는 prototype 기록과 과거 통합 초안으로 유지한다.
+- Project Knowledge와 Domain Term 관리는 `contracts/knowledge-api.md`를 기준으로 한다.
 - `GET /api/workspace`
   - 현재: 전체 데모 화면 데이터를 한 번에 반환
   - 목표: Space/Meeting/Report API로 분리
@@ -49,6 +64,7 @@
 
 ## Data Model
 
+- 전체 관계 초안은 `erd.md`에 Mermaid ERD로 기록한다.
 - User: 사용자 식별, 이름, 이메일, 인증 공급자
 - Space: 프로젝트 단위 컨테이너
 - SpaceMember: Space별 멤버십과 역할
@@ -66,8 +82,10 @@
 - AI 서버로 전달하는 컨텍스트는 Backend가 권한 필터링 후 구성하는 것을 목표로 한다.
 - Project AI 구현 시 회의 데이터 retrieval 전에 MeetingParticipant 권한을 적용한다.
 - Transcript, summary, speaker 수정 API는 MeetingParticipant 권한 확인 후 처리한다.
-- Speaker 이름 수정은 `host` 또는 `editor` 권한으로 제한한다.
+- Speaker 이름 수정은 `HOST` 또는 `EDITOR` 권한으로 제한한다.
 - LiveKit 토큰은 짧은 만료 시간을 유지한다.
+- 회의 게스트는 특정 회의의 MeetingParticipant로만 접근하며 Space 전체 권한, Project Knowledge, Project AI 권한을 기본으로 갖지 않는다.
+- Meeting status는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED`를 기준으로 하고, Transcript/Report 후처리 상태는 별도 status로 관리한다.
 
 ## Parallel Work Plan
 
@@ -77,8 +95,8 @@
 | Workstream | Owner | Agent | Scope | Expected Files | Dependencies |
 | --- | --- | --- | --- | --- | --- |
 | Docs/Contracts | TBD | TBD | Open 질문 결정, API 계약, 데이터 모델, 작업 계획 갱신 | `specs/001-meetingmind-core/*` | - |
-| Auth/Login | 사용자(Auth 담당) | Codex | Google OAuth와 자체 회원가입/로그인, Backend 검증 기반 access/refresh token 계약/구현, Frontend 로그인 상태 연결, 보호 route 경계 정의 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `specs/001-meetingmind-core/contracts/api.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/research.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Q-001 decided. Auth API는 `/api/v1/auth/*`로 시작하며 Q-006 전체 API 결정과 분리 |
-| Backend | TBD | TBD | Space/Meeting API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/api.md`, `specs/001-meetingmind-core/data-model.md` | Auth/Login contract, Q-002, Docs/Contracts |
+| Auth/Login | 사용자(Auth 담당) | Codex | Google OAuth와 자체 회원가입/로그인, Backend 검증 기반 access/refresh token 계약/구현, Frontend 로그인 상태 연결, 보호 route 경계 정의 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `specs/001-meetingmind-core/contracts/auth-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/research.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Q-001 decided. Auth API는 `/api/v1/auth/*`로 시작하며 Q-006 전체 API 결정과 분리 |
+| Backend | TBD | TBD | Space/Meeting/Knowledge API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/space-api.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/contracts/kanban-api.md`, `specs/001-meetingmind-core/contracts/knowledge-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/data-model.md` | Auth/Login contract, Q-002, Docs/Contracts |
 | Frontend | TBD | TBD | Project/Meeting 선택 상태, mock fallback 표시, 화면 연동 | `frontend/**` | API 계약 확정, Auth/Login guard 경계 |
 | AI | 사용자 | Codex | 백엔드/프론트엔드 구현 없이 AI 서버에서 RAG chunk 형식, mock/in-memory retriever, 용어 설명, 회의 요약/보고서 생성, 회의별/프로젝트별 챗봇, 태스크 추출 prototype API를 준비한다. Backend 권한 필터 이후 컨텍스트 조립은 target architecture로 유지한다. | `ai/**`, `specs/001-meetingmind-core/*` | Backend 권한 필터, 실제 STT 저장 API, pgvector migration, Frontend 화면 연결은 후속 담당자 작업. 그 전까지 mock 또는 권한 필터링된 prototype context만 사용 |
 | Data | TBD | TBD | PostgreSQL/pgvector 스키마 초안과 migration | `backend/**`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002 |
@@ -87,7 +105,8 @@
 
 - Single-owner files:
   - Auth/Login owner: `frontend/src/components/GoogleLoginModal.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`
-  - `specs/001-meetingmind-core/contracts/api.md`: Docs/Contracts owner가 변경하고 Backend/Frontend/AI가 따른다.
+  - `specs/001-meetingmind-core/contracts/*`: Docs/Contracts owner가 형식과 shared contract를 관리하고, 기능별 owner가 담당 API 파일을 변경한다.
+  - `specs/001-meetingmind-core/contracts/api.md`: legacy snapshot이다. 신규 구현 기준으로 수정하지 않는다.
   - `specs/001-meetingmind-core/data-model.md`: Docs/Contracts 또는 Data owner가 변경하고 Backend가 따른다.
   - migration 파일: Data owner가 순차 생성한다.
 - Shared contracts:
@@ -97,15 +116,15 @@
   - 같은 API endpoint 구현 파일
   - 같은 migration 파일
   - 같은 화면 route/component 파일
-  - `specs/001-meetingmind-core/contracts/api.md`
+  - 같은 `specs/001-meetingmind-core/contracts/*.md` 파일
   - `specs/001-meetingmind-core/data-model.md`
 
 ## Integration Order
 
-1. Q-001 로그인 방식과 Auth API 경계를 확정한다.
-2. Auth/Login owner가 확정된 Auth API, token 전달 방식, Frontend guard 경계에 맞춰 구현한다.
-3. Q-002 회의 권한 등급을 결정한다.
-4. API 계약과 데이터 모델을 확정한다.
+1. `requirements/INDEX.md`에서 작업별 요구사항 문서를 확인한다.
+2. Q-001 로그인 방식과 Auth API 경계는 확정된 기준을 따른다.
+3. 회의 권한 등급은 `HOST`, `EDITOR`, `VIEWER`와 회의 게스트 기준을 따른다.
+4. API 계약과 데이터 모델을 요구사항 용어/상태/권한 기준으로 맞춘다.
 5. 공통 오류 응답, Meeting status, transcript/speaker 계약을 확정한다.
 6. Backend 도메인 모델과 권한 필터를 먼저 구현한다.
 7. AI 담당은 실제 STT/DB를 기다리지 않고 `TranscriptSegment` 유사 mock 데이터에서 RAG chunk를 만드는 adapter와 in-memory retriever를 먼저 구현한다.
@@ -116,7 +135,7 @@
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`
-- Backend: `cd backend && mvn test`
+- Backend: `cd backend && ./gradlew test`
 - AI: `cd ai && python -m compileall app`
 - Manual: 워크스페이스 홈, 회의 대기, 라이브룸, Meeting AI, Report Agent 화면 이동 확인
 

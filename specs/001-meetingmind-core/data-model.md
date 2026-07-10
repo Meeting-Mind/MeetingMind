@@ -2,6 +2,8 @@
 
 # Data Model: MeetingMind Core Prototype
 
+관계 도식은 `erd.md`를 우선 확인한다. 이 문서는 엔티티별 필드, RAG 논리 구조, 권한/보존 규칙을 설명한다.
+
 ## Entity Overview
 
 ### User
@@ -26,7 +28,7 @@ Backend가 발급하는 MeetingMind access token의 subject는 `User.id`다. 사
 - `createdAt`
 - `lastUsedAt`
 
-### RefreshTokenSession
+### AuthSession
 
 - `id`
 - `userId`
@@ -51,7 +53,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `id`
 - `spaceId`
 - `userId`
-- `role`: owner, admin, member
+- `role`: OWNER, ADMIN, MEMBER
 - `joinedAt`
 
 ### Meeting
@@ -62,7 +64,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `scheduledAt`
 - `startedAt`
 - `endedAt`
-- `status`: CREATED, SCHEDULED, LIVE, PROCESSING, COMPLETED, FAILED
+- `status`: SCHEDULED, IN_PROGRESS, ENDED, CANCELED
 - `failureReason`
 - `retentionPolicy`
 
@@ -71,8 +73,11 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `id`
 - `meetingId`
 - `userId`
-- `role`: host, editor, participant, viewer
-- `accessStatus`
+- `role`: HOST, EDITOR, VIEWER
+- `participantType`: member, guest
+- `accessStatus`: ACTIVE, REVOKED
+
+회의 게스트는 SpaceMember가 아닐 수 있지만 특정 회의의 `MeetingParticipant`로 등록된다. 회의 게스트는 지정된 회의 밖의 STT, 보고서, Meeting AI, 회의 파일, Project Knowledge, Project AI에 기본 접근할 수 없다.
 
 ### MeetingSpeaker
 
@@ -96,23 +101,41 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 
 - `id`
 - `meetingId`
+- `status`: CANDIDATE, DRAFT, CONFIRMED
 - `title`
 - `summary`
 - `decisions`
 - `actionItems`
 - `version`
+- `isCurrent`: 회의당 현재 공식 CONFIRMED report는 하나만 true
 - `createdAt`
 
 ### ProjectKnowledge
 
 - `id`
 - `spaceId`
-- `type`: overview, tech_stack, decision, schedule, role, document
+- `type`: report, decision, manual, external
 - `title`
 - `content`
-- `sourceMeetingId`
-- `approvedBy`
+- `sourceMeetingId`: 회의 기반 지식이면 원본 회의 id, 수동/외부 지식이면 null 가능
+- `approvedBy`: 공식 지식 등록/승인 사용자
+- `status`: PUBLISHED, ARCHIVED
+- `embeddingStatus`: PENDING, PROCESSING, COMPLETED, FAILED
+- `embeddingJobId`: 비동기 embedding 재생성 작업 id
+- `createdAt`
 - `updatedAt`
+- `deletedAt`: soft delete 또는 archive 추적 후보
+
+### DomainTerm
+
+- `id`
+- `spaceId`
+- `term`
+- `definition`
+- `status`: ACTIVE, ARCHIVED
+- `createdAt`
+- `updatedAt`
+- `archivedAt`
 
 ### EmbeddingChunk
 
@@ -124,6 +147,21 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `content`
 - `embedding`
 - `createdAt`
+
+### Data Constraints
+
+- `User.email`은 unique다.
+- `AuthIdentity(provider, providerUserId)`는 unique다.
+- `SpaceMember(spaceId, userId)`는 active member 기준 unique다.
+- Space당 active `OWNER`는 정확히 1명이어야 한다.
+- `MeetingParticipant(meetingId, userId)`는 active participant 기준 unique다.
+- `MeetingSpeaker(meetingId, label)`은 unique다.
+- `TranscriptSegment(meetingId, sequence)`은 unique다.
+- `MeetingReport(meetingId, version)`은 unique다.
+- `MeetingReport(meetingId)` 기준 `status=CONFIRMED and isCurrent=true`는 최대 1개다.
+- `TaskCard.sourceCandidateId`는 nullable이지만 값이 있으면 unique다.
+- `DomainTerm(spaceId, term)`은 active term 기준 unique다.
+- `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
 
 ## RAG Chunk Shape
 
@@ -190,11 +228,18 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 
 - Space 접근은 `SpaceMember`로 판단한다.
 - 회의 접근은 `MeetingParticipant`로 판단한다.
+- SpaceRole은 `OWNER`, `ADMIN`, `MEMBER`를 기본값으로 한다.
+- MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다.
 - Meeting AI는 `meetingId` 하나에 속한 데이터만 사용한다.
-- Project AI는 `ProjectKnowledge`와 사용자가 접근 가능한 `meetingId` 목록의 chunk만 사용한다.
-- 발화자 이름 수정은 회의 `host` 또는 `editor` 권한이 있는 사용자만 수행한다.
+- Project AI는 `ProjectKnowledge`와 사용자가 접근 가능한 `meetingId` 목록의 chunk만 사용한다. 회의 게스트는 Project AI를 기본 사용할 수 없다.
+- Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정한다. 회의 게스트는 기본 접근할 수 없다.
+- Project Knowledge 수정 시 embedding은 비동기 재생성한다. 기존 chunk는 유지하고 새 embedding chunk가 `COMPLETED`가 되면 교체한다.
+- 발화자 이름 수정은 회의 `HOST` 또는 `EDITOR` 권한이 있는 사용자만 수행한다.
 - transcript, report, summary 조회는 `MeetingParticipant` 권한 확인 후 허용한다.
 - AI 서버로 전달되는 transcript segment는 Backend 권한 필터 이후에 구성한다.
+- `MeetingParticipant.accessStatus=ACTIVE`만 회의 접근 권한으로 인정한다. `REVOKED`는 조회, 수정, LiveKit token, Meeting AI, Project AI meeting context 접근을 모두 차단한다.
+- SpaceMember 제거 시 같은 Space에 속한 `participantType=member` MeetingParticipant는 `REVOKED`로 전환한다. `participantType=guest`는 SpaceMember가 아니므로 이 정책으로 회수하지 않는다.
+- HOST의 회의방 일시 퇴장은 `MeetingParticipant` 권한을 바꾸지 않는다. 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 
 ## API Representation Rules
 
@@ -205,5 +250,5 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 ## Retention
 
 - 음성 원본: 기본 장기 보관 없음
-- STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상
+- STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상. 선택지는 7일/30일/영구이며 기본값은 30일이다.
 - 보고서/공식 지식: Space 정책에 따른 보존

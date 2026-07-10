@@ -20,6 +20,19 @@
 - Frontend Auth 연결을 추가했다. 자체 로그인/회원가입과 Google credential exchange를 `/api/v1/auth/*`로 보내고, token pair는 `sessionStorage`에 저장한다.
 - 랜딩(`/`) 외 앱 route를 보호 route로 감싸 비로그인 사용자는 로그인 모달로 유도하고, 로그인 성공 후 요청했던 route로 복귀하게 했다.
 - Backend Auth runtime smoke 중 `AuthTokenService`, `GoogleJwtCredentialVerifier`의 테스트용 보조 생성자 때문에 Spring이 런타임 생성자를 선택하지 못하는 문제를 발견했다. 런타임 생성자에 `@Autowired`를 명시하고 context smoke test를 추가했다.
+- Backend 빌드를 Maven에서 Gradle로 전환했다. 기본 Java 26 환경에서도 wrapper가 실행되도록 Gradle 9.6.1을 사용하고, 컴파일/테스트 toolchain은 Java 21로 유지한다.
+- Google Sheets 요구사항 정의서를 `requirements/*` Markdown 기준선으로 분할했다.
+- 기능/비기능 요구사항은 요약 카탈로그와 전체 우선순위 상세 문서로 분리했다. 상세 문서에는 P2를 포함해 인수 기준, 조건/권한, 실패/예외, 검증 기준 또는 측정 방법을 보존했다.
+- 요구사항 읽기 전략을 `AGENTS.md`와 constitution에 반영했다. 구현자는 `requirements/INDEX.md`를 먼저 읽고 필요한 요구사항 문서만 추가로 읽는다.
+- 용어집, 권한 매트릭스, 상태값 기준으로 core spec, plan, data-model, contracts, clarify, tasks, analyze를 갱신했다.
+- 권한 role enum 표기는 용어집 기준인 `OWNER`/`ADMIN`/`MEMBER`, `HOST`/`EDITOR`/`VIEWER`로 정리했다.
+- 정책, 성능지표, 용어집, 상태값 문서는 Google Sheets의 전체 컬럼을 보존하는 상세 스냅샷으로 보강했다.
+- Q-002 회의 권한 등급은 `HOST`, `EDITOR`, `VIEWER`로 결정했고, 회의 게스트는 특정 회의의 `MeetingParticipant`로만 접근한다.
+- Q-003 STT 원문 보존 기본값은 30일로 결정했다.
+- Q-004 Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정하며, 회의 게스트는 기본 접근할 수 없도록 정리했다.
+- API 명세를 기능군별 파일로 분리하고, backend 전체 도메인 ERD 초안을 추가했다.
+- API/ERD/Data Model 변경 시 관련 문서 영향 확인과 `implement.md` 로그 기록을 에이전트 지침에 추가했다.
+- AI 담당 범위에서 분리 API/ERD 기준선을 재검토하고, RAG scope/unsupported/sourceId/candidate 안전 검증을 보강했다.
 
 ## Work Allocation
 
@@ -33,11 +46,23 @@
 | 사용자 | Codex | T070-T071 | 현재 AI 코드 경계 기록과 AI prototype API 계약 문서화 |
 | 사용자 | Codex | T072 | 회의 중 transcript 용어 설명 prototype 구현 |
 | 사용자 | Codex | T078-T088 | STT/DB 구현 전 RAG chunk 형식, in-memory retriever, RAG 기반 AI 기능 전환 작업 |
+| 사용자 | Codex | T104, T087-T088 | 요구사항 기준선 반영 후 AI/RAG 영향도 점검, RAG safety 검증, AI workstream closeout |
 | 사용자 | Codex | T078-T079 | RAG chunk/embeddingText 형식 문서화와 AI 서버 RAG 타입 경계 추가 |
 | 사용자(Auth 담당) | Codex | T024 | Google OAuth 단독, 자체 계정/JWT, Google OAuth + 자체 계정 + access/refresh token 병행안 비교와 결정 정리 |
 | 사용자(Auth 담당) | Codex | T089-T096 | 로그인/인증 기반 구축 작업 경계, Auth API 계약, Backend 검증, Frontend auth 상태, 보호 route guard 계획 |
 | 사용자(Auth 담당) | Codex | T089 | 현재 Frontend Google 로그인 모달과 Backend auth/security 부재 상태 조사 |
-| 사용자(Auth 담당) | Codex | T090 | `/api/v1/auth/*` Auth API, User/AuthIdentity/RefreshTokenSession 모델, token storage/protected route 계약 문서화 |
+| 사용자(Auth 담당) | Codex | T090 | `/api/v1/auth/*` Auth API, User/AuthIdentity/AuthSession 모델, token storage/protected route 계약 문서화 |
+| 사용자 | Codex | T107-T109 | 기능군별 API 명세 분리, backend 전체 도메인 ERD 초안, API/ERD 변경 로그 지침 보강 |
+| 사용자(Frontend 담당) | Codex | T044 | Frontend route, API client, mock fallback 위치 조사 |
+| 사용자(Frontend 담당) | Codex | T045 | Frontend target API TypeScript type 추가 |
+| 사용자(Frontend 담당) | Codex | T046 | Frontend project 선택 상태를 stable `spaceId` query 우선으로 정리 |
+| 사용자(Frontend 담당) | Codex | T047 | Frontend legacy workspace snapshot client와 target Space/Meeting API client 경계 분리 |
+| 사용자(Data 담당) | Codex | T058 | Backend DB/migration 도구 현황 조사와 Flyway SQL migration 위치 문서화 |
+| 사용자(Data 담당) | Codex | T059 | Flyway 기반 User, Space, SpaceMember V1 schema migration 작성 |
+| 사용자(Data 담당) | Codex | T060 | Flyway 기반 Meeting, MeetingParticipant, MeetingSpeaker V2 schema migration 작성 |
+| 사용자(Data 담당) | Codex | T061 | Flyway 기반 TranscriptSegment, MeetingReport, report decision/action item V3 schema migration 작성 |
+| 사용자(Data 담당) | Codex | T062 | Flyway 기반 ProjectKnowledge, EmbeddingChunk, chunk source segment V4 schema migration 작성 |
+| 팀원(STT/Audio 담당) | TBD | T063 | retentionPolicy, failureReason, STT 원문 보존 정책 field/default 전략 정리 |
 
 ## Files Changed
 
@@ -48,10 +73,26 @@
 - `.specify/templates/*`: 반복 작업용 템플릿
 - `.specify/skills/qa-checklist.md`: 도구 중립 QA 체크리스트
 - `specs/001-meetingmind-core/*`: MeetingMind 핵심 프로토타입 스펙 세트
+- `requirements/*`: Google Sheets 요구사항 정의서의 로컬 Markdown 기준선
+- `specs/001-meetingmind-core/contracts/README.md`: 기능군별 API 명세 라우팅과 변경 규칙
+- `specs/001-meetingmind-core/contracts/common.md`: 공통 API 규칙, 오류, role/status/source shape
+- `specs/001-meetingmind-core/contracts/auth-api.md`: Auth API 명세 초안
+- `specs/001-meetingmind-core/contracts/space-api.md`: Space, dashboard, calendar, member, owner transfer API 명세 초안
+- `specs/001-meetingmind-core/contracts/meeting-api.md`: Meeting, ACL, transcript, report API 명세 초안
+- `specs/001-meetingmind-core/contracts/kanban-api.md`: Kanban, task card, task candidate API 명세 초안
+- `specs/001-meetingmind-core/contracts/knowledge-api.md`: Project Knowledge와 Domain Term 관리 API 명세 초안
+- `specs/001-meetingmind-core/contracts/ai-api.md`: Meeting AI, Project AI, report/task candidate, term API 명세 초안
+- `specs/001-meetingmind-core/contracts/live-stt-api.md`: LiveKit, meeting room, STT/dialogue API 명세 초안
+- `specs/001-meetingmind-core/erd.md`: backend 전체 도메인 ERD 초안
 - `ai/app/main.py`: `POST /api/meeting-ai/explain-term` endpoint와 Domain Dictionary 우선 응답, AI fallback 추가
 - `ai/app/rag.py`: RAG chunk/source/search request/result 타입과 retriever protocol 추가
 - `backend/src/main/java/com/meetingmind/demo/service/LiveKitTokenService.java`: 안정적인 단위 테스트를 위해 clock/config provider 주입 경계 추가
+- `backend/build.gradle`, `backend/settings.gradle`, `backend/gradlew*`, `backend/gradle/wrapper/*`: Backend 빌드를 Maven에서 Gradle로 전환
 - `backend/src/main/java/com/meetingmind/demo/auth/**`: in-memory Auth store, PBKDF2 password hash, HMAC access token, refresh token hash/revoke, Google ID token verifier, Auth controller/error response 추가
+- `backend/src/main/resources/db/migration/V1__create_users_spaces.sql`: User, Space, SpaceMember schema 초안과 active membership/owner partial unique index 추가
+- `backend/src/main/resources/db/migration/V2__create_meetings_acl.sql`: Meeting, MeetingParticipant, MeetingSpeaker schema 초안과 회의 ACL/speaker 제약 추가
+- `backend/src/main/resources/db/migration/V3__create_transcripts_reports.sql`: TranscriptSegment, MeetingReport, report decision/action item schema 초안과 source id JSON 저장 제약 추가
+- `backend/src/main/resources/db/migration/V4__create_knowledge_embeddings.sql`: ProjectKnowledge, EmbeddingChunk, chunk source segment schema 초안과 pgvector column 준비 추가
 - `backend/src/test/java/com/meetingmind/demo/service/LiveKitTokenServiceTest.java`: LiveKit JWT claim/signature 성공 케이스와 설정 누락 실패 케이스 테스트
 - `backend/src/test/java/com/meetingmind/demo/auth/AuthServiceTest.java`: signup/me, 중복 이메일, 비밀번호 실패, refresh rotation, Google identity 연결 테스트
 - `backend/src/test/java/com/meetingmind/demo/MeetingMindApplicationTest.java`: Spring bean wiring context smoke 테스트 추가
@@ -65,7 +106,7 @@
 
 - 제품 코드 변경 범위는 AI prototype, Backend Auth, Frontend Auth로 확장되었다. Auth 외 `backend/**`, `frontend/**` 변경은 각 workstream owner와 합의한다.
 - Auth/Login workstream은 `GoogleLoginModal.tsx`, future `frontend/src/auth/**`, future `backend/**/auth/**`를 우선 소유한다. Frontend/Backend 담당자는 auth token 저장/전달, auth endpoint, backend auth package를 수정하기 전에 Auth owner와 합의한다.
-- 현재 `.idea/`, `output/`, `tmp/`는 Auth 작업 범위 밖 미추적 파일로 유지한다. 커밋 전 포함하지 않는다.
+- 현재 `.idea/`는 작업 범위 밖 개인 IDE 설정으로 Git 미추적 상태를 유지한다. 커밋 전 포함하지 않는다.
 
 ## Integration Result
 
@@ -74,19 +115,74 @@
 - 작업별 owner/agent/dependency/files 관리는 `tasks.md`와 `tasks-template.md`에 추가했다.
 - milestone과 task granularity 기준은 `AGENTS.md`, `tasks.md`, `tasks-template.md`에 추가했다.
 - 실제 배정/충돌/통합 기록은 `implement.md`와 `implement-template.md`에 추가했다.
-- 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker 계약은 `contracts/api.md`, `data-model.md`, `plan.md`, `clarify.md`, `tasks.md`에 반영했다.
-- 실제 구현 착수는 `tasks.md`의 T024-T096 상세 task 기준으로 진행한다.
-- AI 담당 workstream은 `tasks.md`의 T070-T077로 분리했다. T070-T072를 완료 상태로 두고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다.
-- AI prototype API 계약은 `contracts/api.md`에 추가했다. 범위는 용어 설명, 회의 요약/보고서 생성, 회의별 챗봇, 프로젝트별 챗봇, 회의 종료 태스크 후보 추출이다.
+- 공통 API 규칙, 오류 응답, Meeting status, transcript/speaker 계약은 `contracts/common.md`, `contracts/meeting-api.md`, `contracts/live-stt-api.md`, `data-model.md`, `plan.md`, `clarify.md`, `tasks.md`에 반영했다.
+- 실제 구현 착수는 `tasks.md`의 T024-T106 상세 task 기준으로 진행한다.
+- AI 담당 workstream은 `tasks.md`의 T070-T088로 분리했다. T070-T072와 T078-T088은 완료했고, `backend/**`와 `frontend/**` 구현은 다른 담당자 배정 전까지 `TBD`로 유지한다.
+- AI prototype API 계약은 `contracts/ai-api.md`에 정리했다. 범위는 용어 설명, 회의 요약/보고서 생성, 회의별 챗봇, 프로젝트별 챗봇, 회의 종료 태스크 후보 추출이다.
 - 용어 설명 prototype은 `pgvector` 같은 Domain Dictionary 항목을 로컬 응답으로 먼저 처리하고, dictionary에 없지만 transcript 근거가 있는 용어는 AI fallback으로 설명한다.
-- RAG 기반 작업은 `tasks.md`의 M011/T078-T088로 세분화했다. T078-T079를 완료하고 T080을 시작 상태로 두었으며, 실제 STT 저장 API/DB schema/pgvector migration은 후속 담당자 작업으로 남긴다.
-- Auth/Login 기반 작업은 `tasks.md`의 M012/T089-T096으로 세분화했다. T024, T089, T090을 완료 상태로 두고, 실제 Backend Auth 구현은 T091부터 진행한다.
+- RAG 기반 작업은 `tasks.md`의 M011/T078-T088로 세분화했다. T078-T088은 완료했고, 실제 STT 저장 API/DB schema/pgvector migration은 후속 담당자 작업으로 남긴다.
+- Auth/Login 기반 작업은 `tasks.md`의 M012/T089-T096으로 세분화했다. T089-T093, T095-T096은 완료했고, LiveKit token을 회의 접근 권한과 연결하는 T094는 T040 이후로 남긴다.
+- 요구사항 기준선 반영 작업은 `tasks.md`의 M013/T097-T106으로 세분화했다. T097-T101은 완료했고, backend/frontend/ai/data 영향도 점검은 T102-T105로 남긴다.
+- T102-T105는 도메인 구현과 실제 코드 영향도 점검이므로 각 영역 팀원이 담당한다. Codex는 문서 기준선, 상세 요구사항 스냅샷, 용어/enum 정합성까지만 정리했다.
+- API/ERD 기준선 작업은 `tasks.md`의 M014/T107-T110으로 세분화했다. T107-T109는 완료했고, 각 기능 owner의 상세 리뷰와 충돌 점검은 T110으로 남긴다.
+
+## Contract and ERD Change Log
+
+- 2026-07-09: 단일 `contracts/api.md` 기준선을 기능군별 명세로 분리했다. 신규 구현 기준은 `contracts/README.md`의 라우팅을 따른다.
+- 2026-07-09: `erd.md`를 추가해 Auth, Space, Meeting, STT, Report, Kanban, AI/RAG, Audit 관계 초안을 Mermaid ERD로 작성했다.
+- 2026-07-09: `AGENTS.md`에 API/ERD/Data Model 변경 시 문서 영향 확인과 `implement.md` 로그 기록 규칙을 추가했다.
+- 2026-07-09: `.specify/templates/api-contract-template.md`와 `contracts/README.md`에 endpoint 표준 섹션 규칙을 추가하고, 분리 API 문서에 Status/Auth/Data Scope/Validation/Errors/Audit/Requirement Trace/Notes 구조를 적용했다.
+- 2026-07-09: `contracts/api.md`를 legacy snapshot으로 명확히 하고, `plan.md`, `tasks.md`, `analyze.md`의 API 문서 참조를 분리 contract 파일 기준으로 갱신했다. 검증은 문서 포맷 중심으로 수행한다.
+- 2026-07-09: API 문서의 `Requirement Trace`를 실제 `requirements/functional-requirements.md` ID와 대조해 수정하고, 누락된 `knowledge-api.md`를 추가했다. `erd.md`에는 ProjectKnowledge/DomainTerm 상태 필드와 주요 unique/index/nullable 제약을 보강했다.
+- 2026-07-09: Invitation은 `SPACE_INVITATION`/`MEETING_INVITATION`으로 분리, MeetingReport는 회의당 current confirmed 1개, ProjectKnowledge embedding은 비동기 재생성으로 결정했다. 관련 결정은 `clarify.md` D-010~D-012와 API/ERD/data-model에 반영했다.
+- 2026-07-09: Q-005 보고서 파일 포맷은 Markdown 우선으로 결정했다. PDF/DOCX export는 후속 옵션으로 둔다.
+- 2026-07-09: 자체 회원가입 비밀번호 정책을 `POL-PW-01` 수준으로 올렸다. Backend signup은 최소 8자와 영대문자/영소문자/숫자/특수문자 중 3종 이상 포함을 서버에서 검증한다.
+- 2026-07-09: Backend auth/권한 후속 구현 순서는 `T039/T040` Space/Meeting 접근 검증 service, `T094` LiveKit token 권한 연동, Auth store DB 영속화 순서로 확정했다.
+- 2026-07-09: GitHub Actions CI 기준선을 추가했다. PR/push에서 Backend test, Frontend build, AI compile/unit test를 분리 job으로 실행한다.
+- 2026-07-09: SpaceMember 제거 시 같은 Space의 member MeetingParticipant를 `REVOKED`로 전환하는 정책을 확정했다. `MeetingParticipant.accessStatus` canonical 값은 `ACTIVE`, `REVOKED`로 status-values, data-model, ERD, contracts에 반영했다.
+- 2026-07-09: HOST 일시 퇴장, 회의 종료, 마지막 HOST 회수/강등/삭제 금지 정책을 확정했다. `ADMIN`은 서비스 전체 운영자가 아니라 SpaceRole의 프로젝트 관리자임을 용어집과 결정 로그에 명시했다.
+- 2026-07-09: 회의 삭제 권한은 기본 `OWNER`/`HOST` 전용으로 확정하고, `ADMIN` 삭제는 명시적 예외 정책이 있을 때만 허용하도록 정책/권한/API 계약에 반영했다.
+- 2026-07-09: `AuthIdentity.provider` 표기를 `local`, `google`로 통일했다. ERD의 로컬 인증 provider 제약도 같은 기준으로 맞췄다.
+- 2026-07-09: T039/T040/T094 구현 전에 사용할 `test-matrix.md`를 추가했다. 요구사항의 성공/실패 기준을 Space access, Meeting access, HOST 보호, SpaceMember 제거, LiveKit token 발급 단위 테스트 케이스로 분해했다.
+- 2026-07-09: T102 Backend 영향도 점검을 수행했다. 현재 Auth token 발급은 요구사항 기준과 정합하지만, legacy `/api/livekit/token`은 아직 인증 사용자와 회의 권한을 확인하지 않고 request body의 `identity`/`roomName`을 신뢰한다. 이 gap은 T094에서 target `/api/v1/meetings/{meetingId}/livekit-token`로 전환하며 닫는다.
+- 2026-07-09: T039/T040 선행 slice로 `backend/src/main/java/com/meetingmind/demo/authz/**` 권한 policy 계층을 추가했다. `SpaceAccessPolicy`는 active `SpaceMember`와 `OWNER`/`ADMIN` 멤버 관리 권한을 default-deny로 검증하고, `MeetingAccessPolicy`는 `ACTIVE` participant, `OWNER`/`ADMIN` override, `OWNER`/`HOST` 삭제, 마지막 active `HOST` 보호, SpaceMember 제거 시 member participant 회수, LiveKit 접근 상태 차단을 검증한다. 전체 T039/T040 task status는 기존 dependency인 T036/T037 도메인 모델/DTO 통합 전까지 open으로 유지한다.
+- 2026-07-09: 마지막 active `HOST` 보호 실패 code `LAST_ACTIVE_HOST_REQUIRED`를 공통 오류 계약과 Meeting participant 변경 계약에 추가했다.
+- 2026-07-09: T035 Backend 구조 조사를 수행했다. 현재 backend는 JPA/DB 없이 Auth의 `InMemoryAuthStore`, service, controller, 단위 테스트 패턴을 사용하므로 Space/Meeting 도메인도 같은 in-memory repository/service 경계로 시작한다.
+- 2026-07-09: T036/T037로 `backend/src/main/java/com/meetingmind/demo/domain/**` 최소 도메인 record와 `InMemoryWorkspaceStore`, `WorkspaceDomainService`를 추가했다. Space 생성은 생성자를 `OWNER` SpaceMember로 등록하고, 회의 생성은 `OWNER`/`ADMIN`만 허용하며 생성자를 `HOST` MeetingParticipant로 등록한다. 추가 참여자는 SpaceMember인 경우 `VIEWER` participant로 등록한다.
+- 2026-07-09: T039/T040 policy를 domain service context adapter와 연결했다. `WorkspaceDomainService`가 Space/Meeting 저장 데이터에서 `SpaceAccessContext`, `MeetingAccessContext`를 구성해 기존 authz policy에 전달할 수 있다.
+- 2026-07-09: T094 target LiveKit token 발급 경로를 추가했다. `/api/v1/meetings/{meetingId}/livekit-token`은 `AuthService.currentUser`로 인증 사용자를 확인하고, `MeetingAccessPolicy.requireLiveKitAccess` 통과 후 request body가 아니라 `meetingId`, 인증 사용자 id/displayName으로 LiveKit token을 발급한다. legacy `/api/livekit/token`은 prototype endpoint로 유지한다.
+- 2026-07-09: `AuthExceptionHandler`를 전역 REST advice로 확장해 Auth/Authz 예외를 공통 `code`, `message`, `fieldErrors`, `traceId` 응답으로 반환하도록 했다. LiveKit 설정 누락은 target 경로에서 `LIVEKIT_NOT_CONFIGURED`로 변환한다.
+- 2026-07-09: T041 target API 전환 지점으로 `/api/v1/spaces`, `/api/v1/spaces/{spaceId}/meetings`를 추가했다. 기존 `/api/workspace` 통합 mock 응답은 그대로 유지하고, target endpoint는 `AuthService.currentUser`와 `WorkspaceDomainService.ensureUser`를 거쳐 in-memory Space/Meeting read/write model을 사용한다.
+- 2026-07-09: T042 공통 오류 응답 경계를 보강했다. `AuthExceptionHandler`는 전역 advice로 `AuthException`, `AuthorizationException`, validation error를 처리하고, legacy LiveKit 설정 누락도 `LIVEKIT_NOT_CONFIGURED` code로 변환한다.
+- 2026-07-09: T038로 `TranscriptSegment`, `MeetingReport`, `ProjectKnowledge`, `EmbeddingChunk`와 관련 enum을 추가했다. Transcript는 `startMs/endMs`, speaker/source/sequence를 보존하고, MeetingReport decision/action item은 `sourceIds`를 보존하며, ProjectKnowledge는 `sourceMeetingId`, `embeddingStatus`, `embeddingJobId`를 갖는다. EmbeddingChunk는 meeting/project scope, source metadata, transcript source segment 목록, speakerNames, embeddingText, metadata, vector placeholder를 가진다.
+- 2026-07-09: T044 Frontend discovery를 수행했다. `frontend/src/App.tsx`가 보호 route, `/api/workspace` 통합 fetch, mock fallback, 프로젝트/회의/멤버 임시 생성 상태를 함께 관리한다. `frontend/src/auth/session.ts`는 인증 API와 Authorization header helper만 갖고, Space/Meeting API client는 아직 분리되어 있지 않다. `frontend/src/types.ts`의 `WorkspaceData`는 legacy `/api/workspace` 응답 shape에 묶여 있어 T045에서 target `Space`, `Meeting`, `Report`, `AI` 타입과 분리해야 한다.
+- 2026-07-09: T045로 `frontend/src/types.ts`에 target API용 `SpaceSummary`, `SpaceDetail`, `MeetingSummary`, `MeetingDetail`, `TranscriptResponse`, `ReportSummary`, `TaskCard`, `AiSource`, `ProjectAiChatRequest`, `AiChatResponse` 타입을 추가했다. 기존 `WorkspaceData`는 `/api/workspace` legacy mock fallback용으로 유지한다.
+- 2026-07-09: T046으로 legacy `WorkspaceSpace`에 stable `id`를 추가하고, `/spaces` 카드, `WorkspaceSidebar`, `ProjectOverviewPage`, `TeamMembersPage`, `LiveMeetingPage`의 프로젝트 선택 route를 `spaceId` query 우선으로 정리했다. 기존 `project` name query는 fallback과 표시용으로 유지한다.
+- 2026-07-09: T047로 `frontend/src/api/workspace.ts`를 추가했다. `fetchLegacyWorkspaceSnapshot`은 기존 `/api/workspace` fallback 경계를 담당하고, `fetchSpaces`, `createSpace`, `fetchSpaceDetail`, `fetchMeetings`, `createMeeting`은 target `/api/v1` Space/Meeting API 전환 지점으로 분리했다. `App.tsx`의 inline `/api/workspace` fetch는 legacy client 호출로 교체했다.
+
+## Current Frontend Workstream Notes
+
+- Route 진입점은 `frontend/src/App.tsx`다. 공개 route는 `/`, 보호 route는 `/spaces`, `/project-overview`, `/team-members`, `/live-meeting`, `/live-room`, `/meeting-ai`, `/report-agent`다.
+- 현재 데이터 로딩은 로그인 후 `GET /api/workspace` 한 번으로 동작한다. 실패 시 `frontend/src/data/mockData.ts`의 local mock을 유지한다.
+- `frontend/src/App.tsx` 안에 `handleCreateProject`, `handleCreateMeeting`, join request approve/reject 등 임시 in-memory 상태 변경 로직이 있다.
+- `frontend/src/pages/WorkspaceHomePage.tsx`는 프로젝트 목록 화면처럼 보이지만 현재 UI 문구와 계산은 회의 카탈로그 중심이다. FR-DASH-01/02/06/07과 연결될 첫 수정 대상이다.
+- `frontend/src/pages/ProjectOverviewPage.tsx`는 `project` query param으로 선택된 Space를 찾고, 회의 목록/최근 문서/Project AI prompt/회의 생성 모달을 표시한다. FR-DASH-03, FR-CAL-02/03, FR-MREG-01/05, FR-PBOT-01의 화면 진입점이다.
+- `frontend/src/components/WorkspaceSidebar.tsx`는 프로젝트 생성 모달과 project/team navigation을 가진다. 프로젝트 생성 API 연결 시 공통 생성 진입점으로 사용한다.
+- `frontend/src/pages/TeamMembersPage.tsx`는 멤버/초대/요청 승인 UI를 갖고 있어 FR-PERM-01~05, FR-OWN-01~03 후속 연결 대상이다.
+- `frontend/src/pages/MeetingAiPage.tsx`, `ProjectOverviewPage.tsx`, `ReportAgentPage.tsx`는 각각 Meeting AI, Project AI, report 편집/확정 흐름의 화면 진입점이다.
+- 다음 작업 T045에서는 `WorkspaceData` 중심 타입을 유지하되, target API용 `SpaceSummary`, `SpaceDetail`, `MeetingSummary`, `ReportSummary`, `ProjectAiSource` 타입을 별도로 추가해 기존 mock fallback과 실제 API shape가 섞이지 않게 한다.
+- 다음 작업 T047에서는 `/api/workspace` legacy fetch와 target `/api/v1/spaces`, `/api/v1/spaces/{spaceId}/meetings` 호출 경계를 분리한다. 기존 mock fallback은 유지한다.
+- 2026-07-09: T058 Data discovery를 수행했다. 현재 backend에는 JDBC/JPA, PostgreSQL driver, Flyway, Liquibase 의존성과 datasource 설정이 없다. Data migration 도구는 Flyway SQL migration으로 결정하고, 파일 위치는 `backend/src/main/resources/db/migration`으로 기록했다. T058 범위에서는 의존성, datasource 설정, schema 파일을 추가하지 않고 T059 이후 schema 작업에서 적용한다.
+- 2026-07-09: T059로 Flyway V1 migration을 추가했다. 기본 profile에서는 DB 없이 기존 prototype이 실행되도록 `spring.flyway.enabled=false`로 두고, `db` profile에서 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`로 Flyway를 실행한다. `users`, `spaces`, `space_members`는 text id 기반 PK, FK, enum check, active member unique index, active OWNER partial unique index를 가진다.
+- 2026-07-09: T060으로 Flyway V2 migration을 추가했다. `meetings`는 Space FK, `SCHEDULED`/`IN_PROGRESS`/`ENDED`/`CANCELED` status check, `space_id, scheduled_at` index를 가진다. `meeting_participants`는 User/Meeting FK, `HOST`/`EDITOR`/`VIEWER`, `member`/`guest`, `ACTIVE`/`REVOKED` check와 active participant unique index를 가진다. `meeting_speakers`는 meeting별 speaker label unique index와 nullable displayName 제약을 가진다.
+- 2026-07-09: T061로 Flyway V3 migration을 추가했다. `transcript_segments`는 `start_ms/end_ms` 시간 범위, meeting별 sequence unique, meeting별 start time index를 가진다. `meeting_reports`는 version unique, current confirmed partial unique index, `CANDIDATE`/`DRAFT`/`CONFIRMED` status check를 가진다. 결정사항과 액션아이템은 `report_decisions`, `report_action_items`로 분리하고, 출처 추적은 `source_ids jsonb` 배열 제약으로 저장한다.
+- 2026-07-09: T062로 Flyway V4 migration을 추가했다. `project_knowledge`는 Space FK, `report`/`decision`/`manual`/`external` type, `PUBLISHED`/`ARCHIVED` status, `PENDING`/`PROCESSING`/`COMPLETED`/`FAILED` embedding status, `(space_id, type, updated_at)` index를 가진다. `embedding_chunks`는 `space_id`, `meeting_id`, `scope`, `source_type`, `source_id`, `embedding_text`, `metadata`, nullable pgvector `embedding`을 저장하고, meeting scope는 `meeting_id`가 required다. `chunk_source_segments`는 chunk와 transcript segment 관계를 unique로 추적한다.
 
 ## Current Auth Workstream Notes
 
-- 현재 Frontend에는 `frontend/src/components/GoogleLoginModal.tsx`가 있으며, Google Identity Services script를 로드하고 credential payload를 decode해 `onSuccess`로 사용자 표시 정보를 넘긴다.
-- 현재 `GoogleLoginModal.tsx`는 import 사용처가 없어 실제 route guard와 연결되지 않았다.
-- 현재 `frontend/src/App.tsx`는 `/api/workspace`를 호출하고 실패 시 mock data를 유지하며, auth state 또는 `Authorization` header 전달 경계는 없다.
+- 현재 Frontend에는 `frontend/src/components/GoogleLoginModal.tsx`가 있으며, 자체 로그인/회원가입과 Google Backend exchange를 처리한다.
+- `frontend/src/App.tsx`는 auth session 상태와 protected route를 관리하고, `/api/workspace` 호출에 `Authorization` header를 전달한다.
+- 기존 mock fallback은 유지되지만 로그인 상태는 Backend auth 응답 기준으로 관리한다.
 - 현재 Backend Auth 구현은 새 외부 dependency 없이 Java 표준 crypto/Jackson/Spring MVC 기반으로 작성했다. Spring Security는 아직 도입하지 않았다.
 - 현재 Backend Auth package는 `backend/src/main/java/com/meetingmind/demo/auth/**`다.
 - 확정 구현 방향대로 Google OAuth와 자체 회원가입/로그인을 모두 지원하고, Backend가 access token과 refresh token, user profile을 반환한다.
@@ -97,7 +193,7 @@
 - 로그인 성공 후에는 비로그인 상태에서 요청했던 보호 route로 복귀한다.
 - Backend Auth runtime 환경변수는 `MEETINGMIND_JWT_SECRET` 또는 `AUTH_JWT_SECRET`, Google 검증용 `GOOGLE_CLIENT_ID` 또는 `VITE_GOOGLE_CLIENT_ID`를 사용한다.
 - 현재 Auth 저장소는 prototype용 in-memory store다. 서버 재시작 시 사용자, identity, refresh session은 사라지며, DB 영속화는 Data/Backend 후속 작업이다.
-- LiveKit token을 인증 사용자와 회의 접근 권한에 연결하는 T094는 T040/Q-002 회의 권한 정책 확정 전까지 구현하지 않는다.
+- LiveKit token을 인증 사용자와 회의 접근 권한에 연결하는 T094는 T040 회의 접근 검증 계층 구현 전까지 구현하지 않는다.
 
 ## Current AI Workstream Notes
 
@@ -125,6 +221,12 @@
 - 2026-07-06: 실제 OpenAI 보고서 생성 호출은 `certifi` CA bundle 적용 후 API endpoint까지 도달했으나, 현재 로컬 OpenAI key가 유효하지 않아 401 invalid key로 실패했다. AI 서버는 루트 `.env`도 읽고 `OPEN_AI_KEY` alias도 `OPENAI_API_KEY`로 인식하도록 보완했으며, 유효한 key 교체 후 실제 생성 결과를 다시 확인한다.
 - `POST /api/meeting-ai/extract-tasks`를 추가했다. transcript와 summary를 source-aware RAG chunk로 변환하고, OpenAI에는 참석자 목록과 sourceId가 포함된 회의 근거를 전달해 task candidate JSON을 받는다.
 - 2026-07-06: `ai/.venv/bin/python -m compileall app`와 task extraction source/JSON parse smoke test를 통과했다. 모든 태스크 후보는 저장 전 상태인 `confirmationState=candidate`로 정규화한다. 다음 작업은 RAG scope와 컨텍스트 밖 질문 방어를 검증하는 T087이다.
+- 2026-07-09: `contracts/ai-api.md`, `contracts/knowledge-api.md`, `erd.md`, `data-model.md` 기준으로 AI owner review를 수행했다. 현재 AI prototype은 Meeting AI 단일 meeting scope, Project AI 공식 지식/허용 meeting summary 분리, 근거 없음 `unsupported=true`, registered glossary LLM 미호출 원칙과 맞는다.
+- 2026-07-09: T104 영향도 점검 결과, token budget 축소 정책과 AI/API observability log는 아직 구현되어 있지 않다. 이는 Backend 권한 필터, 실제 RAG 저장소, 운영 로깅이 들어오는 후속 milestone에서 처리한다.
+- 2026-07-09: RAG safety unittest를 추가했다. Meeting scope가 다른 meeting/projectKnowledge chunk를 제외하고, Project scope가 허용되지 않은 meeting chunk를 제외하며, 근거 없는 Meeting AI/task extraction은 OpenAI를 호출하지 않는다.
+- 2026-07-09: Report action item도 저장 전 산출물 원칙에 맞게 `confirmationState=candidate`로 정규화하도록 수정했다. LLM이 임의 sourceId를 반환해도 제공된 source 목록에 없는 값은 제거된다.
+- 2026-07-10: AI prototype endpoint observability를 추가했다. `/api/meeting-ai/*`와 `/api/project-ai/chat` wrapper가 처리 시간, model, source count, unsupported 여부와 reason을 `meetingmind.ai` logger에 기록하며, 질문/본문 같은 입력 원문은 로그에 포함하지 않는다.
+- 2026-07-10: `AiObservabilityTest`를 추가해 unsupported 응답의 `NO_SOURCES` reason, model/source count/durationMs 로그 필드, 입력 원문 비노출, 지원 응답의 source count를 검증했다.
 
 ## AI RAG Task Priority
 
@@ -137,12 +239,12 @@
 7. T084: 프로젝트별 챗봇 RAG scope 구현 완료
 8. T085: 회의 요약/보고서 생성 prototype 구현 완료
 9. T086: 회의 종료 태스크 후보 추출 prototype 구현 완료
-10. T087-T088: RAG safety와 최종 검증
+10. T087-T088: RAG safety와 최종 검증 완료
 
 ## Git Status Notes
 
-- 문서 기준선은 `codex/docs-agent-collaboration-workflow` 브랜치에 커밋되어 원격 push되었다.
-- 현재 PDF 공유 산출물인 `output/`, `tmp/`는 Git 미추적 상태다.
+- 요구사항 기준선 반영 변경은 PR #8의 `agent/requirements-docs-baseline` 브랜치에 커밋되어 원격 push되었다.
+- 개인 IDE 설정과 에이전트 산출물 디렉터리인 `.idea/`, `output/`, `tmp/`는 Git에 올리지 않고 루트 `.gitignore`에서 제외한다.
 - `c15ca74 feat: add backend auth prototype` 이후 Frontend Auth 연결, Backend Auth runtime wiring fix, context smoke test, Auth 검증 문서 갱신을 후속 Auth 변경으로 정리했다.
 
 ## Verification
@@ -152,23 +254,54 @@
 - Passed: `cd ai && .venv/bin/python -c "from app.main import ExplainTermRequest, explain_term; ..."`로 Domain Dictionary 우선 응답 확인
 - Passed: `curl -fsS http://127.0.0.1:8000/health`
 - Passed: `curl -fsS -X POST http://127.0.0.1:8000/api/meeting-ai/explain-term ...`
-- Passed: `cd backend && mvn -Dtest=LiveKitTokenServiceTest test`
-- Passed: `cd backend && mvn test`
-- Passed: `cd backend && mvn test`로 AuthServiceTest 포함 총 7개 backend test 통과
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd backend && ./gradlew build`
+- Historical Maven verification before Gradle conversion: `cd backend && mvn -Dtest=LiveKitTokenServiceTest test`, `cd backend && mvn test`
 - Passed: `cd ai && python3 -m unittest discover -s tests`
 - Passed: `cd ai && python3 -m compileall app tests`
+- Passed: `cd ai && python3 -m compileall app tests` after AI RAG safety tests
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 9 tests
+- Passed: `cd ai && python3 -m compileall app tests` after AI observability logging
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 11 tests, after AI observability logging
 - Passed: `cd frontend && npm run build`
 - Passed: `cd frontend && npm run build` after Frontend Auth route guard changes
-- Passed: `cd backend && mvn test` after Spring context smoke test addition, total 8 backend tests
+- Passed: `cd backend && ./gradlew test` after Gradle conversion, total 8 backend tests
 - Passed: `cd frontend && npm run build` after Auth runtime fix and docs update candidate
 - Passed: `cd ai && python3 -m unittest discover -s tests`, 4 tests
 - Passed: `cd ai && python3 -m compileall app tests`
 - Passed: `git diff --check`
-- Passed: local runtime smoke with `MEETINGMIND_JWT_SECRET=dev-test-secret GOOGLE_CLIENT_ID=dev-google-client mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=18080`
+- Passed: `cd backend && ./gradlew test` after `POL-PW-01` password policy and CI baseline changes
+- Passed: `cd frontend && npm run build` after CI baseline changes
+- Passed: `cd ai && python3 -m compileall app tests` after CI baseline changes
+- Passed: `cd ai && python3 -m unittest discover -s tests`, 4 tests, after CI baseline changes
+- Passed: `git diff --check` after CI baseline changes
+- Passed: `git diff --check` after authz test matrix docs
+- Passed: `cd backend && ./gradlew test` after backend authz policy slice, total 31 backend tests
+- Passed: `cd backend && ./gradlew test` after workspace domain model/service, total 37 backend tests
+- Passed: `cd backend && ./gradlew test` after target LiveKit authorization path, total 41 backend tests
+- Passed: `cd backend && ./gradlew test` after target Space/Meeting API and common error handling, total 44 backend tests
+- Passed: `cd backend && ./gradlew test` after artifact/RAG domain model, total 48 backend tests
+- Passed: `cd frontend && npm run build` after T045 target frontend API types
+- Passed: `git diff --check` after T044-T045 frontend workstream docs/types
+- Passed: `cd frontend && npm run build` after T046 stable project route state
+- Passed: `git diff --check` after T046 stable project route state
+- Passed: `cd frontend && npm run build` after T047 frontend workspace API client split
+- Passed: `git diff --check` after T047 frontend workspace API client split
+- Passed: `git diff --check` after T058 data discovery docs
+- Passed: `cd backend && ./gradlew test` after T059 Flyway V1 migration setup
+- Passed: `git diff --check` after T059 Flyway V1 migration setup
+- Passed: `cd backend && ./gradlew test` after T060 Flyway V2 meeting ACL migration
+- Passed: `git diff --check` after T060 Flyway V2 meeting ACL migration
+- Passed: `cd backend && ./gradlew test` after T061 Flyway V3 transcript/report migration
+- Passed: `git diff --check` after T061 Flyway V3 transcript/report migration
+- Passed: `cd backend && ./gradlew test` after T062 Flyway V4 knowledge/embedding migration
+- Passed: `git diff --check` after T062 Flyway V4 knowledge/embedding migration
+- Passed: local runtime smoke with `MEETINGMIND_JWT_SECRET=dev-test-secret GOOGLE_CLIENT_ID=dev-google-client mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=18080` before Gradle conversion
 - Passed: `curl -fsS http://127.0.0.1:18080/api/workspace`
 - Passed: `curl -fsS http://127.0.0.1:18080/api/v1/auth/signup -H 'Content-Type: application/json' -d '{"email":"api-smoke-18080@meetingmind.ai","password":"password-123","displayName":"API Smoke"}'`
 - Not run: Browser automation verification. `agent-browser` CLI and Playwright packages are not available in this environment; adding a new browser test library was avoided because existing frontend test framework is not present.
 - Not run: `cd ai && python -m compileall app`는 이 환경에 `python` 명령이 없어 `python3`로 대체했다.
+- Not run: Flyway migration against a real PostgreSQL datasource after T059-T062. Local `db` profile datasource is not configured in this environment; migration 적용 검증은 T064에서 수행한다.
 - Note: 첫 `mvn -Dtest=LiveKitTokenServiceTest test` 실행은 Maven이 `~/.m2`에 Surefire provider를 쓸 권한이 없어 실패했고, 승인 후 재실행해 통과했다.
 - Note: `npm ci` 후 `npm audit`이 moderate 1건, high 1건을 보고했다. `npm audit fix --force`는 breaking change 가능성이 있어 실행하지 않았다.
 - Note: `8080`, `8081`, `5173`, `5174`는 기존 로컬 프로세스가 사용 중이었다. Auth runtime smoke는 충돌을 피하려고 Backend `18080`, Frontend `5176`으로 실행했다.
@@ -176,13 +309,13 @@
 ## Remaining Work
 
 - `clarify.md`의 Open 질문 결정
-- Backend Auth 영속화: 현재 in-memory Auth store를 DB 기반 User/AuthIdentity/RefreshTokenSession 저장소로 전환
-- LiveKit token auth 연결(T094): T040/Q-002 회의 접근 권한 정책 확정 후 인증 사용자와 회의 권한을 확인하도록 전환
+- Backend Auth 영속화: 현재 in-memory Auth store를 DB 기반 User/AuthIdentity/AuthSession 저장소로 전환
+- LiveKit token auth 연결(T094): T040 회의 접근 검증 계층 구현 후 인증 사용자와 회의 권한을 확인하도록 전환
+- 요구사항 기준선 영향도 점검: T102-T105에서 backend/frontend/ai/data가 새 용어, 권한, 상태값, 성능/토큰 기준과 충돌하는지 확인
 - mock API 분리
 - Target API base URL 결정
 - 실제 STT 파일 업로드 방식 결정
 - Meeting AI 권한 필터링 경로 강화
-- Project AI RAG 설계와 구현
-- AI prototype 구현: 요약/보고서 생성, 회의별/프로젝트별 챗봇 분리, 회의 종료 태스크 후보 추출 API
+- Project AI 실제 DB/pgvector RAG 연결과 Backend 권한 선필터 통합
 - Frontend 연결: Live Room 용어 설명 UI, Meeting/Project AI source 표시, Report Agent 연결은 Frontend 담당 TBD
-- RAG prototype 구현: `ai/app/rag.py` 추가, mock retriever 연결, sources/citations UI 표시
+- Frontend/Backend 연결: AI prototype endpoint를 권한 필터 이후 Backend route와 화면에 연결

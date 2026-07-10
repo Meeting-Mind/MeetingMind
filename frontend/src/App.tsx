@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { buildAuthHeaders, readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
+import { fetchLegacyWorkspaceSnapshot } from "./api/workspace";
+import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
 import { LiveMeetingPage } from "./pages/LiveMeetingPage";
@@ -12,8 +13,6 @@ import { TeamMembersPage } from "./pages/TeamMembersPage";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { mockData } from "./data/mockData";
 import type { WorkspaceData } from "./types";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
 type TeamMember = {
@@ -95,6 +94,16 @@ function buildInviteMeta(projectName: string): InviteMeta {
     link: `https://meetingmind.ai/invite/${encodeURIComponent(slug || "new-project")}`,
     code: `${codeSeed}-TEAM-${String(projectName.length).padStart(4, "0")}`
   };
+}
+
+function buildSpaceId(projectName: string) {
+  const slug = projectName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `space-${slug || "new-project"}`;
 }
 
 function inferMeetingTitle(projectName: string, description: string, index: number) {
@@ -188,6 +197,7 @@ export function App() {
     setData((previous) => {
       const existingIndex = previous.workspaceHome.spaces.findIndex((space) => space.name === normalizedName);
       const nextSpace = {
+        id: previous.workspaceHome.spaces[existingIndex]?.id ?? buildSpaceId(normalizedName),
         name: normalizedName,
         members: "멤버 0명",
         meetings: "진행 회의 0건",
@@ -300,15 +310,7 @@ export function App() {
 
     let active = true;
 
-    fetch(`${API_BASE_URL}/api/workspace`, {
-      headers: buildAuthHeaders(authSession)
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`API request failed with ${response.status}`);
-        }
-        return response.json() as Promise<Partial<WorkspaceData>>;
-      })
+    fetchLegacyWorkspaceSnapshot(authSession)
       .then((nextData) => {
         if (active) {
           setData({

@@ -1,7 +1,9 @@
 import json
+import logging
 import os
 from pathlib import Path
 import ssl
+from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -37,6 +39,7 @@ DOTENV_CANDIDATES = [
 ENV_ALIASES = {
     "OPENAI_API_KEY": ("OPEN_AI_KEY",),
 }
+LOGGER = logging.getLogger("meetingmind.ai")
 
 
 class TranscriptRow(BaseModel):
@@ -202,6 +205,62 @@ class ExtractTasksResponse(BaseModel):
     sources: list[AiSource] = Field(default_factory=list)
     unsupported: bool = False
     model: str
+
+
+def observe_ai_endpoint(endpoint: str, operation: Any) -> Any:
+    started_at = perf_counter()
+    try:
+        response = operation()
+    except Exception as error:
+        duration_ms = elapsed_ms(started_at)
+        LOGGER.warning(
+            "ai_request_failed %s",
+            json.dumps(
+                {
+                    "endpoint": endpoint,
+                    "durationMs": duration_ms,
+                    "errorType": type(error).__name__,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        raise
+
+    LOGGER.info(
+        "ai_request_completed %s",
+        json.dumps(
+            ai_observability_fields(endpoint, response, elapsed_ms(started_at)),
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    return response
+
+
+def ai_observability_fields(endpoint: str, response: Any, duration_ms: int) -> dict[str, Any]:
+    source_count = len(getattr(response, "sources", []) or [])
+    unsupported = bool(getattr(response, "unsupported", False))
+    return {
+        "endpoint": endpoint,
+        "durationMs": duration_ms,
+        "model": getattr(response, "model", None),
+        "sourceCount": source_count,
+        "unsupported": unsupported,
+        "unsupportedReason": unsupported_reason(response, source_count) if unsupported else None,
+    }
+
+
+def unsupported_reason(response: Any, source_count: int) -> str:
+    if source_count == 0:
+        return "NO_SOURCES"
+    if getattr(response, "sourceType", None) == "none":
+        return "NO_EVIDENCE"
+    return "UNSUPPORTED_RESPONSE"
+
+
+def elapsed_ms(started_at: float) -> int:
+    return max(0, round((perf_counter() - started_at) * 1000))
 
 
 def load_dotenv() -> dict[str, str]:
@@ -785,7 +844,7 @@ def parse_report_response(
                 assignee=optional_str(item.get("assignee")),
                 dueDate=optional_str(item.get("dueDate")),
                 sourceIds=filter_source_ids(item.get("sourceIds"), source_ids),
-                confirmationState=str(item.get("confirmationState") or "candidate"),
+                confirmationState="candidate",
             )
             for item in data.get("actionItems", [])
             if isinstance(item, dict) and str(item.get("title") or "").strip()
@@ -988,29 +1047,29 @@ def health() -> dict[str, Any]:
 
 @app.post("/api/meeting-ai/ask", response_model=MeetingAiAskResponse)
 def meeting_ai_ask(payload: MeetingAiAskRequest) -> MeetingAiAskResponse:
-    return call_openai(payload)
+    return observe_ai_endpoint("meeting-ai.ask", lambda: call_openai(payload))
 
 
 @app.post("/api/meeting-ai/explain-term", response_model=ExplainTermResponse)
 def meeting_ai_explain_term(payload: ExplainTermRequest) -> ExplainTermResponse:
-    return explain_term(payload)
+    return observe_ai_endpoint("meeting-ai.explain-term", lambda: explain_term(payload))
 
 
 @app.post("/api/meeting-ai/chat", response_model=MeetingAiChatResponse)
 def meeting_ai_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
-    return meeting_chat(payload)
+    return observe_ai_endpoint("meeting-ai.chat", lambda: meeting_chat(payload))
 
 
 @app.post("/api/meeting-ai/generate-report", response_model=GenerateReportResponse)
 def meeting_ai_generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
-    return generate_report(payload)
+    return observe_ai_endpoint("meeting-ai.generate-report", lambda: generate_report(payload))
 
 
 @app.post("/api/meeting-ai/extract-tasks", response_model=ExtractTasksResponse)
 def meeting_ai_extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksResponse:
-    return extract_tasks(payload)
+    return observe_ai_endpoint("meeting-ai.extract-tasks", lambda: extract_tasks(payload))
 
 
 @app.post("/api/project-ai/chat", response_model=ProjectAiChatResponse)
 def project_ai_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
-    return project_chat(payload)
+    return observe_ai_endpoint("project-ai.chat", lambda: project_chat(payload))

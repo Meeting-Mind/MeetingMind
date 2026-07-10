@@ -51,6 +51,15 @@ function parseUpdatedRank(value: string) {
   return Number(match[1]) * 100 + Number(match[2]);
 }
 
+function buildProjectOverviewHref(space: WorkspaceData["workspaceHome"]["spaces"][number]) {
+  const params = new URLSearchParams({
+    spaceId: space.id,
+    project: space.name
+  });
+
+  return `/project-overview?${params.toString()}`;
+}
+
 export function WorkspaceHomePage({
   data,
   onCreateProject
@@ -190,7 +199,7 @@ export function WorkspaceHomePage({
             <Link
               key={space.name}
               className="workspace-catalog-card"
-              to={`/project-overview?project=${encodeURIComponent(space.name)}`}
+              to={buildProjectOverviewHref(space)}
             >
               <div className="workspace-catalog-card-time">
                 <span className="workspace-catalog-time-dot" />

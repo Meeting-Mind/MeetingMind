@@ -45,3 +45,9 @@ Project Knowledge는 프로젝트의 공식 최신 상태다. 회의 기록은 �
 ## 10. 검증 가능한 변경
 
 모든 기능 변경은 사용자 가치, API/데이터 계약, 검증 방법을 가져야 한다. 검증 없이 완료된 것으로 간주하지 않는다.
+
+## 11. 요구사항 기준선
+
+Google Sheets 요구사항 정의서의 로컬 스냅샷은 `requirements/*`에 Markdown으로 보관한다. 기능 스펙, 기술 계획, 작업 목록, API 계약, 데이터 모델, 구현은 관련 요구사항 문서의 용어, 권한, 상태값, 정책, 성능 기준을 위반할 수 없다.
+
+구현자는 요구사항 전체를 매번 읽지 않는다. 작업 시작 시 `requirements/INDEX.md`를 확인하고, 현재 작업 영역에 필요한 요구사항 문서만 추가로 읽는다. 도메인 용어는 `requirements/glossary.md`, 권한은 `requirements/permissions.md`, 상태값은 `requirements/status-values.md`를 우선 기준으로 삼는다.

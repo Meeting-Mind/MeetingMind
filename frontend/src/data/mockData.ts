@@ -17,6 +17,7 @@ export const mockData: WorkspaceData = {
     },
     spaces: [
       {
+        id: "space-finpilot-renewal",
         name: "FinPilot Renewal",
         members: "멤버 8명",
         meetings: "진행 회의 3건",
@@ -25,6 +26,7 @@ export const mockData: WorkspaceData = {
         href: "/project-overview"
       },
       {
+        id: "space-campus-admin-assistant",
         name: "Campus Admin Assistant",
         members: "멤버 5명",
         meetings: "진행 회의 2건",

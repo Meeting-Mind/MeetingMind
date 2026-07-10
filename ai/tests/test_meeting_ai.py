@@ -1,8 +1,23 @@
+import json
 import unittest
 from unittest.mock import patch
 
-from app.main import ExplainTermRequest, GlossaryItem, TranscriptRow, explain_term
-from app.rag import RagChunk, chunk_to_source
+from app.main import (
+    AiSource,
+    ExplainTermRequest,
+    ExtractTasksRequest,
+    GlossaryItem,
+    MeetingAiChatRequest,
+    TranscriptRow,
+    ai_observability_fields,
+    explain_term,
+    extract_tasks,
+    meeting_ai_chat,
+    meeting_chat,
+    parse_report_response,
+    parse_task_candidates_response,
+)
+from app.rag import InMemoryRagRetriever, RagChunk, RagSearchRequest, chunk_to_source
 
 
 class ExplainTermTest(unittest.TestCase):
@@ -91,6 +106,211 @@ class RagMappingTest(unittest.TestCase):
         self.assertEqual(source.startMs, 370300)
         self.assertEqual(source.endMs, 374100)
         self.assertEqual(source.text, "김진수: ERD 구조를 수정해야 합니다.")
+
+
+class RagSafetyTest(unittest.TestCase):
+    def test_meeting_scope_excludes_other_meetings_and_project_knowledge(self):
+        chunks = [
+            RagChunk(
+                chunkId="meeting-001:transcript:0001",
+                scope="meeting",
+                projectId="space-001",
+                meetingId="meeting-001",
+                sourceType="transcript",
+                sourceId="segment-001",
+                content="김진수: 권한 필터를 먼저 적용합니다.",
+                embeddingText="회의: 회의1\n범위: meeting\n출처: transcript\n내용: 권한 필터",
+            ),
+            RagChunk(
+                chunkId="meeting-002:transcript:0001",
+                scope="meeting",
+                projectId="space-001",
+                meetingId="meeting-002",
+                sourceType="transcript",
+                sourceId="segment-999",
+                content="이미주: 권한 필터 구현은 다른 회의에서 논의했습니다.",
+                embeddingText="회의: 회의2\n범위: meeting\n출처: transcript\n내용: 권한 필터",
+            ),
+            RagChunk(
+                chunkId="space-001:projectKnowledge:0001",
+                scope="project",
+                projectId="space-001",
+                meetingId=None,
+                sourceType="projectKnowledge",
+                sourceId="knowledge-001",
+                content="프로젝트 공식 권한 정책입니다.",
+                embeddingText="회의: 공식 지식\n범위: project\n출처: projectKnowledge\n내용: 권한 정책",
+            ),
+        ]
+
+        results = InMemoryRagRetriever(chunks).search(
+            RagSearchRequest(
+                query="권한 필터",
+                scope="meeting",
+                projectId="space-001",
+                meetingId="meeting-001",
+                limit=10,
+            )
+        )
+
+        self.assertEqual([result.chunk.sourceId for result in results], ["segment-001"])
+
+    def test_project_scope_excludes_disallowed_meeting_chunks_but_keeps_official_knowledge(self):
+        chunks = [
+            RagChunk(
+                chunkId="space-001:projectKnowledge:0001",
+                scope="project",
+                projectId="space-001",
+                sourceType="projectKnowledge",
+                sourceId="knowledge-001",
+                content="공식 권한 정책은 Project Knowledge에 저장합니다.",
+                embeddingText="회의: 공식 지식\n범위: project\n출처: projectKnowledge\n내용: 권한 정책",
+            ),
+            RagChunk(
+                chunkId="meeting-allowed:meetingSummary:0001",
+                scope="project",
+                projectId="space-001",
+                meetingId="meeting-allowed",
+                sourceType="meetingSummary",
+                sourceId="meeting-summary-allowed",
+                content="접근 가능한 회의에서 권한 필터가 논의되었습니다.",
+                embeddingText="회의: 접근 가능\n범위: project\n출처: meetingSummary\n내용: 권한 필터",
+            ),
+            RagChunk(
+                chunkId="meeting-denied:meetingSummary:0001",
+                scope="project",
+                projectId="space-001",
+                meetingId="meeting-denied",
+                sourceType="meetingSummary",
+                sourceId="meeting-summary-denied",
+                content="접근 불가 회의의 권한 필터 논의입니다.",
+                embeddingText="회의: 접근 불가\n범위: project\n출처: meetingSummary\n내용: 권한 필터",
+            ),
+        ]
+
+        results = InMemoryRagRetriever(chunks).search(
+            RagSearchRequest(
+                query="권한 필터",
+                scope="project",
+                projectId="space-001",
+                allowedMeetingIds=("meeting-allowed",),
+                limit=10,
+            )
+        )
+
+        source_ids = [result.chunk.sourceId for result in results]
+        self.assertIn("knowledge-001", source_ids)
+        self.assertIn("meeting-summary-allowed", source_ids)
+        self.assertNotIn("meeting-summary-denied", source_ids)
+
+    def test_meeting_chat_does_not_call_llm_without_sources(self):
+        payload = MeetingAiChatRequest(
+            meetingId="meeting-001",
+            question="예산 승인 내역은?",
+            transcript=[
+                TranscriptRow(time="00:01:00", speaker="김진수", text="권한 필터를 먼저 적용합니다.")
+            ],
+        )
+
+        with patch("app.main.call_openai_text") as call_openai_text:
+            response = meeting_chat(payload)
+
+        call_openai_text.assert_not_called()
+        self.assertTrue(response.unsupported)
+        self.assertEqual(response.sources, [])
+        self.assertEqual(response.model, "context-only")
+
+    def test_task_extraction_does_not_call_llm_without_sources(self):
+        payload = ExtractTasksRequest(meetingId="meeting-001", title="주간 회의")
+
+        with patch("app.main.call_openai_text") as call_openai_text:
+            response = extract_tasks(payload)
+
+        call_openai_text.assert_not_called()
+        self.assertTrue(response.unsupported)
+        self.assertEqual(response.tasks, [])
+        self.assertEqual(response.sources, [])
+
+    def test_generated_source_ids_are_filtered_to_provided_sources(self):
+        sources = [
+            AiSource(
+                sourceId="segment-001",
+                type="transcript",
+                title="주간 회의",
+                text="김진수: ERD 수정안을 문서화하겠습니다.",
+            )
+        ]
+
+        report = parse_report_response(
+            '{"summary":"요약","decisions":[{"title":"결정","sourceIds":["segment-001","forged-source"]}],'
+            '"actionItems":[{"title":"ERD 수정안 문서화","sourceIds":["forged-source"],'
+            '"confirmationState":"confirmed"}],"markdown":"## 요약"}',
+            model="test-model",
+            sources=sources,
+        )
+        tasks = parse_task_candidates_response(
+            '{"tasks":[{"title":"ERD 수정안 문서화","sourceIds":["segment-001","forged-source"],'
+            '"confirmationState":"confirmed"}]}',
+            model="test-model",
+            sources=sources,
+        )
+
+        self.assertEqual(report.decisions[0].sourceIds, ["segment-001"])
+        self.assertEqual(report.actionItems[0].sourceIds, [])
+        self.assertEqual(report.actionItems[0].confirmationState, "candidate")
+        self.assertEqual(tasks.tasks[0].sourceIds, ["segment-001"])
+        self.assertEqual(tasks.tasks[0].confirmationState, "candidate")
+
+
+class AiObservabilityTest(unittest.TestCase):
+    def test_endpoint_logs_model_source_count_and_unsupported_reason(self):
+        payload = MeetingAiChatRequest(
+            meetingId="meeting-001",
+            question="민감한 질문 원문",
+            transcript=[
+                TranscriptRow(time="00:01:00", speaker="김진수", text="권한 필터를 먼저 적용합니다.")
+            ],
+        )
+
+        with self.assertLogs("meetingmind.ai", level="INFO") as logs:
+            response = meeting_ai_chat(payload)
+
+        self.assertTrue(response.unsupported)
+        log_message = logs.output[0]
+        self.assertIn("ai_request_completed", log_message)
+        self.assertNotIn("민감한 질문 원문", log_message)
+
+        payload_text = log_message.split("ai_request_completed ", 1)[1]
+        fields = json.loads(payload_text)
+        self.assertEqual(fields["endpoint"], "meeting-ai.chat")
+        self.assertEqual(fields["model"], "context-only")
+        self.assertEqual(fields["sourceCount"], 0)
+        self.assertTrue(fields["unsupported"])
+        self.assertEqual(fields["unsupportedReason"], "NO_SOURCES")
+        self.assertIsInstance(fields["durationMs"], int)
+
+    def test_observability_fields_count_sources_for_supported_response(self):
+        response = parse_task_candidates_response(
+            '{"tasks":[{"title":"ERD 수정","sourceIds":["segment-001"]}]}',
+            model="test-model",
+            sources=[
+                AiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    title="주간 회의",
+                    text="ERD 수정 작업을 진행합니다.",
+                )
+            ],
+        )
+
+        fields = ai_observability_fields("meeting-ai.extract-tasks", response, 12)
+
+        self.assertEqual(fields["endpoint"], "meeting-ai.extract-tasks")
+        self.assertEqual(fields["durationMs"], 12)
+        self.assertEqual(fields["model"], "test-model")
+        self.assertEqual(fields["sourceCount"], 1)
+        self.assertFalse(fields["unsupported"])
+        self.assertIsNone(fields["unsupportedReason"])
 
 
 if __name__ == "__main__":

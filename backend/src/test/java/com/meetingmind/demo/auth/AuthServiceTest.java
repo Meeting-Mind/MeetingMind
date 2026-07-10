@@ -51,6 +51,19 @@ class AuthServiceTest {
     }
 
     @Test
+    void signupRejectsPasswordThatDoesNotMeetPolicy() {
+        AuthService service = newAuthService(new FakeGoogleCredentialVerifier());
+
+        assertThatThrownBy(() -> service.signup(new SignupRequest("miju@meetingmind.ai", "password", "이미주"), "JUnit"))
+                .isInstanceOf(AuthException.class)
+                .satisfies(error -> {
+                    AuthException exception = (AuthException) error;
+                    assertThat(exception.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(exception.code()).isEqualTo("INVALID_REQUEST");
+                });
+    }
+
+    @Test
     void loginRejectsWrongPassword() {
         AuthService service = newAuthService(new FakeGoogleCredentialVerifier());
         service.signup(new SignupRequest("miju@meetingmind.ai", "password-123", "이미주"), "JUnit");

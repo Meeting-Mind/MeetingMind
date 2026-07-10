@@ -29,6 +29,9 @@ public class AuthService {
         if (store.findIdentity("local", email).isPresent() || store.findUserByEmail(email).isPresent()) {
             throw new AuthException(HttpStatus.CONFLICT, "EMAIL_ALREADY_REGISTERED", "이미 가입된 이메일입니다.");
         }
+        if (!PasswordPolicy.isValid(request.password())) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", PasswordPolicy.MESSAGE);
+        }
 
         Instant now = tokenService.now();
         AuthUser user = store.createUser(email, request.displayName().trim(), null, now);
@@ -91,7 +94,7 @@ public class AuthService {
         return issueTokenPair(user, userAgent);
     }
 
-    AuthUserResponse currentUser(String authorizationHeader) {
+    public AuthUserResponse currentUser(String authorizationHeader) {
         String userId = tokenService.resolveSubject(authorizationHeader);
         return store.findUserById(userId)
                 .map(AuthUserResponse::from)

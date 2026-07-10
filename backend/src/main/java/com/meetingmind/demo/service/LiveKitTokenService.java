@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class LiveKitTokenService {
 
+    public static final long TOKEN_EXPIRES_IN_SECONDS = 60L * 60L;
     private static final Path DOTENV_PATH = Path.of(".env");
     private final Clock clock;
     private final ConfigProvider configProvider;
@@ -33,23 +34,27 @@ public class LiveKitTokenService {
     }
 
     public LiveKitTokenResponse issueToken(LiveKitTokenRequest request) {
+        return issueToken(request.roomName(), request.identity(), request.name());
+    }
+
+    public LiveKitTokenResponse issueToken(String roomName, String identity, String name) {
         String serverUrl = requireConfig("LIVEKIT_WS_URL", "LIVEKIT_URL");
         String apiKey = requireEnv("LIVEKIT_API_KEY");
         String apiSecret = requireEnv("LIVEKIT_API_SECRET");
 
         long now = Instant.now(clock).getEpochSecond();
-        long expiresAt = now + 60L * 60L;
+        long expiresAt = now + TOKEN_EXPIRES_IN_SECONDS;
 
         String header = base64Url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
-        String payload = base64Url(buildPayload(request, apiKey, now, expiresAt));
+        String payload = base64Url(buildPayload(roomName, identity, name, apiKey, now, expiresAt));
         String signature = sign(apiSecret, header + "." + payload);
 
         return new LiveKitTokenResponse(
                 serverUrl,
                 header + "." + payload + "." + signature,
-                request.roomName(),
-                request.identity(),
-                request.name()
+                roomName,
+                identity,
+                name
         );
     }
 
@@ -114,16 +119,16 @@ public class LiveKitTokenService {
         return value;
     }
 
-    private String buildPayload(LiveKitTokenRequest request, String apiKey, long now, long expiresAt) {
+    private String buildPayload(String roomName, String identity, String name, String apiKey, long now, long expiresAt) {
         return "{"
                 + "\"iss\":\"" + escape(apiKey) + "\","
-                + "\"sub\":\"" + escape(request.identity()) + "\","
-                + "\"name\":\"" + escape(request.name()) + "\","
+                + "\"sub\":\"" + escape(identity) + "\","
+                + "\"name\":\"" + escape(name) + "\","
                 + "\"nbf\":" + now + ","
                 + "\"exp\":" + expiresAt + ","
                 + "\"video\":{"
                 + "\"roomJoin\":true,"
-                + "\"room\":\"" + escape(request.roomName()) + "\","
+                + "\"room\":\"" + escape(roomName) + "\","
                 + "\"canPublish\":true,"
                 + "\"canSubscribe\":true,"
                 + "\"canPublishData\":true"

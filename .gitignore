@@ -3,9 +3,14 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+.idea/
+output/
+tmp/
 __pycache__/
 *.py[cod]
 backend/target/
+backend/.gradle/
+backend/build/
 .env
 .env.*
 !.env.example
