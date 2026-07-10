@@ -1599,7 +1599,9 @@ body.app-theme select {
 }
 
 .project-operation-toolbar,
-.project-acl-add {
+.project-acl-add,
+.project-meeting-create-form,
+.project-task-filters {
   display: grid;
   grid-template-columns: minmax(180px, 1.4fr) minmax(140px, 0.8fr) auto;
   gap: 12px;
@@ -1607,7 +1609,9 @@ body.app-theme select {
 }
 
 .project-operation-toolbar label,
-.project-acl-add label {
+.project-acl-add label,
+.project-meeting-create-form label,
+.project-task-filters label {
   display: grid;
   gap: 7px;
   color: #77728f;
@@ -1618,10 +1622,18 @@ body.app-theme select {
 
 .project-operation-toolbar select,
 .project-acl-add select,
+.project-meeting-create-form input,
+.project-meeting-create-form select,
+.project-task-filters input,
+.project-task-filters select,
 .project-task-form input,
 .project-task-form select,
 .project-task-form textarea,
-.project-kanban-card-actions select {
+.project-kanban-card-actions select,
+.project-kanban-edit input,
+.project-kanban-edit select,
+.project-kanban-edit textarea,
+.project-delete-confirm input {
   min-width: 0;
   border: 1px solid #e5e1f0;
   border-radius: 14px;
@@ -1634,6 +1646,9 @@ body.app-theme select {
 
 .project-operation-toolbar select,
 .project-acl-add select,
+.project-meeting-create-form input,
+.project-task-filters input,
+.project-task-filters select,
 .project-task-form input,
 .project-task-form select {
   height: 44px;
@@ -1642,8 +1657,11 @@ body.app-theme select {
 
 .project-operation-danger,
 .project-acl-add button,
+.project-meeting-create-form button,
 .project-task-form button,
-.project-kanban-card-actions button {
+.project-kanban-card-actions button,
+.project-delete-confirm button,
+.project-kanban-edit-actions button {
   height: 44px;
   border: 0;
   border-radius: 14px;
@@ -1658,15 +1676,88 @@ body.app-theme select {
 }
 
 .project-acl-add button,
-.project-task-form button {
+.project-meeting-create-form button,
+.project-task-form button,
+.project-delete-confirm button,
+.project-kanban-edit-actions button {
   background: #282b49;
   color: #fff;
 }
 
 .project-acl-add button:disabled,
-.project-task-form button:disabled {
+.project-meeting-create-form button:disabled,
+.project-task-form button:disabled,
+.project-delete-confirm button:disabled,
+.project-kanban-edit-actions button:disabled,
+.project-acl-row select:disabled,
+.project-acl-row button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.project-meeting-create-form {
+  grid-template-columns: minmax(160px, 1.2fr) 190px minmax(180px, 1fr) auto;
+}
+
+.project-meeting-create-form select[multiple] {
+  min-height: 92px;
+  padding: 8px 10px;
+}
+
+.project-delete-confirm,
+.project-acl-overrides,
+.project-acl-denied {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #ebe7f5;
+  border-radius: 16px;
+  background: #fffdf7;
+  color: #746f86;
+}
+
+.project-delete-confirm {
+  grid-template-columns: minmax(0, 1fr) 120px 96px;
+  align-items: center;
+  background: #fff8f8;
+}
+
+.project-delete-confirm strong,
+.project-acl-overrides strong,
+.project-acl-denied strong {
+  display: block;
+  color: #34375b;
+  font-weight: 900;
+}
+
+.project-delete-confirm p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.project-acl-overrides div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-acl-overrides span,
+.project-acl-denied span,
+.project-kanban-source,
+.project-kanban-empty {
+  color: #8d88a2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.project-acl-overrides span {
+  display: inline-flex;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #3d74bd;
 }
 
 .project-acl-note {
@@ -1742,6 +1833,10 @@ body.app-theme select {
   grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.8fr) 140px minmax(160px, 1fr) auto;
   gap: 10px;
   align-items: start;
+}
+
+.project-task-filters {
+  grid-template-columns: minmax(180px, 1fr) 150px 150px;
 }
 
 .project-task-form textarea {
@@ -1825,8 +1920,54 @@ body.app-theme select {
 }
 
 .project-kanban-card-actions button {
-  width: 54px;
+  min-width: 54px;
   height: 38px;
+  padding: 0 10px;
+}
+
+.project-kanban-card-actions button:first-of-type {
+  background: #eef5ff;
+  color: #3d74bd;
+}
+
+.project-kanban-edit {
+  display: grid;
+  gap: 8px;
+}
+
+.project-kanban-edit input,
+.project-kanban-edit select {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.project-kanban-edit textarea {
+  min-height: 72px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.project-kanban-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.project-kanban-edit-actions button {
+  flex: 1;
+  height: 38px;
+}
+
+.project-kanban-edit-actions button.secondary {
+  background: #f2efff;
+  color: #6a6586;
+}
+
+.project-kanban-empty {
+  padding: 12px;
+  border: 1px dashed #e5e1f0;
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
 }
 
 .project-overview-side {
@@ -1898,6 +2039,48 @@ body.app-theme select {
   text-align: left;
   font-size: 16px;
   font-weight: 800;
+}
+
+.project-ai-source-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid #ebe7f5;
+  border-radius: 16px;
+  background: #fbfafd;
+}
+
+.project-ai-source-panel div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.project-ai-source-panel strong,
+.project-ai-source-panel span {
+  display: block;
+}
+
+.project-ai-source-panel strong {
+  color: #34375b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.project-ai-source-panel span,
+.project-ai-source-panel p {
+  color: #8d88a2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.project-ai-source-panel p {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.35;
 }
 
 .project-chat-history {
@@ -2120,9 +2303,87 @@ body.app-theme select {
 }
 
 .team-members-approval-panel,
+.team-members-invitation-split,
+.team-members-owner-transfer,
 .team-members-toolbar,
 .team-members-footer {
   margin-bottom: 20px;
+}
+
+.team-members-invitation-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.team-members-invitation-split article,
+.team-members-owner-transfer {
+  padding: 20px;
+  border: 1px solid var(--app-line);
+  border-radius: 28px;
+  background: #fff;
+}
+
+.team-members-invitation-split strong,
+.team-members-owner-transfer strong {
+  display: block;
+  color: #35385c;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.team-members-invitation-split p,
+.team-members-owner-transfer p {
+  margin: 8px 0 16px;
+  color: #8f89a5;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.team-members-invitation-split button,
+.team-members-owner-transfer button {
+  height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: #282b49;
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.team-members-owner-transfer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1.35fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.team-members-owner-transfer form {
+  display: grid;
+  grid-template-columns: 1fr 1fr minmax(150px, 0.8fr) auto;
+  gap: 10px;
+}
+
+.team-members-owner-transfer select,
+.team-members-owner-transfer input,
+.team-members-col.actions select {
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #e5e1f0;
+  border-radius: 14px;
+  background: #fff;
+  color: #34375b;
+  font: inherit;
+  font-weight: 800;
+}
+
+.team-members-owner-transfer button:disabled,
+.team-members-col.actions button:disabled,
+.team-members-col.actions select:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .team-members-toolbar {
@@ -2190,7 +2451,7 @@ body.app-theme select {
 .team-members-table-head,
 .team-members-row {
   display: grid;
-  grid-template-columns: 80px 1.3fr 1fr 1fr 0.95fr;
+  grid-template-columns: 64px minmax(210px, 1.25fr) minmax(150px, 0.8fr) minmax(170px, 0.95fr) minmax(160px, 0.85fr) minmax(170px, 0.9fr);
   align-items: center;
 }
 
@@ -2241,10 +2502,26 @@ body.app-theme select {
 }
 
 .team-members-col.member,
-.team-members-col.project {
+.team-members-col.project,
+.team-members-col.actions {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.team-members-col.actions {
+  gap: 8px;
+}
+
+.team-members-col.actions button {
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 14px;
+  background: #fff1f1;
+  color: #d64545;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .team-members-col.check {

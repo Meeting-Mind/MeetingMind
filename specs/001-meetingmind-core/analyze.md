@@ -32,6 +32,7 @@
 | Low | 회의당 current confirmed report 1개 정책을 결정했다. | Project Knowledge 승격, 다운로드, Project AI source 연결 시 공식 회의록이 중복되는 위험이 줄었다. | Backend migration 구현 시 partial unique index 또는 애플리케이션 제약을 둔다. | `clarify.md`, `erd.md`, `data-model.md`, `meeting-api.md` | Decided |
 | Low | ProjectKnowledge embedding 재생성은 비동기로 결정했다. | Knowledge 수정 API 응답 지연과 embedding provider 장애 영향을 줄이고 기존 chunk로 검색 안정성을 유지한다. | Backend/Data 구현 시 `embeddingStatus`, `embeddingJobId`, 비동기 worker 또는 job 경계를 설계한다. | `clarify.md`, `erd.md`, `data-model.md`, `knowledge-api.md` | Decided |
 | Medium | AI/RAG prototype을 분리 API/ERD 기준으로 재검토했다. | Meeting AI scope, Project AI source 분리, 근거 없음 처리, candidate 산출물 원칙은 코드와 테스트로 확인됐다. token budget과 observability log는 아직 구현되지 않았다. | Backend 권한 필터와 실제 RAG 저장소 도입 시 token 축소 정책, 처리 시간/모델/근거 수 로그를 별도 task로 추가한다. | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `contracts/ai-api.md`, `knowledge-api.md`, `erd.md`, `data-model.md`, `tasks.md`, `implement.md` | AI Reviewed |
+| Medium | M018 Project Workspace Frontend는 local state 기준으로 완료됐지만 권한 보장은 아직 frontend prototype 표현이다. | UI는 default-deny, 회수 즉시 source 제외, owner/admin override, 마지막 active HOST 보호, owner transfer 확인을 표현하지만 실제 보안 경계는 backend가 닫아야 한다. | 다음 backend 권한 매트릭스 구현에서 MeetingParticipant/Invitation, SpaceMember role/remove, owner transfer transaction, Project AI 권한 선필터, AuditLog 저장을 구현한다. | `frontend/src/App.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/TeamMembersPage.tsx`, `requirements/permissions.md`, `tasks.md`, `implement.md` | Frontend Verified |
 
 ## Recommendation
 

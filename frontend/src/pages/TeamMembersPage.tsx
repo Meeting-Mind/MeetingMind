@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type { WorkspaceData } from "../types";
@@ -7,6 +7,7 @@ type TeamMember = {
   name: string;
   email: string;
   role: string;
+  spaceRole: "OWNER" | "ADMIN" | "MEMBER";
   since: string;
   access: string;
   rank: string;
@@ -34,6 +35,9 @@ export function TeamMembersPage({
   inviteMeta,
   onApproveRequest,
   onRejectRequest,
+  onRemoveMember,
+  onTransferOwner,
+  onUpdateMemberRole,
   onCreateProject
 }: {
   spaces: WorkspaceData["workspaceHome"]["spaces"];
@@ -42,6 +46,18 @@ export function TeamMembersPage({
   inviteMeta: Record<string, InviteMeta>;
   onApproveRequest?: (projectName: string, requestId: string) => void;
   onRejectRequest?: (projectName: string, requestId: string) => void;
+  onRemoveMember?: (projectName: string, memberEmail: string) => void;
+  onTransferOwner?: (
+    projectName: string,
+    targetMemberEmail: string,
+    previousOwnerRole: Exclude<TeamMember["spaceRole"], "OWNER">,
+    confirmation: string
+  ) => void;
+  onUpdateMemberRole?: (
+    projectName: string,
+    memberEmail: string,
+    role: Exclude<TeamMember["spaceRole"], "OWNER">
+  ) => void;
   onCreateProject?: (payload: { name: string; description: string }) => void;
 }) {
   useEffect(() => {
@@ -64,6 +80,12 @@ export function TeamMembersPage({
   };
   const activeCount = members.filter((member) => member.status === "active").length;
   const awayCount = members.length - activeCount;
+  const currentOwner = members.find((member) => member.spaceRole === "OWNER") ?? null;
+  const transferCandidates = members.filter((member) => member.status === "active" && member.spaceRole !== "OWNER");
+  const [transferTargetEmail, setTransferTargetEmail] = useState("");
+  const [previousOwnerRole, setPreviousOwnerRole] = useState<Exclude<TeamMember["spaceRole"], "OWNER">>("ADMIN");
+  const [transferConfirm, setTransferConfirm] = useState("");
+  const canTransferOwner = Boolean(transferTargetEmail) && transferConfirm === "TRANSFER OWNER";
 
   async function handleCopyInvite(value: string) {
     try {
@@ -71,6 +93,18 @@ export function TeamMembersPage({
     } catch {
       // Ignore clipboard errors in unsupported environments.
     }
+  }
+
+  function handleOwnerTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canTransferOwner) {
+      return;
+    }
+
+    onTransferOwner?.(projectName, transferTargetEmail, previousOwnerRole, transferConfirm);
+    setTransferTargetEmail("");
+    setPreviousOwnerRole("ADMIN");
+    setTransferConfirm("");
   }
 
   return (
@@ -98,7 +132,7 @@ export function TeamMembersPage({
           </div>
           <div className="team-members-invite-panel">
             <button className="team-members-invite-button" onClick={() => void handleCopyInvite(invite.link)} type="button">
-              팀 초대 링크
+              Space 초대 링크
             </button>
             <div
               className="team-members-invite-code"
@@ -112,10 +146,23 @@ export function TeamMembersPage({
               role="button"
               tabIndex={0}
             >
-              <span>팀 초대 코드</span>
+              <span>Space 초대 코드</span>
               <strong>{invite.code}</strong>
             </div>
           </div>
+        </section>
+
+        <section className="team-members-invitation-split">
+          <article>
+            <strong>Space invitation</strong>
+            <p>프로젝트 멤버로 추가되어 Project Knowledge와 프로젝트 화면에 접근합니다.</p>
+            <button onClick={() => void handleCopyInvite(invite.link)} type="button">Space 링크 복사</button>
+          </article>
+          <article>
+            <strong>Meeting invitation</strong>
+            <p>특정 회의의 MeetingParticipant로만 초대합니다. Space 전체 권한과 Project AI 권한은 부여하지 않습니다.</p>
+            <button onClick={() => void handleCopyInvite(`${invite.link}/meeting`)} type="button">회의 초대 copy 복사</button>
+          </article>
         </section>
 
         <section className="team-members-approval-panel">
@@ -161,6 +208,45 @@ export function TeamMembersPage({
           )}
         </section>
 
+        <section className="team-members-owner-transfer">
+          <div>
+            <strong>Owner transfer</strong>
+            <p>
+              현재 owner {currentOwner?.name ?? "없음"} · 활성 SpaceMember만 대상입니다. 확인 문구 없이 이양되지 않습니다.
+            </p>
+          </div>
+          <form onSubmit={handleOwnerTransfer}>
+            <select
+              aria-label="새 owner 선택"
+              onChange={(event) => setTransferTargetEmail(event.target.value)}
+              value={transferTargetEmail}
+            >
+              <option value="">대상 선택</option>
+              {transferCandidates.map((member) => (
+                <option key={`owner-target-${member.email}`} value={member.email}>
+                  {member.name} · {member.spaceRole}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="기존 owner 강등 role"
+              onChange={(event) => setPreviousOwnerRole(event.target.value as Exclude<TeamMember["spaceRole"], "OWNER">)}
+              value={previousOwnerRole}
+            >
+              <option value="ADMIN">기존 owner를 ADMIN으로 변경</option>
+              <option value="MEMBER">기존 owner를 MEMBER로 변경</option>
+            </select>
+            <input
+              aria-label="owner transfer 확인 문구"
+              onChange={(event) => setTransferConfirm(event.target.value)}
+              placeholder="TRANSFER OWNER"
+              type="text"
+              value={transferConfirm}
+            />
+            <button disabled={!canTransferOwner} type="submit">이양</button>
+          </form>
+        </section>
+
         <section className="team-members-toolbar">
           <div className="team-members-tabs">
             <button className="active">All</button>
@@ -185,6 +271,7 @@ export function TeamMembersPage({
             <div className="team-members-col role">역할</div>
             <div className="team-members-col access">권한</div>
             <div className="team-members-col project">직급</div>
+            <div className="team-members-col actions">관리</div>
           </div>
 
           <div className="team-members-table-body">
@@ -215,7 +302,7 @@ export function TeamMembersPage({
                   <div className="team-members-col access">
                     <div className="team-members-primary">
                       <strong>{member.access}</strong>
-                      <span>{member.status === "active" ? "현재 회의 접근 가능" : "부재 중 · 열람 중심"}</span>
+                      <span>{member.status === "active" ? `${member.spaceRole} · 활성 SpaceMember` : "부재 중 · 열람 중심"}</span>
                     </div>
                   </div>
 
@@ -225,6 +312,32 @@ export function TeamMembersPage({
                       <strong>{member.rank}</strong>
                       <span>{member.status === "active" ? "활성 멤버" : "부재 중"}</span>
                     </div>
+                  </div>
+
+                  <div className="team-members-col actions">
+                    <select
+                      aria-label={`${member.name} Space role 변경`}
+                      disabled={member.spaceRole === "OWNER"}
+                      onChange={(event) =>
+                        onUpdateMemberRole?.(
+                          projectName,
+                          member.email,
+                          event.target.value as Exclude<TeamMember["spaceRole"], "OWNER">
+                        )
+                      }
+                      value={member.spaceRole === "OWNER" ? "OWNER" : member.spaceRole}
+                    >
+                      <option value="OWNER" disabled>OWNER</option>
+                      <option value="ADMIN">ADMIN</option>
+                      <option value="MEMBER">MEMBER</option>
+                    </select>
+                    <button
+                      disabled={member.spaceRole === "OWNER"}
+                      onClick={() => onRemoveMember?.(projectName, member.email)}
+                      type="button"
+                    >
+                      제거
+                    </button>
                   </div>
                 </article>
               ))

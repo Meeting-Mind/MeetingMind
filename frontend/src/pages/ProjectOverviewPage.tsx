@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
-import type { TranscriptRow, WorkspaceData } from "../types";
+import type { WorkspaceData } from "../types";
 
 const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL ?? "http://localhost:8000";
 
@@ -14,6 +14,12 @@ type ProjectChatMessage = {
 type MeetingAiAskResponse = {
   answer: string;
   model: string;
+};
+type ProjectAiSourceCandidate = {
+  sourceId: string;
+  sourceType: "projectKnowledge" | "meetingRecord";
+  title: string;
+  text: string;
 };
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
@@ -40,6 +46,7 @@ type TeamMemberState = {
   name: string;
   email: string;
   role: string;
+  spaceRole: "OWNER" | "ADMIN" | "MEMBER";
   since: string;
   access: string;
   rank: string;
@@ -47,6 +54,8 @@ type TeamMemberState = {
 };
 type MeetingSort = "recent" | "oldest" | "state";
 type TaskStatus = ProjectTaskState["status"];
+type TaskStatusFilter = TaskStatus | "ALL";
+type TaskEditDraft = Pick<ProjectTaskState, "assignee" | "description" | "dueDate" | "status" | "title">;
 
 type ProjectKnowledge = {
   finalDecision: string;
@@ -270,6 +279,7 @@ export function ProjectOverviewPage({
   onDeleteMeeting,
   onDeleteProjectTask,
   onMoveProjectTask,
+  onUpdateProjectTask,
   onUpdateMeetingParticipant,
   onUpdateMeetingStatus,
   onUpdateProject
@@ -286,12 +296,16 @@ export function ProjectOverviewPage({
   projectMembers: Record<string, TeamMemberState[]>;
   projectTasks: Record<string, ProjectTaskState[]>;
   spaces: WorkspaceData["workspaceHome"]["spaces"];
-  onCreateMeeting?: (projectName: string) => void;
+  onCreateMeeting?: (
+    projectName: string,
+    payload?: { title?: string; scheduledAt?: string; participantEmails?: string[] }
+  ) => void;
   onCreateProject?: (payload: { name: string; description: string }) => void;
   onCreateProjectTask?: (projectName: string, task: Omit<ProjectTaskState, "id" | "sourceCandidateId">) => void;
   onDeleteMeeting?: (projectName: string, meetingIndex: string) => void;
   onDeleteProjectTask?: (projectName: string, taskId: string) => void;
   onMoveProjectTask?: (projectName: string, taskId: string, status: TaskStatus) => void;
+  onUpdateProjectTask?: (projectName: string, taskId: string, updates: TaskEditDraft) => void;
   onUpdateMeetingParticipant?: (
     projectName: string,
     meetingIndex: string,
@@ -338,11 +352,27 @@ export function ProjectOverviewPage({
   const [selectedMeetingIndex, setSelectedMeetingIndex] = useState("");
   const [selectedMemberEmail, setSelectedMemberEmail] = useState("");
   const [selectedMemberRole, setSelectedMemberRole] = useState<MeetingParticipantState["role"]>("VIEWER");
+  const [newMeetingTitle, setNewMeetingTitle] = useState("");
+  const [newMeetingAt, setNewMeetingAt] = useState("2026-07-10T10:00");
+  const [newMeetingParticipantEmails, setNewMeetingParticipantEmails] = useState<string[]>([]);
+  const [meetingDeleteCandidate, setMeetingDeleteCandidate] = useState("");
+  const [meetingDeleteConfirm, setMeetingDeleteConfirm] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [taskDueDate, setTaskDueDate] = useState("2026-07-20");
   const [taskMeetingIndex, setTaskMeetingIndex] = useState("");
+  const [taskSearch, setTaskSearch] = useState("");
+  const [taskAssigneeFilter, setTaskAssigneeFilter] = useState("ALL");
+  const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusFilter>("ALL");
+  const [editingTaskId, setEditingTaskId] = useState("");
+  const [taskEditDraft, setTaskEditDraft] = useState<TaskEditDraft>({
+    title: "",
+    description: "",
+    assignee: "",
+    dueDate: "",
+    status: "TODO"
+  });
 
   useEffect(() => {
     if (!viewData) {
@@ -364,50 +394,16 @@ export function ProjectOverviewPage({
     setSelectedMeetingIndex(viewData.meetings[0]?.index ?? "");
     setTaskMeetingIndex(viewData.meetings[0]?.index ?? "");
     setSelectedMemberEmail("");
+    setNewMeetingTitle("");
+    setNewMeetingParticipantEmails([]);
+    setMeetingDeleteCandidate("");
+    setMeetingDeleteConfirm("");
     setTaskAssignee("");
+    setTaskSearch("");
+    setTaskAssigneeFilter("ALL");
+    setTaskStatusFilter("ALL");
+    setEditingTaskId("");
   }, [viewData?.selectedSpace.name]);
-
-  const payloadSource = useMemo(() => {
-    if (!viewData) {
-      return {
-        transcript: [] as TranscriptRow[],
-        decisions: [],
-        actions: []
-      };
-    }
-
-    const nextMeeting = viewData.meetings.find((meeting) => meeting.state !== "완료") ?? viewData.meetings[0] ?? null;
-    const transcript: TranscriptRow[] = viewData.meetings.map((meeting, index) => ({
-      time: `06:${String(2 + index * 4).padStart(2, "0")}:00`,
-      speaker: `${meeting.index.replace("#", "")}회차`,
-      text:
-        meeting.state === "완료"
-          ? `${meeting.title} 회의에서 구조 점검과 주요 결정사항을 정리했습니다.`
-          : meeting.state === "예정"
-            ? `${meeting.title} 회의에서 보안 정책과 관리자 권한 최종안을 확정할 예정입니다.`
-            : `${meeting.title} 회의에서 권한 기반 RAG 검색 구조와 보고서 생성 흐름을 논의했습니다.`
-    }));
-
-    return {
-      transcript,
-      decisions: [
-        {
-          title: viewData.knowledge.finalDecision,
-          meta: `${viewData.selectedSpace.name} 프로젝트 결정`
-        }
-      ],
-      actions: [
-        {
-          title: `${viewData.selectedSpace.name} 다음 회의 안건 정리`,
-          meta: nextMeeting ? `${nextMeeting.date} 예정` : "아직 예정된 회의 없음"
-        },
-        {
-          title: `${viewData.selectedSpace.name} 최근 결정사항 검토`,
-          meta: viewData.selectedSpace.updatedAt
-        }
-      ]
-    };
-  }, [viewData]);
 
   useEffect(() => {
     if (!chatScrollRef.current) {
@@ -420,21 +416,82 @@ export function ProjectOverviewPage({
     });
   }, [loading, messages]);
 
-  const filteredMeetings = useMemo(() => {
-    const normalizedQuery = meetingSearch.trim().toLowerCase();
-    const sourceMeetings = viewData?.meetings ?? [];
-    const nextMeetings = sourceMeetings.filter((meeting) => {
-      if (!normalizedQuery) {
+  if (!viewData) {
+    return null;
+  }
+
+  const nextMeeting = viewData.meetings.find((meeting) => meeting.state !== "완료") ?? viewData.meetings[0] ?? null;
+  const contextMeeting = viewData.meetings.find((meeting) => meeting.state === "보고서 생성됨") ?? viewData.meetings[0] ?? null;
+  const canSubmit = input.trim().length > 0 && !loading;
+  const selectedProjectName = viewData.selectedSpace.name;
+  const selectedMeeting = viewData.meetings.find((meeting) => meeting.index === selectedMeetingIndex) ?? contextMeeting;
+  const selectedMeetingKey = selectedMeeting ? buildMeetingKey(selectedProjectName, selectedMeeting.index) : "";
+  const members = projectMembers[selectedProjectName] ?? [];
+  const defaultParticipants = selectedMeetingKey ? buildDefaultMeetingParticipants(members, selectedMeetingKey) : [];
+  const visibleParticipants = selectedMeetingKey
+    ? meetingParticipants[selectedMeetingKey] ?? defaultParticipants
+    : [];
+  const hasStoredParticipants = selectedMeetingKey ? Boolean(meetingParticipants[selectedMeetingKey]) : false;
+  const selectedProjectTasks = projectTasks[selectedProjectName] ?? [];
+  const availableMember = members.find((member) => member.email === selectedMemberEmail) ?? members[0] ?? null;
+  const overrideMembers = members.filter((member) => member.spaceRole === "OWNER" || member.spaceRole === "ADMIN");
+  const defaultDeniedMembers = selectedMeeting
+    ? members.filter(
+        (member) =>
+          !overrideMembers.some((overrideMember) => overrideMember.email === member.email) &&
+          !visibleParticipants.some(
+            (participant) => participant.email === member.email && participant.accessStatus === "ACTIVE"
+          )
+      )
+    : [];
+  const projectKnowledgeSources: ProjectAiSourceCandidate[] = [
+    {
+      sourceId: `${viewData.selectedSpace.id}:knowledge:decision`,
+      sourceType: "projectKnowledge",
+      title: "공식 Project Knowledge · 최종 결정",
+      text: viewData.knowledge.finalDecision
+    },
+    {
+      sourceId: `${viewData.selectedSpace.id}:knowledge:owner`,
+      sourceType: "projectKnowledge",
+      title: "공식 Project Knowledge · 담당 구조",
+      text: viewData.knowledge.ownerStructure
+    }
+  ];
+  const accessibleMeetingSources: ProjectAiSourceCandidate[] = viewData.meetings
+    .filter((meeting) => {
+      const meetingKey = buildMeetingKey(selectedProjectName, meeting.index);
+      const storedParticipants = meetingParticipants[meetingKey];
+      const candidateParticipants = storedParticipants ?? buildDefaultMeetingParticipants(members, meetingKey);
+
+      return candidateParticipants.some((participant) => participant.accessStatus === "ACTIVE");
+    })
+    .map((meeting) => ({
+      sourceId: `${viewData.selectedSpace.id}:meeting:${meeting.id ?? meeting.index}`,
+      sourceType: "meetingRecord" as const,
+      title: `회의기록 ${meeting.index} · ${meeting.title}`,
+      text: getMeetingDescription(meeting)
+    }));
+  const projectAiSourceCandidates = [...projectKnowledgeSources, ...accessibleMeetingSources];
+  const accessibleMeetingSourceIds = new Set(
+    accessibleMeetingSources.map((source) => source.sourceId.replace(`${viewData.selectedSpace.id}:meeting:`, ""))
+  );
+  const accessibleMeetings = viewData.meetings.filter((meeting) =>
+    accessibleMeetingSourceIds.has(meeting.id ?? meeting.index)
+  );
+  const normalizedMeetingQuery = meetingSearch.trim().toLowerCase();
+  const filteredMeetings = accessibleMeetings
+    .filter((meeting) => {
+      if (!normalizedMeetingQuery) {
         return true;
       }
 
       return [meeting.index, meeting.title, meeting.date, meeting.state, getMeetingDescription(meeting)]
         .join(" ")
         .toLowerCase()
-        .includes(normalizedQuery);
-    });
-
-    return [...nextMeetings].sort((left, right) => {
+        .includes(normalizedMeetingQuery);
+    })
+    .sort((left, right) => {
       if (meetingSort === "oldest") {
         return parseMeetingDateLabel(left.date) - parseMeetingDateLabel(right.date);
       }
@@ -446,26 +503,59 @@ export function ProjectOverviewPage({
 
       return parseMeetingDateLabel(right.date) - parseMeetingDateLabel(left.date);
     });
-  }, [meetingSearch, meetingSort, viewData]);
+  const projectAiPayload = {
+    projectId: viewData.selectedSpace.id,
+    question: input.trim(),
+    projectKnowledge: projectKnowledgeSources.map((source) => ({
+      sourceId: source.sourceId,
+      title: source.title,
+      text: source.text
+    })),
+    meetings: accessibleMeetingSources.map((source) => ({
+      meetingId: source.sourceId,
+      title: source.title,
+      summary: source.text
+    }))
+  };
+  const legacyProjectAiPayload = {
+    transcript: accessibleMeetingSources.map((source, index) => ({
+      time: `06:${String(2 + index * 4).padStart(2, "0")}:00`,
+      speaker: source.title,
+      text: source.text
+    })),
+    decisions: projectKnowledgeSources.map((source) => ({
+      title: source.text,
+      meta: source.title
+    })),
+    actions: [
+      {
+        title: `${viewData.selectedSpace.name} 접근 가능한 회의 기록 ${accessibleMeetingSources.length}건 검토`,
+        meta: "Project AI context"
+      }
+    ]
+  };
+  const activeHostCount = visibleParticipants.filter(
+    (participant) => participant.role === "HOST" && participant.accessStatus === "ACTIVE"
+  ).length;
+  const meetingDeleteToken = selectedMeeting?.index ?? "";
+  const canConfirmMeetingDelete =
+    Boolean(selectedMeeting) && meetingDeleteCandidate === selectedMeeting?.index && meetingDeleteConfirm === meetingDeleteToken;
+  const taskAssigneeOptions = Array.from(
+    new Set(selectedProjectTasks.map((task) => task.assignee).filter((assignee) => assignee.trim().length > 0))
+  );
+  const normalizedTaskQuery = taskSearch.trim().toLowerCase();
+  const filteredProjectTasks = selectedProjectTasks.filter((task) => {
+    const matchesQuery =
+      !normalizedTaskQuery ||
+      [task.title, task.description, task.assignee, task.dueDate, task.sourceCandidateId ?? "", task.meetingKey ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedTaskQuery);
+    const matchesAssignee = taskAssigneeFilter === "ALL" || task.assignee === taskAssigneeFilter;
+    const matchesStatus = taskStatusFilter === "ALL" || task.status === taskStatusFilter;
 
-  if (!viewData) {
-    return null;
-  }
-
-  const nextMeeting = viewData.meetings.find((meeting) => meeting.state !== "완료") ?? viewData.meetings[0] ?? null;
-  const contextMeeting = viewData.meetings.find((meeting) => meeting.state === "보고서 생성됨") ?? viewData.meetings[0] ?? null;
-  const contextMeetingTag = contextMeeting ? `관련 ${contextMeeting.index.replace("#", "")}회차` : "프로젝트 초기 상태";
-  const canSubmit = input.trim().length > 0 && !loading;
-  const selectedProjectName = viewData.selectedSpace.name;
-  const selectedMeeting = viewData.meetings.find((meeting) => meeting.index === selectedMeetingIndex) ?? contextMeeting;
-  const selectedMeetingKey = selectedMeeting ? buildMeetingKey(selectedProjectName, selectedMeeting.index) : "";
-  const members = projectMembers[selectedProjectName] ?? [];
-  const defaultParticipants = selectedMeetingKey ? buildDefaultMeetingParticipants(members, selectedMeetingKey) : [];
-  const visibleParticipants = selectedMeetingKey
-    ? meetingParticipants[selectedMeetingKey] ?? defaultParticipants
-    : [];
-  const selectedProjectTasks = projectTasks[selectedProjectName] ?? [];
-  const availableMember = members.find((member) => member.email === selectedMemberEmail) ?? members[0] ?? null;
+    return matchesQuery && matchesAssignee && matchesStatus;
+  });
   const taskColumns: Array<{ key: TaskStatus; label: string }> = [
     { key: "TODO", label: "Todo" },
     { key: "IN_PROGRESS", label: "In progress" },
@@ -483,6 +573,19 @@ export function ProjectOverviewPage({
     setError("");
     setLoading(true);
 
+    if (!projectAiSourceCandidates.length) {
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "ai",
+          text: "확인 가능한 Project Knowledge 또는 접근 가능한 회의기록 출처가 없어 답변할 수 없습니다.",
+          tags: ["unsupported", "근거 없음"]
+        }
+      ]);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch(`${AI_API_BASE_URL}/api/meeting-ai/ask`, {
         method: "POST",
@@ -491,9 +594,9 @@ export function ProjectOverviewPage({
         },
         body: JSON.stringify({
           question: trimmed,
-          transcript: payloadSource.transcript,
-          decisions: payloadSource.decisions,
-          actions: payloadSource.actions
+          transcript: legacyProjectAiPayload.transcript,
+          decisions: legacyProjectAiPayload.decisions,
+          actions: legacyProjectAiPayload.actions
         })
       });
 
@@ -509,7 +612,10 @@ export function ProjectOverviewPage({
         {
           role: "ai",
           text: result.answer,
-          tags: [contextMeetingTag, "출처 프로젝트 문맥"]
+          tags: [
+            projectKnowledgeSources.length ? `Project Knowledge ${projectKnowledgeSources.length}` : "Project Knowledge 없음",
+            accessibleMeetingSources.length ? `Meeting record ${accessibleMeetingSources.length}` : "Meeting record 없음"
+          ]
         }
       ]);
     } catch (fetchError) {
@@ -520,8 +626,8 @@ export function ProjectOverviewPage({
         ...previous,
         {
           role: "ai",
-          text: `${projectPromptFallback} 현재는 AI 서버 연결을 확인해야 합니다.`,
-          tags: [contextMeetingTag, "출처 프로젝트 요약"]
+          text: `${projectPromptFallback} 현재는 AI 서버 연결을 확인해야 합니다. 근거 없는 추정 답변은 표시하지 않습니다.`,
+          tags: ["unsupported", "확인 불가"]
         }
       ]);
     } finally {
@@ -547,6 +653,21 @@ export function ProjectOverviewPage({
     setIsProjectSettingsOpen(false);
   }
 
+  function handleCreateMeeting(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newMeetingTitle.trim() || !newMeetingAt) {
+      return;
+    }
+
+    onCreateMeeting?.(selectedProjectName, {
+      title: newMeetingTitle.trim(),
+      scheduledAt: new Date(newMeetingAt).toISOString(),
+      participantEmails: newMeetingParticipantEmails
+    });
+    setNewMeetingTitle("");
+    setNewMeetingParticipantEmails([]);
+  }
+
   function handleDeleteProject() {
     if (!viewData) {
       return;
@@ -557,6 +678,21 @@ export function ProjectOverviewPage({
     }
 
     onDeleteProject?.(viewData.selectedSpace.id);
+  }
+
+  function handleStartMeetingDelete(meetingIndex: string) {
+    setMeetingDeleteCandidate(meetingIndex);
+    setMeetingDeleteConfirm("");
+  }
+
+  function handleConfirmMeetingDelete() {
+    if (!selectedMeeting || !canConfirmMeetingDelete) {
+      return;
+    }
+
+    onDeleteMeeting?.(selectedProjectName, selectedMeeting.index);
+    setMeetingDeleteCandidate("");
+    setMeetingDeleteConfirm("");
   }
 
   function handleAddParticipant(event: FormEvent<HTMLFormElement>) {
@@ -580,11 +716,25 @@ export function ProjectOverviewPage({
       return;
     }
 
-    onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
-      email: participant.email,
-      name: participant.name,
-      role,
-      participantType: participant.participantType
+    if (isLastActiveHost(participant) && role !== "HOST") {
+      return;
+    }
+
+    if (!hasStoredParticipants) {
+      defaultParticipants.forEach((defaultParticipant) => {
+        onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+          email: defaultParticipant.email,
+          name: defaultParticipant.name,
+          role: defaultParticipant.id === participant.id ? role : defaultParticipant.role,
+          participantType: defaultParticipant.participantType
+        });
+      });
+      return;
+    }
+
+    onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
+      accessStatus: participant.accessStatus,
+      role
     });
   }
 
@@ -593,16 +743,35 @@ export function ProjectOverviewPage({
       return;
     }
 
-    onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
-      email: participant.email,
-      name: participant.name,
-      role: participant.role,
-      participantType: participant.participantType
-    });
+    if (isLastActiveHost(participant) && accessStatus !== "ACTIVE") {
+      return;
+    }
+
+    if (!hasStoredParticipants) {
+      defaultParticipants.forEach((defaultParticipant) => {
+        onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+          email: defaultParticipant.email,
+          name: defaultParticipant.name,
+          role: defaultParticipant.role,
+          participantType: defaultParticipant.participantType
+        });
+      });
+    } else {
+      onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+        email: participant.email,
+        name: participant.name,
+        role: participant.role,
+        participantType: participant.participantType
+      });
+    }
     onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
       accessStatus,
       role: participant.role
     });
+  }
+
+  function isLastActiveHost(participant: MeetingParticipantState) {
+    return participant.role === "HOST" && participant.accessStatus === "ACTIVE" && activeHostCount === 1;
   }
 
   function handleCreateTask(event: FormEvent<HTMLFormElement>) {
@@ -623,6 +792,31 @@ export function ProjectOverviewPage({
     setTaskTitle("");
     setTaskDescription("");
     setTaskAssignee("");
+  }
+
+  function startTaskEdit(task: ProjectTaskState) {
+    setEditingTaskId(task.id);
+    setTaskEditDraft({
+      title: task.title,
+      description: task.description,
+      assignee: task.assignee,
+      dueDate: task.dueDate,
+      status: task.status
+    });
+  }
+
+  function handleSaveTaskEdit(taskId: string) {
+    if (!taskEditDraft.title.trim()) {
+      return;
+    }
+
+    onUpdateProjectTask?.(selectedProjectName, taskId, {
+      ...taskEditDraft,
+      title: taskEditDraft.title.trim(),
+      description: taskEditDraft.description.trim() || "상세 설명이 아직 작성되지 않았습니다.",
+      assignee: taskEditDraft.assignee.trim() || "미지정"
+    });
+    setEditingTaskId("");
   }
 
   return (
@@ -652,8 +846,8 @@ export function ProjectOverviewPage({
             <button className="secondary" onClick={() => setIsProjectSettingsOpen(true)} type="button">
               프로젝트 설정
             </button>
-            <button className="primary" onClick={() => onCreateMeeting?.(viewData.selectedSpace.name)} type="button">
-              + 새 회의 만들기
+            <button className="primary" onClick={() => setNewMeetingTitle(`${viewData.selectedSpace.name} 후속 회의`)} type="button">
+              회의 정보 입력
             </button>
           </div>
         </section>
@@ -678,7 +872,7 @@ export function ProjectOverviewPage({
                   <span>아직 생성된 회의가 없습니다</span>
                   <strong>이 프로젝트의 첫 회의를 만들어 흐름을 시작하세요.</strong>
                 </div>
-                <button onClick={() => onCreateMeeting?.(viewData.selectedSpace.name)} type="button">회의 만들기</button>
+                <button onClick={() => setNewMeetingTitle(`${viewData.selectedSpace.name} 첫 회의`)} type="button">회의 정보 입력</button>
               </section>
             )}
 
@@ -690,8 +884,8 @@ export function ProjectOverviewPage({
                 </button>
               </div>
               <div className="project-flow-list">
-                {viewData.meetings.length ? (
-                  viewData.meetings.map((meeting, index) => (
+                {accessibleMeetings.length ? (
+                  accessibleMeetings.map((meeting, index) => (
                     <Link
                       key={meeting.index}
                       className="project-flow-row"
@@ -711,7 +905,7 @@ export function ProjectOverviewPage({
                 ) : (
                   <div className="project-flow-empty">
                     <strong>회차가 아직 없습니다</strong>
-                    <p>우측 상단의 새 회의 만들기 버튼으로 첫 회의를 생성해보세요.</p>
+                    <p>접근 가능한 회의가 없거나 아직 회의가 생성되지 않았습니다.</p>
                   </div>
                 )}
               </div>
@@ -723,6 +917,48 @@ export function ProjectOverviewPage({
                 <span>local state · target API 대기</span>
               </div>
 
+              <form className="project-meeting-create-form" onSubmit={handleCreateMeeting}>
+                <label>
+                  <span>회의 제목</span>
+                  <input
+                    aria-label="새 회의 제목"
+                    onChange={(event) => setNewMeetingTitle(event.target.value)}
+                    placeholder="예: 권한 정책 검토"
+                    type="text"
+                    value={newMeetingTitle}
+                  />
+                </label>
+                <label>
+                  <span>일시</span>
+                  <input
+                    aria-label="새 회의 일시"
+                    onChange={(event) => setNewMeetingAt(event.target.value)}
+                    type="datetime-local"
+                    value={newMeetingAt}
+                  />
+                </label>
+                <label>
+                  <span>참여자 후보</span>
+                  <select
+                    aria-label="새 회의 참여자 후보"
+                    multiple
+                    onChange={(event) =>
+                      setNewMeetingParticipantEmails(
+                        Array.from(event.currentTarget.selectedOptions, (option) => option.value)
+                      )
+                    }
+                    value={newMeetingParticipantEmails}
+                  >
+                    {members.map((member) => (
+                      <option key={`new-meeting-member-${member.email}`} value={member.email}>
+                        {member.name} · {member.spaceRole}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button disabled={!newMeetingTitle.trim() || !newMeetingAt} type="submit">회의 생성</button>
+              </form>
+
               {selectedMeeting ? (
                 <>
                   <div className="project-operation-toolbar">
@@ -732,7 +968,7 @@ export function ProjectOverviewPage({
                         onChange={(event) => setSelectedMeetingIndex(event.target.value)}
                         value={selectedMeeting.index}
                       >
-                        {viewData.meetings.map((meeting) => (
+                        {accessibleMeetings.map((meeting) => (
                           <option key={`meeting-select-${meeting.index}`} value={meeting.index}>
                             {meeting.index} {meeting.title}
                           </option>
@@ -760,16 +996,54 @@ export function ProjectOverviewPage({
 
                     <button
                       className="project-operation-danger"
-                      onClick={() => onDeleteMeeting?.(viewData.selectedSpace.name, selectedMeeting.index)}
+                      onClick={() => handleStartMeetingDelete(selectedMeeting.index)}
                       type="button"
                     >
                       회의 삭제
                     </button>
                   </div>
 
+                  {meetingDeleteCandidate === selectedMeeting.index ? (
+                    <div className="project-delete-confirm">
+                      <div>
+                        <strong>회의 삭제 확인</strong>
+                        <p>삭제 권한은 기본 OWNER 또는 해당 회의 HOST로 제한됩니다. 계속하려면 {meetingDeleteToken} 를 입력하세요.</p>
+                      </div>
+                      <input
+                        aria-label="회의 삭제 확인값"
+                        onChange={(event) => setMeetingDeleteConfirm(event.target.value)}
+                        placeholder={meetingDeleteToken}
+                        type="text"
+                        value={meetingDeleteConfirm}
+                      />
+                      <button disabled={!canConfirmMeetingDelete} onClick={handleConfirmMeetingDelete} type="button">
+                        삭제 확정
+                      </button>
+                    </div>
+                  ) : null}
+
                   <div className="project-acl-note">
-                    default-deny 기준 화면입니다. 명시 참여자만 회의 접근 대상으로 보이며, 실제 판정과 감사 기록은 백엔드 연결 후 처리합니다.
+                    default-deny 기준 화면입니다. 명시 참여자만 회의 접근 대상으로 보이고, OWNER/ADMIN은 ACL 없이 override 접근으로 표시합니다.
+                    마지막 active HOST의 강등과 회수는 UI와 local handler에서 모두 차단합니다.
                   </div>
+
+                  <div className="project-acl-overrides">
+                    <strong>owner/admin override</strong>
+                    <div>
+                      {overrideMembers.map((member) => (
+                        <span key={`override-${member.email}`}>{member.name} · {member.spaceRole}</span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {defaultDeniedMembers.length ? (
+                    <div className="project-acl-denied">
+                      <strong>default-deny</strong>
+                      <span>
+                        {defaultDeniedMembers.map((member) => member.name).join(", ")} 은 이 회의의 ACTIVE participant가 아니므로 회의 데이터와 AI 컨텍스트에서 제외됩니다.
+                      </span>
+                    </div>
+                  ) : null}
 
                   <form className="project-acl-add" onSubmit={handleAddParticipant}>
                     <label>
@@ -805,10 +1079,14 @@ export function ProjectOverviewPage({
                       <div key={participant.id} className="project-acl-row">
                         <div>
                           <strong>{participant.name}</strong>
-                          <span>{participant.email}</span>
+                          <span>
+                            {participant.email}
+                            {isLastActiveHost(participant) ? " · 마지막 active HOST 보호" : ""}
+                          </span>
                         </div>
                         <select
                           aria-label={`${participant.name} 회의 role`}
+                          disabled={isLastActiveHost(participant)}
                           onChange={(event) =>
                             handleParticipantRoleChange(participant, event.target.value as MeetingParticipantState["role"])
                           }
@@ -820,6 +1098,7 @@ export function ProjectOverviewPage({
                         </select>
                         <button
                           className={participant.accessStatus === "ACTIVE" ? "secondary" : "project-acl-restore"}
+                          disabled={isLastActiveHost(participant)}
                           onClick={() =>
                             handleParticipantAccessChange(
                               participant,
@@ -845,7 +1124,48 @@ export function ProjectOverviewPage({
             <section className="project-list-section project-kanban-section">
               <div className="project-list-head">
                 <strong>프로젝트 칸반</strong>
-                <span>카드 {selectedProjectTasks.length}개</span>
+                <span>카드 {filteredProjectTasks.length}/{selectedProjectTasks.length}개</span>
+              </div>
+
+              <div className="project-task-filters">
+                <label>
+                  <span>검색</span>
+                  <input
+                    aria-label="태스크 검색"
+                    onChange={(event) => setTaskSearch(event.target.value)}
+                    placeholder="제목, 설명, 출처 후보 ID"
+                    type="text"
+                    value={taskSearch}
+                  />
+                </label>
+                <label>
+                  <span>담당자</span>
+                  <select
+                    aria-label="태스크 담당자 필터"
+                    onChange={(event) => setTaskAssigneeFilter(event.target.value)}
+                    value={taskAssigneeFilter}
+                  >
+                    <option value="ALL">전체</option>
+                    {taskAssigneeOptions.map((assignee) => (
+                      <option key={`task-assignee-${assignee}`} value={assignee}>
+                        {assignee}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>상태</span>
+                  <select
+                    aria-label="태스크 상태 필터"
+                    onChange={(event) => setTaskStatusFilter(event.target.value as TaskStatusFilter)}
+                    value={taskStatusFilter}
+                  >
+                    <option value="ALL">전체</option>
+                    <option value="TODO">TODO</option>
+                    <option value="IN_PROGRESS">IN_PROGRESS</option>
+                    <option value="DONE">DONE</option>
+                  </select>
+                </label>
               </div>
 
               <form className="project-task-form" onSubmit={handleCreateTask}>
@@ -875,7 +1195,7 @@ export function ProjectOverviewPage({
                   value={taskMeetingIndex}
                 >
                   <option value="">회의 연결 없음</option>
-                  {viewData.meetings.map((meeting) => (
+                  {accessibleMeetings.map((meeting) => (
                     <option key={`task-meeting-${meeting.index}`} value={meeting.index}>
                       {meeting.index} {meeting.title}
                     </option>
@@ -895,37 +1215,102 @@ export function ProjectOverviewPage({
                   <div key={column.key} className="project-kanban-column">
                     <div className="project-kanban-column-head">
                       <strong>{column.label}</strong>
-                      <span>{selectedProjectTasks.filter((task) => task.status === column.key).length}</span>
+                      <span>{filteredProjectTasks.filter((task) => task.status === column.key).length}</span>
                     </div>
                     <div className="project-kanban-cards">
-                      {selectedProjectTasks
+                      {filteredProjectTasks
                         .filter((task) => task.status === column.key)
                         .map((task) => (
                           <article key={task.id} className="project-kanban-card">
-                            <strong>{task.title}</strong>
-                            <p>{task.description}</p>
-                            <div className="project-kanban-meta">
-                              <span>{task.assignee}</span>
-                              <span>{task.dueDate}</span>
-                            </div>
-                            <div className="project-kanban-card-actions">
-                              <select
-                                aria-label={`${task.title} 상태 변경`}
-                                onChange={(event) =>
-                                  onMoveProjectTask?.(viewData.selectedSpace.name, task.id, event.target.value as TaskStatus)
-                                }
-                                value={task.status}
-                              >
-                                <option value="TODO">TODO</option>
-                                <option value="IN_PROGRESS">IN_PROGRESS</option>
-                                <option value="DONE">DONE</option>
-                              </select>
-                              <button onClick={() => onDeleteProjectTask?.(viewData.selectedSpace.name, task.id)} type="button">
-                                삭제
-                              </button>
-                            </div>
+                            {editingTaskId === task.id ? (
+                              <div className="project-kanban-edit">
+                                <input
+                                  aria-label="카드 제목 편집"
+                                  onChange={(event) => setTaskEditDraft((previous) => ({ ...previous, title: event.target.value }))}
+                                  value={taskEditDraft.title}
+                                />
+                                <textarea
+                                  aria-label="카드 설명 편집"
+                                  onChange={(event) =>
+                                    setTaskEditDraft((previous) => ({ ...previous, description: event.target.value }))
+                                  }
+                                  value={taskEditDraft.description}
+                                />
+                                <input
+                                  aria-label="카드 담당자 편집"
+                                  onChange={(event) =>
+                                    setTaskEditDraft((previous) => ({ ...previous, assignee: event.target.value }))
+                                  }
+                                  value={taskEditDraft.assignee}
+                                />
+                                <input
+                                  aria-label="카드 마감일 편집"
+                                  onChange={(event) =>
+                                    setTaskEditDraft((previous) => ({ ...previous, dueDate: event.target.value }))
+                                  }
+                                  type="date"
+                                  value={taskEditDraft.dueDate}
+                                />
+                                <select
+                                  aria-label="카드 상태 편집"
+                                  onChange={(event) =>
+                                    setTaskEditDraft((previous) => ({
+                                      ...previous,
+                                      status: event.target.value as TaskStatus
+                                    }))
+                                  }
+                                  value={taskEditDraft.status}
+                                >
+                                  <option value="TODO">TODO</option>
+                                  <option value="IN_PROGRESS">IN_PROGRESS</option>
+                                  <option value="DONE">DONE</option>
+                                </select>
+                                <div className="project-kanban-edit-actions">
+                                  <button disabled={!taskEditDraft.title.trim()} onClick={() => handleSaveTaskEdit(task.id)} type="button">
+                                    저장
+                                  </button>
+                                  <button className="secondary" onClick={() => setEditingTaskId("")} type="button">
+                                    취소
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <strong>{task.title}</strong>
+                                <p>{task.description}</p>
+                                <div className="project-kanban-meta">
+                                  <span>{task.assignee}</span>
+                                  <span>{task.dueDate}</span>
+                                </div>
+                                <div className="project-kanban-source">
+                                  {task.sourceCandidateId ? `sourceCandidateId ${task.sourceCandidateId}` : "수동 생성 카드"}
+                                </div>
+                                <div className="project-kanban-card-actions">
+                                  <select
+                                    aria-label={`${task.title} 상태 변경`}
+                                    onChange={(event) =>
+                                      onMoveProjectTask?.(viewData.selectedSpace.name, task.id, event.target.value as TaskStatus)
+                                    }
+                                    value={task.status}
+                                  >
+                                    <option value="TODO">TODO</option>
+                                    <option value="IN_PROGRESS">IN_PROGRESS</option>
+                                    <option value="DONE">DONE</option>
+                                  </select>
+                                  <button onClick={() => startTaskEdit(task)} type="button">
+                                    편집
+                                  </button>
+                                  <button onClick={() => onDeleteProjectTask?.(viewData.selectedSpace.name, task.id)} type="button">
+                                    삭제
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </article>
                         ))}
+                      {!filteredProjectTasks.some((task) => task.status === column.key) ? (
+                        <div className="project-kanban-empty">조건에 맞는 카드가 없습니다.</div>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -950,6 +1335,20 @@ export function ProjectOverviewPage({
                     {prompt}
                   </button>
                 ))}
+              </div>
+
+              <div className="project-ai-source-panel">
+                <div>
+                  <strong>Project Knowledge</strong>
+                  <span>{projectAiPayload.projectKnowledge.length}개 공식 지식</span>
+                </div>
+                <div>
+                  <strong>Meeting record</strong>
+                  <span>{projectAiPayload.meetings.length}개 접근 가능 회의</span>
+                </div>
+                {!projectAiPayload.meetings.length ? (
+                  <p>접근 가능한 회의기록 source가 없어 회의 기반 답변은 확인 불가로 표시됩니다.</p>
+                ) : null}
               </div>
 
               <div ref={chatScrollRef} className="project-chat-history">
@@ -1033,9 +1432,9 @@ export function ProjectOverviewPage({
             </div>
 
             <div className="project-meetings-modal-summary">
-              <span>전체 {viewData.meetings.length}건</span>
+              <span>접근 가능 {accessibleMeetings.length}건</span>
               <span>검색 결과 {filteredMeetings.length}건</span>
-              <span>예정 {viewData.meetings.filter((meeting) => meeting.state === "예정").length}건</span>
+              <span>예정 {accessibleMeetings.filter((meeting) => meeting.state === "예정").length}건</span>
             </div>
 
             <div className="project-meetings-modal-list">
