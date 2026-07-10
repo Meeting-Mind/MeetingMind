@@ -48,6 +48,7 @@
 | M012 | 로그인/인증 기반 구축 | Google OAuth와 자체 회원가입/로그인, MeetingMind access/refresh token, Frontend auth 상태, 보호 route 경계가 준비되어 있다. | T089-T096 |
 | M013 | 요구사항 정의서 Markdown 기준선 반영 | Google Sheets 요구사항 정의서가 로컬 Markdown으로 분할되고, 에이전트/스펙/후속 작업이 해당 기준을 참조한다. | T097-T106 |
 | M014 | API 명세와 ERD 기준선 분리 | 기능군별 API 명세와 backend 전체 도메인 ERD 초안이 생기고, 후속 구현자가 이를 기준으로 작업할 수 있다. | T107-T110 |
+| M017 | AI 관측성 보강 | AI prototype endpoint가 처리 시간, model, source count, unsupported reason을 입력 원문 없이 로그로 남긴다. | T121 |
 
 ## Foundation
 
@@ -193,6 +194,12 @@
 | T119 | M016 | [x] | ci | 사용자 | Codex | T118 | `.github/workflows/ci.yml`, `.gitignore` | Backend, Frontend, AI 검증을 GitHub Actions CI로 작성한다. | PR/push 시 `./gradlew test`, `npm run build`, `python -m compileall app tests`, `python -m unittest discover -s tests`가 실행된다. |
 | T120 | M016 | [x] | docs/test | 사용자(Auth 담당) | Codex | D-015 | `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | T039/T040/T094 구현 전에 권한/LiveKit 단위 테스트 성공/실패 matrix를 문서화한다. | Space access, Meeting access, HOST 보호, SpaceMember 제거, LiveKit token 발급의 성공/실패 케이스가 요구사항 ID와 연결되어 있다. |
 
+### M017: AI Observability
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T121 | M017 | [x] | ai/observability | 사용자 | Codex | T087, T088 | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/implement.md` | AI prototype endpoint에 처리 시간, model, source count, unsupported reason 로그를 추가한다. | 입력 원문 없이 endpoint/result metadata만 로그로 남기고 `cd ai && ./.venv/bin/python -m unittest discover -s tests`가 통과했다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -203,6 +210,7 @@
 - [ ] V005 주요 화면 라우팅 수동 확인
 - [x] V006 Auth policy/CI 기준선 검증: `cd backend && ./gradlew test`, `cd frontend && npm run build`, `cd ai && python3 -m compileall app tests`, `cd ai && python3 -m unittest discover -s tests`, `git diff --check`
 - [x] V007 Authz test matrix 문서 검증: `git diff --check`
+- [x] V008 AI observability 검증: `cd ai && python3 -m compileall app tests`, `cd ai && ./.venv/bin/python -m unittest discover -s tests`
 
 ## Notes
 

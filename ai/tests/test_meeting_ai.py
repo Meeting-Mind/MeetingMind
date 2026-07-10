@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -8,8 +9,10 @@ from app.main import (
     GlossaryItem,
     MeetingAiChatRequest,
     TranscriptRow,
+    ai_observability_fields,
     explain_term,
     extract_tasks,
+    meeting_ai_chat,
     meeting_chat,
     parse_report_response,
     parse_task_candidates_response,
@@ -257,6 +260,57 @@ class RagSafetyTest(unittest.TestCase):
         self.assertEqual(report.actionItems[0].confirmationState, "candidate")
         self.assertEqual(tasks.tasks[0].sourceIds, ["segment-001"])
         self.assertEqual(tasks.tasks[0].confirmationState, "candidate")
+
+
+class AiObservabilityTest(unittest.TestCase):
+    def test_endpoint_logs_model_source_count_and_unsupported_reason(self):
+        payload = MeetingAiChatRequest(
+            meetingId="meeting-001",
+            question="민감한 질문 원문",
+            transcript=[
+                TranscriptRow(time="00:01:00", speaker="김진수", text="권한 필터를 먼저 적용합니다.")
+            ],
+        )
+
+        with self.assertLogs("meetingmind.ai", level="INFO") as logs:
+            response = meeting_ai_chat(payload)
+
+        self.assertTrue(response.unsupported)
+        log_message = logs.output[0]
+        self.assertIn("ai_request_completed", log_message)
+        self.assertNotIn("민감한 질문 원문", log_message)
+
+        payload_text = log_message.split("ai_request_completed ", 1)[1]
+        fields = json.loads(payload_text)
+        self.assertEqual(fields["endpoint"], "meeting-ai.chat")
+        self.assertEqual(fields["model"], "context-only")
+        self.assertEqual(fields["sourceCount"], 0)
+        self.assertTrue(fields["unsupported"])
+        self.assertEqual(fields["unsupportedReason"], "NO_SOURCES")
+        self.assertIsInstance(fields["durationMs"], int)
+
+    def test_observability_fields_count_sources_for_supported_response(self):
+        response = parse_task_candidates_response(
+            '{"tasks":[{"title":"ERD 수정","sourceIds":["segment-001"]}]}',
+            model="test-model",
+            sources=[
+                AiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    title="주간 회의",
+                    text="ERD 수정 작업을 진행합니다.",
+                )
+            ],
+        )
+
+        fields = ai_observability_fields("meeting-ai.extract-tasks", response, 12)
+
+        self.assertEqual(fields["endpoint"], "meeting-ai.extract-tasks")
+        self.assertEqual(fields["durationMs"], 12)
+        self.assertEqual(fields["model"], "test-model")
+        self.assertEqual(fields["sourceCount"], 1)
+        self.assertFalse(fields["unsupported"])
+        self.assertIsNone(fields["unsupportedReason"])
 
 
 if __name__ == "__main__":
