@@ -759,7 +759,7 @@ export function App() {
           path="/meeting-ai"
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
-              <MeetingAiPage data={data.meetingAi} />
+              <MeetingAiPage data={data.meetingAi} session={authSession} />
             </ProtectedRoute>
           }
         />

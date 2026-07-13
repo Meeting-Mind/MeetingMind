@@ -9,7 +9,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .rag import (
@@ -116,6 +118,26 @@ class MeetingAiChatResponse(BaseModel):
     sources: list[AiSource] = Field(default_factory=list)
     unsupported: bool = False
     model: str
+
+
+class BackendMeetingAiSource(BaseModel):
+    sourceId: str = Field(min_length=1)
+    type: RagSourceType
+    meetingId: str = Field(min_length=1)
+    title: str | None = None
+    speaker: str | None = None
+    time: str | None = None
+    startMs: int | None = None
+    endMs: int | None = None
+    text: str = Field(min_length=1)
+
+
+class BackendMeetingAiChatRequest(BaseModel):
+    projectId: str
+    meetingId: str = Field(min_length=1)
+    meetingTitle: str | None = None
+    question: str = Field(min_length=1)
+    sources: list[BackendMeetingAiSource] = Field(default_factory=list)
 
 
 class ProjectKnowledgeItem(BaseModel):
@@ -517,6 +539,90 @@ def build_meeting_chat_sources(payload: MeetingAiChatRequest) -> list[AiSource]:
     return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
 
 
+def build_backend_meeting_chat_sources(payload: BackendMeetingAiChatRequest) -> list[AiSource]:
+    validate_backend_meeting_sources(payload)
+    chunks = backend_sources_to_rag_chunks(payload)
+    retriever = InMemoryRagRetriever(chunks)
+    results = retriever.search(
+        RagSearchRequest(
+            query=payload.question,
+            scope="meeting",
+            projectId=payload.projectId,
+            meetingId=payload.meetingId,
+            sourceTypes=("transcript", "decision", "actionItem", "report"),
+            limit=5,
+        )
+    )
+    return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
+
+
+def validate_backend_meeting_sources(payload: BackendMeetingAiChatRequest) -> None:
+    forbidden_source = next(
+        (source for source in payload.sources if source.meetingId != payload.meetingId),
+        None,
+    )
+    if forbidden_source is None:
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "AI_CONTEXT_FORBIDDEN",
+            "message": "AI context source meetingId must match request meetingId.",
+        },
+    )
+
+
+def backend_sources_to_rag_chunks(payload: BackendMeetingAiChatRequest) -> list[RagChunk]:
+    chunks: list[RagChunk] = []
+    for index, source in enumerate(payload.sources, start=1):
+        chunks.append(
+            RagChunk(
+                chunkId=f"{payload.meetingId}:{source.type}:{index:04d}",
+                scope="meeting",
+                projectId=payload.projectId,
+                meetingId=payload.meetingId,
+                sourceType=source.type,
+                sourceId=source.sourceId,
+                title=source.title or payload.meetingTitle or source.type,
+                speakerNames=(source.speaker,) if source.speaker else (),
+                startMs=source.startMs,
+                endMs=source.endMs,
+                content=source.text,
+                embeddingText=format_backend_source_embedding(payload, source),
+                metadata=backend_source_metadata(source),
+            )
+        )
+    return chunks
+
+
+def format_backend_source_embedding(
+    payload: BackendMeetingAiChatRequest,
+    source: BackendMeetingAiSource,
+) -> str:
+    lines = [
+        f"회의: {source.title or payload.meetingTitle or payload.meetingId}",
+        "범위: meeting",
+        f"출처: {source.type}",
+    ]
+    if source.time:
+        lines.append(f"시간: {source.time}")
+    if source.speaker:
+        lines.append(f"발화자: {source.speaker}")
+    lines.extend(["내용:", source.text])
+    return "\n".join(lines)
+
+
+def backend_source_metadata(source: BackendMeetingAiSource) -> dict[str, str]:
+    metadata = {
+        "visibility": "already_filtered",
+        "createdFrom": source.type,
+    }
+    if source.time:
+        metadata["timeRange"] = source.time
+    return metadata
+
+
 def build_report_chunks(payload: GenerateReportRequest) -> list[RagChunk]:
     project_id = payload.projectId or payload.meetingId
     return build_meeting_rag_chunks(
@@ -744,6 +850,19 @@ def explain_term(payload: ExplainTermRequest) -> ExplainTermResponse:
 
 def meeting_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
     sources = build_meeting_chat_sources(payload)
+    return answer_meeting_chat(payload.meetingId, payload.question, sources)
+
+
+def backend_meeting_chat(payload: BackendMeetingAiChatRequest) -> MeetingAiChatResponse:
+    sources = build_backend_meeting_chat_sources(payload)
+    return answer_meeting_chat(payload.meetingId, payload.question, sources)
+
+
+def answer_meeting_chat(
+    meeting_id: str,
+    question: str,
+    sources: list[AiSource],
+) -> MeetingAiChatResponse:
     if not sources:
         return MeetingAiChatResponse(
             answer="제공된 회의 맥락에서는 답변 근거를 찾을 수 없습니다.",
@@ -766,8 +885,8 @@ def meeting_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
             "답변은 한국어로 간결하게 작성하고, 관련 근거를 함께 언급해라."
         ),
         user_content=(
-            f"[회의 ID]\n{payload.meetingId}\n\n"
-            f"[사용자 질문]\n{payload.question}\n\n"
+            f"[회의 ID]\n{meeting_id}\n\n"
+            f"[사용자 질문]\n{question}\n\n"
             f"[검색된 회의 근거]\n{context_lines}"
         ),
     )
@@ -776,6 +895,18 @@ def meeting_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
         answer=text,
         sources=sources,
         model=model,
+    )
+
+
+def as_provider_unavailable(error: HTTPException) -> HTTPException:
+    if error.status_code not in (500, 502, 503):
+        return error
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "AI_PROVIDER_UNAVAILABLE",
+            "message": "AI provider 응답을 받을 수 없습니다.",
+        },
     )
 
 
@@ -1036,6 +1167,18 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(_request: Any, _exception: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": "INVALID_REQUEST",
+            "message": "요청값이 잘못되었습니다.",
+            "fieldErrors": [],
+        },
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
@@ -1058,6 +1201,14 @@ def meeting_ai_explain_term(payload: ExplainTermRequest) -> ExplainTermResponse:
 @app.post("/api/meeting-ai/chat", response_model=MeetingAiChatResponse)
 def meeting_ai_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
     return observe_ai_endpoint("meeting-ai.chat", lambda: meeting_chat(payload))
+
+
+@app.post("/api/internal/meeting-ai/chat", response_model=MeetingAiChatResponse)
+def backend_meeting_ai_chat(payload: BackendMeetingAiChatRequest) -> MeetingAiChatResponse:
+    try:
+        return observe_ai_endpoint("meeting-ai.chat.internal", lambda: backend_meeting_chat(payload))
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
 
 
 @app.post("/api/meeting-ai/generate-report", response_model=GenerateReportResponse)

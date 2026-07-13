@@ -1,31 +1,21 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { chatMeetingAi } from "../api/workspace";
+import type { AuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
 type ChatMessage = { role: "user" | "ai"; text: string; sources?: string[]; unsupported?: boolean };
 
-export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
+export function MeetingAiPage({ data, session }: { data: WorkspaceData["meetingAi"]; session: AuthSession | null }) {
   const [searchParams] = useSearchParams();
-  const projectId = searchParams.get("projectId") ?? "project-local";
-  const meetingId = searchParams.get("meetingId") ?? "meeting-local-current";
-  const meetingTitle = searchParams.get("meeting") ?? data.overview.title;
+  const meetingId = searchParams.get("meetingId");
   const [messages, setMessages] = useState<ChatMessage[]>(data.chat);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [modelLabel, setModelLabel] = useState("");
 
-  const canSubmit = input.trim().length > 0 && !loading;
-
-  const payloadSource = useMemo(
-    () => ({
-      transcript: data.transcript,
-      decisions: data.decisions,
-      actions: data.actions
-    }),
-    [data.actions, data.decisions, data.transcript]
-  );
+  const canSubmit = input.trim().length > 0 && !loading && Boolean(meetingId);
 
   useEffect(() => {
     document.body.className = "app-theme";
@@ -47,14 +37,14 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
     setLoading(true);
 
     try {
-      const result = await chatMeetingAi({
-        projectId,
-        meetingId,
-        meetingTitle,
-        question: trimmed,
-        transcript: payloadSource.transcript,
-        decisions: payloadSource.decisions,
-        actions: payloadSource.actions
+      if (!meetingId) {
+        throw new Error("회의 식별자가 필요합니다.");
+      }
+      if (!session) {
+        throw new Error("로그인이 필요합니다.");
+      }
+      const result = await chatMeetingAi(session, meetingId, {
+        question: trimmed
       });
       setModelLabel(result.model);
       setMessages((previous) => [
@@ -76,7 +66,7 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
         ...previous,
         {
           role: "ai",
-          text: "Meeting AI 서비스에 연결하지 못했습니다. AI 서버와 OPENAI_API_KEY 설정을 확인해주세요."
+          text: "Meeting AI 서비스에 연결하지 못했습니다. Backend와 AI 서버 연결 상태를 확인해주세요."
         }
       ]);
     } finally {
@@ -208,13 +198,14 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
               <strong>추천 질문</strong>
               <div className="quick-list">
                 {data.suggestions.map((item) => (
-                  <button key={item.label} onClick={() => void askMeetingAi(item.label)} type="button">
+                  <button disabled={!meetingId || loading} key={item.label} onClick={() => void askMeetingAi(item.label)} type="button">
                     {item.label}
                   </button>
                 ))}
               </div>
             </div>
 
+            {!meetingId ? <div className="meeting-ai-error">회의 목록에서 Meeting AI로 진입하면 현재 회의 범위로 질문할 수 있습니다.</div> : null}
             {error ? <div className="meeting-ai-error">{error}</div> : null}
 
             <form className="chat-input-row" onSubmit={handleSubmit}>

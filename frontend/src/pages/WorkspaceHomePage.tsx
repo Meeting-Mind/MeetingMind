@@ -9,6 +9,7 @@ type CalendarView = "month" | "week" | "day";
 type CalendarEvent = {
   id: string;
   spaceId: string;
+  meetingId?: string;
   projectName: string;
   title: string;
   round: string;
@@ -64,6 +65,9 @@ function buildMeetingDestination(space: WorkspaceData["workspaceHome"]["spaces"]
     meeting: meeting.title,
     round: meeting.index.replace("#", "")
   });
+  if (meeting.id) {
+    params.set("meetingId", meeting.id);
+  }
 
   return `${path}?${params.toString()}`;
 }
@@ -126,6 +130,7 @@ function buildCalendarEvents(
     (projectMeetings[space.name] ?? []).map((meeting, index) => ({
       id: meeting.id ?? `${space.id}-${meeting.index}`,
       spaceId: space.id,
+      meetingId: meeting.id,
       projectName: space.name,
       title: meeting.title,
       round: meeting.index.replace("#", ""),

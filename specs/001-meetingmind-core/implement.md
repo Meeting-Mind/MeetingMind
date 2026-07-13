@@ -272,6 +272,18 @@
 - 2026-07-09: Report action item도 저장 전 산출물 원칙에 맞게 `confirmationState=candidate`로 정규화하도록 수정했다. LLM이 임의 sourceId를 반환해도 제공된 source 목록에 없는 값은 제거된다.
 - 2026-07-10: AI prototype endpoint observability를 추가했다. `/api/meeting-ai/*`와 `/api/project-ai/chat` wrapper가 처리 시간, model, source count, unsupported 여부와 reason을 `meetingmind.ai` logger에 기록하며, 질문/본문 같은 입력 원문은 로그에 포함하지 않는다.
 - 2026-07-10: `AiObservabilityTest`를 추가해 unsupported 응답의 `NO_SOURCES` reason, model/source count/durationMs 로그 필드, 입력 원문 비노출, 지원 응답의 source count를 검증했다.
+- 2026-07-10: AI contract review 결과, 현재 구현은 prototype 호환을 위해 일부 fallback을 유지하고 target 문서는 Backend-to-AI strict contract를 지향해 차이가 있었다. `contracts/ai-api.md`에 Current Prototype과 Target Backend-to-AI 경계를 분리해 `meetingId`/`title` optional fallback, `selectedText` prototype source화, provider error status, audit vs observability, Meeting chat report context gap을 명시했다.
+- 2026-07-10: strict code refactor는 즉시 적용하지 않았다. 현재 frontend/prototype 직접 호출 호환을 깨지 않기 위해 error shape, target request schema, report source 처리, Backend context assembly 연결은 T159-T162 후속 작업으로 분리했다.
+- 2026-07-10: T163으로 Backend Meeting AI chat 1차 연동을 시작했다. 먼저 `meeting-api.md`에 `POST /api/v1/meetings/{meetingId}/ai/chat` 계약을 추가했고, Frontend가 source context를 직접 넘기지 않고 Backend가 meeting read 권한 확인 후 AI 서버 내부 endpoint로 already-filtered context를 전달하는 방향으로 고정했다.
+- 2026-07-10: T163 구현으로 `MeetingAiController`, `MeetingAiService`, `MeetingAiGatewayClient`/`HttpMeetingAiGatewayClient`, AI chat DTO를 추가했다. Backend endpoint는 인증 사용자와 `MeetingAccessPolicy.requireReadAccess`를 확인한 뒤 `WorkspaceDomainService.meetingAiContext`에서 transcript/report decision/action context를 조립해 AI 서버 내부 endpoint로 전달한다. AI provider 실패는 Backend 공통 오류 `503 AI_PROVIDER_UNAVAILABLE`로 매핑한다.
+- 2026-07-10: T164로 Meeting AI 화면의 직접 AI 서버 호출 제거를 시작했다. 범위는 `MeetingAiPage`와 frontend workspace API client이며, Project AI/Report candidate/Task candidate의 직접 AI 호출은 별도 후속 작업으로 둔다.
+- 2026-07-10: T164 구현으로 `chatMeetingAi` frontend client가 `VITE_AI_API_BASE_URL`의 AI 서버 직접 호출 대신 Backend `POST /api/v1/meetings/{meetingId}/ai/chat`을 호출하도록 바뀌었다. `MeetingAiPage`는 `AuthSession`을 받아 Authorization header와 `{question}`만 보내며, 기존 transcript/decision/action prototype context 직접 전달은 제거했다. 현재 mock-only `/meeting-ai` 링크는 실제 Backend meetingId가 없으면 `MEETING_NOT_FOUND`가 날 수 있으므로 route에서 target meetingId를 넘기는 후속 연결이 필요하다.
+- 2026-07-10: T165로 Meeting AI Backend 경유 호출에 필요한 `meetingId` route query 연결을 시작했다. 범위는 `WorkspaceHomePage`, `ProjectOverviewPage`, `MeetingAiPage`이며 mock-only 링크는 Backend 호출을 막고 target meeting id가 있는 회의 이동에서만 실제 호출되도록 한다.
+- 2026-07-10: T165 구현으로 `WorkspaceHomePage`와 `ProjectOverviewPage`의 회의 이동 URL이 `meeting.id`가 있을 때 `meetingId` query를 보존한다. `ReportAgentPage`는 현재 query를 유지해 `Meeting AI` 링크를 제공하고, `MeetingAiPage`는 `meetingId` 없는 직접 진입에서 질문 전송/추천 질문 호출을 막는다.
+- 2026-07-10: T159-T160으로 AI 서버에 target internal `POST /api/internal/meeting-ai/chat`을 추가했다. 기존 `/api/meeting-ai/chat` prototype endpoint는 유지하고, internal endpoint는 `projectId`, `meetingId`, `question`, `sources[].sourceId/type/meetingId/text` 기반 strict request를 받는다. validation 실패는 `400 INVALID_REQUEST`, source meeting 불일치는 `403 AI_CONTEXT_FORBIDDEN`, provider 설정/HTTP/connection 오류는 `503 AI_PROVIDER_UNAVAILABLE`로 변환한다.
+- 2026-07-10: T161로 internal Meeting chat 검색 대상에 `report` source type을 포함했다. Backend가 전달한 report summary source는 `RagChunk`로 변환되어 transcript/decision/actionItem과 같은 meeting scope 검색 필터를 통과한 경우에만 LLM context로 사용된다.
+- 2026-07-10: T162로 Backend `MeetingAiGatewayChatRequest`에 `sources[]`를 추가하고 `HttpMeetingAiGatewayClient` 호출 경로를 `/api/internal/meeting-ai/chat`으로 전환했다. `MeetingAiService`는 권한 확인 후 transcript source와 current/confirmed report summary, decision, action item source metadata를 조립한다. Project AI, report candidate, task candidate의 Backend 경유 전환은 아직 별도 후속 작업이다.
+- 2026-07-10: API smoke 중 Java `HttpClient`의 HTTP/2 upgrade 요청을 Uvicorn이 `Unsupported upgrade request`로 거부해 Backend가 `503 AI_PROVIDER_UNAVAILABLE`을 반환하는 문제를 확인했다. `HttpMeetingAiGatewayClient`의 AI 요청을 `HTTP_1_1`로 고정했고, `signup -> space 생성 -> meeting 생성 -> POST /api/v1/meetings/{meetingId}/ai/chat` real Backend-to-AI smoke가 `200 context-only`로 통과했다.
 
 ## AI RAG Task Priority
 
@@ -308,6 +320,7 @@
 - Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 9 tests
 - Passed: `cd ai && python3 -m compileall app tests` after AI observability logging
 - Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 11 tests, after AI observability logging
+- Passed: `git diff --check` after AI contract prototype/target split docs
 - Passed: `cd frontend && npm run build`
 - Passed: `cd frontend && npm run build` after Frontend Auth route guard changes
 - Passed: `cd backend && ./gradlew test` after Gradle conversion, total 8 backend tests
@@ -326,6 +339,15 @@
 - Passed: `cd backend && ./gradlew test` after target LiveKit authorization path, total 41 backend tests
 - Passed: `cd backend && ./gradlew test` after target Space/Meeting API and common error handling, total 44 backend tests
 - Passed: `cd backend && ./gradlew test` after artifact/RAG domain model, total 48 backend tests
+- Passed: `cd backend && ./gradlew test` after Backend Meeting AI chat integration slice, total 51 backend tests
+- Passed: `cd frontend && npm run build` after Meeting AI frontend switched to Backend AI chat endpoint
+- Passed: `cd frontend && npm run build` after Meeting AI route `meetingId` query preservation
+- Passed: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, 15 tests, after Backend-to-AI target internal schema
+- Passed: `cd ai && ./.venv/bin/python -m compileall app` after Backend-to-AI target internal schema
+- Passed: `cd backend && ./gradlew test` after Backend-to-AI source metadata payload
+- Passed: `cd frontend && npm run build` after full Meeting AI Backend-to-AI review
+- Passed: `git diff --check` after full Meeting AI Backend-to-AI review
+- Passed: real API smoke on Backend `18080` and AI `18000`: signup, space creation, meeting creation, Backend Meeting AI chat returned `200` with `unsupported=true`, `model=context-only`
 - Passed: `cd frontend && npm run build` after T045 target frontend API types
 - Passed: `git diff --check` after T044-T045 frontend workstream docs/types
 - Passed: `cd frontend && npm run build` after T046 stable project route state

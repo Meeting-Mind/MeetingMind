@@ -4,20 +4,27 @@ from unittest.mock import patch
 
 from app.main import (
     AiSource,
+    BackendMeetingAiChatRequest,
+    BackendMeetingAiSource,
     ExplainTermRequest,
     ExtractTasksRequest,
     GlossaryItem,
     MeetingAiChatRequest,
     TranscriptRow,
     ai_observability_fields,
+    backend_meeting_ai_chat,
+    backend_meeting_chat,
     explain_term,
     extract_tasks,
     meeting_ai_chat,
     meeting_chat,
     parse_report_response,
     parse_task_candidates_response,
+    validation_exception_handler,
 )
 from app.rag import InMemoryRagRetriever, RagChunk, RagSearchRequest, chunk_to_source
+from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 
 
 class ExplainTermTest(unittest.TestCase):
@@ -219,6 +226,81 @@ class RagSafetyTest(unittest.TestCase):
         self.assertTrue(response.unsupported)
         self.assertEqual(response.sources, [])
         self.assertEqual(response.model, "context-only")
+
+    def test_backend_meeting_chat_requires_matching_source_meeting_id(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            question="후속 작업은?",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-999",
+                    type="transcript",
+                    meetingId="meeting-999",
+                    title="다른 회의",
+                    text="다른 회의의 후속 작업입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_meeting_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_meeting_chat_searches_report_sources(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            meetingTitle="주간 회의",
+            question="결정된 리스크 대응은?",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="report-001",
+                    type="report",
+                    meetingId="meeting-001",
+                    title="주간 회의록",
+                    text="리스크 대응은 QA 체크리스트를 먼저 보완하기로 결정했습니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", return_value=("QA 체크리스트 보완입니다.", "test-model")):
+            response = backend_meeting_chat(payload)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(response.model, "test-model")
+        self.assertEqual(response.sources[0].sourceId, "report-001")
+        self.assertEqual(response.sources[0].type, "report")
+
+    def test_backend_meeting_chat_maps_provider_error_to_503(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            question="후속 작업은?",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    meetingId="meeting-001",
+                    text="후속 작업은 ERD 문서화입니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", side_effect=HTTPException(status_code=502, detail="boom")):
+            with self.assertRaises(HTTPException) as raised:
+                backend_meeting_ai_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
+
+    def test_backend_meeting_chat_validation_error_uses_contract_shape(self):
+        response = validation_exception_handler(None, RequestValidationError([]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.body.decode("utf-8"))["code"], "INVALID_REQUEST")
 
     def test_task_extraction_does_not_call_llm_without_sources(self):
         payload = ExtractTasksRequest(meetingId="meeting-001", title="주간 회의")
