@@ -823,7 +823,8 @@ Space 초대 링크를 생성한다.
 ### Data Scope
 
 - SpaceMember scope
-- 제거된 사용자의 같은 Space 내 `participantType=member` MeetingParticipant는 `accessStatus=REVOKED`로 전환한다.
+- 제거된 사용자의 같은 Space 내 `participantType=member` MeetingParticipant는 `participantType=guest`로 전환한다.
+- SpaceMember 제거는 프로젝트 전체 접근권만 제거하며, 특정 회의 접근권은 MeetingParticipant ACL로 별도 유지하거나 revoke한다.
 
 ### Request
 
@@ -858,8 +859,9 @@ None.
 
 ### Notes
 
-- 회의별 guest participant는 이 API로 제거하지 않는다.
-- SpaceMember 제거 후 해당 사용자의 프로젝트, 회의, LiveKit, Meeting AI, Project AI meeting context 접근은 즉시 차단한다.
+- 회의별 guest participant는 이 API로 제거하지 않는다. 특정 회의 접근을 끊으려면 MeetingParticipant revoke API를 사용한다.
+- SpaceMember 제거 후 해당 사용자의 프로젝트, Project Knowledge, Project AI 접근은 즉시 차단한다.
+- 제거된 사용자가 active MeetingParticipant를 갖고 있으면 해당 회의, LiveKit, Meeting AI 접근은 회의 ACL 범위에서 유지된다.
 
 ## POST /api/v1/spaces/{spaceId}/owner-transfer
 

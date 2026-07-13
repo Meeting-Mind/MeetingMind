@@ -21,6 +21,13 @@ public class SpaceAccessPolicy {
         }
     }
 
+    public void requireOwnerManagement(SpaceAccessContext context) {
+        requireSpaceAccess(context);
+        if (context.membership().role() != SpaceRole.OWNER) {
+            throw spaceAccessDenied();
+        }
+    }
+
     boolean hasActiveMembership(SpaceAccessContext context) {
         return context != null
                 && context.membership() != null

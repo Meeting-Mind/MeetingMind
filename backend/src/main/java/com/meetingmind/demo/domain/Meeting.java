@@ -2,12 +2,14 @@ package com.meetingmind.demo.domain;
 
 import com.meetingmind.demo.authz.MeetingStatus;
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 public record Meeting(
         String id,
         String spaceId,
         String title,
         OffsetDateTime scheduledAt,
+        String joinCode,
         OffsetDateTime startedAt,
         OffsetDateTime endedAt,
         MeetingStatus status,
@@ -20,6 +22,7 @@ public record Meeting(
                 spaceId,
                 title,
                 scheduledAt,
+                UUID.randomUUID().toString().replace("-", ""),
                 null,
                 null,
                 MeetingStatus.SCHEDULED,
