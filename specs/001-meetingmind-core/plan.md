@@ -299,6 +299,38 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 4. Frontend 확정 버튼과 상태 표시를 Backend response에 연결한다.
 5. 중복 확정, 다른 meeting report, VIEWER 거부, current 교체를 검증한다.
 
+## Task Candidate Backend Route and TaskCard Confirmation Plan
+
+### Scope
+
+- Public routes: `POST /api/v1/meetings/{meetingId}/task-candidates/generate`, `GET /api/v1/meetings/{meetingId}/task-candidates`, `POST /api/v1/meetings/{meetingId}/task-candidates/{candidateId}/confirm`
+- Internal route: `POST /api/internal/meeting-ai/extract-tasks`
+- Backend는 회의 편집 권한을 먼저 확인한 뒤 해당 회의 transcript와 current confirmed report source만 AI context로 조립한다.
+- 지원되는 AI 결과는 `TaskCandidate.CANDIDATE`로 저장하고, 사용자가 확정할 때 `TaskCard`를 하나만 생성한다.
+- Frontend Report Agent의 로컬 추출/등록 상태를 Backend 응답으로 전환한다.
+
+### Permissions and Data Rules
+
+- 생성은 `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`, 조회는 active 회의 접근 권한이 필요하다.
+- 확정은 active SpaceMember와 회의 편집 권한을 모두 요구하므로 meeting guest는 프로젝트 칸반 카드를 만들 수 없다.
+- AI 내부 endpoint는 `transcript`, `report`, `decision`, `actionItem`만 허용하고 request와 다른 project/meeting source를 거부한다.
+- 담당자 이름은 active participant와 active SpaceMember가 정확히 일치할 때만 `suggestedAssigneeId`로 연결한다.
+- `unsupported=true`는 저장하지 않고 `TaskCard.sourceCandidateId` unique 제약으로 중복 확정을 방지한다.
+
+### Boundaries
+
+- candidate TTL은 `Q-009` 결정 전이므로 이번 slice에서 임의 정책을 넣지 않는다.
+- 후보 제외 API와 일반 Kanban 카드 CRUD/목록 화면의 Backend 전환은 후속 범위다.
+- runtime 저장소는 in-memory이며 PostgreSQL migration은 target schema 기준선으로 추가한다.
+
+### Integration Order
+
+1. 계약, 권한, 상태, 모델과 migration을 확정한다.
+2. AI strict schema와 단일 meeting source validator를 구현한다.
+3. Backend 생성/저장, 조회, 확정 domain transition을 연결한다.
+4. Frontend 추출/검토/확정 flow를 Backend API로 전환한다.
+5. scope, 권한, 중복 negative case와 정상 API flow를 검증한다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

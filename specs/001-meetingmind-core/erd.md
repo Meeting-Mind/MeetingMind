@@ -11,6 +11,7 @@ erDiagram
   USER ||--o{ SPACE_MEMBER : joins
   USER ||--o{ MEETING_PARTICIPANT : participates
   USER ||--o{ MEETING_REPORT : creates
+  USER ||--o{ TASK_CANDIDATE : creates
   USER ||--o{ TASK_CARD : assigned
 
   SPACE ||--o{ SPACE_MEMBER : has
@@ -34,7 +35,6 @@ erDiagram
   MEETING_SPEAKER ||--o{ TRANSCRIPT_SEGMENT : speaks
   MEETING_REPORT ||--o{ REPORT_DECISION : contains
   MEETING_REPORT ||--o{ REPORT_ACTION_ITEM : contains
-  TASK_CANDIDATE ||--o{ TASK_CANDIDATE_SOURCE : cites
   TASK_CANDIDATE ||--o| TASK_CARD : confirmed_as
 
   PROJECT_KNOWLEDGE ||--o{ EMBEDDING_CHUNK : source
@@ -204,17 +204,13 @@ erDiagram
     string meetingId FK
     string title
     string assigneeName
+    string suggestedAssigneeId FK
     date dueDate
     string status
     json sourceIds
+    string createdBy FK
     datetime createdAt
-  }
-
-  TASK_CANDIDATE_SOURCE {
-    string id PK
-    string candidateId FK
-    string sourceType
-    string sourceId
+    datetime confirmedAt
   }
 
   TASK_CARD {
@@ -228,6 +224,7 @@ erDiagram
     string assigneeId FK
     date dueDate
     datetime createdAt
+    datetime updatedAt
   }
 
   PROJECT_KNOWLEDGE {
@@ -357,7 +354,11 @@ erDiagram
 - `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환할 수 있고 확정 시 `confirmedAt`을 기록한다.
 - 확정 대상은 해당 meeting의 최신 version이어야 한다.
 - candidate 만료 검증은 `Q-008`의 TTL 정책 결정 후 추가한다.
-- `TASK_CANDIDATE.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나로 확장 후보를 둔다.
+- `TASK_CANDIDATE.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나다.
+- `TASK_CANDIDATE.sourceIds`는 Backend canonical source allowlist로 필터링한 근거 ID를 JSON으로 보존한다.
+- `TASK_CANDIDATE.suggestedAssigneeId`와 `TASK_CARD.assigneeId`는 application layer에서 active SpaceMember인지 검증한다.
+- `TASK_CANDIDATE.CANDIDATE`만 TaskCard로 확정할 수 있고 확정 시 `confirmedAt`을 기록한다.
+- candidate 만료 검증은 `Q-009`의 TTL 정책 결정 후 추가한다.
 - `TASK_CARD.sourceCandidateId`는 nullable이지만, 값이 있으면 unique다. 후보 하나는 최대 하나의 TaskCard로만 확정된다.
 - `TASK_CARD(spaceId, status)`와 `TASK_CARD(assigneeId, status)` index를 둔다.
 

@@ -4556,17 +4556,29 @@ body.app-theme select {
   font-weight: 900;
 }
 
-.report-agent-task-candidate input {
+.report-agent-task-candidate input,
+.report-agent-task-candidate select,
+.report-agent-task-candidate textarea {
   width: 100%;
   min-width: 0;
-  height: 40px;
   border: 1px solid #e5e0ef;
   border-radius: 12px;
-  padding: 0 10px;
   color: #2d3049;
   font: inherit;
   font-weight: 800;
   outline: none;
+}
+
+.report-agent-task-candidate input,
+.report-agent-task-candidate select {
+  height: 40px;
+  padding: 0 10px;
+}
+
+.report-agent-task-candidate textarea {
+  min-height: 64px;
+  padding: 10px;
+  resize: vertical;
 }
 
 .report-agent-task-candidate-grid {

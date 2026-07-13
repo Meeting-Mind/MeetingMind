@@ -14,12 +14,14 @@
 | Q-006 | Medium | Target API Base URL은 `/api/v1`로 고정할까, 현재 prototype 경로와 병행할까? | Frontend client 구성과 Backend route migration 순서를 결정한다. | Open | |
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
 | Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
+| Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
 
 ## Blocking Decisions
 
 - Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다. 단, Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 먼저 시작한다.
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
 - Q-008은 candidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태·권한·current 전이는 먼저 구현할 수 있다.
+- Q-009는 TaskCandidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태 전이와 중복 확정 방지는 먼저 구현할 수 있다.
 
 ## Q-001 Authentication Options
 
@@ -66,6 +68,7 @@
 - D-015: Backend auth/권한 후속 구현 순서는 `T039/T040` Space/Meeting 접근 검증 service, `T094` LiveKit token 권한 연동, Auth store DB 영속화 순서로 진행한다. 이유는 LiveKit/AI/회의 데이터 접근이 먼저 MeetingParticipant 권한 판단을 필요로 하기 때문이다.
 - D-016: SpaceMember 제거 시 해당 Space의 `participantType=member`인 active MeetingParticipant는 모두 `accessStatus=REVOKED`로 전환한다. 회의 guest participant는 SpaceMember 제거 API 대상이 아니므로 이 정책으로 회수하지 않는다.
 - D-022: AI 회의록 생성 결과는 재조회와 확정을 위해 `MeetingReport.CANDIDATE`로 임시 저장한다. candidate는 기본 공식 회의록 조회와 Project AI source에서 제외하고, `status=CANDIDATE`를 명시한 조회 또는 생성 응답에서만 노출한다. AI가 `unsupported=true`를 반환하면 저장하지 않는다.
+- D-023: 태스크 추출은 `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`가 실행한다. 후보 조회는 active 회의 접근 권한이 필요하고, TaskCard 확정은 회의 편집 권한과 active `SpaceMember`를 모두 요구한다. AI가 `unsupported=true`를 반환하면 후보를 저장하지 않으며 후보당 TaskCard는 최대 하나만 생성한다.
 - D-017: `MeetingParticipant.accessStatus`는 `ACTIVE`, `REVOKED`를 canonical 값으로 사용한다. `ACTIVE`만 회의 접근 권한으로 인정하고 `REVOKED`는 조회, 수정, LiveKit token, AI context 접근을 모두 차단한다.
 - D-018: HOST의 회의방 일시 퇴장은 허용하며 role/accessStatus를 유지한다. HOST가 회의를 종료하면 Meeting status를 `ENDED`로 전환한다. 마지막 active HOST의 강등, 접근 회수, participant 제거는 거부하며, 마지막 HOST를 없애려면 다른 참여자를 먼저 HOST로 승격해야 한다.
 - D-019: `ADMIN`은 서비스 전체 운영자나 프로그램 관리자가 아니라 특정 Space 안에서 오너가 위임한 프로젝트 관리자 역할이다. 서비스 전체 운영자 역할은 현재 Core Prototype 범위 밖이다.

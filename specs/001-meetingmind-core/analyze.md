@@ -24,6 +24,7 @@
 | Medium | Project AI Backend 권한 선필터 1차 연동이 완료됐다. | active SpaceMember와 meeting ACL을 통과한 공식 지식/회의 요약만 AI context에 포함되며 Frontend 직접 AI 호출이 제거됐다. 실제 DB 검색으로 오해하지 않도록 in-memory 경계를 유지해야 한다. | M021 검증 결과를 기준선으로 유지하고 PostgreSQL/pgvector, embedding worker, persistent audit는 후속 Data/AI milestone으로 분리한다. | `spec.md`, `plan.md`, `contracts/ai-api.md`, `contracts/space-api.md`, `tasks.md`, `implement.md`, `ai/**`, `backend/**`, `frontend/**` | M021 Verified |
 | Medium | AI 회의록 candidate Backend 경유 전환이 완료됐다. | 편집 권한과 단일 meeting source 검증 뒤에서 supported candidate만 임시 저장된다. confirm/update/export와 실제 DB repository는 아직 구현되지 않았다. | M022 기준선을 유지하고 report confirm/version 및 PostgreSQL repository를 후속 milestone으로 분리한다. | `plan.md`, `contracts/ai-api.md`, `contracts/meeting-api.md`, `data-model.md`, `erd.md`, `tasks.md`, `implement.md`, `ai/**`, `backend/**`, `frontend/**` | M022 Verified |
 | Medium | Report candidate confirm과 current version 전환이 완료됐다. | 편집 권한자가 candidate/draft를 확정하면 기존 current는 해제되고 새 report만 current가 된다. candidate TTL과 version history 조회는 아직 없다. | M024 기준선을 유지하고 `Q-008` TTL, update/history/export, persistent audit를 후속 milestone으로 분리한다. | `clarify.md`, `contracts/meeting-api.md`, `data-model.md`, `erd.md`, `tasks.md`, `implement.md`, `backend/**`, `frontend/**` | M024 Verified |
+| Medium | AI 태스크 후보 Backend 경유와 TaskCard 확정이 완료됐다. | 단일 회의 source와 편집 권한 뒤에서 후보가 저장되고 active SpaceMember인 편집 권한자만 후보당 카드 하나를 확정한다. TTL, 제외 API, DB transaction, 일반 Kanban 연동은 아직 없다. | M025 기준선을 유지하고 `Q-009`, PostgreSQL repository, persistent audit, Kanban CRUD를 후속 milestone으로 분리한다. | `requirements/permissions.md`, `requirements/status-values.md`, `clarify.md`, `contracts/common.md`, `contracts/ai-api.md`, `contracts/kanban-api.md`, `data-model.md`, `erd.md`, `tasks.md`, `implement.md`, `ai/**`, `backend/**`, `frontend/**` | M025 Verified |
 | Low | Async STT Processing API는 Future Draft다. | 현재 Core Prototype의 확정 구현 계약으로 오해하면 scope creep이 생길 수 있다. | 실제 STT 작업 전 별도 milestone 또는 feature spec으로 승격한다. | `contracts/live-stt-api.md`, future `specs/*` | Deferred |
 | Low | `/api/workspace`는 현재 프로토타입 통합 API다. | 실제 확장 시 API 분리가 필요하다. | T029-T034에서 Space/Meeting/Report/AI API 계약을 세분화한다. | `contracts/README.md`, `contracts/space-api.md`, `contracts/meeting-api.md`, `contracts/ai-api.md`, `tasks.md` | Open |
 | Low | Auth workstream의 backend/frontend/AI 회귀 검증과 Auth API smoke가 실행됐다. | 핵심 auth token 발급, Spring bean wiring, frontend build 회귀는 확인됐다. 브라우저 자동화 도구는 현재 환경에 없어 UI 클릭 흐름은 자동 검증하지 못했다. | Browser automation 도구가 준비되면 보호 route redirect와 자체 회원가입 UI 흐름을 추가 확인한다. | `tasks.md`, `implement.md` | Auth Verified |
@@ -37,8 +38,8 @@
 
 ## Recommendation
 
-1. M024 report confirm/current version 변경을 리뷰한 뒤 별도 커밋/PR로 `dev`에 통합한다.
-2. task candidate 추출을 Backend 권한 검증 뒤로 전환하고 Kanban confirm과 연결한다.
-3. `Q-008` candidate TTL을 결정한 뒤 만료 검증과 정리 작업을 추가한다.
+1. M025 task candidate Backend route 변경을 리뷰한 뒤 선행 PR #22 통합 상태를 확인하고 별도 커밋/PR로 `dev`에 통합한다.
+2. `Q-008`, `Q-009` candidate TTL을 결정한 뒤 만료 검증과 정리 작업을 추가한다.
+3. PostgreSQL repository transaction과 V6 migration을 실제 DB에 적용해 unique/FK 제약을 검증한다.
 4. STT 입력 계약이 안정되면 용어 설명을 Backend 권한 검증 뒤로 이동한다.
 5. Data/Backend 영속화 이후 PostgreSQL/pgvector retriever, embedding worker, persistent `AI_REQUESTED` audit를 구현한다.

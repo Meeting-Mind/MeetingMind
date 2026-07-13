@@ -114,6 +114,34 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `createdAt`
 - `confirmedAt`: `CONFIRMED` 전환 시각, 확정 전에는 null
 
+### TaskCandidate
+
+- `id`
+- `meetingId`
+- `title`
+- `assigneeName`: AI가 제안한 담당자 표시 이름, 없으면 null
+- `suggestedAssigneeId`: 표시 이름이 active participant이자 active SpaceMember와 정확히 일치할 때의 사용자 id
+- `dueDate`: AI가 제안한 마감일, 없으면 null
+- `status`: CANDIDATE, CONFIRMED, DISMISSED
+- `sourceIds`: Backend가 AI에 전달한 canonical source 중 후보 근거 ID
+- `createdBy`: 후보 생성 요청 사용자
+- `createdAt`
+- `confirmedAt`: TaskCard 생성과 함께 CONFIRMED로 전환된 시각, 확정 전에는 null
+
+### TaskCard
+
+- `id`
+- `spaceId`
+- `meetingId`: 회의 후보에서 생성되지 않은 일반 카드면 null 가능
+- `sourceCandidateId`: AI 후보에서 생성되지 않은 일반 카드면 null, 값이 있으면 unique
+- `title`
+- `description`
+- `status`: TODO, IN_PROGRESS, DONE
+- `assigneeId`: active SpaceMember 사용자 id, 미지정 시 null
+- `dueDate`
+- `createdAt`
+- `updatedAt`
+
 ### ProjectKnowledge
 
 - `id`
@@ -169,6 +197,12 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - 같은 meeting에 더 높은 version이 존재하면 오래된 candidate 확정을 거부한다.
 - 새 report를 확정할 때 기존 `CONFIRMED and isCurrent=true` report를 `isCurrent=false`로 전환하고 새 report만 `isCurrent=true`로 둔다.
 - `TaskCard.sourceCandidateId`는 nullable이지만 값이 있으면 unique다.
+- `TaskCandidate.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나다.
+- `TaskCandidate`는 AI가 반환한 source ID를 Backend canonical source allowlist로 필터링해 저장한다.
+- `TaskCandidate.CANDIDATE`만 TaskCard로 확정할 수 있고 확정과 카드 생성은 하나의 domain transition으로 처리한다.
+- `TaskCandidate.suggestedAssigneeId`와 `TaskCard.assigneeId`는 active SpaceMember만 허용한다.
+- TaskCandidate 생성/조회 응답의 담당자 선택지는 해당 Space의 active SpaceMember에서 파생하며 별도 entity로 저장하지 않는다.
+- TaskCandidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
 

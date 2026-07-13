@@ -123,6 +123,7 @@ class MeetingAiChatResponse(BaseModel):
 class BackendMeetingAiSource(BaseModel):
     sourceId: str = Field(min_length=1)
     type: RagSourceType
+    projectId: str | None = None
     meetingId: str = Field(min_length=1)
     title: str | None = None
     speaker: str | None = None
@@ -236,6 +237,14 @@ class ExtractTasksRequest(BaseModel):
     transcript: list[TranscriptRow] = Field(default_factory=list)
     summary: str | None = None
     participants: list[ParticipantItem] = Field(default_factory=list)
+
+
+class BackendExtractTasksRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    meetingId: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    participants: list[ParticipantItem] = Field(default_factory=list)
+    sources: list[BackendMeetingAiSource] = Field(default_factory=list)
 
 
 class TaskCandidate(BaseModel):
@@ -730,6 +739,30 @@ def build_task_extraction_sources(payload: ExtractTasksRequest) -> list[AiSource
     return [rag_source_to_ai_source(chunk_to_source(chunk)) for chunk in chunks]
 
 
+def build_backend_task_extraction_sources(payload: BackendExtractTasksRequest) -> list[AiSource]:
+    for source in payload.sources:
+        if source.projectId != payload.projectId:
+            raise meeting_context_forbidden("Task source projectId must match request projectId.")
+        if source.meetingId != payload.meetingId:
+            raise meeting_context_forbidden("Task source meetingId must match request meetingId.")
+        if source.type not in ("transcript", "report", "decision", "actionItem"):
+            raise meeting_context_forbidden("Task source type is not allowed.")
+
+    return [
+        AiSource(
+            sourceId=source.sourceId,
+            type=source.type,
+            title=source.title or payload.title,
+            speaker=source.speaker,
+            time=source.time,
+            startMs=source.startMs,
+            endMs=source.endMs,
+            text=source.text,
+        )
+        for source in payload.sources
+    ]
+
+
 def build_project_rag_chunks(payload: ProjectAiChatRequest) -> list[RagChunk]:
     return build_rag_chunks(
         RagBuildRequest(
@@ -1147,6 +1180,25 @@ def parse_report_response(
 
 def extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksResponse:
     sources = build_task_extraction_sources(payload)
+    return extract_tasks_from_sources(
+        payload.meetingId,
+        payload.title or payload.meetingId,
+        payload.participants,
+        sources,
+    )
+
+
+def backend_extract_tasks(payload: BackendExtractTasksRequest) -> ExtractTasksResponse:
+    sources = build_backend_task_extraction_sources(payload)
+    return extract_tasks_from_sources(payload.meetingId, payload.title, payload.participants, sources)
+
+
+def extract_tasks_from_sources(
+    meeting_id: str,
+    title: str,
+    participants: list[ParticipantItem],
+    sources: list[AiSource],
+) -> ExtractTasksResponse:
     if not sources:
         return ExtractTasksResponse(
             tasks=[],
@@ -1157,7 +1209,7 @@ def extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksResponse:
 
     participant_lines = "\n".join(
         f"- {participant.name} ({participant.role or 'role-unknown'})"
-        for participant in payload.participants
+        for participant in participants
     )
     context_lines = "\n".join(
         f"- sourceId={source.sourceId} type={source.type} title={source.title or '-'} "
@@ -1174,8 +1226,8 @@ def extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksResponse:
             "응답은 반드시 JSON 객체만 반환하고 key는 tasks를 사용해라."
         ),
         user_content=(
-            f"[회의 ID]\n{payload.meetingId}\n\n"
-            f"[회의 제목]\n{payload.title or payload.meetingId}\n\n"
+            f"[회의 ID]\n{meeting_id}\n\n"
+            f"[회의 제목]\n{title}\n\n"
             f"[참석자]\n{participant_lines or '- 없음'}\n\n"
             f"[회의 근거]\n{context_lines}"
         ),
@@ -1380,6 +1432,17 @@ def backend_meeting_ai_generate_report(payload: BackendGenerateReportRequest) ->
 @app.post("/api/meeting-ai/extract-tasks", response_model=ExtractTasksResponse)
 def meeting_ai_extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksResponse:
     return observe_ai_endpoint("meeting-ai.extract-tasks", lambda: extract_tasks(payload))
+
+
+@app.post("/api/internal/meeting-ai/extract-tasks", response_model=ExtractTasksResponse)
+def backend_meeting_ai_extract_tasks(payload: BackendExtractTasksRequest) -> ExtractTasksResponse:
+    try:
+        return observe_ai_endpoint(
+            "meeting-ai.extract-tasks.internal",
+            lambda: backend_extract_tasks(payload),
+        )
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
 
 
 @app.post("/api/project-ai/chat", response_model=ProjectAiChatResponse)

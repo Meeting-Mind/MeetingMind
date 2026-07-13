@@ -28,6 +28,9 @@
 | STT 보관 정책 설정 | O | X | X | X |
 | 해당 회의 AI 보고서 열람 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
 | 해당 회의 AI 보고서 편집 | O | O | O, EDITOR/HOST 필요 | O, 해당 회의의 EDITOR/HOST만 |
+| 해당 회의 AI 태스크 후보 추출 | O | O | O, EDITOR/HOST 필요 | O, 해당 회의의 EDITOR/HOST만 |
+| 해당 회의 AI 태스크 후보 조회 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
+| 태스크 후보의 프로젝트 카드 확정 | O | O | O, EDITOR/HOST 및 SpaceMember 필요 | X |
 | Meeting AI 질의 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
 | Project Knowledge 열람 | O | O | O | X |
 | Project Knowledge 수정 | O | O | X | X |
@@ -41,6 +44,8 @@
 - 회의 참여자로 지정되는 즉시 해당 회의에 대한 STT, AI 보고서, Meeting AI 접근 권한이 부여된다.
 - 권한이 해제되면 해당 회의 데이터와 AI 컨텍스트 접근도 즉시 차단된다.
 - 회의 산출물 열람은 VIEWER 이상이 가능하지만, AI 보고서 편집과 발화자 이름 수정은 EDITOR/HOST 또는 Space OWNER/ADMIN override 권한이 필요하다.
+- AI 태스크 후보 추출은 회의 산출물 생성 작업이므로 `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`만 수행한다.
+- 태스크 후보 조회는 active 회의 접근 권한으로 허용하지만, 프로젝트 TaskCard 확정은 active `SpaceMember`이면서 회의 편집 권한이 있는 사용자만 수행한다. 회의 게스트는 프로젝트 칸반에 카드를 만들 수 없다.
 - HOST가 회의방에서 일시 퇴장해도 MeetingParticipant role과 accessStatus는 유지된다.
 - HOST가 회의를 종료하면 Meeting status를 `ENDED`로 전환한다.
 - 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다. 마지막 HOST를 없애려면 다른 참여자를 먼저 HOST로 승격해야 한다.
