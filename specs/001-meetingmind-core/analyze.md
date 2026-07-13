@@ -35,11 +35,12 @@
 | Low | 회의당 current confirmed report 1개 정책을 결정했다. | Project Knowledge 승격, 다운로드, Project AI source 연결 시 공식 회의록이 중복되는 위험이 줄었다. | Backend migration 구현 시 partial unique index 또는 애플리케이션 제약을 둔다. | `clarify.md`, `erd.md`, `data-model.md`, `meeting-api.md` | Decided |
 | Low | ProjectKnowledge embedding 재생성은 비동기로 결정했다. | Knowledge 수정 API 응답 지연과 embedding provider 장애 영향을 줄이고 기존 chunk로 검색 안정성을 유지한다. | Backend/Data 구현 시 `embeddingStatus`, `embeddingJobId`, 비동기 worker 또는 job 경계를 설계한다. | `clarify.md`, `erd.md`, `data-model.md`, `knowledge-api.md` | Decided |
 | Medium | AI/RAG prototype과 Backend-to-AI 경계를 분리 API/ERD 기준으로 재검토했다. | Meeting/Project scope, source 분리, 근거 없음 처리, candidate 원칙과 처리 시간/model/source count observability log는 코드와 테스트로 확인됐다. token budget 축소 정책과 persistent audit는 아직 없다. | report/task/term Backend 경유 전환에서도 같은 strict source 검증을 적용하고, 실제 RAG 저장소 도입 시 token budget과 persistent audit를 별도 task로 구현한다. | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `contracts/ai-api.md`, `knowledge-api.md`, `erd.md`, `data-model.md`, `tasks.md`, `implement.md` | AI Reviewed |
+| Medium | AI provider 오류, timeout, 공통 오류 body가 M026에서 정규화됐다. | public/internal 경로에서 provider raw detail이 노출되지 않고 챗봇 계열 30초, 보고서 60초 timeout과 `{code, message, fieldErrors, traceId}`가 적용된다. 구현 비교 문서도 현재 기준선으로 갱신됐으며 자동 재시도는 중복 과금 위험 때문에 제외됐다. | internal service auth, token budget 자동 축소, persistent audit는 각각 선행 의존성을 갖는 후속 milestone으로 분리한다. | `requirements/performance.md`, `contracts/ai-api.md`, `feature-implementation-comparison.md`, `plan.md`, `tasks.md`, `implement.md`, `ai/app/main.py`, `ai/tests/test_meeting_ai.py` | M026 Verified |
 
 ## Recommendation
 
-1. M025 task candidate Backend route 변경을 리뷰한 뒤 선행 PR #22 통합 상태를 확인하고 별도 커밋/PR로 `dev`에 통합한다.
-2. `Q-008`, `Q-009` candidate TTL을 결정한 뒤 만료 검증과 정리 작업을 추가한다.
-3. PostgreSQL repository transaction과 V6 migration을 실제 DB에 적용해 unique/FK 제약을 검증한다.
+1. M026 AI provider safety 변경을 별도 PR로 검토하고 `dev`에 통합한다.
+2. internal API 서비스 인증 header를 Backend와 shared contract로 확정한다.
+3. `Q-008`, `Q-009` candidate TTL을 결정한 뒤 만료 검증과 정리 작업을 추가한다.
 4. STT 입력 계약이 안정되면 용어 설명을 Backend 권한 검증 뒤로 이동한다.
 5. Data/Backend 영속화 이후 PostgreSQL/pgvector retriever, embedding worker, persistent `AI_REQUESTED` audit를 구현한다.

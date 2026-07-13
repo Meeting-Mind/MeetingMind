@@ -541,3 +541,31 @@
 - 후보 제외 API와 일반 Kanban 카드 CRUD/목록의 Backend 전환
 - PostgreSQL repository transaction과 V6 unique/FK 제약 실제 적용 검증
 - `AI_REQUESTED`, `TASK_CANDIDATE_CONFIRMED`, `TASK_CARD_CHANGED` persistent audit log
+
+## M026 AI Provider Safety
+
+### Scope and Decision
+
+- `requirements/performance.md`의 prototype 기준에 따라 OpenAI 호출은 기본 30초, 보고서 생성은 60초 timeout을 사용한다.
+- 설정 누락, provider HTTP/connection 오류, timeout, 잘못된 응답은 public/internal 경로 모두 `503 AI_PROVIDER_UNAVAILABLE` 고정 응답으로 정규화한다.
+- provider raw body, 연결 사유, 환경변수 이름은 클라이언트 응답에 포함하지 않는다.
+- AI `HTTPException`과 validation 오류는 `{code, message, fieldErrors, traceId}` 공통 body를 반환하며 현재 AI traceId는 `null`이다.
+- 생성 요청 자동 재시도는 중복 과금 가능성이 있고 idempotency 보장이 없어 제외했다.
+- API request/response 데이터 모델, ERD, RAG scope 변경은 없다.
+- `feature-implementation-comparison.md`를 현재 권한 기반 AI 통합 prototype 상태로 갱신하고 상세 기준 문서로의 경계를 명시했다.
+
+### Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 35 tests
+- Passed: HTTP 오류 detail, connection reason, 환경변수 이름 비노출 테스트
+- Passed: validation/provider 오류의 `{code, message, fieldErrors, traceId}` 공통 body 테스트
+- Passed: OpenAI 기본 30초와 보고서 60초 timeout 전달 테스트
+- Passed: `git diff --check`
+
+### Remaining Boundary
+
+- internal API 서비스 인증은 Backend credential/header 연동이 필요한 shared contract 작업이다.
+- PostgreSQL/pgvector retriever와 embedding worker는 Data/Backend 영속 저장소가 선행되어야 한다.
+- 실제 STT 기반 context 연동은 STT 저장·조회 계약과 권한 필터 구현이 선행되어야 한다.
+- persistent `AI_REQUESTED` audit와 token budget 자동 축소는 별도 후속 milestone이다.

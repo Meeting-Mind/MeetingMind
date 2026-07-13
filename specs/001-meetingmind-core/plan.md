@@ -331,6 +331,15 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 4. Frontend 추출/검토/확정 flow를 Backend API로 전환한다.
 5. scope, 권한, 중복 negative case와 정상 API flow를 검증한다.
 
+## AI Provider Safety Plan
+
+- OpenAI Responses API 호출 timeout은 `requirements/performance.md`의 prototype 목표를 따라 챗봇, 용어 설명, 태스크 추출은 30초, 보고서 생성은 60초로 적용한다.
+- provider 설정 누락, HTTP 오류, 연결 오류, 응답 본문 오류는 외부 원문을 노출하지 않고 `503 AI_PROVIDER_UNAVAILABLE`로 정규화하며 `{code, message, fieldErrors, traceId}` 공통 body를 사용한다.
+- 생성 요청 자동 재시도는 응답 유실 시 같은 요청의 중복 과금 가능성이 있고 provider idempotency key를 사용하지 않으므로 이번 milestone에서 제외한다. 사용자가 Backend를 통해 명시적으로 다시 요청하는 흐름을 유지한다.
+- 이번 변경은 AI provider adapter의 오류·timeout 경계만 바꾸며 API request/response 데이터 모델, ERD, RAG scope에는 영향이 없다.
+- 구현 비교 문서는 현재 권한 기반 AI 통합 prototype 경계를 요약하고 상세 상태는 `tasks.md`, `implement.md`, `contracts/*`로 연결한다.
+- internal API 서비스 인증은 Backend가 동일 credential/header를 전송해야 하므로 별도 shared contract milestone으로 분리한다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`
