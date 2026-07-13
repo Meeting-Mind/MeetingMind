@@ -215,8 +215,48 @@ public class WorkspaceDomainService {
                 createdBy,
                 nextVersion,
                 false,
-                Instant.now(clock)
+                Instant.now(clock),
+                null
         ));
+    }
+
+    public synchronized MeetingReport confirmMeetingReport(String meetingId, String reportId) {
+        store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        MeetingReport target = store.findMeetingReportById(reportId)
+                .filter(report -> report.meetingId().equals(meetingId))
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "REPORT_NOT_FOUND",
+                        "회의록을 찾을 수 없습니다."
+                ));
+        if (target.status() != MeetingReportStatus.CANDIDATE && target.status() != MeetingReportStatus.DRAFT) {
+            throw invalidRequest("CANDIDATE 또는 DRAFT 회의록만 확정할 수 있습니다.");
+        }
+
+        int latestVersion = store.findMeetingReports(meetingId).stream()
+                .mapToInt(MeetingReport::version)
+                .max()
+                .orElse(target.version());
+        if (target.version() != latestVersion) {
+            throw new AuthorizationException(
+                    HttpStatus.CONFLICT,
+                    "REPORT_VERSION_CONFLICT",
+                    "최신 회의록 version만 확정할 수 있습니다."
+            );
+        }
+
+        store.findMeetingReports(meetingId).stream()
+                .filter(report -> report.status() == MeetingReportStatus.CONFIRMED)
+                .filter(MeetingReport::current)
+                .filter(report -> !report.id().equals(reportId))
+                .map(MeetingReport::withoutCurrent)
+                .forEach(store::saveMeetingReport);
+        return store.saveMeetingReport(target.confirmed(Instant.now(clock)));
     }
 
     public ProjectAiContext projectAiContext(String spaceId) {

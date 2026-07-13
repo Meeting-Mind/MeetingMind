@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { generateReportCandidate } from "../api/workspace";
+import { confirmMeetingReport, generateReportCandidate } from "../api/workspace";
 import type { AuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
@@ -43,8 +43,11 @@ type ReportCandidateDraft = {
   id: string;
   summary: string;
   markdown: string;
-  status: "candidate";
+  status: "candidate" | "confirmed";
   sources: string[];
+  version: number;
+  isCurrent: boolean;
+  confirmedAt: string | null;
 };
 
 type TaskCandidateDraft = {
@@ -407,6 +410,7 @@ export function ReportAgentPage({
   const [selectedCommitId, setSelectedCommitId] = useState<string | null>(null);
   const [reportCandidate, setReportCandidate] = useState<ReportCandidateDraft | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isConfirmingReport, setIsConfirmingReport] = useState(false);
   const [reportGenerationError, setReportGenerationError] = useState("");
   const [taskCandidates, setTaskCandidates] = useState<TaskCandidateDraft[]>([]);
   const changeCommits = reportState.commits;
@@ -428,6 +432,7 @@ export function ReportAgentPage({
     setSelectedCommitId(null);
     setReportCandidate(null);
     setIsGeneratingReport(false);
+    setIsConfirmingReport(false);
     setReportGenerationError("");
     setTaskCandidates([]);
   }, [projectName, meetingTitle, reportView, round]);
@@ -684,13 +689,40 @@ export function ReportAgentPage({
         summary: response.candidate.summary,
         markdown: response.candidate.markdown,
         status: "candidate",
-        sources: response.sources.map((source) => source.title || source.sourceId)
+        sources: response.sources.map((source) => source.title || source.sourceId),
+        version: response.candidate.version,
+        isCurrent: response.candidate.isCurrent,
+        confirmedAt: null
       });
       setSaveLabel("● 회의록 candidate 생성됨 · 확정 대기");
     } catch (error) {
       setReportGenerationError(error instanceof Error ? error.message : "회의록 candidate 생성에 실패했습니다.");
     } finally {
       setIsGeneratingReport(false);
+    }
+  }
+
+  async function handleConfirmReportCandidate() {
+    if (!session || !meetingId || !reportCandidate || reportCandidate.status !== "candidate" || isConfirmingReport) {
+      return;
+    }
+
+    setIsConfirmingReport(true);
+    setReportGenerationError("");
+    try {
+      const response = await confirmMeetingReport(session, meetingId, reportCandidate.id);
+      setReportCandidate((current) => current ? {
+        ...current,
+        status: "confirmed",
+        version: response.version,
+        isCurrent: response.isCurrent,
+        confirmedAt: response.confirmedAt
+      } : current);
+      setSaveLabel("● 공식 회의록으로 확정됨 · 방금 전");
+    } catch (error) {
+      setReportGenerationError(error instanceof Error ? error.message : "회의록 확정에 실패했습니다.");
+    } finally {
+      setIsConfirmingReport(false);
     }
   }
 
@@ -1075,19 +1107,25 @@ export function ReportAgentPage({
                 <div className="report-agent-report-candidate">
                   <div className="report-agent-report-candidate-top">
                     <strong>회의록 후보</strong>
-                    <span>candidate</span>
+                    <span>{reportCandidate.status === "confirmed" ? "confirmed" : "candidate"}</span>
                   </div>
                   <p>{reportCandidate.summary}</p>
+                  <p>v{reportCandidate.version}{reportCandidate.isCurrent ? " · current" : ""}</p>
                   <div className="report-agent-bubble-tags">
                     {reportCandidate.sources.map((source) => (
                       <span key={source}>{source}</span>
                     ))}
                   </div>
                   <button
-                    disabled
+                    disabled={reportCandidate.status === "confirmed" || isConfirmingReport}
+                    onClick={handleConfirmReportCandidate}
                     type="button"
                   >
-                    확정 기능 준비 중
+                    {isConfirmingReport
+                      ? "확정 중..."
+                      : reportCandidate.status === "confirmed"
+                        ? "공식 회의록 확정됨"
+                        : "프로젝트 문서로 확정"}
                   </button>
                 </div>
               ) : null}

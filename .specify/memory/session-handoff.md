@@ -25,14 +25,12 @@
 - PostgreSQL/pgvector 기반 실제 RAG 저장소, embedding worker, persistent AI audit log는 후속 작업이다.
 - mock/legacy Space와 target Backend Space의 ID 연결은 완료되지 않았으므로 target 목록에 없는 Space에서는 Project AI 호출을 차단한다.
 - AI 회의록 candidate는 Backend 편집 권한과 단일 meeting source 검증 뒤에서 생성되고 supported 결과만 in-memory `CANDIDATE`로 저장된다.
-- report confirm/update/download, 실제 PostgreSQL repository, persistent audit log는 후속 작업이다.
+- report candidate/draft 확정은 Backend 편집 권한 뒤에서 실행되고 기존 current를 해제한 뒤 새 report만 `CONFIRMED/current=true`가 된다.
+- candidate TTL, report update/history/download, 실제 PostgreSQL repository, persistent audit log는 후속 작업이다.
 
 ## 다음 Shared Milestone
 
-다음 milestone은 아래 두 후보 중 우선순위를 결정한 뒤 `tasks.md`에 등록한다.
-
-1. report candidate confirm/update/version과 current confirmed 단일 제약 구현
-2. task candidate 추출을 Backend 권한 검증 뒤로 전환하고 Kanban confirm과 연결
+다음 milestone 후보는 task candidate 추출을 Backend 권한 검증 뒤로 전환하고 Kanban confirm과 연결하는 작업이다.
 
 ## 검증 기준선
 

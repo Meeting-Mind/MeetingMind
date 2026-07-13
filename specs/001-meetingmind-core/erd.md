@@ -354,6 +354,9 @@ erDiagram
 - `CANDIDATE`는 임시 저장하되 기본 공식 회의록 조회와 Project AI source에서 제외하고, `unsupported=true` 결과는 저장하지 않는다.
 - `MEETING_REPORT.isCurrent=true`이고 `status=CONFIRMED`인 report는 meeting당 최대 1개만 허용한다.
 - 새 report version을 확정하면 기존 current confirmed report는 `isCurrent=false`로 바꾼다.
+- `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환할 수 있고 확정 시 `confirmedAt`을 기록한다.
+- 확정 대상은 해당 meeting의 최신 version이어야 한다.
+- candidate 만료 검증은 `Q-008`의 TTL 정책 결정 후 추가한다.
 - `TASK_CANDIDATE.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나로 확장 후보를 둔다.
 - `TASK_CARD.sourceCandidateId`는 nullable이지만, 값이 있으면 unique다. 후보 하나는 최대 하나의 TaskCard로만 확정된다.
 - `TASK_CARD(spaceId, status)`와 `TASK_CARD(assigneeId, status)` index를 둔다.

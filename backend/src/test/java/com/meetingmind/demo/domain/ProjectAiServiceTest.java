@@ -154,6 +154,7 @@ class ProjectAiServiceTest {
                 "user-owner",
                 1,
                 true,
+                FIXED_CLOCK.instant(),
                 FIXED_CLOCK.instant()
         );
     }

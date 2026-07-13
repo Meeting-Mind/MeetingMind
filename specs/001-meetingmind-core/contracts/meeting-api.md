@@ -1064,6 +1064,9 @@ None.
 - report가 해당 meeting에 속해야 한다.
 - `status=CANDIDATE` 또는 `DRAFT`만 확정 가능하다.
 - 새 report를 확정하면 기존 current confirmed report는 `isCurrent=false`가 된다.
+- 중복 확정은 `400 INVALID_REQUEST`로 거부한다.
+- 대상 report보다 높은 version이 존재하면 오래된 candidate 확정을 `409 REPORT_VERSION_CONFLICT`로 거부한다.
+- candidate 만료 검증은 `Q-008` 정책 결정 후 추가한다.
 
 ### Response
 
@@ -1072,15 +1075,18 @@ None.
   "id": "report-001",
   "status": "CONFIRMED",
   "version": 1,
-  "isCurrent": true
+  "isCurrent": true,
+  "confirmedAt": "2026-07-13T12:00:00Z"
 }
 ```
 
 ### Errors
 
 - `400 INVALID_REQUEST`: 상태 전이 오류
+- `409 REPORT_VERSION_CONFLICT`: 최신 report version이 아님
 - `403 MEETING_ACCESS_DENIED`: 확정 권한 없음
-- `404 MEETING_NOT_FOUND`: 회의 또는 report 없음
+- `404 MEETING_NOT_FOUND`: 회의 없음
+- `404 REPORT_NOT_FOUND`: report 없음 또는 path meeting과 불일치
 
 ### Audit
 

@@ -275,6 +275,30 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 - AI `unsupported=true` 또는 provider 실패 결과는 저장하지 않는다.
 - confirm, manual edit, version history 조회, export는 M022 이후 범위다.
 
+## Report Confirm and Current Version Plan
+
+### Scope
+
+- Public route: `POST /api/v1/meetings/{meetingId}/reports/{reportId}/confirm`
+- `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR`만 확정할 수 있다.
+- `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환하고 중복 확정은 거부한다.
+- 동일 meeting의 기존 current confirmed report를 `isCurrent=false`로 전환한 뒤 대상 report만 `isCurrent=true`와 `confirmedAt`을 기록한다.
+- Frontend는 Backend 확정 성공 후 candidate status, version, current 표시를 갱신한다.
+
+### Boundaries
+
+- candidate TTL은 `Q-008` 결정 전이므로 이번 slice에서 임의 정책을 넣지 않는다.
+- 수동 update, version history 조회/복원, export, persistent audit log는 후속 범위다.
+- runtime 저장소는 in-memory이며 PostgreSQL partial unique index는 기존 V3 target schema를 기준으로 유지한다.
+
+### Integration Order
+
+1. 계약과 `confirmedAt` 모델을 확정한다.
+2. in-memory domain transition과 current 단일 제약을 구현한다.
+3. 인증/편집 권한을 적용한 confirm controller/service를 연결한다.
+4. Frontend 확정 버튼과 상태 표시를 Backend response에 연결한다.
+5. 중복 확정, 다른 meeting report, VIEWER 거부, current 교체를 검증한다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`
