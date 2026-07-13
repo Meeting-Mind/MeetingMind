@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>STT Streaming Test</title>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  button { font-size: 16px; padding: 8px 16px; margin-right: 8px; }
+  #status { margin: 12px 0; color: #555; }
+  #log { border: 1px solid #ccc; padding: 12px; min-height: 200px; white-space: pre-wrap; }
+  .entry { margin-bottom: 4px; }
+  .time { color: #999; margin-right: 6px; }
+  .speaker { font-weight: bold; margin-right: 6px; }
+</style>
+</head>
+<body>
+<h2>실시간 스트리밍 STT 테스트</h2>
+<p>마이크 → 48kHz PCM → <code>/ws/egress-audio/{sessionId}</code> → Clova Nest gRPC 스트리밍 (LiveKit 없이 직결)</p>
+<button id="startBtn">Start</button>
+<button id="stopBtn" disabled>Stop</button>
+<div id="status">대기 중</div>
+<div id="log"></div>
+
+<script>
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+
+let audioCtx, source, processor, stream, ws, sessionId, pollTimer, shownCount = 0;
+
+function setStatus(text) { statusEl.textContent = text; }
+
+function floatTo16BitPCM(input) {
+  const buffer = new ArrayBuffer(input.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
+}
+
+async function pollTranscript() {
+  const res = await fetch(`/api/stt/stream/${sessionId}/transcript`);
+  if (!res.ok) return;
+  const entries = await res.json();
+  for (let i = shownCount; i < entries.length; i++) {
+    const e = entries[i];
+    const div = document.createElement('div');
+    div.className = 'entry';
+    div.innerHTML = `<span class="time">${e.time}</span><span class="speaker">${e.displayName}</span>${e.text}`;
+    logEl.appendChild(div);
+  }
+  shownCount = entries.length;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function start() {
+  startBtn.disabled = true;
+  logEl.textContent = '';
+  shownCount = 0;
+  try {
+    setStatus('세션 생성 중...');
+    const startRes = await fetch('/api/stt/stream/test-start', { method: 'POST' });
+    if (!startRes.ok) {
+      throw new Error(`세션 시작 실패 (HTTP ${startRes.status}): ${await startRes.text()}`);
+    }
+    sessionId = (await startRes.json()).sessionId;
+
+    setStatus('마이크 권한 요청 중...');
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 48000 } });
+
+    audioCtx = new AudioContext({ sampleRate: 48000 });
+    if (audioCtx.sampleRate !== 48000) {
+      console.warn('AudioContext sampleRate is', audioCtx.sampleRate, '(expected 48000; server assumes 48kHz input)');
+    }
+
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/egress-audio/${sessionId}`);
+    ws.binaryType = 'arraybuffer';
+
+    await new Promise((resolve, reject) => {
+      ws.onopen = resolve;
+      ws.onerror = () => reject(new Error('WebSocket 연결 실패'));
+    });
+
+    source = audioCtx.createMediaStreamSource(stream);
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    processor.onaudioprocess = (event) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(floatTo16BitPCM(event.inputBuffer.getChannelData(0)));
+      }
+    };
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    pollTimer = setInterval(pollTranscript, 1000);
+    setStatus(`스트리밍 중 (session: ${sessionId})`);
+    stopBtn.disabled = false;
+  } catch (err) {
+    setStatus(`오류: ${err.message}`);
+    startBtn.disabled = false;
+    console.error(err);
+  }
+}
+
+async function stop() {
+  stopBtn.disabled = true;
+  clearInterval(pollTimer);
+  if (processor) processor.disconnect();
+  if (source) source.disconnect();
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  if (audioCtx) await audioCtx.close();
+  if (ws) ws.close();
+  if (sessionId) {
+    await fetch(`/api/stt/stream/${sessionId}/stop`, { method: 'POST' }).catch(() => {});
+    await pollTranscript().catch(() => {});
+  }
+  setStatus('중지됨');
+  startBtn.disabled = false;
+}
+
+startBtn.onclick = start;
+stopBtn.onclick = stop;
+</script>
+</body>
+</html>

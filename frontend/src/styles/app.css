@@ -73,6 +73,8 @@ body.app-theme select {
   height: calc(100vh / var(--app-scale));
   transform: scale(var(--app-scale));
   transform-origin: top left;
+  /* ponytail: OS window-snap resizes can leave the scaled layer stale in Chromium until repainted; backface-visibility forces a fresh composite. */
+  backface-visibility: hidden;
 }
 
 .workspace-catalog-shell {
@@ -337,7 +339,7 @@ body.app-theme select {
 
 .workspace-catalog-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 20px;
   align-content: start;
 }
@@ -3483,8 +3485,8 @@ body.app-theme select {
   gap: 14px;
 }
 
-.lk-live-room-sidebar-feed-item,
-.lk-live-room-sidebar-card {
+.lk-live-room-sidebar-feed-item {
+  position: relative;
   padding: 18px;
   border: 1px solid #e4def5;
   border-radius: 24px;
@@ -3500,6 +3502,7 @@ body.app-theme select {
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
+  padding-right: 28px;
 }
 
 .lk-live-room-sidebar-feed-meta span,
@@ -3509,34 +3512,74 @@ body.app-theme select {
   font-weight: 900;
 }
 
-.lk-live-room-sidebar-feed-item p,
-.lk-live-room-dictionary-term p {
+.lk-live-room-sidebar-feed-item p {
   margin: 0;
   color: #464a67;
   font-size: 16px;
   line-height: 1.55;
 }
 
-.lk-live-room-sidebar-card strong {
-  display: block;
-  margin-bottom: 14px;
-  color: #313454;
-  font-size: 18px;
-  font-weight: 900;
+.lk-live-room-keyword-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: #ece6ff;
+  color: #5a47de;
+  font-weight: 800;
 }
 
-.lk-live-room-dictionary-term {
-  padding: 16px;
-  border: 1px solid #e7e2f5;
-  border-radius: 18px;
+.lk-live-room-bookmark {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #c3bfd8;
+}
+
+.lk-live-room-bookmark.is-active {
+  color: #6b5cf6;
+}
+
+.lk-live-room-sidebar-empty {
+  margin: 0;
+  padding: 24px 4px;
+  color: #9f9ab7;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.lk-live-room-sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 0 16px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 999px;
   background: #fff;
 }
 
-.lk-live-room-dictionary-term h4 {
-  margin: 0 0 8px;
-  color: #313454;
-  font-size: 17px;
-  font-weight: 900;
+.lk-live-room-sidebar-search input {
+  min-width: 0;
+  flex: 1;
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  color: #454963;
+  font-size: 15px;
+}
+
+.lk-live-room-sidebar-search-icon {
+  display: inline-flex;
+  color: #a49ec3;
 }
 
 .workspace-project-modal-backdrop,
