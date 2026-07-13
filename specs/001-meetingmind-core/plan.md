@@ -221,6 +221,34 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 - Report export는 Markdown 우선 결정이 있으나 PDF/DOCX 생성 방식은 후속 작업이다.
 - TaskCandidate confirm은 Kanban API 계약에 있지만 실제 칸반 저장소와 frontend state 연결은 M018/M019 통합 지점이다.
 
+## Project AI Backend Permission Prefilter Plan
+
+### Scope
+
+- Public route: `POST /api/v1/spaces/{spaceId}/ai/chat`
+- Internal route: `POST /api/internal/project-ai/chat`
+- Backend는 활성 SpaceMember를 확인한 뒤 ProjectKnowledge와 사용자가 읽을 수 있는 회의의 current/confirmed report summary만 AI context로 조립한다.
+- AI 서버는 `projectKnowledge`, `meetingSummary` source만 project scope에서 검색하고 source project/meeting allowlist를 다시 검증한다.
+- Frontend는 질문만 Backend에 전달하며 mock transcript/decision/action context를 직접 보내지 않는다.
+- 실제 PostgreSQL/pgvector 검색, embedding worker, 대화 이력, persistent audit log는 이번 slice에서 제외한다.
+
+### Parallel Work Plan
+
+- Team members: 1
+- Agents: 1 Codex
+- Workstreams: contracts -> AI -> Backend -> Frontend -> verification 순차 처리
+- Shared contracts: `contracts/ai-api.md`, `contracts/space-api.md`
+- Conflict boundaries: AI는 `ai/**`, Backend는 Project AI controller/service/dto와 기존 policy/domain의 최소 확장, Frontend는 `App.tsx`, `api/workspace.ts`, `ProjectOverviewPage.tsx`만 수정한다.
+- Integration order: 계약 확정 후 AI strict schema, Backend context/gateway, Frontend 호출 전환, 전체 검증 순서로 통합한다.
+
+### Security and Data Rules
+
+- Project AI는 SpaceMember만 사용할 수 있고 meeting guest는 사용할 수 없다.
+- OWNER/ADMIN은 기존 `MeetingAccessPolicy` manager override를 따르고 MEMBER는 active MeetingParticipant인 회의만 포함한다.
+- `REVOKED` participant의 회의는 `allowedMeetingIds`와 `sources[]` 모두에서 제외한다.
+- ProjectKnowledge는 `PUBLISHED`, `embeddingStatus=COMPLETED`이고 삭제되지 않은 항목만 포함한다.
+- 회의 기록은 1차 연동에서 current confirmed report summary만 포함하며 원문 transcript 전체를 프로젝트 컨텍스트로 확장하지 않는다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

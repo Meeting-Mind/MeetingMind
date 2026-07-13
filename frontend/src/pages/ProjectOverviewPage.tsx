@@ -1,19 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { chatProjectAi } from "../api/workspace";
+import type { AuthSession } from "../auth/session";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
-import type { TranscriptRow, WorkspaceData } from "../types";
-
-const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL ?? "http://localhost:8000";
+import type { WorkspaceData } from "../types";
 
 type ProjectChatMessage = {
   role: "user" | "ai";
   text: string;
   tags?: string[];
-};
-
-type MeetingAiAskResponse = {
-  answer: string;
-  model: string;
 };
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
@@ -260,6 +255,8 @@ function getMeetingDestinationForSpace(space: WorkspaceData["workspaceHome"]["sp
 
 export function ProjectOverviewPage({
   data,
+  session,
+  projectAiSpaceIds,
   onDeleteProject,
   meetingParticipants,
   onAddMeetingParticipant,
@@ -278,6 +275,8 @@ export function ProjectOverviewPage({
   onUpdateProject
 }: {
   data: WorkspaceData["projectOverview"];
+  session: AuthSession | null;
+  projectAiSpaceIds: string[];
   onDeleteProject?: (spaceId: string) => void;
   meetingParticipants: Record<string, MeetingParticipantState[]>;
   onAddMeetingParticipant?: (
@@ -316,9 +315,6 @@ export function ProjectOverviewPage({
   const projectName = searchParams.get("project");
   const viewData = buildProjectView(data, projectMeetings, spaces, spaceId, projectName);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
-  const projectPromptFallback = viewData
-    ? `${viewData.selectedSpace.name} 프로젝트 기준으로 일정, 결정사항, 다음 회의 흐름을 정리해드릴게요.`
-    : "프로젝트 기준으로 일정, 결정사항, 다음 회의 흐름을 정리해드릴게요.";
   const [messages, setMessages] = useState<ProjectChatMessage[]>([
     {
       role: "ai",
@@ -370,48 +366,6 @@ export function ProjectOverviewPage({
     setTaskAssignee("");
   }, [viewData?.selectedSpace.name]);
 
-  const payloadSource = useMemo(() => {
-    if (!viewData) {
-      return {
-        transcript: [] as TranscriptRow[],
-        decisions: [],
-        actions: []
-      };
-    }
-
-    const nextMeeting = viewData.meetings.find((meeting) => meeting.state !== "완료") ?? viewData.meetings[0] ?? null;
-    const transcript: TranscriptRow[] = viewData.meetings.map((meeting, index) => ({
-      time: `06:${String(2 + index * 4).padStart(2, "0")}:00`,
-      speaker: `${meeting.index.replace("#", "")}회차`,
-      text:
-        meeting.state === "완료"
-          ? `${meeting.title} 회의에서 구조 점검과 주요 결정사항을 정리했습니다.`
-          : meeting.state === "예정"
-            ? `${meeting.title} 회의에서 보안 정책과 관리자 권한 최종안을 확정할 예정입니다.`
-            : `${meeting.title} 회의에서 권한 기반 RAG 검색 구조와 보고서 생성 흐름을 논의했습니다.`
-    }));
-
-    return {
-      transcript,
-      decisions: [
-        {
-          title: viewData.knowledge.finalDecision,
-          meta: `${viewData.selectedSpace.name} 프로젝트 결정`
-        }
-      ],
-      actions: [
-        {
-          title: `${viewData.selectedSpace.name} 다음 회의 안건 정리`,
-          meta: nextMeeting ? `${nextMeeting.date} 예정` : "아직 예정된 회의 없음"
-        },
-        {
-          title: `${viewData.selectedSpace.name} 최근 결정사항 검토`,
-          meta: viewData.selectedSpace.updatedAt
-        }
-      ]
-    };
-  }, [viewData]);
-
   useEffect(() => {
     if (!chatScrollRef.current) {
       return;
@@ -457,8 +411,9 @@ export function ProjectOverviewPage({
 
   const nextMeeting = viewData.meetings.find((meeting) => meeting.state !== "완료") ?? viewData.meetings[0] ?? null;
   const contextMeeting = viewData.meetings.find((meeting) => meeting.state === "보고서 생성됨") ?? viewData.meetings[0] ?? null;
-  const contextMeetingTag = contextMeeting ? `관련 ${contextMeeting.index.replace("#", "")}회차` : "프로젝트 초기 상태";
-  const canSubmit = input.trim().length > 0 && !loading;
+  const selectedSpaceId = viewData.selectedSpace.id;
+  const projectAiAvailable = projectAiSpaceIds.includes(selectedSpaceId);
+  const canSubmit = input.trim().length > 0 && !loading && Boolean(session) && projectAiAvailable;
   const selectedProjectName = viewData.selectedSpace.name;
   const selectedMeeting = viewData.meetings.find((meeting) => meeting.index === selectedMeetingIndex) ?? contextMeeting;
   const selectedMeetingKey = selectedMeeting ? buildMeetingKey(selectedProjectName, selectedMeeting.index) : "";
@@ -487,32 +442,25 @@ export function ProjectOverviewPage({
     setLoading(true);
 
     try {
-      const response = await fetch(`${AI_API_BASE_URL}/api/meeting-ai/ask`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          question: trimmed,
-          transcript: payloadSource.transcript,
-          decisions: payloadSource.decisions,
-          actions: payloadSource.actions
-        })
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || `프로젝트 AI 요청 실패 (${response.status})`);
+      if (!session) {
+        throw new Error("로그인이 필요합니다.");
       }
-
-      const result = (await response.json()) as MeetingAiAskResponse;
+      if (!projectAiAvailable) {
+        throw new Error("프로젝트 AI 검색 데이터가 아직 준비되지 않았습니다.");
+      }
+      const result = await chatProjectAi(session, selectedSpaceId, { question: trimmed });
+      const sourceTags = Array.from(new Set(result.sources.map((source) =>
+        source.type === "projectKnowledge"
+          ? `공식 지식 · ${source.title}`
+          : `회의 기록 · ${source.title}`
+      )));
       setModelLabel(result.model);
       setMessages((previous) => [
         ...previous,
         {
           role: "ai",
           text: result.answer,
-          tags: [contextMeetingTag, "출처 프로젝트 문맥"]
+          tags: sourceTags.length ? sourceTags : result.unsupported ? ["확인 불가"] : undefined
         }
       ]);
     } catch (fetchError) {
@@ -523,8 +471,7 @@ export function ProjectOverviewPage({
         ...previous,
         {
           role: "ai",
-          text: `${projectPromptFallback} 현재는 AI 서버 연결을 확인해야 합니다.`,
-          tags: [contextMeetingTag, "출처 프로젝트 요약"]
+          text: "Project AI 응답을 가져오지 못했습니다. 잠시 후 다시 시도해주세요."
         }
       ]);
     } finally {
@@ -949,7 +896,7 @@ export function ProjectOverviewPage({
 
               <div className="project-ask-prompts">
                 {viewData.knowledge.prompts.map((prompt) => (
-                  <button key={prompt} onClick={() => void askProjectAi(prompt)} type="button">
+                  <button disabled={!session || loading || !projectAiAvailable} key={prompt} onClick={() => void askProjectAi(prompt)} type="button">
                     {prompt}
                   </button>
                 ))}
@@ -971,6 +918,7 @@ export function ProjectOverviewPage({
                 {loading ? <div className="project-chat-bubble ai">답변을 정리하고 있습니다...</div> : null}
               </div>
 
+              {!projectAiAvailable ? <p className="project-chat-error">프로젝트 AI 검색 데이터가 아직 준비되지 않았습니다.</p> : null}
               {error ? <p className="project-chat-error">{error}</p> : null}
 
               <form className="project-chat-form" onSubmit={handleSubmit}>

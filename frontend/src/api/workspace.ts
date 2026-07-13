@@ -254,6 +254,18 @@ export async function chatMeetingAi(
   });
 }
 
+export async function chatProjectAi(
+  session: AuthSession,
+  spaceId: string,
+  request: { question: string }
+): Promise<AiChatResponse> {
+  return requestJson<AiChatResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/ai/chat`, {
+    method: "POST",
+    headers: jsonHeaders(session),
+    body: JSON.stringify(request)
+  });
+}
+
 export async function generateReportCandidate(
   request: GenerateReportCandidateRequest
 ): Promise<ReportCandidateResponse> {

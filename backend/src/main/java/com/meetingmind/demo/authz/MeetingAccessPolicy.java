@@ -15,10 +15,16 @@ public class MeetingAccessPolicy {
 
     public void requireReadAccess(MeetingAccessContext context) {
         ensureMeetingExists(context);
-        if (spaceAccessPolicy.hasManagerOverride(context.spaceContext()) || hasActiveParticipant(context)) {
+        if (canReadAccess(context)) {
             return;
         }
         throw meetingAccessDenied();
+    }
+
+    public boolean canReadAccess(MeetingAccessContext context) {
+        return context != null
+                && context.meetingExists()
+                && (spaceAccessPolicy.hasManagerOverride(context.spaceContext()) || hasActiveParticipant(context));
     }
 
     public void requireEditAccess(MeetingAccessContext context) {

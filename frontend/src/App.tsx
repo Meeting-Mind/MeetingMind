@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { fetchLegacyWorkspaceSnapshot } from "./api/workspace";
+import { fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
 import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
@@ -250,6 +250,7 @@ export function App() {
   const [projectInvites, setProjectInvites] = useState<Record<string, InviteMeta>>(initialProjectInvites);
   const [meetingParticipants, setMeetingParticipants] = useState<Record<string, MeetingParticipantState[]>>({});
   const [projectTasks, setProjectTasks] = useState<Record<string, ProjectTaskState[]>>(initialProjectTasks);
+  const [projectAiSpaceIds, setProjectAiSpaceIds] = useState<string[]>([]);
   const openAuthModal = useCallback(() => setAuthModalOpen(true), []);
 
   function handleAuthSuccess(session: AuthSession) {
@@ -648,6 +649,7 @@ export function App() {
 
   useEffect(() => {
     if (!authSession) {
+      setProjectAiSpaceIds([]);
       return;
     }
 
@@ -670,6 +672,18 @@ export function App() {
         // Keep the local mock data when the API is not running yet.
         if (active) {
           setWorkspaceDataSource("mock-fallback");
+        }
+      });
+
+    fetchSpaces(authSession)
+      .then((response) => {
+        if (active) {
+          setProjectAiSpaceIds(response.spaces.map((space) => space.id));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setProjectAiSpaceIds([]);
         }
       });
 
@@ -719,6 +733,8 @@ export function App() {
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
               <ProjectOverviewPage
                 data={data.projectOverview}
+                session={authSession}
+                projectAiSpaceIds={projectAiSpaceIds}
                 onDeleteProject={handleDeleteProject}
                 onCreateMeeting={handleCreateMeeting}
                 onCreateProject={handleCreateProject}

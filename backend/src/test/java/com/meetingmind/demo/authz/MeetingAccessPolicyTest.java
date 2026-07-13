@@ -20,6 +20,12 @@ class MeetingAccessPolicyTest {
 
     @Test
     void revokedOrMissingParticipantCannotReadMeeting() {
+        assertThat(policy.canReadAccess(context(
+                participant(MeetingRole.VIEWER, ParticipantType.MEMBER, ParticipantAccessStatus.REVOKED),
+                spaceMembership(SpaceRole.MEMBER)
+        ))).isFalse();
+        assertThat(policy.canReadAccess(context(null, spaceMembership(SpaceRole.MEMBER)))).isFalse();
+
         assertThatThrownBy(() -> policy.requireReadAccess(context(
                 participant(MeetingRole.VIEWER, ParticipantType.MEMBER, ParticipantAccessStatus.REVOKED),
                 spaceMembership(SpaceRole.MEMBER)
@@ -34,6 +40,8 @@ class MeetingAccessPolicyTest {
 
     @Test
     void ownerAndAdminCanReadWithoutMeetingParticipant() {
+        assertThat(policy.canReadAccess(context(null, spaceMembership(SpaceRole.OWNER)))).isTrue();
+        assertThat(policy.canReadAccess(context(null, spaceMembership(SpaceRole.ADMIN)))).isTrue();
         policy.requireReadAccess(context(null, spaceMembership(SpaceRole.OWNER)));
         policy.requireReadAccess(context(null, spaceMembership(SpaceRole.ADMIN)));
     }

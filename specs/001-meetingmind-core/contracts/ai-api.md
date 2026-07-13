@@ -366,11 +366,7 @@ Current Prototype:
 - `projectId`, `question`: required
 - 요청의 `projectKnowledge`와 `meetings`는 prototype caller가 이미 허용한 값으로 간주한다.
 
-Target Backend-to-AI:
-
-- `projectId`, `question`: required
-- meeting source는 Backend 권한 필터를 통과한 것만 포함한다.
-- 공식 지식과 회의 근거는 `type`으로 구분 가능해야 한다.
+Target Backend-to-AI는 아래 `POST /api/internal/project-ai/chat`을 사용한다.
 
 ### Response
 
@@ -413,6 +409,107 @@ Target Backend-to-AI:
 ### Notes
 
 - Guest는 기본적으로 Project AI context에 접근하지 않는다.
+
+## POST /api/internal/project-ai/chat
+
+Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 strict Project AI endpoint다.
+
+### Status
+
+- Backend-to-AI Internal
+
+### Auth and Permissions
+
+- AI 서버는 사용자 인증을 직접 처리하지 않는다.
+- Backend가 active SpaceMember를 확인하고 meeting별 read 권한을 적용한다.
+- meeting guest는 Project AI 호출 대상이 아니다.
+
+### Data Scope
+
+- Project scope
+- `projectKnowledge`: 해당 Space의 `PUBLISHED`, `embeddingStatus=COMPLETED` 공식 지식
+- `meetingSummary`: `allowedMeetingIds`에 포함된 회의의 current/confirmed report summary
+- 실제 transcript/pgvector 검색은 후속 저장소 연동 범위다.
+
+### Request
+
+```json
+{
+  "projectId": "space-001",
+  "question": "권한 관련 남은 리스크가 뭐야?",
+  "allowedMeetingIds": ["meeting-001"],
+  "sources": [
+    {
+      "sourceId": "knowledge-001",
+      "type": "projectKnowledge",
+      "projectId": "space-001",
+      "meetingId": null,
+      "title": "권한 설계 메모",
+      "text": "Project AI는 접근 가능한 회의만 검색한다."
+    },
+    {
+      "sourceId": "report-001",
+      "type": "meetingSummary",
+      "projectId": "space-001",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12 회의록",
+      "text": "회의 ACL과 Project AI 권한 선필터를 논의했다."
+    }
+  ]
+}
+```
+
+### Validation
+
+- `projectId`, `question`: required, blank 금지
+- `sources[].sourceId`, `sources[].type`, `sources[].projectId`, `sources[].text`: required
+- 모든 source의 `projectId`는 request `projectId`와 같아야 한다.
+- source type은 `projectKnowledge`, `meetingSummary`만 허용한다.
+- `meetingSummary.meetingId`는 required이며 `allowedMeetingIds`에 포함되어야 한다.
+- `projectKnowledge.meetingId`는 null이어야 한다.
+
+### Response
+
+```json
+{
+  "answer": "남은 리스크는 Project AI 권한 선필터와 실제 pgvector 저장소 연동입니다.",
+  "sources": [
+    {
+      "sourceId": "knowledge-001",
+      "type": "projectKnowledge",
+      "title": "권한 설계 메모",
+      "text": "Project AI는 접근 가능한 회의만 검색한다."
+    }
+  ],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: schema validation 실패
+- `403 AI_CONTEXT_FORBIDDEN`: project 불일치, 허용되지 않은 meeting source, 잘못된 source type
+- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, provider HTTP/connection 실패
+
+### Audit
+
+- AI server observability log only
+- Backend persistent `AI_REQUESTED` event는 후속 구현
+
+### Requirement Trace
+
+- FR-PBOT-01: 프로젝트 질의응답
+- FR-PBOT-02: 권한 범위 검색
+- FR-PBOT-03: 공식 지식/회의 기록 출처 구분
+- FR-PBOT-04: 근거 부재 처리
+- NFR-AZ-01: 검색 전 권한 선필터
+- NFR-AZ-02: 권한 통과 데이터만 AI context에 포함
+- NFR-AZ-04: Meeting AI/Project AI scope 분리
+
+### Notes
+
+- 검색 결과가 없으면 LLM을 호출하지 않고 `unsupported: true`, `model: context-only`를 반환한다.
 
 ## POST /api/meeting-ai/generate-report
 

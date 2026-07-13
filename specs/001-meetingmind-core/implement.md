@@ -284,6 +284,16 @@
 - 2026-07-10: T161로 internal Meeting chat 검색 대상에 `report` source type을 포함했다. Backend가 전달한 report summary source는 `RagChunk`로 변환되어 transcript/decision/actionItem과 같은 meeting scope 검색 필터를 통과한 경우에만 LLM context로 사용된다.
 - 2026-07-10: T162로 Backend `MeetingAiGatewayChatRequest`에 `sources[]`를 추가하고 `HttpMeetingAiGatewayClient` 호출 경로를 `/api/internal/meeting-ai/chat`으로 전환했다. `MeetingAiService`는 권한 확인 후 transcript source와 current/confirmed report summary, decision, action item source metadata를 조립한다. Project AI, report candidate, task candidate의 Backend 경유 전환은 아직 별도 후속 작업이다.
 - 2026-07-10: API smoke 중 Java `HttpClient`의 HTTP/2 upgrade 요청을 Uvicorn이 `Unsupported upgrade request`로 거부해 Backend가 `503 AI_PROVIDER_UNAVAILABLE`을 반환하는 문제를 확인했다. `HttpMeetingAiGatewayClient`의 AI 요청을 `HTTP_1_1`로 고정했고, `signup -> space 생성 -> meeting 생성 -> POST /api/v1/meetings/{meetingId}/ai/chat` real Backend-to-AI smoke가 `200 context-only`로 통과했다.
+- 2026-07-13: M021 Project AI Backend 권한 선필터 연동을 시작했다. public route는 `POST /api/v1/spaces/{spaceId}/ai/chat`, internal route는 `POST /api/internal/project-ai/chat`으로 정하고, Backend가 active SpaceMember와 meeting read 권한을 확인한 뒤 `PUBLISHED` ProjectKnowledge와 읽기 가능한 회의의 current/confirmed report summary만 전달하도록 계약을 갱신했다.
+- 2026-07-13: Project AI 계약 변경은 기존 `ProjectKnowledge`, `MeetingReport`, `MeetingParticipant`, source reference 관계를 그대로 사용하므로 `erd.md`와 `data-model.md`의 구조 변경은 없다. 이번 slice는 in-memory read model을 사용하며 실제 PostgreSQL/pgvector, embedding worker, 대화 이력, persistent `AI_REQUESTED` audit는 후속 범위다.
+- 2026-07-13: core `spec.md`는 Project AI Backend 권한 선필터 1차 연동을 In Scope로, 실제 PostgreSQL/pgvector 멀티 회의 RAG와 embedding worker를 Out of Scope로 구분해 이번 M021 범위와 맞췄다.
+- 2026-07-13: T167-T168로 `/api/internal/project-ai/chat` strict schema와 project/meeting source validator를 구현했다. project 불일치, 허용 목록 밖 meeting summary, 잘못된 source type을 `403 AI_CONTEXT_FORBIDDEN`으로 차단하고, 공식 지식과 회의 요약을 project scope RAG에서 구분한다.
+- 2026-07-13: T169-T170으로 `POST /api/v1/spaces/{spaceId}/ai/chat`을 추가했다. Backend는 active SpaceMember를 먼저 확인하고 `MeetingAccessPolicy.canReadAccess`로 읽을 수 있는 회의만 선필터한 뒤 `PUBLISHED`, `embeddingStatus=COMPLETED` ProjectKnowledge와 current/confirmed report summary를 AI에 전달한다. Project AI context는 transcript를 읽지 않는 전용 record로 제한했다.
+- 2026-07-13: PR 전 권한 순서 리뷰에서 모든 회의 report를 조회한 뒤 ACL을 적용하던 중간 흐름을 발견했다. `projectAiContext`는 Space와 ProjectKnowledge, Meeting 메타데이터만 조회하고, `MeetingAccessPolicy.canReadAccess`를 통과한 meetingId에 대해서만 `projectMeetingContext`로 report를 조회하도록 바꿔 권한 검증 후 회의 산출물 조회 순서를 보장했다.
+- 2026-07-13: T171로 ProjectOverviewPage의 AI 서버 직접 `/api/meeting-ai/ask` 호출과 mock transcript/decision/action payload를 제거했다. Frontend는 인증 header와 질문만 Backend로 보내고 응답 source를 `공식 지식`과 `회의 기록` 태그로 구분한다. 앱은 target `/api/v1/spaces` 목록을 별도로 조회해 선택 Space가 실제 접근 가능한 target Space일 때만 Project AI를 활성화하며 mock/legacy Space ID의 `SPACE_NOT_FOUND` 요청을 사전에 차단한다.
+- 2026-07-13: M021은 1명/1 agent 순차 workstream으로 contracts -> AI -> Backend -> Frontend -> verification 순서로 통합했고 파일 충돌은 없었다. AI unittest 19개/compile, Backend test, Frontend build, `git diff --check`가 통과했다.
+- 2026-07-13: Backend `18080` + AI `18000` real API smoke에서 signup -> Space 생성 -> Project AI chat이 `200`, `unsupported=true`, `model=context-only`로 통과했다. 비멤버 호출은 `403 SPACE_ACCESS_DENIED`, AI internal allowlist 밖 meeting source는 `403 AI_CONTEXT_FORBIDDEN`으로 차단됐으며 테스트 서버는 종료했다.
+- 2026-07-13: `analyze.md`의 stale Project AI Deferred 판단과 observability 미구현 설명을 M021 실제 상태에 맞춰 갱신했다. 다음 AI 구현 milestone은 FR-RPT-01 P0과 report -> task 선행 관계를 기준으로 M022 AI 회의록 candidate Backend 경유 전환으로 선정했고 T174-T181을 계약, AI, Backend context/candidate, Frontend, 검증, closeout으로 분해했다.
 
 ## AI RAG Task Priority
 
@@ -393,3 +403,28 @@
 - M018 Frontend 후속: TeamMembersPage의 Space role 변경/멤버 제거/owner transfer 확인 절차, 마지막 active HOST 보호 disabled state, ACL 감사 로그 표시, 칸반 검색/필터와 `sourceCandidateId` 표시
 - M019 Frontend 후속: Report current confirmed/version UI, Markdown export 버튼, task candidate confirm 후 M018 칸반 state와 `TaskCard.sourceCandidateId` 연계, Meeting AI source 시간/발화자/결정 ID 세분 표시
 - Backend/API gap: Space 수정/삭제, dashboard/calendar events, MeetingParticipant/Invitation, meeting update/delete, Kanban CRUD, report confirm/update/download, TaskCandidate 저장/confirm, Project/Meeting AI backend 권한 필터와 audit log runtime 구현
+
+## M023 Session Handoff Shared/Local Split
+
+### Decision
+
+- `.specify/memory/session-handoff.md`는 병합 후에도 유효한 팀 공통 기준, 통합 경계, 다음 shared milestone만 유지한다.
+- 개인 이름, 브랜치, 로컬 커밋, 변경 파일, 개인 TODO는 `.specify/memory/session-handoff.local.md`에 기록한다.
+- local 파일은 `.gitignore`로 제외하고, 팀이 같은 구조를 사용할 수 있도록 `.specify/memory/session-handoff.example.md`만 추적한다.
+- 상세 구현 로그는 `implement.md`, task 상태는 `tasks.md`, PR 변경 설명은 PR 본문을 기준으로 하여 공용 handoff의 중복 누적을 막는다.
+
+### Changes
+
+- `AGENTS.md`에 공용/local handoff의 읽기 시점, 허용 내용, 커밋 금지 규칙을 추가했다.
+- 누적된 과거 브랜치와 세션 로그를 공용 handoff에서 제거하고 현재 통합 기준과 M022만 남겼다.
+- owner, branch, base commit, progress, verification, blocker를 기록하는 개인 템플릿을 추가했다.
+- 개인 local handoff를 생성했으며 이 파일은 Git 상태에 노출되지 않는다.
+- API 계약, ERD, data model, 애플리케이션 코드에는 영향이 없다.
+
+### Verification
+
+- Passed: `git check-ignore -v .specify/memory/session-handoff.local.md`
+- Passed: 공용 handoff에서 owner, branch, base commit, 과거 session heading, 커밋 전/미추적 상태 패턴이 검색되지 않음
+- Passed: ignored local handoff가 `git status --short --untracked-files=all`에 나타나지 않음
+- Passed: `git diff --check`
+- Not run: Frontend/Backend/AI 검증. 이번 변경은 docs/process와 ignore 규칙에만 한정된다.

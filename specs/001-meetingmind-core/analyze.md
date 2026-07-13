@@ -21,7 +21,7 @@
 | Medium | 요구사항 정의서가 로컬 Markdown 기준선으로 반영됐다. | 구현자는 Google Sheets 전체를 매번 읽지 않고 `requirements/INDEX.md`에서 필요한 요구사항 문서만 읽으면 된다. | 새 기능/계약/데이터 변경 전 관련 `requirements/*` 문서를 확인한다. | `requirements/*`, `AGENTS.md`, `constitution.md`, `spec.md`, `plan.md`, `tasks.md` | Decided |
 | Medium | 회의 권한 등급과 회의 게스트 범위가 확정됐다. | `MeetingParticipant.role`, UI 제어, LiveKit token, AI/RAG 권한 필터가 같은 기준을 따라야 한다. | `HOST`, `EDITOR`, `VIEWER`와 `participantType=guest` 기준으로 backend/frontend/ai 영향도를 점검한다. | `requirements/permissions.md`, `clarify.md`, `data-model.md`, `contracts/meeting-api.md`, `contracts/live-stt-api.md`, `contracts/ai-api.md`, `tasks.md` | Decided |
 | Medium | Target API base URL과 실제 오디오 업로드 방식이 미정이다. | `/api/v1` route migration, 대용량 파일 처리, S3 연계 방식이 달라질 수 있다. | `clarify.md` Q-006, Q-007을 실제 구현 전에 결정한다. | `clarify.md`, `contracts/README.md`, `contracts/common.md`, `contracts/live-stt-api.md`, `plan.md` | Open |
-| Medium | Project AI 실제 RAG는 범위 밖이다. | 현재 문서는 원칙과 목표 모델만 정의한다. | Meeting AI 안정화 이후 별도 feature spec으로 분리한다. | future `specs/*` | Deferred |
+| Medium | Project AI Backend 권한 선필터 1차 연동이 완료됐다. | active SpaceMember와 meeting ACL을 통과한 공식 지식/회의 요약만 AI context에 포함되며 Frontend 직접 AI 호출이 제거됐다. 실제 DB 검색으로 오해하지 않도록 in-memory 경계를 유지해야 한다. | M021 검증 결과를 기준선으로 유지하고 PostgreSQL/pgvector, embedding worker, persistent audit는 후속 Data/AI milestone으로 분리한다. | `spec.md`, `plan.md`, `contracts/ai-api.md`, `contracts/space-api.md`, `tasks.md`, `implement.md`, `ai/**`, `backend/**`, `frontend/**` | M021 Verified |
 | Low | Async STT Processing API는 Future Draft다. | 현재 Core Prototype의 확정 구현 계약으로 오해하면 scope creep이 생길 수 있다. | 실제 STT 작업 전 별도 milestone 또는 feature spec으로 승격한다. | `contracts/live-stt-api.md`, future `specs/*` | Deferred |
 | Low | `/api/workspace`는 현재 프로토타입 통합 API다. | 실제 확장 시 API 분리가 필요하다. | T029-T034에서 Space/Meeting/Report/AI API 계약을 세분화한다. | `contracts/README.md`, `contracts/space-api.md`, `contracts/meeting-api.md`, `contracts/ai-api.md`, `tasks.md` | Open |
 | Low | Auth workstream의 backend/frontend/AI 회귀 검증과 Auth API smoke가 실행됐다. | 핵심 auth token 발급, Spring bean wiring, frontend build 회귀는 확인됐다. 브라우저 자동화 도구는 현재 환경에 없어 UI 클릭 흐름은 자동 검증하지 못했다. | Browser automation 도구가 준비되면 보호 route redirect와 자체 회원가입 UI 흐름을 추가 확인한다. | `tasks.md`, `implement.md` | Auth Verified |
@@ -31,12 +31,12 @@
 | Low | Space invitation과 Meeting invitation 분리를 결정했다. | 회의 게스트 초대가 Space membership을 만들지 않도록 API/ERD 경계가 명확해졌다. | Backend migration 구현 시 `SPACE_INVITATION`, `MEETING_INVITATION`을 별도 테이블로 만든다. | `clarify.md`, `erd.md`, `space-api.md`, `meeting-api.md` | Decided |
 | Low | 회의당 current confirmed report 1개 정책을 결정했다. | Project Knowledge 승격, 다운로드, Project AI source 연결 시 공식 회의록이 중복되는 위험이 줄었다. | Backend migration 구현 시 partial unique index 또는 애플리케이션 제약을 둔다. | `clarify.md`, `erd.md`, `data-model.md`, `meeting-api.md` | Decided |
 | Low | ProjectKnowledge embedding 재생성은 비동기로 결정했다. | Knowledge 수정 API 응답 지연과 embedding provider 장애 영향을 줄이고 기존 chunk로 검색 안정성을 유지한다. | Backend/Data 구현 시 `embeddingStatus`, `embeddingJobId`, 비동기 worker 또는 job 경계를 설계한다. | `clarify.md`, `erd.md`, `data-model.md`, `knowledge-api.md` | Decided |
-| Medium | AI/RAG prototype을 분리 API/ERD 기준으로 재검토했다. | Meeting AI scope, Project AI source 분리, 근거 없음 처리, candidate 산출물 원칙은 코드와 테스트로 확인됐다. token budget과 observability log는 아직 구현되지 않았다. | Backend 권한 필터와 실제 RAG 저장소 도입 시 token 축소 정책, 처리 시간/모델/근거 수 로그를 별도 task로 추가한다. | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `contracts/ai-api.md`, `knowledge-api.md`, `erd.md`, `data-model.md`, `tasks.md`, `implement.md` | AI Reviewed |
+| Medium | AI/RAG prototype과 Backend-to-AI 경계를 분리 API/ERD 기준으로 재검토했다. | Meeting/Project scope, source 분리, 근거 없음 처리, candidate 원칙과 처리 시간/model/source count observability log는 코드와 테스트로 확인됐다. token budget 축소 정책과 persistent audit는 아직 없다. | report/task/term Backend 경유 전환에서도 같은 strict source 검증을 적용하고, 실제 RAG 저장소 도입 시 token budget과 persistent audit를 별도 task로 구현한다. | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `contracts/ai-api.md`, `knowledge-api.md`, `erd.md`, `data-model.md`, `tasks.md`, `implement.md` | AI Reviewed |
 
 ## Recommendation
 
-1. T102-T105에서 backend/frontend/ai/data 영향도를 요구사항 기준선과 비교한다.
-2. T040 Backend 도메인 모델과 회의 권한 필터를 만든다.
-3. T094 LiveKit token 발급을 인증 사용자와 회의 접근 권한 확인 뒤로 이동한다.
-4. Meeting AI 컨텍스트 조립을 Backend 권한 검증 뒤로 이동한다.
-5. 그 다음 Project AI RAG를 도입한다.
+1. M021 Project AI 변경을 리뷰한 뒤 별도 커밋/PR로 `dev`에 통합한다.
+2. M022 AI 회의록 candidate 생성을 Backend 권한 검증과 strict internal endpoint 뒤로 이동한다.
+3. report candidate 저장 경계가 생기면 task candidate 추출과 칸반 confirm 연동을 진행한다.
+4. STT 입력 계약이 안정되면 용어 설명을 Backend 권한 검증 뒤로 이동한다.
+5. Data/Backend 영속화 이후 PostgreSQL/pgvector retriever, embedding worker, persistent `AI_REQUESTED` audit를 구현한다.
