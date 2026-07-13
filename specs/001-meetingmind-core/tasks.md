@@ -51,6 +51,7 @@
 | M017 | 메인 대시보드와 캘린더 프론트엔드 구현 | FR-DASH-01~07, FR-CAL-01~05 기준으로 프로젝트 대시보드, 프로젝트 관리 local flow, 캘린더 월/주/일 뷰, 일정→회의 이동이 mock/API 경계를 유지한 채 동작한다. | T121-T130 |
 | M018 | 프로젝트 워크스페이스 프론트엔드 구현 | FR-MREG, FR-ACL, FR-KAN, FR-PBOT, FR-PERM, FR-OWN 기준으로 회의 관리/ACL, 칸반, Project AI, 멤버/오너 관리가 권한 경계를 드러낸 상태로 동작한다. | T131-T144 |
 | M019 | 회의 워크스페이스 프론트엔드 구현 | FR-RPT, FR-MBOT, FR-TASK 기준으로 Meeting AI 단일 회의 scope, report candidate/편집/확정, task candidate 검토/칸반 등록이 source metadata를 유지한 채 동작한다. | T145-T157 |
+| M020 | AI 계약 prototype/target 경계 정리 | Current Prototype과 Target Backend-to-AI 차이가 문서화되고 Backend Meeting AI chat 1차 연동 경로가 분리되어 있다. | T158-T165 |
 
 ## Foundation
 
@@ -248,6 +249,19 @@
 | T156 | M019 | [ ] | frontend/smoke | 사용자(Frontend 담당) | Codex | T148, T151, T153 | `frontend/**`, `specs/001-meetingmind-core/implement.md` | Meeting AI, Report Agent, task candidate, report export route 흐름을 수동 점검한다. | 주요 route 이동 결과와 발견 이슈 또는 미실행 사유가 `implement.md`에 기록되어 있다. |
 | T157 | M019 | [ ] | frontend/verification | 사용자(Frontend 담당) | Codex | T156 | `frontend/**`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Frontend build와 diff 검증을 실행하고 M019 완료 상태를 정리한다. | `cd frontend && npm run build`, `git diff --check` 결과가 기록되고 완료된 task만 `[x]`로 표시되어 있다. |
 
+### M020: AI Contract Prototype and Target Split
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T158 | M020 | [x] | contracts/ai | 사용자 | Codex | T088, T104 | `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | AI API 문서에서 Current Prototype과 Target Backend-to-AI validation/error/audit 경계를 분리한다. | optional fallback, provider error, audit/observability, report context gap이 문서화되어 있다. |
+| T159 | M020 | [x] | ai/errors | 사용자 | Codex | T158 | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/contracts/ai-api.md` | AI provider error response를 target common code와 맞출지 또는 Backend adapter에서 변환할지 구현한다. | Target internal endpoint가 provider `500/502/503`을 `503 AI_PROVIDER_UNAVAILABLE`로 변환하고 기존 prototype endpoint의 `500/502` 호환은 유지한다. |
+| T160 | M020 | [x] | ai/schema | 사용자 | Codex | T158 | `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/contracts/ai-api.md` | Backend-to-AI strict request schema와 source metadata validator를 prototype endpoint와 분리한다. | `/api/internal/meeting-ai/chat` target schema가 `projectId`, `meetingId`, `question`, `sources[].sourceId/type/meetingId/text`를 받고 source meeting 불일치 시 `403 AI_CONTEXT_FORBIDDEN`을 반환하며 기존 `/api/meeting-ai/chat`은 유지된다. |
+| T161 | M020 | [x] | ai/rag | 사용자 | Codex | T160 | `ai/app/main.py`, `ai/app/rag.py`, `ai/tests/test_meeting_ai.py` | Meeting chat의 report chunk 포함 여부와 source type 처리를 target 계약과 맞춘다. | Target internal Meeting chat 검색 대상에 `report` source type이 포함되고 report source 단위 테스트가 통과했다. |
+| T162 | M020 | [x] | backend/ai | 사용자 | Codex | T052, T160 | `backend/**`, `ai/**`, `specs/001-meetingmind-core/contracts/ai-api.md` | Backend 권한 필터 이후 AI context 조립/호출 경로를 target schema에 연결한다. | Backend Meeting AI chat이 권한 확인 후 transcript/current confirmed report/decision/action source metadata를 조립해 `/api/internal/meeting-ai/chat`으로 호출한다. |
+| T163 | M020 | [x] | backend/ai-chat | 사용자 | Codex | T158, T040 | `backend/**`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/implement.md` | `POST /api/v1/meetings/{meetingId}/ai/chat` 1차 연동을 추가한다. | Backend가 인증 사용자와 meeting read 권한을 확인한 뒤 AI 서버 `/api/internal/meeting-ai/chat`으로 already-filtered context를 전달하고 `cd backend && ./gradlew test`가 통과했다. |
+| T164 | M020 | [x] | frontend/meeting-ai | 사용자 | Codex | T163 | `frontend/src/api/workspace.ts`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md` | Meeting AI 화면의 직접 AI 서버 호출을 Backend endpoint로 전환한다. | `POST /api/v1/meetings/{meetingId}/ai/chat`에 인증 header와 `{question}`만 전송하고 기존 prototype context 직접 전달은 제거되었으며 `cd frontend && npm run build`가 통과했다. |
+| T165 | M020 | [x] | frontend/routing | 사용자 | Codex | T164 | `frontend/src/pages/WorkspaceHomePage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | Meeting AI Backend 경유 호출에 필요한 target `meetingId` route query를 보존한다. | `meeting.id`가 있는 회의 이동 경로는 `meetingId` query를 포함하고, `ReportAgentPage`는 해당 query를 Meeting AI 링크로 전달하며, `MeetingAiPage`는 `meetingId` 없는 직접 진입에서 Backend 호출을 막고 `cd frontend && npm run build`가 통과했다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -259,6 +273,11 @@
 - [x] V006 Auth policy/CI 기준선 검증: `cd backend && ./gradlew test`, `cd frontend && npm run build`, `cd ai && python3 -m compileall app tests`, `cd ai && python3 -m unittest discover -s tests`, `git diff --check`
 - [x] V007 Authz test matrix 문서 검증: `git diff --check`
 - [x] V008 AI observability 검증: `cd ai && python3 -m compileall app tests`, `cd ai && ./.venv/bin/python -m unittest discover -s tests`
+- [x] V009 AI contract prototype/target split 문서 검증: `git diff --check`
+- [x] V010 Backend Meeting AI chat 1차 연동 검증: `cd backend && ./gradlew test`, `git diff --check`
+- [x] V011 Frontend Meeting AI Backend 경유 전환 검증: `cd frontend && npm run build`, `git diff --check`
+- [x] V012 Meeting AI route `meetingId` 연결 검증: `cd frontend && npm run build`, `git diff --check`
+- [x] V013 Backend-to-AI target schema/API 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, `cd ai && ./.venv/bin/python -m compileall app`, `cd backend && ./gradlew test`, `cd frontend && npm run build`, Backend `18080` + AI `18000` real API smoke, `git diff --check`
 
 ## Notes
 

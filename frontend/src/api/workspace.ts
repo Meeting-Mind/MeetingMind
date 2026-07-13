@@ -24,7 +24,6 @@ import type {
   ExtractTaskCandidatesRequest,
   ExtractTaskCandidatesResponse,
   MeetingListResponse,
-  MeetingAiChatRequest,
   MeetingParticipantsResponse,
   OwnerTransferRequest,
   OwnerTransferResponse,
@@ -243,10 +242,14 @@ export async function declineMeetingInvitation(
   );
 }
 
-export async function chatMeetingAi(request: MeetingAiChatRequest): Promise<AiChatResponse> {
-  return requestAiJson<AiChatResponse>("/api/meeting-ai/chat", {
+export async function chatMeetingAi(
+  session: AuthSession,
+  meetingId: string,
+  request: { question: string }
+): Promise<AiChatResponse> {
+  return requestJson<AiChatResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/ai/chat`, {
     method: "POST",
-    headers: plainJsonHeaders(),
+    headers: jsonHeaders(session),
     body: JSON.stringify(request)
   });
 }

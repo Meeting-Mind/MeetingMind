@@ -2,10 +2,71 @@
 
 # Session Handoff
 
+## Latest Session Summary: 2026-07-13
+
+현재 작업 브랜치는 `ai/contract-prototype-target-split`이다. 이번 세션은 AI 담당 범위에서 Meeting AI를 Frontend 직접 AI 호출 구조에서 `Frontend -> Backend -> AI internal endpoint` 구조로 전환하는 작업을 진행했다.
+
+### Latest Git State
+
+- Meeting AI Backend 경유 전환 변경은 `ai/contract-prototype-target-split` 브랜치의 PR 범위로 정리했다.
+- 아래 신규 Backend 파일을 포함해 AI, Backend, Frontend, 계약 및 구현 기록을 함께 검증했다.
+  - `backend/src/main/java/com/meetingmind/demo/controller/MeetingAiController.java`
+  - `backend/src/main/java/com/meetingmind/demo/dto/ai/*`
+  - `backend/src/main/java/com/meetingmind/demo/service/AiGatewayException.java`
+  - `backend/src/main/java/com/meetingmind/demo/service/MeetingAiGatewayClient.java`
+  - `backend/src/main/java/com/meetingmind/demo/service/HttpMeetingAiGatewayClient.java`
+  - `backend/src/main/java/com/meetingmind/demo/service/MeetingAiService.java`
+  - `backend/src/test/java/com/meetingmind/demo/domain/MeetingAiServiceTest.java`
+
+### Latest Completed Scope
+
+- `specs/001-meetingmind-core/tasks.md`의 M020 `T158-T165`가 완료 상태다.
+- `contracts/ai-api.md`에서 기존 prototype `POST /api/meeting-ai/chat`과 신규 Backend-to-AI internal `POST /api/internal/meeting-ai/chat`을 분리했다.
+- `contracts/meeting-api.md`에 public Backend endpoint `POST /api/v1/meetings/{meetingId}/ai/chat` 명세를 추가했다.
+- Backend public endpoint는 인증 사용자와 `MeetingAccessPolicy.requireReadAccess`를 확인한 뒤 AI 서버 internal endpoint를 호출한다.
+- Frontend `MeetingAiPage`는 이제 AI 서버 직접 호출 대신 Backend `POST /api/v1/meetings/{meetingId}/ai/chat`에 `{ question }`만 보낸다.
+- Meeting AI 진입 경로는 `meetingId` query를 보존한다. `meetingId`가 없으면 Backend 호출을 막는다.
+- AI 서버는 target internal request에서 `sources[].sourceId/type/meetingId/text`를 검증한다.
+- AI internal endpoint는 source meeting 불일치 시 `403 AI_CONTEXT_FORBIDDEN`, validation 실패 시 `400 INVALID_REQUEST`, provider 오류 시 `503 AI_PROVIDER_UNAVAILABLE`을 반환한다.
+- Backend는 transcript, current/confirmed report summary, decision, action item을 `sources[]` metadata로 조립한다.
+
+### Important Runtime Finding
+
+API smoke 중 Java `HttpClient`가 Uvicorn에 HTTP/2 upgrade 요청을 보내면서 AI 서버가 `Unsupported upgrade request` / `Invalid HTTP request`로 거부했다. 이 때문에 Backend public Meeting AI API가 `503 AI_PROVIDER_UNAVAILABLE`을 반환했다.
+
+수정 내용:
+
+- `HttpMeetingAiGatewayClient`의 AI 요청을 `HttpClient.Version.HTTP_1_1`로 고정했다.
+- 수정 후 real Backend `18080` + AI `18000` smoke가 통과했다.
+
+### Latest Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, 15 tests
+- Passed: `cd ai && ./.venv/bin/python -m compileall app`
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd frontend && npm run build`
+- Passed: `git diff --check`
+- Passed: real API smoke on Backend `18080` and AI `18000`
+  - `POST /api/v1/auth/signup` -> `200`
+  - `POST /api/v1/spaces` -> `200`
+  - `POST /api/v1/spaces/{spaceId}/meetings` -> `200`
+  - `POST /api/v1/meetings/{meetingId}/ai/chat` -> `200`, `unsupported=true`, `model=context-only`
+  - AI internal forbidden case -> `403 AI_CONTEXT_FORBIDDEN`
+  - AI internal validation case -> `400 INVALID_REQUEST`
+
+테스트용으로 띄운 Backend, AI, fake AI 서버는 종료했다.
+
+### Next Recommended Work
+
+1. 현재 변경 범위를 리뷰한 뒤 커밋/PR을 만든다.
+2. PR 본문에는 M020 범위, API smoke 결과, HTTP/1.1 고정 이유를 포함한다.
+3. 다음 구현은 Project AI Backend 경유 전환을 우선 추천한다.
+4. 이후 Report candidate Backend 경유 전환, Task candidate Backend 경유 전환, AI audit log runtime 구현을 순서대로 진행한다.
+
 ## Current State
 
 - 프로젝트는 `frontend`, `backend`, `ai` 3개 영역으로 구성된 MeetingMind 프로토타입이다.
-- 현재까지 실제 제품 코드는 변경하지 않았고, 에이전틱 코딩을 위한 Markdown 문서 체계를 정리했다.
+- 현재 브랜치에는 Meeting AI Backend 경유 전환과 AI internal endpoint 구현 변경이 PR 범위로 정리되어 있다.
 - specs 변경 동반 갱신 규칙, research/data-model/api contract 템플릿, 작업 완료 기준, clarification 우선순위, analysis 추적 상태를 보완했다.
 - Git 작업 절차, staging, commit, pull, branch, push 규칙을 `AGENTS.md`에 구체화했다.
 - 팀원/에이전트 병렬 작업을 위해 `AGENTS.md`, `plan-template.md`, `tasks-template.md`, `implement-template.md`, core `plan.md`, `tasks.md`, `implement.md`에 병렬 계획/충돌 방지 구조를 추가했다.

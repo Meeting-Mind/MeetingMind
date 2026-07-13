@@ -166,6 +166,20 @@ public class WorkspaceDomainService {
         );
     }
 
+    public MeetingAiContext meetingAiContext(String meetingId) {
+        Meeting meeting = store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        return new MeetingAiContext(
+                meeting,
+                store.findTranscriptSegments(meetingId),
+                store.findMeetingReports(meetingId)
+        );
+    }
+
     private void requireUser(String userId) {
         if (userId == null || userId.isBlank() || store.findUserById(userId).isEmpty()) {
             throw new AuthorizationException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "사용자를 찾을 수 없습니다.");
@@ -197,5 +211,16 @@ public class WorkspaceDomainService {
     }
 
     public record SpaceSummary(Space space, SpaceRole role, long meetingCount) {
+    }
+
+    public record MeetingAiContext(
+            Meeting meeting,
+            List<TranscriptSegment> transcriptSegments,
+            List<MeetingReport> reports
+    ) {
+        public MeetingAiContext {
+            transcriptSegments = transcriptSegments == null ? List.of() : List.copyOf(transcriptSegments);
+            reports = reports == null ? List.of() : List.copyOf(reports);
+        }
     }
 }

@@ -372,7 +372,22 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
   const [searchParams] = useSearchParams();
   const projectName = searchParams.get("project");
   const meetingTitle = searchParams.get("meeting");
+  const meetingId = searchParams.get("meetingId");
   const round = searchParams.get("round");
+  const meetingAiParams = new URLSearchParams();
+  if (projectName) {
+    meetingAiParams.set("project", projectName);
+  }
+  if (meetingTitle) {
+    meetingAiParams.set("meeting", meetingTitle);
+  }
+  if (meetingId) {
+    meetingAiParams.set("meetingId", meetingId);
+  }
+  if (round) {
+    meetingAiParams.set("round", round);
+  }
+  const meetingAiHref = meetingAiParams.toString() ? `/meeting-ai?${meetingAiParams.toString()}` : "/meeting-ai";
   const reportView = useMemo(
     () => buildReportView(data, projectName, meetingTitle, round),
     [data, meetingTitle, projectName, round]
@@ -803,6 +818,7 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
 
           <div className="report-agent-header-actions">
             <span className="report-agent-save-pill">{saveLabel}</span>
+            <Link to={meetingAiHref}>Meeting AI</Link>
             <button onClick={handleExportPdf} type="button">
               PDF로 내보내기
             </button>

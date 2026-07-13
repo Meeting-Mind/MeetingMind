@@ -251,6 +251,9 @@ function getMeetingDestinationForSpace(space: WorkspaceData["workspaceHome"]["sp
     meeting: meeting.title,
     round: meeting.index.replace("#", "")
   });
+  if (meeting.id) {
+    params.set("meetingId", meeting.id);
+  }
 
   return `${path}?${params.toString()}`;
 }

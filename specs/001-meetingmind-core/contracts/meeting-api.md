@@ -8,7 +8,7 @@
 | --- | --- |
 | Status | Target Backend |
 | Owner | Backend, Frontend |
-| Related requirements | FR-MREG-01, FR-MREG-02, FR-MREG-04, FR-MREG-05, FR-MREG-06, FR-MREG-07, FR-ACL-01, FR-ACL-02, FR-ACL-03, FR-ACL-05, FR-ACL-06, FR-RPT-03, FR-RPT-04, FR-RPT-05, FR-RPT-06, FR-RPT-07, FR-STT-04, FR-STT-05, NFR-AZ-01, NFR-AZ-03, NFR-SEC-06 |
+| Related requirements | FR-MREG-01, FR-MREG-02, FR-MREG-04, FR-MREG-05, FR-MREG-06, FR-MREG-07, FR-ACL-01, FR-ACL-02, FR-ACL-03, FR-ACL-05, FR-ACL-06, FR-MBOT-01, FR-MBOT-02, FR-MBOT-03, FR-MBOT-04, FR-RPT-03, FR-RPT-04, FR-RPT-05, FR-RPT-06, FR-RPT-07, FR-STT-04, FR-STT-05, NFR-AI-01, NFR-AI-02, NFR-AZ-01, NFR-AZ-03, NFR-AZ-04, NFR-SEC-06 |
 | Related data model | Meeting, MeetingParticipant, MeetingInvitation, MeetingSpeaker, TranscriptSegment, MeetingReport, SourceReference, AuditLog |
 
 ## GET /api/v1/spaces/{spaceId}/meetings
@@ -760,6 +760,86 @@ None.
 ### Notes
 
 - transcript 원문 보존 기간은 정책 문서를 따른다.
+
+## POST /api/v1/meetings/{meetingId}/ai/chat
+
+Backend가 인증/회의 권한을 확인한 뒤 Meeting AI 서버에 already-filtered context를 전달한다.
+
+### Status
+
+- Target Backend
+- Backend-to-AI integration slice
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 `MeetingParticipant`
+- Backend는 AI 서버 호출 전에 `MeetingAccessPolicy.requireReadAccess`를 적용한다.
+
+### Data Scope
+
+- Meeting scope
+- Backend가 해당 회의의 transcript, report decision, report action item만 조립한다.
+- Frontend는 질문만 전달하고 transcript/report/action source를 직접 전달하지 않는다.
+
+### Request
+
+```json
+{
+  "question": "김진수가 맡은 후속 작업이 뭐야?"
+}
+```
+
+### Validation
+
+- `question`: required, blank 금지
+- `meetingId`: path required
+- Backend-to-AI 내부 request에는 `meetingId`, `meetingTitle`, transcript/decision/action context가 포함되어야 한다.
+
+### Response
+
+```json
+{
+  "answer": "김진수의 후속 작업 후보는 ERD 수정안 문서화입니다.",
+  "sources": [
+    {
+      "sourceId": "action-001",
+      "type": "actionItem",
+      "title": "Sprint Planning #12",
+      "text": "김진수 · ERD 수정안 문서화"
+    }
+  ],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- `403 MEETING_ACCESS_DENIED`: 회의 접근 권한 없음
+- `404 MEETING_NOT_FOUND`: 회의 없음
+- `503 AI_PROVIDER_UNAVAILABLE`: AI provider 응답 없음
+
+### Audit
+
+- Target: `AI_REQUESTED`
+- Current implementation slice: persistent audit log 미구현, Backend auth/permission check 후 AI provider 호출만 수행
+
+### Requirement Trace
+
+- FR-MBOT-01: 회의별 챗봇
+- FR-MBOT-02: 단일 회의 범위 제한
+- FR-MBOT-03: 출처 표시
+- FR-MBOT-04: 근거 부재 처리
+- NFR-AI-01: 근거 없는 답변 방지
+- NFR-AI-02: 회의 근거 출처 표시
+- NFR-AZ-04: Meeting AI/Project AI 검색범위 분리
+
+### Notes
+
+- AI 서버 내부 endpoint는 `contracts/ai-api.md`의 `POST /api/internal/meeting-ai/chat`을 사용한다.
+- Project AI와 report/task candidate 저장 연동은 별도 후속 작업이다.
 
 ## PATCH /api/v1/meetings/{meetingId}/speakers/{speakerId}
 
