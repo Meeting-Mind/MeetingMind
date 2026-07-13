@@ -24,17 +24,15 @@
 - 인증, Space/Meeting 권한, AI gateway의 기본 경로는 구현되어 있으나 일부 저장소는 in-memory 구현이다.
 - PostgreSQL/pgvector 기반 실제 RAG 저장소, embedding worker, persistent AI audit log는 후속 작업이다.
 - mock/legacy Space와 target Backend Space의 ID 연결은 완료되지 않았으므로 target 목록에 없는 Space에서는 Project AI 호출을 차단한다.
-- Report candidate의 Backend 경유 생성, 저장, 화면 연결은 M022 범위다.
+- AI 회의록 candidate는 Backend 편집 권한과 단일 meeting source 검증 뒤에서 생성되고 supported 결과만 in-memory `CANDIDATE`로 저장된다.
+- report confirm/update/download, 실제 PostgreSQL repository, persistent audit log는 후속 작업이다.
 
 ## 다음 Shared Milestone
 
-M022 `T174-T181`: AI 회의록 candidate Backend 경유 전환
+다음 milestone은 아래 두 후보 중 우선순위를 결정한 뒤 `tasks.md`에 등록한다.
 
-1. public/internal report 생성 계약, 편집 권한, candidate 저장 shape를 먼저 확정한다.
-2. Backend가 단일 meeting source를 선필터한 뒤 AI internal endpoint를 호출한다.
-3. AI 응답은 공식 회의록과 분리된 `CANDIDATE`로 저장한다.
-4. Frontend Report Agent를 Backend endpoint에 연결한다.
-5. 단위 테스트, 권한 negative case, 실제 API smoke 결과를 기록한다.
+1. report candidate confirm/update/version과 current confirmed 단일 제약 구현
+2. task candidate 추출을 Backend 권한 검증 뒤로 전환하고 Kanban confirm과 연결
 
 ## 검증 기준선
 

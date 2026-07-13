@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { generateReportCandidate } from "../api/workspace";
+import type { AuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
 type ChangeCommit = {
@@ -41,7 +43,7 @@ type ReportCandidateDraft = {
   id: string;
   summary: string;
   markdown: string;
-  status: "candidate" | "confirmed";
+  status: "candidate";
   sources: string[];
 };
 
@@ -368,7 +370,13 @@ function buildReportView(
   return buildGeneratedReport(normalizedProject, normalizedMeeting, normalizedRound);
 }
 
-export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }) {
+export function ReportAgentPage({
+  data,
+  session
+}: {
+  data: WorkspaceData["reportAgent"];
+  session: AuthSession | null;
+}) {
   const [searchParams] = useSearchParams();
   const projectName = searchParams.get("project");
   const meetingTitle = searchParams.get("meeting");
@@ -398,6 +406,8 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
   const [isCommitListOpen, setIsCommitListOpen] = useState(false);
   const [selectedCommitId, setSelectedCommitId] = useState<string | null>(null);
   const [reportCandidate, setReportCandidate] = useState<ReportCandidateDraft | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportGenerationError, setReportGenerationError] = useState("");
   const [taskCandidates, setTaskCandidates] = useState<TaskCandidateDraft[]>([]);
   const changeCommits = reportState.commits;
 
@@ -417,6 +427,8 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
     setIsCommitListOpen(false);
     setSelectedCommitId(null);
     setReportCandidate(null);
+    setIsGeneratingReport(false);
+    setReportGenerationError("");
     setTaskCandidates([]);
   }, [projectName, meetingTitle, reportView, round]);
 
@@ -652,25 +664,34 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
     setSaveLabel("● 프로젝트 문서로 저장됨 · 방금 전");
   }
 
-  function handleGenerateReportCandidate() {
-    setReportCandidate({
-      id: `report-candidate-${Date.now()}`,
-      summary: reportState.summary,
-      markdown: buildReportMarkdown(reportState),
-      status: "candidate",
-      sources: [reportState.breadcrumb, "현재 회의 보고서 본문", "Action Item"]
-    });
-    setSaveLabel("● 회의록 candidate 생성됨 · 확정 대기");
-  }
-
-  function handleConfirmReportCandidate() {
-    if (!reportCandidate) {
+  async function handleGenerateReportCandidate() {
+    if (!session || !meetingId || isGeneratingReport) {
+      setReportGenerationError(meetingId ? "로그인이 필요합니다." : "회의 정보가 없어 candidate를 생성할 수 없습니다.");
       return;
     }
 
-    setReportCandidate({ ...reportCandidate, status: "confirmed" });
-    handleProjectDocumentSave();
-    setSaveLabel("● candidate 확정됨 · backend confirm 연결 대기");
+    setIsGeneratingReport(true);
+    setReportGenerationError("");
+    try {
+      const response = await generateReportCandidate(session, meetingId);
+      if (response.unsupported || !response.candidate) {
+        setReportCandidate(null);
+        setReportGenerationError("현재 회의에는 회의록을 생성할 근거가 없습니다.");
+        return;
+      }
+      setReportCandidate({
+        id: response.candidate.id,
+        summary: response.candidate.summary,
+        markdown: response.candidate.markdown,
+        status: "candidate",
+        sources: response.sources.map((source) => source.title || source.sourceId)
+      });
+      setSaveLabel("● 회의록 candidate 생성됨 · 확정 대기");
+    } catch (error) {
+      setReportGenerationError(error instanceof Error ? error.message : "회의록 candidate 생성에 실패했습니다.");
+    } finally {
+      setIsGeneratingReport(false);
+    }
   }
 
   function handleExtractTaskCandidates() {
@@ -1038,19 +1059,23 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
                   <strong>Candidate Review</strong>
                   <p>저장성 결과는 확정 전 후보로만 다룹니다</p>
                 </div>
-                <span>frontend local</span>
+                <span>backend candidate</span>
               </div>
 
               <div className="report-agent-candidate-actions">
-                <button onClick={handleGenerateReportCandidate} type="button">회의록 candidate 생성</button>
+                <button disabled={isGeneratingReport || !meetingId} onClick={handleGenerateReportCandidate} type="button">
+                  {isGeneratingReport ? "생성 중..." : "회의록 candidate 생성"}
+                </button>
                 <button onClick={handleExtractTaskCandidates} type="button">태스크 후보 추출</button>
               </div>
+
+              {reportGenerationError ? <p className="report-agent-candidate-error">{reportGenerationError}</p> : null}
 
               {reportCandidate ? (
                 <div className="report-agent-report-candidate">
                   <div className="report-agent-report-candidate-top">
                     <strong>회의록 후보</strong>
-                    <span>{reportCandidate.status === "candidate" ? "candidate" : "confirmed local"}</span>
+                    <span>candidate</span>
                   </div>
                   <p>{reportCandidate.summary}</p>
                   <div className="report-agent-bubble-tags">
@@ -1059,11 +1084,10 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
                     ))}
                   </div>
                   <button
-                    disabled={reportCandidate.status === "confirmed"}
-                    onClick={handleConfirmReportCandidate}
+                    disabled
                     type="button"
                   >
-                    프로젝트 문서로 확정
+                    확정 기능 준비 중
                   </button>
                 </div>
               ) : null}

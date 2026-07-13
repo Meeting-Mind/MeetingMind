@@ -147,8 +147,11 @@ class ProjectAiServiceTest {
                 MeetingReportStatus.CONFIRMED,
                 "회의록",
                 summary,
+                "## 요약\n" + summary,
                 List.of(),
                 List.of(),
+                List.of(),
+                "user-owner",
                 1,
                 true,
                 FIXED_CLOCK.instant()

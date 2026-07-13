@@ -600,6 +600,77 @@ Target Backend-to-AI:
 ### Notes
 
 - 공식 저장/확정은 `meeting-api.md`의 report endpoint가 담당한다.
+- 기존 Frontend/AI prototype 호환용 endpoint다. Target Frontend는 직접 호출하지 않는다.
+
+## POST /api/internal/meeting-ai/generate-report
+
+Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호출하는 strict 회의록 생성 endpoint다.
+
+### Status
+
+- Target Backend-to-AI Internal
+
+### Auth and Permissions
+
+- 외부 사용자 직접 호출 금지
+- Backend는 `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR` 권한을 먼저 확인한다.
+
+### Data Scope
+
+- 단일 Meeting scope
+- 허용 source type: `transcript`, `decision`, `actionItem`
+
+### Request
+
+```json
+{
+  "projectId": "space-001",
+  "meetingId": "meeting-001",
+  "title": "Sprint Planning #12",
+  "format": "markdown",
+  "sources": [
+    {
+      "sourceId": "segment-001",
+      "type": "transcript",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12",
+      "speaker": "김철수",
+      "startMs": 1000,
+      "endMs": 5000,
+      "text": "권한 필터를 먼저 적용합니다."
+    }
+  ]
+}
+```
+
+### Validation
+
+- `projectId`, `meetingId`, `title`: required
+- `format`: `markdown` only
+- 모든 source의 `meetingId`는 request `meetingId`와 같아야 한다.
+- 허용되지 않은 source type이나 다른 meeting source는 `403 AI_CONTEXT_FORBIDDEN`으로 거부한다.
+
+### Response
+
+- 기존 `POST /api/meeting-ai/generate-report`의 `GenerateReportResponse`와 같다.
+- source가 없으면 LLM을 호출하지 않고 `unsupported=true`, `model=context-only`를 반환한다.
+
+### Errors
+
+- `400 INVALID_REQUEST`: 필수값 또는 format 검증 실패
+- `403 AI_CONTEXT_FORBIDDEN`: source scope/type 검증 실패
+- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정, 호출, 응답 파싱 실패
+
+### Audit
+
+- AI server observability log
+- Backend가 public 요청에 대해 `AI_REQUESTED` 기록 예정
+
+### Requirement Trace
+
+- FR-RPT-01: 단일 회의 근거 기반 AI 회의록 생성
+- FR-RPT-02: candidate 반환
+- NFR-AZ-01, NFR-AZ-04: 권한 선필터와 scope 강제
 
 ## POST /api/meeting-ai/extract-tasks
 

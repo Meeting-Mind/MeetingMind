@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import ssl
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -190,6 +190,14 @@ class GenerateReportRequest(BaseModel):
     decisions: list[NamedItem] = Field(default_factory=list)
     actions: list[NamedItem] = Field(default_factory=list)
     format: str = "markdown"
+
+
+class BackendGenerateReportRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    meetingId: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    format: Literal["markdown"] = "markdown"
+    sources: list[BackendMeetingAiSource] = Field(default_factory=list)
 
 
 class ReportDecision(BaseModel):
@@ -656,6 +664,41 @@ def build_report_sources(payload: GenerateReportRequest) -> list[AiSource]:
     return [rag_source_to_ai_source(chunk_to_source(chunk)) for chunk in chunks]
 
 
+def build_backend_report_sources(payload: BackendGenerateReportRequest) -> list[AiSource]:
+    validate_backend_report_sources(payload)
+    return [
+        AiSource(
+            sourceId=source.sourceId,
+            type=source.type,
+            title=source.title or payload.title,
+            speaker=source.speaker,
+            time=source.time,
+            startMs=source.startMs,
+            endMs=source.endMs,
+            text=source.text,
+        )
+        for source in payload.sources
+    ]
+
+
+def validate_backend_report_sources(payload: BackendGenerateReportRequest) -> None:
+    for source in payload.sources:
+        if source.meetingId != payload.meetingId:
+            raise meeting_context_forbidden("Report source meetingId must match request meetingId.")
+        if source.type not in ("transcript", "decision", "actionItem"):
+            raise meeting_context_forbidden("Report source type is not allowed.")
+
+
+def meeting_context_forbidden(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "AI_CONTEXT_FORBIDDEN",
+            "message": message,
+        },
+    )
+
+
 def build_task_extraction_chunks(payload: ExtractTasksRequest) -> list[RagChunk]:
     project_id = payload.projectId or payload.meetingId
     summary_items: tuple[RagTextItem, ...] = ()
@@ -996,6 +1039,20 @@ def as_provider_unavailable(error: HTTPException) -> HTTPException:
 
 def generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
     sources = build_report_sources(payload)
+    return generate_report_from_sources(payload.meetingId, payload.title or payload.meetingId, payload.format, sources)
+
+
+def backend_generate_report(payload: BackendGenerateReportRequest) -> GenerateReportResponse:
+    sources = build_backend_report_sources(payload)
+    return generate_report_from_sources(payload.meetingId, payload.title, payload.format, sources)
+
+
+def generate_report_from_sources(
+    meeting_id: str,
+    title: str,
+    report_format: str,
+    sources: list[AiSource],
+) -> GenerateReportResponse:
     if not sources:
         return GenerateReportResponse(
             summary="제공된 회의 맥락에서는 보고서를 생성할 근거를 찾을 수 없습니다.",
@@ -1023,9 +1080,9 @@ def generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
             "confirmationState는 candidate로 둔다."
         ),
         user_content=(
-            f"[회의 ID]\n{payload.meetingId}\n\n"
-            f"[회의 제목]\n{payload.title or payload.meetingId}\n\n"
-            f"[출력 형식]\n{payload.format}\n\n"
+            f"[회의 ID]\n{meeting_id}\n\n"
+            f"[회의 제목]\n{title}\n\n"
+            f"[출력 형식]\n{report_format}\n\n"
             f"[회의 근거]\n{context_lines}"
         ),
     )
@@ -1307,6 +1364,17 @@ def backend_meeting_ai_chat(payload: BackendMeetingAiChatRequest) -> MeetingAiCh
 @app.post("/api/meeting-ai/generate-report", response_model=GenerateReportResponse)
 def meeting_ai_generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
     return observe_ai_endpoint("meeting-ai.generate-report", lambda: generate_report(payload))
+
+
+@app.post("/api/internal/meeting-ai/generate-report", response_model=GenerateReportResponse)
+def backend_meeting_ai_generate_report(payload: BackendGenerateReportRequest) -> GenerateReportResponse:
+    try:
+        return observe_ai_endpoint(
+            "meeting-ai.generate-report.internal",
+            lambda: backend_generate_report(payload),
+        )
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
 
 
 @app.post("/api/meeting-ai/extract-tasks", response_model=ExtractTasksResponse)

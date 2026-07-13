@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -178,6 +179,44 @@ public class WorkspaceDomainService {
                 store.findTranscriptSegments(meetingId),
                 store.findMeetingReports(meetingId)
         );
+    }
+
+    public MeetingReport saveReportCandidate(
+            String meetingId,
+            String createdBy,
+            String title,
+            String summary,
+            String markdown,
+            List<MeetingReport.ReportDecision> decisions,
+            List<MeetingReport.ReportActionItem> actionItems,
+            List<String> sourceIds
+    ) {
+        requireUser(createdBy);
+        store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        int nextVersion = store.findMeetingReports(meetingId).stream()
+                .mapToInt(MeetingReport::version)
+                .max()
+                .orElse(0) + 1;
+        return store.saveMeetingReport(new MeetingReport(
+                "report-" + UUID.randomUUID(),
+                meetingId,
+                MeetingReportStatus.CANDIDATE,
+                title,
+                summary,
+                markdown,
+                decisions,
+                actionItems,
+                sourceIds,
+                createdBy,
+                nextVersion,
+                false,
+                Instant.now(clock)
+        ));
     }
 
     public ProjectAiContext projectAiContext(String spaceId) {

@@ -428,3 +428,40 @@
 - Passed: ignored local handoff가 `git status --short --untracked-files=all`에 나타나지 않음
 - Passed: `git diff --check`
 - Not run: Frontend/Backend/AI 검증. 이번 변경은 docs/process와 ignore 규칙에만 한정된다.
+
+## M022 AI Report Candidate Backend Route
+
+### Contract and Model
+
+- public `POST /api/v1/meetings/{meetingId}/reports/generate`와 internal `POST /api/internal/meeting-ai/generate-report`를 분리했다.
+- 생성 권한은 Space `OWNER`/`ADMIN` 또는 Meeting `HOST`/`EDITOR`로 제한한다.
+- `MeetingReport.CANDIDATE`에 `markdown`, `createdBy`, `sourceIds`를 추가하고 V5 migration에 candidate metadata를 반영했다.
+- candidate는 임시 저장하지만 공식 report와 Project AI source에서는 제외하고, `unsupported=true` 결과는 저장하지 않는다.
+
+### Implementation
+
+- AI internal endpoint는 `transcript`, `decision`, `actionItem`만 허용하며 다른 meeting/source type을 `AI_CONTEXT_FORBIDDEN`으로 차단한다.
+- Backend는 권한 확인 후에만 해당 meeting context를 조회하고, AI 응답 source도 원래 선필터된 request source에서 다시 구성한다.
+- supported 결과는 증가한 version과 `current=false`를 가진 candidate로 저장한다. source가 없거나 응답 근거가 선필터 목록과 교집합이 없으면 저장하지 않는다.
+- Frontend Report Agent는 AI 서버 직접 호출과 로컬 candidate 생성을 제거하고 인증된 Backend API를 호출한다.
+- 아직 구현되지 않은 confirm은 로컬 성공 상태로 바꾸지 않고 비활성 상태로 표시한다.
+
+### Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, 24 tests
+- Passed: `cd ai && ./.venv/bin/python -m compileall app`
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd frontend && npm run build` (기존 500 kB 초과 bundle warning 유지)
+- Passed: `git diff --check`
+- Passed: Backend service test에서 supported candidate 저장, source allowlist 정규화, VIEWER 사전 차단, unsupported 미저장을 검증했다.
+- Passed: Backend `18080` 실제 public API smoke에서 owner의 source 없는 회의는 `200`, `candidate=null`, `unsupported=true`, `model=context-only`를 반환했다.
+- Passed: 같은 meeting에 대한 비권한 사용자는 `403 MEETING_ACCESS_DENIED`를 반환했다.
+- Note: 첫 smoke 스크립트는 Space 응답을 `.space.id`로 잘못 읽어 null path 404가 발생했으며, 실제 응답의 `.id`로 수정 후 통과했다.
+- Not run: V5 migration 실제 PostgreSQL 적용. 로컬 DB profile datasource가 구성되지 않아 schema 적용은 후속 data verification에서 확인한다.
+
+### Remaining Boundary
+
+- report confirm, manual update, version history 조회, Markdown/PDF/DOCX download
+- `MeetingReport` PostgreSQL repository와 candidate 만료/취소 정책
+- `AI_REQUESTED`, `REPORT_CANDIDATE_CREATED` persistent audit log
+- 실제 STT 입력 API 연결 후 supported public end-to-end smoke

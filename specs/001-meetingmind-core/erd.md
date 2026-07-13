@@ -10,6 +10,7 @@ erDiagram
   USER ||--o{ AUTH_SESSION : has
   USER ||--o{ SPACE_MEMBER : joins
   USER ||--o{ MEETING_PARTICIPANT : participates
+  USER ||--o{ MEETING_REPORT : creates
   USER ||--o{ TASK_CARD : assigned
 
   SPACE ||--o{ SPACE_MEMBER : has
@@ -172,6 +173,8 @@ erDiagram
     string title
     string summary
     string markdown
+    string createdBy FK
+    json sourceIds
     int version
     boolean isCurrent
     datetime createdAt
@@ -347,6 +350,8 @@ erDiagram
 
 - `MEETING_REPORT(meetingId, version)`은 unique다.
 - `MEETING_REPORT.status`는 `CANDIDATE`, `DRAFT`, `CONFIRMED` 중 하나다.
+- `MEETING_REPORT.createdBy`는 candidate 생성 요청 사용자이며, `sourceIds`는 보고서 전체 근거 source를 보존한다.
+- `CANDIDATE`는 임시 저장하되 기본 공식 회의록 조회와 Project AI source에서 제외하고, `unsupported=true` 결과는 저장하지 않는다.
 - `MEETING_REPORT.isCurrent=true`이고 `status=CONFIRMED`인 report는 meeting당 최대 1개만 허용한다.
 - 새 report version을 확정하면 기존 current confirmed report는 `isCurrent=false`로 바꾼다.
 - `TASK_CANDIDATE.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나로 확장 후보를 둔다.

@@ -783,7 +783,7 @@ export function App() {
           path="/report-agent"
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
-              <ReportAgentPage data={data.reportAgent} />
+              <ReportAgentPage data={data.reportAgent} session={authSession} />
             </ProtectedRoute>
           }
         />

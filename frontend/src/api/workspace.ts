@@ -27,7 +27,6 @@ import type {
   MeetingParticipantsResponse,
   OwnerTransferRequest,
   OwnerTransferResponse,
-  GenerateReportCandidateRequest,
   ReportCandidateResponse,
   ReportDownloadFormat,
   ReportListResponse,
@@ -267,13 +266,16 @@ export async function chatProjectAi(
 }
 
 export async function generateReportCandidate(
-  request: GenerateReportCandidateRequest
+  session: AuthSession,
+  meetingId: string
 ): Promise<ReportCandidateResponse> {
-  return requestAiJson<ReportCandidateResponse>("/api/meeting-ai/generate-report", {
+  return requestJson<ReportCandidateResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/generate`,
+    {
     method: "POST",
-    headers: plainJsonHeaders(),
-    body: JSON.stringify(request)
-  });
+      headers: buildAuthHeaders(session)
+    }
+  );
 }
 
 export async function extractTaskCandidates(

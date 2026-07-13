@@ -63,8 +63,11 @@ class MeetingAiServiceTest {
                 MeetingReportStatus.CONFIRMED,
                 "Sprint Planning #12 회의록",
                 "회의 요약",
+                "## 회의 요약",
                 List.of(new MeetingReport.ReportDecision("decision-1", "ERD 수정", "회의별 ACL을 분리한다.", List.of("segment-1"))),
                 List.of(new MeetingReport.ReportActionItem("action-1", "ERD 수정안 문서화", member.id(), null, List.of("segment-1"))),
+                List.of("segment-1"),
+                owner.id(),
                 1,
                 true,
                 FIXED_CLOCK.instant()

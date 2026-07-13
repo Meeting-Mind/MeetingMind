@@ -898,6 +898,82 @@ Backend가 인증/회의 권한을 확인한 뒤 Meeting AI 서버에 already-fi
 
 - speaker 수정은 transcript text 자체를 바꾸지 않는다.
 
+## POST /api/v1/meetings/{meetingId}/reports/generate
+
+Backend가 회의 편집 권한을 확인하고 단일 회의 context로 AI 회의록 candidate를 생성한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR`
+
+### Data Scope
+
+- 해당 meeting의 TranscriptSegment
+- 해당 meeting의 current/confirmed report에 포함된 decision/action item
+
+### Request
+
+None. 출력 형식은 우선 `markdown`으로 고정한다.
+
+### Validation
+
+- meeting이 존재해야 한다.
+- AI에 전달하는 모든 source는 path `meetingId`와 같아야 한다.
+- AI가 `unsupported=true`를 반환하면 candidate를 저장하지 않는다.
+
+### Response
+
+```json
+{
+  "candidate": {
+    "id": "report-001",
+    "meetingId": "meeting-001",
+    "status": "CANDIDATE",
+    "title": "Sprint Planning #12 회의록",
+    "summary": "권한 분리와 ERD 수정이 논의되었습니다.",
+    "markdown": "## 요약\n권한 분리와 ERD 수정이 논의되었습니다.",
+    "decisions": [],
+    "actionItems": [],
+    "sourceIds": ["segment-001"],
+    "createdBy": "user-001",
+    "version": 1,
+    "isCurrent": false,
+    "createdAt": "2026-07-13T12:00:00Z"
+  },
+  "sources": [],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+근거가 없으면 `candidate=null`, `unsupported=true`, `model=context-only`로 반환한다.
+
+### Errors
+
+- `403 MEETING_ACCESS_DENIED`: 생성 권한 없음
+- `404 MEETING_NOT_FOUND`: 회의 없음
+- `503 AI_PROVIDER_UNAVAILABLE`: AI provider 오류
+
+### Audit
+
+- `AI_REQUESTED` 예정
+- candidate 저장 시 `REPORT_CANDIDATE_CREATED` 예정
+
+### Requirement Trace
+
+- FR-RPT-01: AI 회의록 생성
+- FR-RPT-02: 확정 전 candidate 임시 저장과 반환
+
+### Notes
+
+- candidate는 `MeetingReport.CANDIDATE`로 임시 저장하지만 공식 report나 Project AI source로 취급하지 않는다.
+- 기존 AI prototype endpoint는 Frontend에서 직접 호출하지 않는다.
+
 ## GET /api/v1/meetings/{meetingId}/reports
 
 회의록 목록 또는 현재 회의록을 조회한다.
@@ -918,6 +994,7 @@ Backend가 인증/회의 권한을 확인한 뒤 Meeting AI 서버에 already-fi
 ### Query
 
 - `status`: optional `CANDIDATE`, `DRAFT`, `CONFIRMED`
+- 생략 시 공식 report인 `DRAFT`, `CONFIRMED`만 반환하고 `CANDIDATE`는 제외한다.
 
 ### Validation
 
