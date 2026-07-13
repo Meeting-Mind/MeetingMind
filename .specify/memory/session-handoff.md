@@ -2,6 +2,21 @@
 
 # Session Handoff
 
+## Latest Work in Progress: Project AI Backend Route
+
+현재 작업 브랜치는 `ai/project-ai-backend-route`이며 M021 `T166-T173` Project AI Backend 권한 선필터 연동 변경이 PR 범위로 정리되어 있다.
+
+- public Backend route: `POST /api/v1/spaces/{spaceId}/ai/chat`
+- internal AI route: `POST /api/internal/project-ai/chat`
+- Backend는 active SpaceMember를 확인하고 OWNER/ADMIN override 또는 active MeetingParticipant가 읽을 수 있는 회의만 `allowedMeetingIds`에 포함한다.
+- source는 `PUBLISHED`, `embeddingStatus=COMPLETED` ProjectKnowledge와 접근 가능한 회의의 current/confirmed report summary만 사용한다.
+- Project AI context 조립은 transcript를 읽지 않는 전용 Backend record를 사용한다.
+- Frontend Project AI는 AI 서버 직접 호출과 mock context 전송을 제거하고 인증된 Backend API에 질문만 보낸다. target Space 목록에 없는 mock/legacy Space에서는 호출을 차단한다.
+- AI 19 tests/compile, Backend test, Frontend build, diff check와 Backend `18080` + AI `18000` real API smoke를 통과했다.
+- 비멤버는 `403 SPACE_ACCESS_DENIED`, allowlist 밖 meeting source는 `403 AI_CONTEXT_FORBIDDEN`으로 차단된다.
+- 실제 PostgreSQL/pgvector, embedding worker, 대화 이력, persistent audit log, mock Space와 target Space 목록 연결은 후속 작업이다.
+- 다음 선정 작업은 M022/T174-T181 AI 회의록 candidate Backend 경유 전환이며, 계약/권한/저장 shape 확정부터 시작한다.
+
 ## Latest Session Summary: 2026-07-13
 
 현재 작업 브랜치는 `ai/contract-prototype-target-split`이다. 이번 세션은 AI 담당 범위에서 Meeting AI를 Frontend 직접 AI 호출 구조에서 `Frontend -> Backend -> AI internal endpoint` 구조로 전환하는 작업을 진행했다.

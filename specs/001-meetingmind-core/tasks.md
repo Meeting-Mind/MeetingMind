@@ -52,6 +52,8 @@
 | M018 | 프로젝트 워크스페이스 프론트엔드 구현 | FR-MREG, FR-ACL, FR-KAN, FR-PBOT, FR-PERM, FR-OWN 기준으로 회의 관리/ACL, 칸반, Project AI, 멤버/오너 관리가 권한 경계를 드러낸 상태로 동작한다. | T131-T144 |
 | M019 | 회의 워크스페이스 프론트엔드 구현 | FR-RPT, FR-MBOT, FR-TASK 기준으로 Meeting AI 단일 회의 scope, report candidate/편집/확정, task candidate 검토/칸반 등록이 source metadata를 유지한 채 동작한다. | T145-T157 |
 | M020 | AI 계약 prototype/target 경계 정리 | Current Prototype과 Target Backend-to-AI 차이가 문서화되고 Backend Meeting AI chat 1차 연동 경로가 분리되어 있다. | T158-T165 |
+| M021 | Project AI Backend 권한 선필터 연동 | Project AI가 SpaceMember 인증과 회의 ACL 선필터 이후의 공식 지식/회의 요약만 사용하고 Frontend가 Backend API를 호출한다. | T166-T173 |
+| M022 | AI 회의록 candidate Backend 경유 전환 | AI 회의록 생성이 회의 편집 권한과 단일 meeting source 검증 뒤에서 실행되고 candidate 저장/화면 연결 경계가 생긴다. | T174-T181 |
 
 ## Foundation
 
@@ -262,6 +264,32 @@
 | T164 | M020 | [x] | frontend/meeting-ai | 사용자 | Codex | T163 | `frontend/src/api/workspace.ts`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md` | Meeting AI 화면의 직접 AI 서버 호출을 Backend endpoint로 전환한다. | `POST /api/v1/meetings/{meetingId}/ai/chat`에 인증 header와 `{question}`만 전송하고 기존 prototype context 직접 전달은 제거되었으며 `cd frontend && npm run build`가 통과했다. |
 | T165 | M020 | [x] | frontend/routing | 사용자 | Codex | T164 | `frontend/src/pages/WorkspaceHomePage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | Meeting AI Backend 경유 호출에 필요한 target `meetingId` route query를 보존한다. | `meeting.id`가 있는 회의 이동 경로는 `meetingId` query를 포함하고, `ReportAgentPage`는 해당 query를 Meeting AI 링크로 전달하며, `MeetingAiPage`는 `meetingId` 없는 직접 진입에서 Backend 호출을 막고 `cd frontend && npm run build`가 통과했다. |
 
+### M021: Project AI Backend Permission Prefilter Integration
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T166 | M021 | [x] | contracts/ai | 사용자 | Codex | T084, T104, T162 | `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/contracts/space-api.md`, `specs/001-meetingmind-core/plan.md`, `specs/001-meetingmind-core/implement.md` | Project AI public Backend API와 strict Backend-to-AI internal 계약을 확정한다. | public request는 질문만 받고 internal request는 `projectId`, `allowedMeetingIds`, `sources[]`를 받으며 공식 지식/회의 기록 source type과 오류가 문서화되어 있다. |
+| T167 | M021 | [x] | ai/schema | 사용자 | Codex | T166 | `ai/app/main.py`, `ai/tests/test_meeting_ai.py` | `/api/internal/project-ai/chat` strict request와 source validator를 구현한다. | source `projectId` 불일치, 허용되지 않은 meeting source, 잘못된 source type이 `403 AI_CONTEXT_FORBIDDEN`으로 차단된다. |
+| T168 | M021 | [x] | ai/rag | 사용자 | Codex | T167 | `ai/app/main.py`, `ai/app/rag.py`, `ai/tests/test_meeting_ai.py` | Project AI internal endpoint가 공식 ProjectKnowledge와 허용된 meetingSummary만 project scope로 검색하도록 연결한다. | 공식 지식/회의 기록 출처가 구분되고 근거가 없으면 LLM 미호출 `unsupported=true`가 유지된다. |
+| T169 | M021 | [x] | backend/context | 사용자 | Codex | T166, T040 | `backend/src/main/java/com/meetingmind/demo/authz/**`, `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/service/**`, `backend/src/test/**` | Backend가 Space 접근을 확인하고 Project AI용 ProjectKnowledge와 읽기 가능한 meeting report summary를 선필터한다. | 일반 MEMBER는 active MeetingParticipant 회의만 포함하고 OWNER/ADMIN override와 REVOKED 제외가 단위 테스트로 검증된다. |
+| T170 | M021 | [x] | backend/api | 사용자 | Codex | T167, T169 | `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/main/java/com/meetingmind/demo/dto/ai/**`, `backend/src/main/java/com/meetingmind/demo/service/**`, `backend/src/test/**` | `POST /api/v1/spaces/{spaceId}/ai/chat`과 AI gateway를 구현한다. | 인증/Space 권한 검사 후 `/api/internal/project-ai/chat`을 호출하고 provider 실패를 `503 AI_PROVIDER_UNAVAILABLE`로 매핑한다. |
+| T171 | M021 | [x] | frontend/project-ai | 사용자 | Codex | T170 | `frontend/src/App.tsx`, `frontend/src/api/workspace.ts`, `frontend/src/pages/ProjectOverviewPage.tsx` | Project AI 화면의 AI 서버 직접 호출과 mock context 전송을 제거하고 Backend API로 전환한다. | 인증 header와 `{question}`만 전송하고 응답 source type을 공식 지식/회의 기록으로 구분하며 target Space 목록에 없는 mock/legacy Space 호출은 차단한다. |
+| T172 | M021 | [x] | verification | 사용자 | Codex | T168, T170, T171 | `ai/**`, `backend/**`, `frontend/**`, `specs/001-meetingmind-core/implement.md` | AI/Backend/Frontend 검증과 권한 negative case를 실행한다. | AI unittest/compile, Backend test, Frontend build, diff check와 real API smoke 결과가 기록되어 있다. |
+| T173 | M021 | [x] | docs/closeout | 사용자 | Codex | T172 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `.specify/memory/session-handoff.md` | M021 구현 범위, 데이터 모델 영향 없음, 실제 DB/pgvector 후속 경계를 정리한다. | 완료 task와 검증 결과가 실제 구현과 일치하고 실제 DB/embedding/audit 후속 작업이 남아 있다. |
+
+### M022: AI Report Candidate Backend Route
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T174 | M022 | [ ] | contracts/report-ai | 사용자 | Codex | T150, T162 | `requirements/functional-requirements-detail.md`, `requirements/permissions.md`, `requirements/status-values.md`, `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/erd.md` | report candidate public route, strict internal request, 생성 권한, 저장 shape와 source metadata를 확정한다. | endpoint, request/response, `CANDIDATE` 저장, 권한, 상태 전이, 오류와 ERD/data-model 영향 여부가 결정되어 있다. |
+| T175 | M022 | [ ] | ai/report-schema | 사용자 | Codex | T174 | `ai/app/main.py`, `ai/tests/test_meeting_ai.py` | strict `/api/internal/meeting-ai/generate-report` request와 단일 meeting source validator를 구현한다. | 다른 meeting/project source가 `403 AI_CONTEXT_FORBIDDEN`으로 차단되고 provider 오류가 `503`으로 정규화된다. |
+| T176 | M022 | [ ] | backend/report-context | 사용자 | Codex | T174, T175 | `backend/src/main/java/com/meetingmind/demo/authz/**`, `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/service/**`, `backend/src/test/**` | Backend가 report 생성 권한을 확인하고 해당 meeting transcript/decision/action source만 조립해 AI gateway를 호출한다. | 권한 없는 사용자는 AI 호출 전에 차단되고 AI request에는 단일 meeting source만 포함된다. |
+| T177 | M022 | [ ] | backend/report-candidate | 사용자 | Codex | T176 | `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/main/java/com/meetingmind/demo/dto/**`, `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/**` | AI 응답을 `MeetingReport.CANDIDATE`로 저장하고 public API response로 반환한다. | candidate가 공식 confirmed report와 분리되고 sourceIds, version, current=false가 보존된다. |
+| T178 | M022 | [ ] | frontend/report-candidate | 사용자 | Codex | T177 | `frontend/src/App.tsx`, `frontend/src/api/workspace.ts`, `frontend/src/pages/ReportAgentPage.tsx` | Report Agent의 로컬 candidate 생성과 AI 서버 직접 호출 후보를 Backend API로 전환한다. | 인증 header와 meetingId만 기준으로 생성하고 Backend candidate/source/unsupported 상태를 화면에 반영한다. |
+| T179 | M022 | [ ] | verification/unit | 사용자 | Codex | T175, T177, T178 | `ai/**`, `backend/**`, `frontend/**`, `specs/001-meetingmind-core/implement.md` | AI/Backend/Frontend 단위 검증과 report 권한 negative case를 실행한다. | AI unittest/compile, Backend test, Frontend build, diff check 결과가 기록되어 있다. |
+| T180 | M022 | [ ] | verification/integration | 사용자 | Codex | T179 | `ai/**`, `backend/**`, `specs/001-meetingmind-core/implement.md` | Backend-to-AI report candidate 실제 API smoke를 수행한다. | signup -> Space/Meeting 생성 -> report candidate 생성과 권한 거부 결과 또는 미실행 사유가 기록되어 있다. |
+| T181 | M022 | [ ] | docs/closeout | 사용자 | Codex | T180 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `.specify/memory/session-handoff.md` | M022 상태와 report confirm/version/export 후속 경계를 정리한다. | 완료 태스크만 `[x]`이고 confirm/update/download 및 실제 DB 전환 후속이 명시되어 있다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -278,6 +306,7 @@
 - [x] V011 Frontend Meeting AI Backend 경유 전환 검증: `cd frontend && npm run build`, `git diff --check`
 - [x] V012 Meeting AI route `meetingId` 연결 검증: `cd frontend && npm run build`, `git diff --check`
 - [x] V013 Backend-to-AI target schema/API 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, `cd ai && ./.venv/bin/python -m compileall app`, `cd backend && ./gradlew test`, `cd frontend && npm run build`, Backend `18080` + AI `18000` real API smoke, `git diff --check`
+- [x] V014 Project AI Backend 권한 선필터 검증: AI 19 tests/compile, Backend test, Frontend build, public `200 context-only`, 비멤버 `403 SPACE_ACCESS_DENIED`, internal allowlist 위반 `403 AI_CONTEXT_FORBIDDEN`, `git diff --check`
 
 ## Notes
 

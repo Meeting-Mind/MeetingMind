@@ -166,6 +166,22 @@ class ProjectAiChatResponse(BaseModel):
     model: str
 
 
+class BackendProjectAiSource(BaseModel):
+    sourceId: str = Field(min_length=1)
+    type: RagSourceType
+    projectId: str = Field(min_length=1)
+    meetingId: str | None = None
+    title: str | None = None
+    text: str = Field(min_length=1)
+
+
+class BackendProjectAiChatRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    allowedMeetingIds: list[str] = Field(default_factory=list)
+    sources: list[BackendProjectAiSource] = Field(default_factory=list)
+
+
 class GenerateReportRequest(BaseModel):
     projectId: str | None = None
     meetingId: str
@@ -731,6 +747,74 @@ def build_project_chat_sources(payload: ProjectAiChatRequest) -> list[AiSource]:
     return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
 
 
+def build_backend_project_chat_sources(payload: BackendProjectAiChatRequest) -> list[AiSource]:
+    validate_backend_project_sources(payload)
+    chunks = backend_project_sources_to_rag_chunks(payload)
+    retriever = InMemoryRagRetriever(chunks)
+    results = retriever.search(
+        RagSearchRequest(
+            query=payload.question,
+            scope="project",
+            projectId=payload.projectId,
+            allowedMeetingIds=tuple(payload.allowedMeetingIds),
+            sourceTypes=("projectKnowledge", "meetingSummary"),
+            limit=6,
+        )
+    )
+    return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
+
+
+def validate_backend_project_sources(payload: BackendProjectAiChatRequest) -> None:
+    allowed_meeting_ids = set(payload.allowedMeetingIds)
+    for source in payload.sources:
+        if source.projectId != payload.projectId:
+            raise project_context_forbidden("AI context source projectId must match request projectId.")
+        if source.type not in ("projectKnowledge", "meetingSummary"):
+            raise project_context_forbidden("Project AI source type is not allowed.")
+        if source.type == "meetingSummary" and (
+            not source.meetingId or source.meetingId not in allowed_meeting_ids
+        ):
+            raise project_context_forbidden("Meeting source is outside the allowed meeting scope.")
+        if source.type == "projectKnowledge" and source.meetingId is not None:
+            raise project_context_forbidden("Project Knowledge source must not carry a meeting scope.")
+
+
+def project_context_forbidden(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "AI_CONTEXT_FORBIDDEN",
+            "message": message,
+        },
+    )
+
+
+def backend_project_sources_to_rag_chunks(payload: BackendProjectAiChatRequest) -> list[RagChunk]:
+    return [
+        RagChunk(
+            chunkId=f"{payload.projectId}:{source.type}:{index:04d}",
+            scope="project",
+            projectId=payload.projectId,
+            meetingId=source.meetingId,
+            sourceType=source.type,
+            sourceId=source.sourceId,
+            title=source.title or source.sourceId,
+            content=source.text,
+            embeddingText=(
+                f"프로젝트: {payload.projectId}\n"
+                f"범위: project\n"
+                f"출처: {source.type}\n"
+                f"내용:\n{source.text}"
+            ),
+            metadata={
+                "visibility": "already_filtered",
+                "recordType": "official" if source.type == "projectKnowledge" else "meeting",
+            },
+        )
+        for index, source in enumerate(payload.sources, start=1)
+    ]
+
+
 def transcript_rows_to_segments(
     rows: list[TranscriptRow],
     *,
@@ -1121,6 +1205,15 @@ def first_non_empty_line(value: str) -> str | None:
 
 def project_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
     sources = build_project_chat_sources(payload)
+    return answer_project_chat(payload.projectId, payload.question, sources)
+
+
+def backend_project_chat(payload: BackendProjectAiChatRequest) -> ProjectAiChatResponse:
+    sources = build_backend_project_chat_sources(payload)
+    return answer_project_chat(payload.projectId, payload.question, sources)
+
+
+def answer_project_chat(project_id: str, question: str, sources: list[AiSource]) -> ProjectAiChatResponse:
     if not sources:
         return ProjectAiChatResponse(
             answer="제공된 프로젝트 맥락에서는 답변 근거를 찾을 수 없습니다.",
@@ -1143,8 +1236,8 @@ def project_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
             "답변은 한국어로 간결하게 작성해라."
         ),
         user_content=(
-            f"[프로젝트 ID]\n{payload.projectId}\n\n"
-            f"[사용자 질문]\n{payload.question}\n\n"
+            f"[프로젝트 ID]\n{project_id}\n\n"
+            f"[사용자 질문]\n{question}\n\n"
             f"[검색된 프로젝트 근거]\n{context_lines}"
         ),
     )
@@ -1224,3 +1317,11 @@ def meeting_ai_extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksRespon
 @app.post("/api/project-ai/chat", response_model=ProjectAiChatResponse)
 def project_ai_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
     return observe_ai_endpoint("project-ai.chat", lambda: project_chat(payload))
+
+
+@app.post("/api/internal/project-ai/chat", response_model=ProjectAiChatResponse)
+def backend_project_ai_chat(payload: BackendProjectAiChatRequest) -> ProjectAiChatResponse:
+    try:
+        return observe_ai_endpoint("project-ai.chat.internal", lambda: backend_project_chat(payload))
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error

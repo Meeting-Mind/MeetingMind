@@ -180,6 +180,26 @@ public class WorkspaceDomainService {
         );
     }
 
+    public ProjectAiContext projectAiContext(String spaceId) {
+        Space space = store.findSpaceById(spaceId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "SPACE_NOT_FOUND",
+                        "Space를 찾을 수 없습니다."
+                ));
+        return new ProjectAiContext(space, store.findProjectKnowledge(spaceId), store.findMeetingsBySpaceId(spaceId));
+    }
+
+    public ProjectMeetingContext projectMeetingContext(String meetingId) {
+        Meeting meeting = store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        return new ProjectMeetingContext(meeting, store.findMeetingReports(meetingId));
+    }
+
     private void requireUser(String userId) {
         if (userId == null || userId.isBlank() || store.findUserById(userId).isEmpty()) {
             throw new AuthorizationException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "사용자를 찾을 수 없습니다.");
@@ -220,6 +240,23 @@ public class WorkspaceDomainService {
     ) {
         public MeetingAiContext {
             transcriptSegments = transcriptSegments == null ? List.of() : List.copyOf(transcriptSegments);
+            reports = reports == null ? List.of() : List.copyOf(reports);
+        }
+    }
+
+    public record ProjectAiContext(
+            Space space,
+            List<ProjectKnowledge> projectKnowledge,
+            List<Meeting> meetings
+    ) {
+        public ProjectAiContext {
+            projectKnowledge = projectKnowledge == null ? List.of() : List.copyOf(projectKnowledge);
+            meetings = meetings == null ? List.of() : List.copyOf(meetings);
+        }
+    }
+
+    public record ProjectMeetingContext(Meeting meeting, List<MeetingReport> reports) {
+        public ProjectMeetingContext {
             reports = reports == null ? List.of() : List.copyOf(reports);
         }
     }
