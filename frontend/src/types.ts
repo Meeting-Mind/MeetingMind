@@ -451,23 +451,40 @@ export interface AiChatResponse {
   model: string;
 }
 
-export type ReportFormat = "markdown";
-
-export interface GenerateReportCandidateRequest {
-  projectId: string;
-  meetingId: string;
+export interface ReportCandidateDecision {
+  id: string;
   title: string;
-  transcript: TranscriptRow[];
-  decisions: LabeledItem[];
-  actions: LabeledItem[];
-  format: ReportFormat;
+  rationale: string | null;
+  sourceIds: string[];
+}
+
+export interface ReportCandidateActionItem {
+  id: string;
+  title: string;
+  assignee: string | null;
+  dueDate: string | null;
+  confirmationState: "candidate";
+  sourceIds: string[];
+}
+
+export interface StoredReportCandidate {
+  id: string;
+  meetingId: string;
+  status: "CANDIDATE";
+  title: string;
+  summary: string;
+  markdown: string;
+  decisions: ReportCandidateDecision[];
+  actionItems: ReportCandidateActionItem[];
+  sourceIds: string[];
+  createdBy: string;
+  version: number;
+  isCurrent: false;
+  createdAt: ApiDateTime;
 }
 
 export interface ReportCandidateResponse {
-  summary: string;
-  decisions: LabeledItem[];
-  actionItems: LabeledItem[];
-  markdown: string;
+  candidate: StoredReportCandidate | null;
   sources: AiSource[];
   unsupported: boolean;
   model: string;

@@ -249,6 +249,32 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 - ProjectKnowledge는 `PUBLISHED`, `embeddingStatus=COMPLETED`이고 삭제되지 않은 항목만 포함한다.
 - 회의 기록은 1차 연동에서 current confirmed report summary만 포함하며 원문 transcript 전체를 프로젝트 컨텍스트로 확장하지 않는다.
 
+## AI Report Candidate Backend Route Plan
+
+### Scope
+
+- Public route: `POST /api/v1/meetings/{meetingId}/reports/generate`
+- Internal route: `POST /api/internal/meeting-ai/generate-report`
+- Backend는 `OWNER`/`ADMIN` 또는 `HOST`/`EDITOR` 권한을 확인한 뒤 해당 회의 transcript와 current/confirmed report의 decision/action source만 조립한다.
+- AI 서버는 source type과 meeting scope를 다시 검증하고, 근거가 없으면 LLM 호출 없이 `unsupported=true`를 반환한다.
+- 지원되는 결과만 `MeetingReport.CANDIDATE`로 임시 저장하고 공식 report와 Project AI source에서는 제외한다.
+- Frontend Report Agent는 인증 header와 `meetingId`만 사용해 Backend endpoint를 호출한다.
+
+### Integration Order
+
+1. 계약, 권한, candidate 저장 shape와 ERD/data-model 영향을 확정한다.
+2. AI strict schema와 단일 meeting source validator를 구현한다.
+3. Backend 권한 검증, context 조립, AI gateway, candidate 저장을 연결한다.
+4. Frontend 로컬 candidate 생성을 Backend 응답으로 전환한다.
+5. 단위 테스트, 권한 negative case, 실제 API smoke를 실행한다.
+
+### Persistence Boundary
+
+- 현재 runtime 저장소는 in-memory지만 target schema에는 `markdown`, `createdBy`, `sourceIds`를 반영한다.
+- candidate version은 동일 meeting의 기존 report 최대 version 다음 값으로 생성한다.
+- AI `unsupported=true` 또는 provider 실패 결과는 저장하지 않는다.
+- confirm, manual edit, version history 조회, export는 M022 이후 범위다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

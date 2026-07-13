@@ -84,7 +84,7 @@ public class MeetingAiService {
     private List<MeetingAiGatewayChatRequest.LabeledItem> actionRows(List<MeetingReport> reports) {
         return reports.stream()
                 .flatMap(report -> report.actionItems().stream())
-                .map(action -> new MeetingAiGatewayChatRequest.LabeledItem(action.title(), action.assigneeId()))
+                .map(action -> new MeetingAiGatewayChatRequest.LabeledItem(action.title(), action.assigneeName()))
                 .toList();
     }
 
@@ -140,9 +140,9 @@ public class MeetingAiService {
                                         null,
                                         null,
                                         null,
-                                        action.assigneeId() == null || action.assigneeId().isBlank()
+                                        action.assigneeName() == null || action.assigneeName().isBlank()
                                                 ? action.title()
-                                                : action.title() + " / assignee=" + action.assigneeId()
+                                                : action.title() + " / assignee=" + action.assigneeName()
                                 ))
                 )
                 .flatMap(stream -> stream)
