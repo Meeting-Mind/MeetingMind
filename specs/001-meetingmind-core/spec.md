@@ -39,6 +39,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - Google OAuth와 자체 회원가입/로그인 기반의 최소 인증 흐름을 제공한다.
 - LiveKit 토큰을 발급해 실시간 회의방 연결 준비를 한다.
 - Meeting AI는 현재 회의 맥락만 사용해 질문에 답한다.
+- Project AI는 Backend가 Space 접근과 회의 ACL을 선필터한 공식 지식/회의 요약으로 1차 질의응답 경계를 제공한다.
 - Report Agent는 AI 생성 회의 보고서 편집 흐름을 제공한다.
 - 현재는 mock 데이터와 최소 API를 허용하되 실제 구현 전환 지점을 명확히 문서화한다.
 
@@ -48,7 +49,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - 실제 STT 파이프라인
 - PostgreSQL/pgvector 영속화
 - S3 파일 저장
-- Project AI의 실제 멀티 회의 RAG
+- Project AI의 실제 PostgreSQL/pgvector 멀티 회의 RAG와 embedding worker
 - 운영 배포 자동화
 
 ## Functional Requirements

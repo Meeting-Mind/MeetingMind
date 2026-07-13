@@ -63,6 +63,7 @@
 - D-014: 비밀번호 정책은 `POL-PW-01` 수준으로 적용한다. 자체 회원가입 비밀번호는 최소 8자이며 영대문자, 영소문자, 숫자, 특수문자 중 3종 이상을 포함해야 한다.
 - D-015: Backend auth/권한 후속 구현 순서는 `T039/T040` Space/Meeting 접근 검증 service, `T094` LiveKit token 권한 연동, Auth store DB 영속화 순서로 진행한다. 이유는 LiveKit/AI/회의 데이터 접근이 먼저 MeetingParticipant 권한 판단을 필요로 하기 때문이다.
 - D-016: SpaceMember 제거 시 해당 Space의 `participantType=member`인 active MeetingParticipant는 모두 `accessStatus=REVOKED`로 전환한다. 회의 guest participant는 SpaceMember 제거 API 대상이 아니므로 이 정책으로 회수하지 않는다.
+- D-017: AI 회의록 생성 결과는 재조회와 확정을 위해 `MeetingReport.CANDIDATE`로 임시 저장한다. candidate는 기본 공식 회의록 조회와 Project AI source에서 제외하고, `status=CANDIDATE`를 명시한 조회 또는 생성 응답에서만 노출한다. AI가 `unsupported=true`를 반환하면 저장하지 않는다.
 - D-017: `MeetingParticipant.accessStatus`는 `ACTIVE`, `REVOKED`를 canonical 값으로 사용한다. `ACTIVE`만 회의 접근 권한으로 인정하고 `REVOKED`는 조회, 수정, LiveKit token, AI context 접근을 모두 차단한다.
 - D-018: HOST의 회의방 일시 퇴장은 허용하며 role/accessStatus를 유지한다. HOST가 회의를 종료하면 Meeting status를 `ENDED`로 전환한다. 마지막 active HOST의 강등, 접근 회수, participant 제거는 거부하며, 마지막 HOST를 없애려면 다른 참여자를 먼저 HOST로 승격해야 한다.
 - D-019: `ADMIN`은 서비스 전체 운영자나 프로그램 관리자가 아니라 특정 Space 안에서 오너가 위임한 프로젝트 관리자 역할이다. 서비스 전체 운영자 역할은 현재 Core Prototype 범위 밖이다.

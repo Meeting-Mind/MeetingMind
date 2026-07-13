@@ -1,6 +1,11 @@
 package com.meetingmind.demo.service;
 
 import com.meetingmind.demo.dto.TranscriptEntryResponse;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -18,18 +23,43 @@ import org.springframework.stereotype.Component;
 public class SttSessionRegistry {
 
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final Path TRANSCRIPT_DIR = Path.of("output", "transcripts");
 
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
+    // ponytail: 데모 규모 동시 회의 수 가정, 방 하나당 파일 락 하나. 방 수가 많아지면 락 맵을 정리(evict)하는 로직 추가.
+    private final Map<String, Object> roomFileLocks = new ConcurrentHashMap<>();
 
-    public String create(String roomName, String speaker) {
+    public String create(String roomName, String displayName) {
         String sessionId = UUID.randomUUID().toString();
         List<TranscriptEntryResponse> transcript = Collections.synchronizedList(new ArrayList<>());
 
-        ClovaNestStreamClient client = new ClovaNestStreamClient(text ->
-                transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), speaker, text)));
+        ClovaNestStreamClient client = new ClovaNestStreamClient(text -> {
+            transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), displayName, text));
+            appendToTranscriptFile(roomName, displayName, text);
+        });
 
         sessions.put(sessionId, new SessionState(roomName, client, transcript, new AtomicReference<>()));
         return sessionId;
+    }
+
+    private void appendToTranscriptFile(String roomName, String displayName, String text) {
+        Path file = TRANSCRIPT_DIR.resolve(sanitizeFileName(roomName) + ".txt");
+        Object lock = roomFileLocks.computeIfAbsent(roomName, key -> new Object());
+        synchronized (lock) {
+            try {
+                Files.createDirectories(TRANSCRIPT_DIR);
+                Files.writeString(
+                        file,
+                        displayName + ": " + text + System.lineSeparator(),
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException exception) {
+                throw new UncheckedIOException(exception);
+            }
+        }
+    }
+
+    private static String sanitizeFileName(String roomName) {
+        return roomName.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
     public ClovaNestStreamClient getStreamClient(String sessionId) {

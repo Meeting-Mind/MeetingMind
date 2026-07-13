@@ -1,5 +1,7 @@
 package com.meetingmind.demo.controller;
 
+import com.meetingmind.demo.auth.AuthService;
+import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.config.DotenvConfig;
 import com.meetingmind.demo.dto.SttStreamStartRequest;
 import com.meetingmind.demo.dto.SttStreamStartResponse;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,15 +28,23 @@ public class SttStreamController {
 
     private final SttSessionRegistry sessionRegistry;
     private final LiveKitEgressService liveKitEgressService;
+    private final AuthService authService;
 
-    public SttStreamController(SttSessionRegistry sessionRegistry, LiveKitEgressService liveKitEgressService) {
+    public SttStreamController(
+            SttSessionRegistry sessionRegistry,
+            LiveKitEgressService liveKitEgressService,
+            AuthService authService) {
         this.sessionRegistry = sessionRegistry;
         this.liveKitEgressService = liveKitEgressService;
+        this.authService = authService;
     }
 
     @PostMapping("/stream/start")
-    public SttStreamStartResponse start(@Valid @RequestBody SttStreamStartRequest request) {
-        String sessionId = sessionRegistry.create(request.roomName(), request.speaker());
+    public SttStreamStartResponse start(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @Valid @RequestBody SttStreamStartRequest request) {
+        AuthUserResponse user = authService.currentUser(authorizationHeader);
+        String sessionId = sessionRegistry.create(request.roomName(), user.displayName());
         try {
             String publicWsBaseUrl = DotenvConfig.require("PUBLIC_WS_BASE_URL");
             String websocketUrl = publicWsBaseUrl + "/ws/egress-audio/" + sessionId;

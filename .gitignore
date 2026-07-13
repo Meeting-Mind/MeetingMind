@@ -27,6 +27,5 @@ ai/.env.*
 .env
 *.env
 !*.env.example
-.idea/
-.vscode/
-.claude/
+.claude
+

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { generateReportCandidate } from "../api/workspace";
+import type { AuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
 type ChangeCommit = {
@@ -35,6 +37,23 @@ type PendingChange = {
   commitTitle: string;
   commitNote: string;
   commitDetails: string[];
+};
+
+type ReportCandidateDraft = {
+  id: string;
+  summary: string;
+  markdown: string;
+  status: "candidate";
+  sources: string[];
+};
+
+type TaskCandidateDraft = {
+  id: string;
+  title: string;
+  assignee: string;
+  dueDate: string;
+  status: "candidate" | "registered";
+  sourceIds: string[];
 };
 
 type ChatMessage = {
@@ -75,6 +94,40 @@ function createChatMessage(message: Omit<ChatMessage, "id">): ChatMessage {
     id: `${message.role}-${Math.random().toString(36).slice(2, 10)}`,
     ...message
   };
+}
+
+function buildReportMarkdown(report: ReportView) {
+  return [
+    `# ${report.title}`,
+    "",
+    "## 요약",
+    report.summary,
+    "",
+    "## 회의 주제",
+    ...report.subjectLines.map((line) => `- ${line}`),
+    "",
+    "## 결정 사항",
+    ...report.decisions.map((decision) => `- ${decision.item}: ${decision.decision} (${decision.note})`),
+    "",
+    "## Action Item",
+    ...report.actions.map((action) => `- ${action}`)
+  ].join("\n");
+}
+
+function buildTaskCandidatesFromReport(report: ReportView): TaskCandidateDraft[] {
+  return report.actions.map((action, index) => {
+    const [assignee, ...titleParts] = action.split("—");
+    const title = titleParts.join("—").trim() || action.trim();
+
+    return {
+      id: `candidate-local-${index + 1}`,
+      title,
+      assignee: assignee.trim() || "미지정",
+      dueDate: "",
+      status: "candidate",
+      sourceIds: [`${report.breadcrumb} Action Item ${index + 1}`]
+    };
+  });
 }
 
 function inferReportTrack(projectName: string, meetingTitle: string) {
@@ -317,11 +370,32 @@ function buildReportView(
   return buildGeneratedReport(normalizedProject, normalizedMeeting, normalizedRound);
 }
 
-export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }) {
+export function ReportAgentPage({
+  data,
+  session
+}: {
+  data: WorkspaceData["reportAgent"];
+  session: AuthSession | null;
+}) {
   const [searchParams] = useSearchParams();
   const projectName = searchParams.get("project");
   const meetingTitle = searchParams.get("meeting");
+  const meetingId = searchParams.get("meetingId");
   const round = searchParams.get("round");
+  const meetingAiParams = new URLSearchParams();
+  if (projectName) {
+    meetingAiParams.set("project", projectName);
+  }
+  if (meetingTitle) {
+    meetingAiParams.set("meeting", meetingTitle);
+  }
+  if (meetingId) {
+    meetingAiParams.set("meetingId", meetingId);
+  }
+  if (round) {
+    meetingAiParams.set("round", round);
+  }
+  const meetingAiHref = meetingAiParams.toString() ? `/meeting-ai?${meetingAiParams.toString()}` : "/meeting-ai";
   const reportView = useMemo(
     () => buildReportView(data, projectName, meetingTitle, round),
     [data, meetingTitle, projectName, round]
@@ -331,6 +405,10 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
   const [saveLabel, setSaveLabel] = useState("● 자동 저장됨 · 방금 전");
   const [isCommitListOpen, setIsCommitListOpen] = useState(false);
   const [selectedCommitId, setSelectedCommitId] = useState<string | null>(null);
+  const [reportCandidate, setReportCandidate] = useState<ReportCandidateDraft | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportGenerationError, setReportGenerationError] = useState("");
+  const [taskCandidates, setTaskCandidates] = useState<TaskCandidateDraft[]>([]);
   const changeCommits = reportState.commits;
 
   const selectedCommit = changeCommits.find((commit) => commit.id === selectedCommitId) ?? null;
@@ -348,6 +426,10 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
     setSaveLabel("● 자동 저장됨 · 방금 전");
     setIsCommitListOpen(false);
     setSelectedCommitId(null);
+    setReportCandidate(null);
+    setIsGeneratingReport(false);
+    setReportGenerationError("");
+    setTaskCandidates([]);
   }, [projectName, meetingTitle, reportView, round]);
 
   function buildCommitId(seed: number) {
@@ -582,6 +664,54 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
     setSaveLabel("● 프로젝트 문서로 저장됨 · 방금 전");
   }
 
+  async function handleGenerateReportCandidate() {
+    if (!session || !meetingId || isGeneratingReport) {
+      setReportGenerationError(meetingId ? "로그인이 필요합니다." : "회의 정보가 없어 candidate를 생성할 수 없습니다.");
+      return;
+    }
+
+    setIsGeneratingReport(true);
+    setReportGenerationError("");
+    try {
+      const response = await generateReportCandidate(session, meetingId);
+      if (response.unsupported || !response.candidate) {
+        setReportCandidate(null);
+        setReportGenerationError("현재 회의에는 회의록을 생성할 근거가 없습니다.");
+        return;
+      }
+      setReportCandidate({
+        id: response.candidate.id,
+        summary: response.candidate.summary,
+        markdown: response.candidate.markdown,
+        status: "candidate",
+        sources: response.sources.map((source) => source.title || source.sourceId)
+      });
+      setSaveLabel("● 회의록 candidate 생성됨 · 확정 대기");
+    } catch (error) {
+      setReportGenerationError(error instanceof Error ? error.message : "회의록 candidate 생성에 실패했습니다.");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
+
+  function handleExtractTaskCandidates() {
+    setTaskCandidates(buildTaskCandidatesFromReport(reportState));
+    setSaveLabel("● 태스크 candidate 추출됨 · 검토 대기");
+  }
+
+  function handleUpdateTaskCandidate(candidateId: string, updates: Partial<Pick<TaskCandidateDraft, "assignee" | "dueDate" | "title">>) {
+    setTaskCandidates((current) =>
+      current.map((candidate) => (candidate.id === candidateId ? { ...candidate, ...updates } : candidate))
+    );
+  }
+
+  function handleRegisterTaskCandidate(candidateId: string) {
+    setTaskCandidates((current) =>
+      current.map((candidate) => (candidate.id === candidateId ? { ...candidate, status: "registered" } : candidate))
+    );
+    setSaveLabel("● 태스크 candidate 승인됨 · 칸반 API 연결 대기");
+  }
+
   function handleExportPdf() {
     const printWindow = window.open("", "_blank", "width=1100,height=900");
     if (!printWindow) {
@@ -709,6 +839,7 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
 
           <div className="report-agent-header-actions">
             <span className="report-agent-save-pill">{saveLabel}</span>
+            <Link to={meetingAiHref}>Meeting AI</Link>
             <button onClick={handleExportPdf} type="button">
               PDF로 내보내기
             </button>
@@ -920,6 +1051,94 @@ export function ReportAgentPage({ data }: { data: WorkspaceData["reportAgent"] }
                 />
                 <button type="submit">→</button>
               </form>
+            </section>
+
+            <section className="report-agent-candidate-card">
+              <div className="report-agent-candidate-head">
+                <div>
+                  <strong>Candidate Review</strong>
+                  <p>저장성 결과는 확정 전 후보로만 다룹니다</p>
+                </div>
+                <span>backend candidate</span>
+              </div>
+
+              <div className="report-agent-candidate-actions">
+                <button disabled={isGeneratingReport || !meetingId} onClick={handleGenerateReportCandidate} type="button">
+                  {isGeneratingReport ? "생성 중..." : "회의록 candidate 생성"}
+                </button>
+                <button onClick={handleExtractTaskCandidates} type="button">태스크 후보 추출</button>
+              </div>
+
+              {reportGenerationError ? <p className="report-agent-candidate-error">{reportGenerationError}</p> : null}
+
+              {reportCandidate ? (
+                <div className="report-agent-report-candidate">
+                  <div className="report-agent-report-candidate-top">
+                    <strong>회의록 후보</strong>
+                    <span>candidate</span>
+                  </div>
+                  <p>{reportCandidate.summary}</p>
+                  <div className="report-agent-bubble-tags">
+                    {reportCandidate.sources.map((source) => (
+                      <span key={source}>{source}</span>
+                    ))}
+                  </div>
+                  <button
+                    disabled
+                    type="button"
+                  >
+                    확정 기능 준비 중
+                  </button>
+                </div>
+              ) : null}
+
+              {taskCandidates.length ? (
+                <div className="report-agent-task-candidates">
+                  {taskCandidates.map((candidate) => (
+                    <div key={candidate.id} className="report-agent-task-candidate">
+                      <div className="report-agent-task-candidate-top">
+                        <strong>{candidate.status === "candidate" ? "검토 대기" : "등록 승인"}</strong>
+                        <span>{candidate.sourceIds[0]}</span>
+                      </div>
+                      <label>
+                        <span>제목</span>
+                        <input
+                          onChange={(event) => handleUpdateTaskCandidate(candidate.id, { title: event.target.value })}
+                          value={candidate.title}
+                        />
+                      </label>
+                      <div className="report-agent-task-candidate-grid">
+                        <label>
+                          <span>담당자</span>
+                          <input
+                            onChange={(event) => handleUpdateTaskCandidate(candidate.id, { assignee: event.target.value })}
+                            value={candidate.assignee}
+                          />
+                        </label>
+                        <label>
+                          <span>마감일</span>
+                          <input
+                            onChange={(event) => handleUpdateTaskCandidate(candidate.id, { dueDate: event.target.value })}
+                            type="date"
+                            value={candidate.dueDate}
+                          />
+                        </label>
+                      </div>
+                      <button
+                        disabled={candidate.status === "registered"}
+                        onClick={() => handleRegisterTaskCandidate(candidate.id)}
+                        type="button"
+                      >
+                        칸반 등록 승인
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <p className="report-agent-candidate-gap">
+                실제 저장, 확정, 칸반 등록은 Backend report/task-candidate API 연결 후 서버 권한 검증과 감사 로그로 처리합니다.
+              </p>
             </section>
           </aside>
         </main>

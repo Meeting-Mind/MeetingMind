@@ -1,33 +1,21 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { chatMeetingAi } from "../api/workspace";
+import type { AuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
-const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL ?? "http://localhost:8000";
+type ChatMessage = { role: "user" | "ai"; text: string; sources?: string[]; unsupported?: boolean };
 
-type ChatMessage = { role: "user" | "ai"; text: string };
-
-type MeetingAiAskResponse = {
-  answer: string;
-  model: string;
-};
-
-export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
+export function MeetingAiPage({ data, session }: { data: WorkspaceData["meetingAi"]; session: AuthSession | null }) {
+  const [searchParams] = useSearchParams();
+  const meetingId = searchParams.get("meetingId");
   const [messages, setMessages] = useState<ChatMessage[]>(data.chat);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [modelLabel, setModelLabel] = useState("");
 
-  const canSubmit = input.trim().length > 0 && !loading;
-
-  const payloadSource = useMemo(
-    () => ({
-      transcript: data.transcript,
-      decisions: data.decisions,
-      actions: data.actions
-    }),
-    [data.actions, data.decisions, data.transcript]
-  );
+  const canSubmit = input.trim().length > 0 && !loading && Boolean(meetingId);
 
   useEffect(() => {
     document.body.className = "app-theme";
@@ -49,27 +37,25 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
     setLoading(true);
 
     try {
-      const response = await fetch(`${AI_API_BASE_URL}/api/meeting-ai/ask`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          question: trimmed,
-          transcript: payloadSource.transcript,
-          decisions: payloadSource.decisions,
-          actions: payloadSource.actions
-        })
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || `Meeting AI 요청 실패 (${response.status})`);
+      if (!meetingId) {
+        throw new Error("회의 식별자가 필요합니다.");
       }
-
-      const result = (await response.json()) as MeetingAiAskResponse;
+      if (!session) {
+        throw new Error("로그인이 필요합니다.");
+      }
+      const result = await chatMeetingAi(session, meetingId, {
+        question: trimmed
+      });
       setModelLabel(result.model);
-      setMessages((previous) => [...previous, { role: "ai", text: result.answer }]);
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "ai",
+          text: result.unsupported ? "확인 가능한 근거가 없어 답변할 수 없습니다." : result.answer,
+          sources: result.sources.map((source) => `${source.title} · ${source.type}`),
+          unsupported: result.unsupported
+        }
+      ]);
     } catch (fetchError) {
       const message =
         fetchError instanceof Error
@@ -80,7 +66,7 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
         ...previous,
         {
           role: "ai",
-          text: "Meeting AI 서비스에 연결하지 못했습니다. AI 서버와 OPENAI_API_KEY 설정을 확인해주세요."
+          text: "Meeting AI 서비스에 연결하지 못했습니다. Backend와 AI 서버 연결 상태를 확인해주세요."
         }
       ]);
     } finally {
@@ -195,6 +181,14 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
               {messages.map((message, index) => (
                 <div key={`${message.role}-${index}`} className={`bubble ${message.role}`}>
                   {message.text}
+                  {message.sources?.length ? (
+                    <div className="meeting-ai-source-list">
+                      {message.sources.map((source) => (
+                        <span key={`${message.role}-${index}-${source}`}>{source}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.unsupported ? <div className="meeting-ai-unsupported">근거 없음</div> : null}
                 </div>
               ))}
               {loading ? <div className="bubble ai">답변 생성 중입니다...</div> : null}
@@ -204,13 +198,14 @@ export function MeetingAiPage({ data }: { data: WorkspaceData["meetingAi"] }) {
               <strong>추천 질문</strong>
               <div className="quick-list">
                 {data.suggestions.map((item) => (
-                  <button key={item.label} onClick={() => void askMeetingAi(item.label)} type="button">
+                  <button disabled={!meetingId || loading} key={item.label} onClick={() => void askMeetingAi(item.label)} type="button">
                     {item.label}
                   </button>
                 ))}
               </div>
             </div>
 
+            {!meetingId ? <div className="meeting-ai-error">회의 목록에서 Meeting AI로 진입하면 현재 회의 범위로 질문할 수 있습니다.</div> : null}
             {error ? <div className="meeting-ai-error">{error}</div> : null}
 
             <form className="chat-input-row" onSubmit={handleSubmit}>

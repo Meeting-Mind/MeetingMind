@@ -57,6 +57,7 @@ class WorkspaceArtifactModelTest {
                 MeetingReportStatus.CANDIDATE,
                 "API 구조 논의 회의록",
                 "권한 모델과 API 구조를 논의했다.",
+                "## 요약\n권한 모델과 API 구조를 논의했다.",
                 List.of(new MeetingReport.ReportDecision(
                         "decision-1",
                         "회의 권한 분리",
@@ -70,6 +71,8 @@ class WorkspaceArtifactModelTest {
                         "2026-07-12",
                         List.of("segment-2")
                 )),
+                List.of("segment-1", "segment-2"),
+                "user-backend",
                 1,
                 false,
                 NOW
@@ -78,6 +81,8 @@ class WorkspaceArtifactModelTest {
         assertThat(report.status()).isEqualTo(MeetingReportStatus.CANDIDATE);
         assertThat(report.version()).isEqualTo(1);
         assertThat(report.current()).isFalse();
+        assertThat(report.createdBy()).isEqualTo("user-backend");
+        assertThat(report.sourceIds()).containsExactly("segment-1", "segment-2");
         assertThat(report.decisions().getFirst().sourceIds()).containsExactly("segment-1");
         assertThat(report.actionItems().getFirst().sourceIds()).containsExactly("segment-2");
         assertThatThrownBy(() -> report.decisions().add(new MeetingReport.ReportDecision(

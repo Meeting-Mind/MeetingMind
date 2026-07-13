@@ -92,9 +92,18 @@ async function authRequest(path: string, body: Record<string, string>): Promise<
 
 async function readErrorMessage(response: Response) {
   try {
-    const payload = (await response.json()) as { message?: string };
-    return payload.message;
+    const text = await response.text();
+    if (!text) {
+      return "";
+    }
+
+    try {
+      const payload = JSON.parse(text) as { message?: string };
+      return payload.message || text;
+    } catch {
+      return text;
+    }
   } catch {
-    return response.text();
+    return "";
   }
 }

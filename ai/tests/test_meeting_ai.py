@@ -4,20 +4,34 @@ from unittest.mock import patch
 
 from app.main import (
     AiSource,
+    BackendGenerateReportRequest,
+    BackendMeetingAiChatRequest,
+    BackendMeetingAiSource,
+    BackendProjectAiChatRequest,
+    BackendProjectAiSource,
     ExplainTermRequest,
     ExtractTasksRequest,
     GlossaryItem,
     MeetingAiChatRequest,
     TranscriptRow,
     ai_observability_fields,
+    backend_meeting_ai_chat,
+    backend_meeting_ai_generate_report,
+    backend_meeting_chat,
+    backend_generate_report,
+    backend_project_ai_chat,
+    backend_project_chat,
     explain_term,
     extract_tasks,
     meeting_ai_chat,
     meeting_chat,
     parse_report_response,
     parse_task_candidates_response,
+    validation_exception_handler,
 )
 from app.rag import InMemoryRagRetriever, RagChunk, RagSearchRequest, chunk_to_source
+from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 
 
 class ExplainTermTest(unittest.TestCase):
@@ -219,6 +233,287 @@ class RagSafetyTest(unittest.TestCase):
         self.assertTrue(response.unsupported)
         self.assertEqual(response.sources, [])
         self.assertEqual(response.model, "context-only")
+
+    def test_backend_meeting_chat_requires_matching_source_meeting_id(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            question="후속 작업은?",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-999",
+                    type="transcript",
+                    meetingId="meeting-999",
+                    title="다른 회의",
+                    text="다른 회의의 후속 작업입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_meeting_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_meeting_chat_searches_report_sources(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            meetingTitle="주간 회의",
+            question="결정된 리스크 대응은?",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="report-001",
+                    type="report",
+                    meetingId="meeting-001",
+                    title="주간 회의록",
+                    text="리스크 대응은 QA 체크리스트를 먼저 보완하기로 결정했습니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", return_value=("QA 체크리스트 보완입니다.", "test-model")):
+            response = backend_meeting_chat(payload)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(response.model, "test-model")
+        self.assertEqual(response.sources[0].sourceId, "report-001")
+        self.assertEqual(response.sources[0].type, "report")
+
+    def test_backend_meeting_chat_maps_provider_error_to_503(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            question="후속 작업은?",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    meetingId="meeting-001",
+                    text="후속 작업은 ERD 문서화입니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", side_effect=HTTPException(status_code=502, detail="boom")):
+            with self.assertRaises(HTTPException) as raised:
+                backend_meeting_ai_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
+
+    def test_backend_meeting_chat_validation_error_uses_contract_shape(self):
+        response = validation_exception_handler(None, RequestValidationError([]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.body.decode("utf-8"))["code"], "INVALID_REQUEST")
+
+    def test_backend_generate_report_rejects_source_from_another_meeting(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-999",
+                    type="transcript",
+                    meetingId="meeting-999",
+                    text="다른 회의 내용입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_generate_report(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_generate_report_rejects_report_source_type(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="report-001",
+                    type="report",
+                    meetingId="meeting-001",
+                    text="기존 보고서입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_generate_report(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_generate_report_returns_unsupported_without_sources(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+        )
+
+        with patch("app.main.call_openai_text") as call_openai_text:
+            response = backend_generate_report(payload)
+
+        call_openai_text.assert_not_called()
+        self.assertTrue(response.unsupported)
+        self.assertEqual(response.sources, [])
+        self.assertEqual(response.model, "context-only")
+
+    def test_backend_generate_report_preserves_filtered_sources(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    meetingId="meeting-001",
+                    title="주간 회의",
+                    speaker="김진수",
+                    startMs=1000,
+                    endMs=5000,
+                    text="권한 필터를 먼저 적용합니다.",
+                )
+            ],
+        )
+
+        with patch(
+            "app.main.call_openai_text",
+            return_value=(
+                '{"summary":"요약","decisions":[],"actionItems":[],"markdown":"## 요약"}',
+                "test-model",
+            ),
+        ):
+            response = backend_generate_report(payload)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(response.model, "test-model")
+        self.assertEqual(response.sources[0].sourceId, "segment-001")
+        self.assertEqual(response.sources[0].startMs, 1000)
+
+    def test_backend_generate_report_maps_provider_error_to_503(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    meetingId="meeting-001",
+                    text="회의 내용입니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", side_effect=HTTPException(status_code=502, detail="boom")):
+            with self.assertRaises(HTTPException) as raised:
+                backend_meeting_ai_generate_report(payload)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
+
+    def test_backend_project_chat_rejects_source_from_another_project(self):
+        payload = BackendProjectAiChatRequest(
+            projectId="space-001",
+            question="권한 정책은?",
+            sources=[
+                BackendProjectAiSource(
+                    sourceId="knowledge-999",
+                    type="projectKnowledge",
+                    projectId="space-999",
+                    text="다른 프로젝트 지식입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_project_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_project_chat_rejects_disallowed_meeting_source(self):
+        payload = BackendProjectAiChatRequest(
+            projectId="space-001",
+            question="권한 정책은?",
+            allowedMeetingIds=["meeting-allowed"],
+            sources=[
+                BackendProjectAiSource(
+                    sourceId="report-denied",
+                    type="meetingSummary",
+                    projectId="space-001",
+                    meetingId="meeting-denied",
+                    text="접근할 수 없는 회의 요약입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_project_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_project_chat_keeps_official_and_meeting_source_types(self):
+        payload = BackendProjectAiChatRequest(
+            projectId="space-001",
+            question="권한 필터는?",
+            allowedMeetingIds=["meeting-001"],
+            sources=[
+                BackendProjectAiSource(
+                    sourceId="knowledge-001",
+                    type="projectKnowledge",
+                    projectId="space-001",
+                    title="권한 정책",
+                    text="Project AI는 권한 필터를 먼저 적용합니다.",
+                ),
+                BackendProjectAiSource(
+                    sourceId="report-001",
+                    type="meetingSummary",
+                    projectId="space-001",
+                    meetingId="meeting-001",
+                    title="권한 회의록",
+                    text="회의에서 권한 필터 적용을 결정했습니다.",
+                ),
+            ],
+        )
+
+        with patch("app.main.call_openai_text", return_value=("권한 필터를 먼저 적용합니다.", "test-model")):
+            response = backend_project_chat(payload)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(response.model, "test-model")
+        self.assertEqual({source.type for source in response.sources}, {"projectKnowledge", "meetingSummary"})
+
+    def test_backend_project_chat_maps_provider_error_to_503(self):
+        payload = BackendProjectAiChatRequest(
+            projectId="space-001",
+            question="권한 정책은?",
+            sources=[
+                BackendProjectAiSource(
+                    sourceId="knowledge-001",
+                    type="projectKnowledge",
+                    projectId="space-001",
+                    text="권한 정책입니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", side_effect=HTTPException(status_code=502, detail="boom")):
+            with self.assertRaises(HTTPException) as raised:
+                backend_project_ai_chat(payload)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
 
     def test_task_extraction_does_not_call_llm_without_sources(self):
         payload = ExtractTasksRequest(meetingId="meeting-001", title="주간 회의")

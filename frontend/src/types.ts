@@ -46,6 +46,16 @@ export interface MeetingAccessMember {
   note: string;
 }
 
+export interface ProjectOverviewMeeting {
+  id?: string;
+  index: string;
+  title: string;
+  date: string;
+  state: string;
+  scheduledAt?: ApiDateTime;
+  durationMinutes?: number;
+}
+
 export type ApiDateTime = string;
 export type ApiDate = string;
 
@@ -92,6 +102,22 @@ export interface CreateSpaceResponse {
   createdAt: ApiDateTime;
 }
 
+export interface UpdateSpaceRequest {
+  name?: string;
+  description?: string | null;
+}
+
+export interface UpdateSpaceResponse {
+  id: string;
+  name: string;
+  description: string | null;
+  updatedAt: ApiDateTime;
+}
+
+export interface DeleteSpaceResponse {
+  deleted: boolean;
+}
+
 export interface MeetingSummary {
   id: string;
   spaceId: string;
@@ -105,6 +131,37 @@ export interface MeetingListResponse {
   meetings: MeetingSummary[];
 }
 
+export interface UpdateMeetingRequest {
+  title?: string;
+  scheduledAt?: ApiDateTime;
+  status?: MeetingStatus;
+}
+
+export interface UpdateMeetingResponse {
+  id: string;
+  title: string;
+  scheduledAt: ApiDateTime;
+  status: MeetingStatus;
+}
+
+export interface DeleteMeetingResponse {
+  deleted: boolean;
+}
+
+export interface CalendarEvent {
+  id: string;
+  spaceId: string;
+  meetingId: string;
+  title: string;
+  startsAt: ApiDateTime;
+  endsAt: ApiDateTime;
+  status: MeetingStatus;
+}
+
+export interface CalendarEventsResponse {
+  events: CalendarEvent[];
+}
+
 export interface MeetingParticipantSummary {
   id: string;
   userId: string;
@@ -113,6 +170,59 @@ export interface MeetingParticipantSummary {
   role: MeetingRole;
   participantType: ParticipantType;
   accessStatus: ParticipantAccessStatus;
+}
+
+export interface MeetingParticipantsResponse {
+  participants: MeetingParticipantSummary[];
+}
+
+export interface AddMeetingParticipantRequest {
+  userId: string;
+  role: MeetingRole;
+  participantType: ParticipantType;
+}
+
+export interface AddMeetingParticipantResponse {
+  participantId: string;
+  role: MeetingRole;
+  accessStatus: ParticipantAccessStatus;
+}
+
+export interface UpdateMeetingParticipantRequest {
+  role?: MeetingRole;
+  accessStatus?: ParticipantAccessStatus;
+}
+
+export interface UpdateMeetingParticipantResponse {
+  participantId: string;
+  role: MeetingRole;
+  accessStatus: ParticipantAccessStatus;
+}
+
+export type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
+
+export interface CreateMeetingInvitationRequest {
+  email: string;
+  meetingRole: MeetingRole;
+  participantType: ParticipantType;
+}
+
+export interface CreateMeetingInvitationResponse {
+  invitationId: string;
+  status: InvitationStatus;
+  expiresAt: ApiDateTime;
+}
+
+export interface ResolveInvitationRequest {
+  token: string;
+}
+
+export interface ResolveMeetingInvitationResponse {
+  participantId?: string;
+  invitationId?: string;
+  role?: MeetingRole;
+  participantType?: ParticipantType;
+  status: InvitationStatus;
 }
 
 export interface MeetingDetail extends MeetingSummary {
@@ -181,6 +291,97 @@ export interface TaskCard {
   sourceCandidateId: string | null;
 }
 
+export interface TaskListResponse {
+  tasks: TaskCard[];
+}
+
+export interface CreateTaskCardRequest {
+  title: string;
+  description?: string | null;
+  assigneeId?: string | null;
+  dueDate?: ApiDate | null;
+  meetingId?: string | null;
+}
+
+export interface CreateTaskCardResponse {
+  id: string;
+  status: TaskCardStatus;
+}
+
+export interface UpdateTaskCardRequest {
+  title?: string;
+  description?: string | null;
+  assigneeId?: string | null;
+  dueDate?: ApiDate | null;
+  status?: TaskCardStatus;
+}
+
+export interface UpdateTaskCardResponse {
+  id: string;
+  status: TaskCardStatus;
+  updatedAt: ApiDateTime;
+}
+
+export interface DeleteTaskCardResponse {
+  deleted: boolean;
+}
+
+export interface SpaceMemberSummary {
+  id: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  role: SpaceRole;
+  joinedAt: ApiDateTime;
+}
+
+export interface SpaceMembersResponse {
+  members: SpaceMemberSummary[];
+}
+
+export interface CreateSpaceInvitationRequest {
+  email: string;
+  role: Exclude<SpaceRole, "OWNER">;
+}
+
+export interface CreateSpaceInvitationResponse {
+  invitationId: string;
+  status: InvitationStatus;
+  expiresAt: ApiDateTime;
+}
+
+export interface ResolveSpaceInvitationResponse {
+  memberId?: string;
+  invitationId?: string;
+  role?: SpaceRole;
+  status: InvitationStatus;
+}
+
+export interface UpdateSpaceMemberRoleRequest {
+  role: Exclude<SpaceRole, "OWNER">;
+}
+
+export interface UpdateSpaceMemberRoleResponse {
+  memberId: string;
+  role: SpaceRole;
+}
+
+export interface RemoveSpaceMemberResponse {
+  removed: boolean;
+}
+
+export interface OwnerTransferRequest {
+  targetMemberId: string;
+  previousOwnerRole: Exclude<SpaceRole, "OWNER">;
+  confirmation: string;
+}
+
+export interface OwnerTransferResponse {
+  ownerMemberId: string;
+  previousOwnerMemberId: string;
+  previousOwnerRole: Exclude<SpaceRole, "OWNER">;
+}
+
 export interface SpaceDetail {
   id: string;
   name: string;
@@ -190,6 +391,21 @@ export interface SpaceDetail {
   recentReports: ReportSummary[];
   actionItems: TaskCard[];
   aiEntrypoints: Array<"project-ai" | "meeting-ai">;
+}
+
+export interface DashboardRecentActivity {
+  id: string;
+  spaceId: string;
+  title: string;
+  occurredAt: ApiDateTime;
+  type: "meeting" | "report" | "task" | "space";
+}
+
+export interface DashboardSummaryResponse {
+  todayMeetings: CalendarEvent[];
+  recentActivities: DashboardRecentActivity[];
+  spaces: SpaceSummary[];
+  actionItems: TaskCard[];
 }
 
 export interface AiSource {
@@ -218,11 +434,134 @@ export interface ProjectAiChatRequest {
   meetings: ProjectAiMeetingContext[];
 }
 
+export interface MeetingAiChatRequest {
+  projectId: string;
+  meetingId: string;
+  meetingTitle: string;
+  question: string;
+  transcript: TranscriptRow[];
+  decisions: LabeledItem[];
+  actions: LabeledItem[];
+}
+
 export interface AiChatResponse {
   answer: string;
   sources: AiSource[];
   unsupported: boolean;
   model: string;
+}
+
+export interface ReportCandidateDecision {
+  id: string;
+  title: string;
+  rationale: string | null;
+  sourceIds: string[];
+}
+
+export interface ReportCandidateActionItem {
+  id: string;
+  title: string;
+  assignee: string | null;
+  dueDate: string | null;
+  confirmationState: "candidate";
+  sourceIds: string[];
+}
+
+export interface StoredReportCandidate {
+  id: string;
+  meetingId: string;
+  status: "CANDIDATE";
+  title: string;
+  summary: string;
+  markdown: string;
+  decisions: ReportCandidateDecision[];
+  actionItems: ReportCandidateActionItem[];
+  sourceIds: string[];
+  createdBy: string;
+  version: number;
+  isCurrent: false;
+  createdAt: ApiDateTime;
+}
+
+export interface ReportCandidateResponse {
+  candidate: StoredReportCandidate | null;
+  sources: AiSource[];
+  unsupported: boolean;
+  model: string;
+}
+
+export interface ExtractTaskCandidatesRequest {
+  projectId: string;
+  meetingId: string;
+  title: string;
+  transcript: TranscriptRow[];
+  summary: string;
+  participants: Array<{
+    name: string;
+    role: MeetingRole;
+  }>;
+}
+
+export interface AiTaskCandidate {
+  title: string;
+  assignee: string | null;
+  dueDate: ApiDate | null;
+  sourceIds: string[];
+  confirmationState: "candidate";
+}
+
+export interface ExtractTaskCandidatesResponse {
+  tasks: AiTaskCandidate[];
+  sources: AiSource[];
+  unsupported: boolean;
+  model: string;
+}
+
+export interface ConfirmReportResponse {
+  id: string;
+  status: "CONFIRMED";
+  version: number;
+  isCurrent: boolean;
+}
+
+export interface UpdateReportRequest {
+  title?: string;
+  summary?: string;
+  markdown?: string;
+}
+
+export interface UpdateReportResponse {
+  id: string;
+  status: "DRAFT";
+  version: number;
+}
+
+export type ReportDownloadFormat = "markdown" | "pdf" | "docx";
+
+export interface TaskCandidateSummary {
+  id: string;
+  meetingId: string;
+  title: string;
+  assigneeName: string | null;
+  dueDate: ApiDate | null;
+  status: "CANDIDATE";
+  sourceIds: string[];
+}
+
+export interface TaskCandidatesResponse {
+  candidates: TaskCandidateSummary[];
+}
+
+export interface ConfirmTaskCandidateRequest {
+  title: string;
+  assigneeId?: string | null;
+  dueDate?: ApiDate | null;
+  status: TaskCardStatus;
+}
+
+export interface ConfirmTaskCandidateResponse {
+  taskId: string;
+  sourceCandidateId: string;
 }
 
 export interface WorkspaceData {
@@ -252,7 +591,7 @@ export interface WorkspaceData {
     overview: MeetingOverview;
     metrics: { label: string; value: string; note: string }[];
     techStack: string;
-    meetings: { index: string; title: string; date: string; state: string }[];
+    meetings: ProjectOverviewMeeting[];
     documents: LabeledItem[];
     questions: LinkItem[];
   };

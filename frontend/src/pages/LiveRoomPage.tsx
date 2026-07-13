@@ -8,6 +8,7 @@ import {
 } from "livekit-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { buildAuthHeaders, readStoredAuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
@@ -28,7 +29,7 @@ type SttStreamStartResponse = {
 
 type SttTranscriptEntry = {
   time: string;
-  speaker: string;
+  displayName: string;
   text: string;
 };
 
@@ -390,12 +391,15 @@ export function LiveRoomPage({
     };
   }, [roomReady, liveMeeting.roomCode]);
 
-  async function startSttStream(roomName: string, trackId: string, speaker: string) {
+  async function startSttStream(roomName: string, trackId: string) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/stt/stream/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomName, trackId, speaker })
+        headers: {
+          "Content-Type": "application/json",
+          ...buildAuthHeaders(readStoredAuthSession())
+        },
+        body: JSON.stringify({ roomName, trackId })
       });
 
       if (!response.ok) {
@@ -512,7 +516,7 @@ export function LiveRoomPage({
             syncSnapshot(room);
             if (!sttStartedRef.current && publication.source === Track.Source.Microphone && publication.trackSid) {
               sttStartedRef.current = true;
-              void startSttStream(liveMeeting.roomCode.toLowerCase(), publication.trackSid, participantProfile.name);
+              void startSttStream(liveMeeting.roomCode.toLowerCase(), publication.trackSid);
             }
           })
           .on(RoomEvent.LocalTrackUnpublished, () => syncSnapshot(room))
@@ -625,7 +629,7 @@ export function LiveRoomPage({
 
   const trimmedSttQuery = sttSearchQuery.trim().toLowerCase();
   const visibleTranscriptRows = trimmedSttQuery
-    ? liveTranscriptRows.filter((row) => `${row.speaker} ${row.text}`.toLowerCase().includes(trimmedSttQuery))
+    ? liveTranscriptRows.filter((row) => `${row.displayName} ${row.text}`.toLowerCase().includes(trimmedSttQuery))
     : liveTranscriptRows;
 
   return (
@@ -731,7 +735,7 @@ export function LiveRoomPage({
                 </p>
               ) : (
                 visibleTranscriptRows.map((row, index) => {
-                  const rowKey = `${row.time}-${row.speaker}-${index}`;
+                  const rowKey = `${row.time}-${row.displayName}-${index}`;
                   const bookmarked = bookmarkedKeys.has(rowKey);
 
                   return (
@@ -746,7 +750,7 @@ export function LiveRoomPage({
                       </button>
                       <div className="lk-live-room-sidebar-feed-meta">
                         <span>{row.time}</span>
-                        <strong>{row.speaker}</strong>
+                        <strong>{row.displayName}</strong>
                       </div>
                       <p>{renderHighlightedText(row.text)}</p>
                     </article>

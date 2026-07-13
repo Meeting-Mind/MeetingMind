@@ -197,6 +197,89 @@ None.
 
 - `recentReports`는 회의 ACL을 통과한 회의록만 포함한다.
 
+## POST /api/v1/spaces/{spaceId}/ai/chat
+
+Backend가 인증과 Project AI 권한 선필터를 적용한 뒤 AI 서버를 호출한다.
+
+### Status
+
+- Target Backend
+- Backend-to-AI integration slice
+
+### Auth and Permissions
+
+- 인증 필요
+- active `SpaceMember`만 호출할 수 있다.
+- meeting guest는 SpaceMember가 아니므로 Project AI를 호출할 수 없다.
+- Backend는 Space 접근을 확인한 뒤 OWNER/ADMIN 또는 active MeetingParticipant가 읽을 수 있는 회의만 선필터한다.
+
+### Data Scope
+
+- Space scope
+- 해당 Space의 `PUBLISHED`, `embeddingStatus=COMPLETED` ProjectKnowledge
+- 사용자가 읽을 수 있는 회의의 current/confirmed report summary
+- Frontend는 source context를 직접 전달하지 않는다.
+
+### Request
+
+```json
+{
+  "question": "권한 관련 남은 리스크가 뭐야?"
+}
+```
+
+### Validation
+
+- `spaceId`: path required
+- `question`: required, blank 금지
+- Backend-to-AI request에는 `allowedMeetingIds`와 already-filtered `sources[]`가 포함되어야 한다.
+
+### Response
+
+```json
+{
+  "answer": "남은 리스크는 실제 pgvector 저장소 연동입니다.",
+  "sources": [
+    {
+      "sourceId": "knowledge-001",
+      "type": "projectKnowledge",
+      "title": "권한 설계 메모",
+      "text": "Project AI는 접근 가능한 회의만 검색한다."
+    }
+  ],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- `401 UNAUTHORIZED`: 인증 실패
+- `403 SPACE_ACCESS_DENIED`: Space 접근 권한 없음 또는 meeting guest 호출
+- `404 SPACE_NOT_FOUND`: Space 없음
+- `503 AI_PROVIDER_UNAVAILABLE`: AI provider 응답 없음
+
+### Audit
+
+- Target: `AI_REQUESTED`
+- Current integration slice: persistent audit log 미구현
+
+### Requirement Trace
+
+- FR-PBOT-01: 프로젝트 질의응답
+- FR-PBOT-02: 접근 가능한 회의만 검색
+- FR-PBOT-03: 공식 지식/회의 기록 출처 구분
+- FR-PBOT-04: 근거 부재 처리
+- NFR-AZ-01: RAG 검색 전 권한 선필터
+- NFR-AZ-02: 권한 통과 데이터만 AI context에 포함
+- NFR-AZ-04: Meeting AI/Project AI 범위 분리
+
+### Notes
+
+- AI 내부 endpoint는 `contracts/ai-api.md`의 `POST /api/internal/project-ai/chat`을 사용한다.
+- 실제 PostgreSQL/pgvector retriever와 대화 이력은 후속 작업이다.
+
 ## PATCH /api/v1/spaces/{spaceId}
 
 Space 정보를 수정한다.

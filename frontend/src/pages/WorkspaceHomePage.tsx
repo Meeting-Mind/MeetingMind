@@ -1,27 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type { WorkspaceData } from "../types";
 
-const catalogLabels = ["DB 설계", "아키텍처", "보안 정책"] as const;
-const catalogDurations = ["32분", "18분", "41분"] as const;
-const catalogDates = ["2일 전", "1일 전", "2일 전"] as const;
-const catalogMembers = ["4명", "12명", "16명"] as const;
-const catalogSummaries = [
-  "3회차 회의에서 논의된 구조 점검과 수정 포인트를 정리한 회의 카드입니다.",
-  "Meeting AI와 Project AI의 검색 범위 및 권한 분리 구조를 정리한 논의입니다.",
-  "자주 사용하는 기술 용어를 프로젝트 사전에 어떻게 축적할지 결정한 회의입니다."
-] as const;
+type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
+type WorkspaceDataSource = "legacy-api" | "mock-fallback";
+type CalendarView = "month" | "week" | "day";
+type CalendarEvent = {
+  id: string;
+  spaceId: string;
+  meetingId?: string;
+  projectName: string;
+  title: string;
+  round: string;
+  startsAt: Date;
+  state: string;
+};
 
-function getMemberInitials(index: number) {
-  const sets = [
-    ["김", "이", "박"],
-    ["정", "김"],
-    ["박", "이"]
-  ];
-
-  return sets[index % sets.length];
-}
+const REFERENCE_DATE = new Date(2026, 6, 10);
+const dashboardFilters = ["전체", "활성 프로젝트", "최근 업데이트"] as const;
 
 function getTotalMeetings(spaces: WorkspaceData["workspaceHome"]["spaces"]) {
   return spaces.reduce((total, space) => {
@@ -36,7 +33,7 @@ function parseMemberCount(value: string) {
 }
 
 function parseUpdatedRank(value: string) {
-  if (value.includes("오늘")) {
+  if (value.includes("방금") || value.includes("오늘")) {
     return 300;
   }
   if (value.includes("어제")) {
@@ -60,12 +57,103 @@ function buildProjectOverviewHref(space: WorkspaceData["workspaceHome"]["spaces"
   return `/project-overview?${params.toString()}`;
 }
 
+function buildMeetingDestination(space: WorkspaceData["workspaceHome"]["spaces"][number], meeting: ProjectMeeting) {
+  const path = meeting.state === "예정" ? "/live-meeting" : "/report-agent";
+  const params = new URLSearchParams({
+    spaceId: space.id,
+    project: space.name,
+    meeting: meeting.title,
+    round: meeting.index.replace("#", "")
+  });
+  if (meeting.id) {
+    params.set("meetingId", meeting.id);
+  }
+
+  return `${path}?${params.toString()}`;
+}
+
+function parseMeetingDate(meeting: ProjectMeeting, fallbackIndex: number) {
+  if (meeting.scheduledAt) {
+    return new Date(meeting.scheduledAt);
+  }
+
+  const [month, day] = meeting.date.split(".").map((value) => Number(value));
+  if (!month || !day) {
+    return new Date(2026, 6, 10 + fallbackIndex);
+  }
+
+  return new Date(2026, month - 1, day, 10 + (fallbackIndex % 5), 0);
+}
+
+function formatDateLabel(date: Date) {
+  return `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatTimeLabel(date: Date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function sameDate(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+}
+
+function getWeekStart(date: Date) {
+  const next = new Date(date);
+  next.setDate(date.getDate() - date.getDay());
+  return next;
+}
+
+function buildCalendarDays(view: CalendarView, selectedDate: Date) {
+  if (view === "day") {
+    return [selectedDate];
+  }
+
+  if (view === "week") {
+    const weekStart = getWeekStart(selectedDate);
+    return Array.from({ length: 7 }, (_, index) => {
+      const next = new Date(weekStart);
+      next.setDate(weekStart.getDate() + index);
+      return next;
+    });
+  }
+
+  const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
+  return Array.from({ length: daysInMonth }, (_, index) => new Date(monthStart.getFullYear(), monthStart.getMonth(), index + 1));
+}
+
+function buildCalendarEvents(
+  spaces: WorkspaceData["workspaceHome"]["spaces"],
+  projectMeetings: Record<string, ProjectMeeting[]>
+) {
+  return spaces.flatMap((space) =>
+    (projectMeetings[space.name] ?? []).map((meeting, index) => ({
+      id: meeting.id ?? `${space.id}-${meeting.index}`,
+      spaceId: space.id,
+      meetingId: meeting.id,
+      projectName: space.name,
+      title: meeting.title,
+      round: meeting.index.replace("#", ""),
+      startsAt: parseMeetingDate(meeting, index),
+      state: meeting.state
+    }))
+  );
+}
+
 export function WorkspaceHomePage({
+  actionItems,
   data,
-  onCreateProject
+  dataSource,
+  onCreateMeeting,
+  onCreateProject,
+  projectMeetings
 }: {
+  actionItems: WorkspaceData["meetingAi"]["actions"];
   data: WorkspaceData["workspaceHome"];
+  dataSource: WorkspaceDataSource;
+  onCreateMeeting?: (projectName: string, payload?: { title?: string; scheduledAt?: string }) => void;
   onCreateProject?: (payload: { name: string; description: string }) => void;
+  projectMeetings: Record<string, ProjectMeeting[]>;
 }) {
   useEffect(() => {
     document.body.className = "app-theme";
@@ -76,39 +164,37 @@ export function WorkspaceHomePage({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "name" | "members">("recent");
-  const [filterBy, setFilterBy] = useState<"all" | (typeof catalogLabels)[number]>("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 6;
+  const [filterBy, setFilterBy] = useState<(typeof dashboardFilters)[number]>("전체");
+  const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [selectedDate, setSelectedDate] = useState(REFERENCE_DATE);
+  const [calendarSpaceId, setCalendarSpaceId] = useState("all");
+  const [meetingTitle, setMeetingTitle] = useState("");
+  const [meetingSpaceId, setMeetingSpaceId] = useState(data.spaces[0]?.id ?? "");
+  const [meetingDateTime, setMeetingDateTime] = useState("2026-07-10T10:00");
   const totalMeetings = getTotalMeetings(data.spaces);
-  const filterOptions: Array<"all" | (typeof catalogLabels)[number]> = ["all", ...catalogLabels];
+  const totalMembers = data.spaces.reduce((total, space) => total + parseMemberCount(space.members), 0);
+  const calendarEvents = useMemo(() => buildCalendarEvents(data.spaces, projectMeetings), [data.spaces, projectMeetings]);
 
-  const catalogSpaces = useMemo(
-    () =>
-      data.spaces.map((space, index) => ({
-        ...space,
-        catalogLabel: catalogLabels[index % catalogLabels.length],
-        catalogDuration: catalogDurations[index % catalogDurations.length],
-        catalogDate: catalogDates[index % catalogDates.length],
-        catalogMembers: catalogMembers[index % catalogMembers.length],
-        catalogSummary: catalogSummaries[index % catalogSummaries.length],
-        initials: getMemberInitials(index),
-        isFeaturedAction: index === 1
-      })),
-    [data.spaces]
-  );
+  useEffect(() => {
+    if (!meetingSpaceId && data.spaces[0]?.id) {
+      setMeetingSpaceId(data.spaces[0].id);
+    }
+  }, [data.spaces, meetingSpaceId]);
 
   const filteredSpaces = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
-
     const searched = normalizedQuery
-      ? catalogSpaces.filter((space) =>
-          `${space.name} ${space.description} ${space.members} ${space.meetings} ${space.catalogLabel} ${space.catalogSummary}`
-            .toLowerCase()
-            .includes(normalizedQuery)
+      ? data.spaces.filter((space) =>
+          `${space.name} ${space.description} ${space.members} ${space.meetings} ${space.updatedAt}`.toLowerCase().includes(normalizedQuery)
         )
-      : catalogSpaces;
+      : data.spaces;
 
-    const filtered = filterBy === "all" ? searched : searched.filter((space) => space.catalogLabel === filterBy);
+    const filtered =
+      filterBy === "활성 프로젝트"
+        ? searched.filter((space) => parseMemberCount(space.members) > 0)
+        : filterBy === "최근 업데이트"
+          ? searched.filter((space) => parseUpdatedRank(space.updatedAt) >= 200)
+          : searched;
 
     const next = [...filtered];
 
@@ -121,146 +207,292 @@ export function WorkspaceHomePage({
     }
 
     return next;
-  }, [catalogSpaces, filterBy, searchQuery, sortBy]);
+  }, [data.spaces, filterBy, searchQuery, sortBy]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredSpaces.length / itemsPerPage));
-  const currentPageSafe = Math.min(currentPage, totalPages);
-  const pagedSpaces = filteredSpaces.slice((currentPageSafe - 1) * itemsPerPage, currentPageSafe * itemsPerPage);
+  const visibleEvents = useMemo(
+    () => calendarEvents.filter((event) => calendarSpaceId === "all" || event.spaceId === calendarSpaceId),
+    [calendarEvents, calendarSpaceId]
+  );
+  const upcomingEvents = useMemo(
+    () =>
+      [...visibleEvents]
+        .filter((event) => event.startsAt >= REFERENCE_DATE)
+        .sort((left, right) => left.startsAt.getTime() - right.startsAt.getTime())
+        .slice(0, 4),
+    [visibleEvents]
+  );
+  const calendarDays = buildCalendarDays(calendarView, selectedDate);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterBy, searchQuery, sortBy]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
+  function handleCreateCalendarMeeting(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const targetSpace = data.spaces.find((space) => space.id === meetingSpaceId);
+    const trimmedTitle = meetingTitle.trim();
+    if (!targetSpace || !trimmedTitle || !meetingDateTime) {
+      return;
     }
-  }, [currentPage, totalPages]);
 
-  const handleCycleFilter = () => {
-    const currentIndex = filterOptions.indexOf(filterBy);
-    const nextIndex = (currentIndex + 1) % filterOptions.length;
-    setFilterBy(filterOptions[nextIndex]);
-  };
+    onCreateMeeting?.(targetSpace.name, {
+      title: trimmedTitle,
+      scheduledAt: new Date(meetingDateTime).toISOString()
+    });
+    setMeetingTitle("");
+  }
 
   return (
     <div className="workspace-catalog-shell workspace-catalog-home-shell">
-      <WorkspaceSidebar activeItem="catalog" disableMembers onCreateProject={onCreateProject} />
+      <WorkspaceSidebar activeItem="catalog" onCreateProject={onCreateProject} />
 
       <main className="workspace-catalog-main workspace-catalog-home-main">
         <div className="workspace-catalog-topbar">
+          <div className="workspace-catalog-data-source" title="개발용 데이터 소스">
+            {dataSource === "legacy-api" ? "API snapshot" : "Mock fallback"}
+          </div>
           <div className="workspace-catalog-top-actions" aria-hidden="true">
             <button className="workspace-catalog-icon-button">🔔</button>
           </div>
         </div>
 
+        <section className="dashboard-summary-grid">
+          <article>
+            <span>프로젝트</span>
+            <strong>{data.spaces.length}개</strong>
+            <p>참여 중인 Space 기준</p>
+          </article>
+          <article>
+            <span>회의</span>
+            <strong>{totalMeetings}건</strong>
+            <p>접근 가능한 일정</p>
+          </article>
+          <article>
+            <span>멤버</span>
+            <strong>{totalMembers}명</strong>
+            <p>프로젝트 멤버 합산</p>
+          </article>
+          <article>
+            <span>최근 활동</span>
+            <strong>{data.recent.length}건</strong>
+            <p>오늘 확인할 업데이트</p>
+          </article>
+        </section>
+
+        <section className="workspace-dashboard-band">
+          <div className="workspace-dashboard-primary">
+            <div className="workspace-dashboard-section-head">
+              <div>
+                <span>Today</span>
+                <strong>{data.todayMeeting.title}</strong>
+              </div>
+              <Link to={data.todayMeeting.href}>회의 대기실</Link>
+            </div>
+            <p>{data.todayMeeting.project} · {data.todayMeeting.time} · {data.todayMeeting.attendees}</p>
+            <p>{data.todayMeeting.note}</p>
+          </div>
+
+          <div className="workspace-dashboard-activity">
+            <div className="workspace-dashboard-section-head">
+              <div>
+                <span>Recent</span>
+                <strong>최근 활동</strong>
+              </div>
+            </div>
+            {data.recent.map((item) => (
+              <div key={`${item.title}-${item.meta}`} className="workspace-dashboard-activity-row">
+                <strong>{item.title}</strong>
+                <span>{item.meta}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="workspace-action-summary">
+          <div className="workspace-dashboard-section-head">
+            <div>
+              <span>Action Items</span>
+              <strong>미완료 작업 요약</strong>
+            </div>
+            <Link to="/project-overview">프로젝트 개요</Link>
+          </div>
+          <div className="workspace-action-summary-list">
+            {actionItems.map((item) => (
+              <div key={`${item.title}-${item.meta}`} className="workspace-action-summary-row">
+                <strong>{item.title}</strong>
+                <span>{item.meta}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="workspace-catalog-controls">
           <div className="workspace-catalog-search">
             <span className="workspace-catalog-search-icon">⌕</span>
             <input
+              aria-label="프로젝트 검색"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="프로젝트명, 설명, 업데이트로 검색"
               type="text"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="회의 제목, 프로젝트로 검색"
-              aria-label="회의 검색"
             />
           </div>
 
           <div className="workspace-catalog-filters">
             <span className="workspace-catalog-filter-label">정렬:</span>
             <select
-              className="workspace-catalog-sort workspace-catalog-sort-select"
-              value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as "recent" | "name" | "members")}
               aria-label="정렬 기준"
+              className="workspace-catalog-sort workspace-catalog-sort-select"
+              onChange={(event) => setSortBy(event.target.value as "recent" | "name" | "members")}
+              value={sortBy}
             >
-              <option value="recent">최근 회의순</option>
+              <option value="recent">최근 업데이트순</option>
               <option value="name">이름순</option>
               <option value="members">멤버 많은순</option>
             </select>
-            <button
-              className={`workspace-catalog-filter-button ${filterBy !== "all" ? "is-active" : ""}`}
-              type="button"
-              onClick={handleCycleFilter}
-              aria-label={`필터 변경: 현재 ${filterBy === "all" ? "전체" : filterBy}`}
-              title="클릭하면 필터가 변경됩니다"
+            <select
+              aria-label="프로젝트 필터"
+              className="workspace-catalog-sort workspace-catalog-sort-select"
+              onChange={(event) => setFilterBy(event.target.value as (typeof dashboardFilters)[number])}
+              value={filterBy}
             >
-              {filterBy === "all" ? "전체" : filterBy}
-            </button>
+              {dashboardFilters.map((filter) => (
+                <option key={filter} value={filter}>{filter}</option>
+              ))}
+            </select>
           </div>
         </section>
 
         <div className="workspace-catalog-heading">
-          <strong>전체 회의 {totalMeetings}건</strong>
+          <strong>프로젝트 {filteredSpaces.length}개</strong>
         </div>
 
         <section className="workspace-catalog-grid">
-          {pagedSpaces.map((space, index) => (
-            <Link
-              key={space.name}
-              className="workspace-catalog-card"
-              to={buildProjectOverviewHref(space)}
-            >
+          {filteredSpaces.map((space, index) => (
+            <Link key={space.id} className="workspace-catalog-card" to={buildProjectOverviewHref(space)}>
               <div className="workspace-catalog-card-time">
                 <span className="workspace-catalog-time-dot" />
-                <strong>{space.catalogDuration}</strong>
+                <strong>{space.updatedAt}</strong>
               </div>
 
               <h2>{space.name}</h2>
-
-              <div className={`workspace-catalog-tag tone-${(index % 3) + 1}`}>{space.catalogLabel}</div>
-
-              <p>{space.catalogSummary}</p>
+              <div className={`workspace-catalog-tag tone-${(index % 3) + 1}`}>{space.meetings}</div>
+              <p>{space.description}</p>
 
               <div className="workspace-catalog-card-footer">
                 <div className="workspace-catalog-avatars" aria-hidden="true">
-                  {space.initials.map((initial, avatarIndex) => (
-                    <span
-                      key={`${space.name}-${initial}-${avatarIndex}`}
-                      className={`workspace-catalog-avatar tone-${((index + avatarIndex) % 3) + 1}`}
-                    >
-                      {initial}
-                    </span>
-                  ))}
-                  <strong>{space.catalogMembers}</strong>
+                  <span className={`workspace-catalog-avatar tone-${(index % 3) + 1}`}>{space.name.slice(0, 1)}</span>
+                  <strong>{space.members}</strong>
                 </div>
-                <span className="workspace-catalog-date">{space.catalogDate}</span>
+                <span className="workspace-catalog-date">Project AI</span>
               </div>
-
-              {space.isFeaturedAction ? <div className="workspace-catalog-card-action">+ 보고서에 추가</div> : null}
             </Link>
           ))}
         </section>
 
+        <section className="workspace-calendar-shell">
+          <div className="workspace-dashboard-section-head">
+            <div>
+              <span>Calendar</span>
+              <strong>회의 일정</strong>
+            </div>
+            <div className="workspace-calendar-view-tabs">
+              {(["month", "week", "day"] as CalendarView[]).map((view) => (
+                <button key={view} className={calendarView === view ? "active" : ""} onClick={() => setCalendarView(view)} type="button">
+                  {view === "month" ? "월" : view === "week" ? "주" : "일"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="workspace-calendar-toolbar">
+            <select
+              aria-label="캘린더 프로젝트 필터"
+              onChange={(event) => setCalendarSpaceId(event.target.value)}
+              value={calendarSpaceId}
+            >
+              <option value="all">전체 프로젝트</option>
+              {data.spaces.map((space) => (
+                <option key={space.id} value={space.id}>{space.name}</option>
+              ))}
+            </select>
+            <input
+              aria-label="캘린더 기준 날짜"
+              onChange={(event) => setSelectedDate(new Date(event.target.value))}
+              type="date"
+              value={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`}
+            />
+          </div>
+
+          <div className={`workspace-calendar-grid ${calendarView}`}>
+            {calendarDays.map((day) => {
+              const dayEvents = visibleEvents.filter((event) => sameDate(event.startsAt, day));
+              return (
+                <div key={day.toISOString()} className={`workspace-calendar-day ${sameDate(day, REFERENCE_DATE) ? "today" : ""}`}>
+                  <span>{formatDateLabel(day)}</span>
+                  {dayEvents.length ? (
+                    dayEvents.map((event) => {
+                      const space = data.spaces.find((item) => item.id === event.spaceId);
+                      const meeting = projectMeetings[event.projectName]?.find((item) => (item.id ?? `${event.spaceId}-${item.index}`) === event.id);
+                      return space && meeting ? (
+                        <Link key={event.id} to={buildMeetingDestination(space, meeting)}>
+                          <strong>{formatTimeLabel(event.startsAt)} {event.title}</strong>
+                          <small>{event.projectName} · {event.state}</small>
+                        </Link>
+                      ) : null;
+                    })
+                  ) : (
+                    <em>일정 없음</em>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="workspace-calendar-bottom">
+            <div className="workspace-calendar-upcoming">
+              <strong>다가오는 회의</strong>
+              {upcomingEvents.length ? (
+                upcomingEvents.map((event) => (
+                  <div key={`upcoming-${event.id}`} className="workspace-calendar-upcoming-row">
+                    <span>{formatDateLabel(event.startsAt)} {formatTimeLabel(event.startsAt)}</span>
+                    <strong>{event.projectName} · {event.title}</strong>
+                  </div>
+                ))
+              ) : (
+                <p>선택한 범위에 예정 회의가 없습니다.</p>
+              )}
+            </div>
+
+            <form className="workspace-calendar-create" onSubmit={handleCreateCalendarMeeting}>
+              <strong>회의 일정 생성</strong>
+              <select
+                aria-label="회의 생성 프로젝트"
+                onChange={(event) => setMeetingSpaceId(event.target.value)}
+                value={meetingSpaceId}
+              >
+                {data.spaces.map((space) => (
+                  <option key={space.id} value={space.id}>{space.name}</option>
+                ))}
+              </select>
+              <input
+                aria-label="회의 제목"
+                onChange={(event) => setMeetingTitle(event.target.value)}
+                placeholder="회의 제목"
+                type="text"
+                value={meetingTitle}
+              />
+              <input
+                aria-label="회의 시작 일시"
+                onChange={(event) => setMeetingDateTime(event.target.value)}
+                type="datetime-local"
+                value={meetingDateTime}
+              />
+              <button disabled={!meetingTitle.trim() || !meetingSpaceId} type="submit">일정 추가</button>
+            </form>
+          </div>
+        </section>
+
         <section className="workspace-catalog-footer">
           <span>
-            검색 결과 {filteredSpaces.length}개 · 페이지 {currentPageSafe}/{totalPages}
+            검색 결과 {filteredSpaces.length}개 · 회의 {totalMeetings}건
           </span>
-          <div className="workspace-catalog-pagination">
-            <button type="button" onClick={() => setCurrentPage(1)} disabled={currentPageSafe === 1}>
-              {"‹‹"}
-            </button>
-            <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPageSafe === 1}>
-              {"‹"}
-            </button>
-            {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
-              <button
-                key={page}
-                className={page === currentPageSafe ? "active" : ""}
-                type="button"
-                onClick={() => setCurrentPage(page)}
-              >
-                {page}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              disabled={currentPageSafe === totalPages}
-            >
-              {"›"}
-            </button>
-          </div>
         </section>
       </main>
     </div>

@@ -47,7 +47,8 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 
 - `.specify/templates/*`: 새 스펙/계획/작업 문서를 만들 때
 - `.specify/skills/*`: 특정 도메인 절차가 필요할 때
-- `.specify/memory/session-handoff.md`: 이전 세션 작업 맥락을 이어받을 때
+- `.specify/memory/session-handoff.md`: 병합된 팀 공통 기준과 다음 통합 작업을 확인할 때
+- `.specify/memory/session-handoff.local.md`: 존재하는 경우 개인 브랜치와 미완료 작업 맥락을 이어받을 때. Git에 커밋하지 않는다.
 - `requirements/INDEX.md`: 새 기능, API, 데이터 모델, 권한, AI 동작을 판단할 때
 - `requirements/glossary.md`: 도메인 용어, entity, API/DB 이름을 정할 때
 - `requirements/permissions.md`: SpaceRole, MeetingParticipant, 회의 게스트, AI/RAG 접근 권한을 바꿀 때
@@ -129,6 +130,15 @@ MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 �
 - task가 너무 크면 planning, contract, implementation, verification task로 나눈다.
 - task마다 milestone, owner, agent, dependency, 예상 수정 파일, 완료 기준을 드러낸다.
 - 여러 에이전트가 병렬 처리하기 쉽도록 dependency가 없는 task와 순차 처리 task를 구분한다.
+
+### Session Handoff 작성 규칙
+
+- `.specify/memory/session-handoff.md`는 팀 공용 파일이다. 병합 후에도 유효한 공통 기준, 현재 통합 경계, 다음 shared milestone만 기록한다.
+- 공용 handoff에는 개인 이름, 작업 브랜치, 로컬 커밋, 미추적 파일, 커밋 전 변경, 개인 TODO를 기록하지 않는다.
+- 개인 세션 상태는 `.specify/memory/session-handoff.example.md`를 복사한 `.specify/memory/session-handoff.local.md`에 기록한다.
+- `.specify/memory/session-handoff.local.md`는 `.gitignore` 대상이며 staging하거나 커밋하지 않는다.
+- 상세 구현 이력과 검증 결과는 `specs/<feature>/implement.md`, 실행 작업 상태는 `tasks.md`, PR 단위 변경은 PR 본문을 기준으로 한다. 공용 handoff에 이를 중복 누적하지 않는다.
+- 공용 handoff를 갱신할 때는 이미 병합되었거나 현재 변경과 함께 병합될 기준만 남기고, 오래된 세션 로그는 삭제한다.
 
 ## Git 협업 지침
 

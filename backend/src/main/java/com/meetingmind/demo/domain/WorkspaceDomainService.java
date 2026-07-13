@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -166,6 +167,78 @@ public class WorkspaceDomainService {
         );
     }
 
+    public MeetingAiContext meetingAiContext(String meetingId) {
+        Meeting meeting = store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        return new MeetingAiContext(
+                meeting,
+                store.findTranscriptSegments(meetingId),
+                store.findMeetingReports(meetingId)
+        );
+    }
+
+    public MeetingReport saveReportCandidate(
+            String meetingId,
+            String createdBy,
+            String title,
+            String summary,
+            String markdown,
+            List<MeetingReport.ReportDecision> decisions,
+            List<MeetingReport.ReportActionItem> actionItems,
+            List<String> sourceIds
+    ) {
+        requireUser(createdBy);
+        store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        int nextVersion = store.findMeetingReports(meetingId).stream()
+                .mapToInt(MeetingReport::version)
+                .max()
+                .orElse(0) + 1;
+        return store.saveMeetingReport(new MeetingReport(
+                "report-" + UUID.randomUUID(),
+                meetingId,
+                MeetingReportStatus.CANDIDATE,
+                title,
+                summary,
+                markdown,
+                decisions,
+                actionItems,
+                sourceIds,
+                createdBy,
+                nextVersion,
+                false,
+                Instant.now(clock)
+        ));
+    }
+
+    public ProjectAiContext projectAiContext(String spaceId) {
+        Space space = store.findSpaceById(spaceId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "SPACE_NOT_FOUND",
+                        "Space를 찾을 수 없습니다."
+                ));
+        return new ProjectAiContext(space, store.findProjectKnowledge(spaceId), store.findMeetingsBySpaceId(spaceId));
+    }
+
+    public ProjectMeetingContext projectMeetingContext(String meetingId) {
+        Meeting meeting = store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        return new ProjectMeetingContext(meeting, store.findMeetingReports(meetingId));
+    }
+
     private void requireUser(String userId) {
         if (userId == null || userId.isBlank() || store.findUserById(userId).isEmpty()) {
             throw new AuthorizationException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "사용자를 찾을 수 없습니다.");
@@ -197,5 +270,33 @@ public class WorkspaceDomainService {
     }
 
     public record SpaceSummary(Space space, SpaceRole role, long meetingCount) {
+    }
+
+    public record MeetingAiContext(
+            Meeting meeting,
+            List<TranscriptSegment> transcriptSegments,
+            List<MeetingReport> reports
+    ) {
+        public MeetingAiContext {
+            transcriptSegments = transcriptSegments == null ? List.of() : List.copyOf(transcriptSegments);
+            reports = reports == null ? List.of() : List.copyOf(reports);
+        }
+    }
+
+    public record ProjectAiContext(
+            Space space,
+            List<ProjectKnowledge> projectKnowledge,
+            List<Meeting> meetings
+    ) {
+        public ProjectAiContext {
+            projectKnowledge = projectKnowledge == null ? List.of() : List.copyOf(projectKnowledge);
+            meetings = meetings == null ? List.of() : List.copyOf(meetings);
+        }
+    }
+
+    public record ProjectMeetingContext(Meeting meeting, List<MeetingReport> reports) {
+        public ProjectMeetingContext {
+            reports = reports == null ? List.of() : List.copyOf(reports);
+        }
     }
 }

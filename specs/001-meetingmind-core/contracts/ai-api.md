@@ -20,6 +20,17 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 - 저장성 결과는 `candidate` 상태로만 반환한다. 실제 저장/확정은 Backend API가 담당한다.
 - 응답에는 가능한 한 `sources[]`를 포함한다.
 
+## Prototype vs Target Boundary
+
+| Topic | Current Prototype | Target Backend-to-AI |
+| --- | --- | --- |
+| Auth/permission | AI 서버 직접 호출은 인증/인가를 처리하지 않는다. | Backend가 인증, Space/Meeting 권한, RAG 선필터를 먼저 처리한다. |
+| Request strictness | 일부 endpoint는 기존 frontend/prototype 호환을 위해 `meetingId` 또는 `title` fallback을 허용한다. | Backend가 필수 식별자와 source metadata를 채운 strict request만 전달한다. |
+| Source trust | 요청에 포함된 transcript/knowledge/source는 already-filtered prototype input으로 간주한다. | AI 서버는 Backend가 필터링한 context만 받으며, 권한 필터 전 데이터를 받으면 오류로 처리한다. |
+| Error shape | 현재 FastAPI 구현은 provider 설정 누락을 `500`, provider 호출/응답 실패를 `502`로 반환한다. | 공통 오류 계약에 맞춰 `503 AI_PROVIDER_UNAVAILABLE` 또는 Backend adapter 변환을 적용한다. |
+| Audit | AI 서버 observability log만 남기며 persistent audit event는 없다. | Backend가 권한 확인 후 `AI_REQUESTED` audit event를 기록한다. |
+| Report context in chat | Meeting chat request는 transcript/decision/action 중심이다. | Backend context assembly 이후 report chunk도 source metadata와 함께 포함할 수 있다. |
+
 ## POST /api/meeting-ai/explain-term
 
 회의 중 transcript 또는 Domain Dictionary 기준으로 특정 용어를 설명한다.
@@ -67,8 +78,17 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 ### Validation
 
+Current Prototype:
+
+- `term`: required
+- `meetingId`: optional. 생략하면 `prototype-meeting`으로 간주한다.
+- `selectedText`는 transcript 검색 결과가 없을 때 already-filtered prototype context로 source화될 수 있다.
+
+Target Backend-to-AI:
+
 - `meetingId`, `term`: required
-- Backend target에서는 context가 해당 meeting 범위인지 검증한다.
+- Backend가 meeting 접근 권한을 검증하고 해당 meeting source만 전달한다.
+- 선택 텍스트는 Backend가 source metadata를 붙이거나 이미 필터링된 source로 변환해야 한다.
 
 ### Response
 
@@ -94,11 +114,13 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: Target에서 권한 필터 전 데이터가 전달됨
-- `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
+- Current Prototype: provider 설정 누락은 `500`, provider 호출/응답 실패는 `502`
+- Target: `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
 
 ### Audit
 
-- `AI_REQUESTED`
+- Current Prototype: AI server observability log only
+- Target: Backend records `AI_REQUESTED`
 
 ### Requirement Trace
 
@@ -115,17 +137,15 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 ## POST /api/meeting-ai/chat
 
-회의별 챗봇이다. 단일 회의 transcript, decision, action item, report 근거만 사용한다.
+회의별 챗봇 prototype endpoint다. Current Prototype은 단일 회의 transcript, decision, action item 근거를 사용한다.
 
 ### Status
 
 - Current Prototype
-- Backend-to-AI Internal target 후보
 
 ### Auth and Permissions
 
 - AI 서버 직접 호출 시 인증은 prototype 범위 밖이다.
-- Target에서는 Backend가 meeting 접근 권한을 확인하고 already-filtered context만 전달한다.
 
 ### Data Scope
 
@@ -153,8 +173,108 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 ### Validation
 
+Current Prototype:
+
 - `meetingId`, `question`: required
-- 모든 source의 `meetingId`가 request meeting과 같아야 한다.
+- 요청에 포함된 transcript, decisions, actions는 이미 해당 meeting 범위로 필터링된 값으로 간주한다.
+
+Target Backend-to-AI는 아래 `POST /api/internal/meeting-ai/chat`을 사용한다.
+
+### Response
+
+```json
+{
+  "answer": "김진수의 후속 작업 후보는 ERD 수정안 문서화입니다.",
+  "sources": [
+    {
+      "sourceId": "action-001",
+      "type": "actionItem",
+      "title": "Sprint Planning #12",
+      "text": "김진수 · ERD 수정안 문서화"
+    }
+  ],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- Current Prototype: provider 설정 누락은 `500`, provider 호출/응답 실패는 `502`
+
+### Audit
+
+- Current Prototype: AI server observability log only
+
+### Requirement Trace
+
+- FR-MBOT-01: 회의별 챗봇
+- FR-MBOT-02: 단일 회의 범위 제한
+- FR-MBOT-03: 출처 표시
+- FR-MBOT-04: 근거 부재 처리
+- NFR-AZ-04: Meeting AI/Project AI 검색범위 분리
+
+### Notes
+
+- 검색 결과가 없으면 LLM을 호출하지 않고 `unsupported: true`를 반환한다.
+
+## POST /api/internal/meeting-ai/chat
+
+Backend가 인증/권한 필터와 context 조립을 끝낸 뒤 호출하는 target internal Meeting AI endpoint다.
+
+### Status
+
+- Backend-to-AI Internal target
+
+### Auth and Permissions
+
+- AI 서버는 사용자 인증을 직접 처리하지 않는다.
+- Backend가 meeting 접근 권한을 확인하고 already-filtered context만 전달한다.
+
+### Data Scope
+
+- Meeting scope
+- `request.meetingId` 하나에 속한 `sources[]`만 사용한다.
+- 검색 대상 source type은 `transcript`, `decision`, `actionItem`, `report`다.
+
+### Request
+
+```json
+{
+  "projectId": "project-001",
+  "meetingId": "meeting-001",
+  "meetingTitle": "Sprint Planning #12",
+  "question": "김진수가 맡은 후속 작업이 뭐야?",
+  "sources": [
+    {
+      "sourceId": "segment-001",
+      "type": "transcript",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12",
+      "speaker": "김진수",
+      "time": "00:01:05-00:01:10",
+      "startMs": 65000,
+      "endMs": 70000,
+      "text": "ERD 수정안 문서화가 필요합니다."
+    },
+    {
+      "sourceId": "report-001",
+      "type": "report",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12 회의록",
+      "text": "회의별 ACL 분리와 ERD 수정 필요성이 논의되었습니다."
+    }
+  ]
+}
+```
+
+### Validation
+
+- `meetingId`, `question`: required
+- `sources[].sourceId`, `sources[].type`, `sources[].meetingId`, `sources[].text`: required
+- 모든 source의 `meetingId`는 request `meetingId`와 같아야 한다.
+- source type은 `transcript`, `decision`, `actionItem`, `report`, `meetingSummary`, `projectKnowledge`, `glossary` enum을 따르되, Meeting chat 검색은 `transcript`, `decision`, `actionItem`, `report`만 대상으로 한다.
 
 ### Response
 
@@ -178,11 +298,12 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: 다른 회의 source 포함
-- `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
+- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, provider HTTP 오류, provider connection 실패
 
 ### Audit
 
-- `AI_REQUESTED`
+- AI server observability log only
+- Backend records `AI_REQUESTED` target audit event
 
 ### Requirement Trace
 
@@ -240,9 +361,12 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 ### Validation
 
+Current Prototype:
+
 - `projectId`, `question`: required
-- meeting source는 Backend 권한 필터를 통과한 것만 포함한다.
-- 공식 지식과 회의 근거는 `type`으로 구분 가능해야 한다.
+- 요청의 `projectKnowledge`와 `meetings`는 prototype caller가 이미 허용한 값으로 간주한다.
+
+Target Backend-to-AI는 아래 `POST /api/internal/project-ai/chat`을 사용한다.
 
 ### Response
 
@@ -266,11 +390,13 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: 권한 필터 전 데이터 포함
-- `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
+- Current Prototype: provider 설정 누락은 `500`, provider 호출/응답 실패는 `502`
+- Target: `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
 
 ### Audit
 
-- `AI_REQUESTED`
+- Current Prototype: AI server observability log only
+- Target: Backend records `AI_REQUESTED`
 
 ### Requirement Trace
 
@@ -283,6 +409,107 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 ### Notes
 
 - Guest는 기본적으로 Project AI context에 접근하지 않는다.
+
+## POST /api/internal/project-ai/chat
+
+Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 strict Project AI endpoint다.
+
+### Status
+
+- Backend-to-AI Internal
+
+### Auth and Permissions
+
+- AI 서버는 사용자 인증을 직접 처리하지 않는다.
+- Backend가 active SpaceMember를 확인하고 meeting별 read 권한을 적용한다.
+- meeting guest는 Project AI 호출 대상이 아니다.
+
+### Data Scope
+
+- Project scope
+- `projectKnowledge`: 해당 Space의 `PUBLISHED`, `embeddingStatus=COMPLETED` 공식 지식
+- `meetingSummary`: `allowedMeetingIds`에 포함된 회의의 current/confirmed report summary
+- 실제 transcript/pgvector 검색은 후속 저장소 연동 범위다.
+
+### Request
+
+```json
+{
+  "projectId": "space-001",
+  "question": "권한 관련 남은 리스크가 뭐야?",
+  "allowedMeetingIds": ["meeting-001"],
+  "sources": [
+    {
+      "sourceId": "knowledge-001",
+      "type": "projectKnowledge",
+      "projectId": "space-001",
+      "meetingId": null,
+      "title": "권한 설계 메모",
+      "text": "Project AI는 접근 가능한 회의만 검색한다."
+    },
+    {
+      "sourceId": "report-001",
+      "type": "meetingSummary",
+      "projectId": "space-001",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12 회의록",
+      "text": "회의 ACL과 Project AI 권한 선필터를 논의했다."
+    }
+  ]
+}
+```
+
+### Validation
+
+- `projectId`, `question`: required, blank 금지
+- `sources[].sourceId`, `sources[].type`, `sources[].projectId`, `sources[].text`: required
+- 모든 source의 `projectId`는 request `projectId`와 같아야 한다.
+- source type은 `projectKnowledge`, `meetingSummary`만 허용한다.
+- `meetingSummary.meetingId`는 required이며 `allowedMeetingIds`에 포함되어야 한다.
+- `projectKnowledge.meetingId`는 null이어야 한다.
+
+### Response
+
+```json
+{
+  "answer": "남은 리스크는 Project AI 권한 선필터와 실제 pgvector 저장소 연동입니다.",
+  "sources": [
+    {
+      "sourceId": "knowledge-001",
+      "type": "projectKnowledge",
+      "title": "권한 설계 메모",
+      "text": "Project AI는 접근 가능한 회의만 검색한다."
+    }
+  ],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: schema validation 실패
+- `403 AI_CONTEXT_FORBIDDEN`: project 불일치, 허용되지 않은 meeting source, 잘못된 source type
+- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, provider HTTP/connection 실패
+
+### Audit
+
+- AI server observability log only
+- Backend persistent `AI_REQUESTED` event는 후속 구현
+
+### Requirement Trace
+
+- FR-PBOT-01: 프로젝트 질의응답
+- FR-PBOT-02: 권한 범위 검색
+- FR-PBOT-03: 공식 지식/회의 기록 출처 구분
+- FR-PBOT-04: 근거 부재 처리
+- NFR-AZ-01: 검색 전 권한 선필터
+- NFR-AZ-02: 권한 통과 데이터만 AI context에 포함
+- NFR-AZ-04: Meeting AI/Project AI scope 분리
+
+### Notes
+
+- 검색 결과가 없으면 LLM을 호출하지 않고 `unsupported: true`, `model: context-only`를 반환한다.
 
 ## POST /api/meeting-ai/generate-report
 
@@ -319,6 +546,14 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 ### Validation
 
+Current Prototype:
+
+- `meetingId`: required
+- `title`: optional. 생략하면 `meetingId`를 제목 fallback으로 사용한다.
+- `format`: `markdown`
+
+Target Backend-to-AI:
+
 - `meetingId`, `title`: required
 - `format`: `markdown`
 - source는 해당 meeting 범위여야 한다.
@@ -348,11 +583,13 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: 다른 회의 source 포함
-- `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
+- Current Prototype: provider 설정 누락은 `500`, provider 호출/응답 실패는 `502`
+- Target: `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
 
 ### Audit
 
-- `AI_REQUESTED`
+- Current Prototype: AI server observability log only
+- Target: Backend records `AI_REQUESTED`
 
 ### Requirement Trace
 
@@ -363,6 +600,77 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 ### Notes
 
 - 공식 저장/확정은 `meeting-api.md`의 report endpoint가 담당한다.
+- 기존 Frontend/AI prototype 호환용 endpoint다. Target Frontend는 직접 호출하지 않는다.
+
+## POST /api/internal/meeting-ai/generate-report
+
+Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호출하는 strict 회의록 생성 endpoint다.
+
+### Status
+
+- Target Backend-to-AI Internal
+
+### Auth and Permissions
+
+- 외부 사용자 직접 호출 금지
+- Backend는 `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR` 권한을 먼저 확인한다.
+
+### Data Scope
+
+- 단일 Meeting scope
+- 허용 source type: `transcript`, `decision`, `actionItem`
+
+### Request
+
+```json
+{
+  "projectId": "space-001",
+  "meetingId": "meeting-001",
+  "title": "Sprint Planning #12",
+  "format": "markdown",
+  "sources": [
+    {
+      "sourceId": "segment-001",
+      "type": "transcript",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12",
+      "speaker": "김철수",
+      "startMs": 1000,
+      "endMs": 5000,
+      "text": "권한 필터를 먼저 적용합니다."
+    }
+  ]
+}
+```
+
+### Validation
+
+- `projectId`, `meetingId`, `title`: required
+- `format`: `markdown` only
+- 모든 source의 `meetingId`는 request `meetingId`와 같아야 한다.
+- 허용되지 않은 source type이나 다른 meeting source는 `403 AI_CONTEXT_FORBIDDEN`으로 거부한다.
+
+### Response
+
+- 기존 `POST /api/meeting-ai/generate-report`의 `GenerateReportResponse`와 같다.
+- source가 없으면 LLM을 호출하지 않고 `unsupported=true`, `model=context-only`를 반환한다.
+
+### Errors
+
+- `400 INVALID_REQUEST`: 필수값 또는 format 검증 실패
+- `403 AI_CONTEXT_FORBIDDEN`: source scope/type 검증 실패
+- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정, 호출, 응답 파싱 실패
+
+### Audit
+
+- AI server observability log
+- Backend가 public 요청에 대해 `AI_REQUESTED` 기록 예정
+
+### Requirement Trace
+
+- FR-RPT-01: 단일 회의 근거 기반 AI 회의록 생성
+- FR-RPT-02: candidate 반환
+- NFR-AZ-01, NFR-AZ-04: 권한 선필터와 scope 강제
 
 ## POST /api/meeting-ai/extract-tasks
 
@@ -403,6 +711,14 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 ### Validation
 
+Current Prototype:
+
+- `meetingId`: required
+- `title`: optional. 생략하면 `meetingId`를 제목 fallback으로 사용한다.
+- `participants`는 요청에 포함된 already-filtered prototype context로 간주한다.
+
+Target Backend-to-AI:
+
 - `meetingId`, `title`: required
 - participants는 해당 meeting context에서 파생된 값이어야 한다.
 
@@ -436,11 +752,13 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: 다른 회의 source 포함
-- `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
+- Current Prototype: provider 설정 누락은 `500`, provider 호출/응답 실패는 `502`
+- Target: `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
 
 ### Audit
 
-- `AI_REQUESTED`
+- Current Prototype: AI server observability log only
+- Target: Backend records `AI_REQUESTED`
 
 ### Requirement Trace
 
@@ -485,11 +803,11 @@ Legacy prototype shape.
 ### Errors
 
 - `400 INVALID_REQUEST`: 입력 검증 실패
-- `503 AI_PROVIDER_UNAVAILABLE`: 외부 AI provider 오류
+- Current Prototype: provider 설정 누락은 `500`, provider 호출/응답 실패는 `502`
 
 ### Audit
 
-- No audit event for legacy endpoint.
+- No audit event for legacy endpoint. Observability log only.
 
 ### Requirement Trace
 

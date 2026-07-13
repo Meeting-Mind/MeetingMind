@@ -98,6 +98,9 @@
 | Auth/Login | 사용자(Auth 담당) | Codex | Google OAuth와 자체 회원가입/로그인, Backend 검증 기반 access/refresh token 계약/구현, Frontend 로그인 상태 연결, 보호 route 경계 정의 | `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/config/**`, `backend/src/main/resources/application.yml`, `specs/001-meetingmind-core/contracts/auth-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/research.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Q-001 decided. Auth API는 `/api/v1/auth/*`로 시작하며 Q-006 전체 API 결정과 분리 |
 | Backend | TBD | TBD | Space/Meeting/Knowledge API 분리, 도메인 모델, 권한 검증 | `backend/**`, `specs/001-meetingmind-core/contracts/space-api.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/contracts/kanban-api.md`, `specs/001-meetingmind-core/contracts/knowledge-api.md`, `specs/001-meetingmind-core/contracts/common.md`, `specs/001-meetingmind-core/data-model.md` | Auth/Login contract, Q-002, Docs/Contracts |
 | Frontend | TBD | TBD | Project/Meeting 선택 상태, mock fallback 표시, 화면 연동 | `frontend/**` | API 계약 확정, Auth/Login guard 경계 |
+| Dashboard/Calendar Frontend | 사용자(Frontend 담당) | Codex | FR-DASH-01~07, FR-CAL-01~05 기준의 프로젝트 홈, 프로젝트 관리, 캘린더 월/주/일 뷰, 일정에서 회의 이동 UX | `frontend/src/App.tsx`, `frontend/src/types.ts`, `frontend/src/api/workspace.ts`, `frontend/src/data/mockData.ts`, `frontend/src/pages/WorkspaceHomePage.tsx`, future calendar component/page, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | M006 mock/API 경계, `contracts/space-api.md`, `contracts/meeting-api.md`, Auth/Login guard |
+| Project Workspace Frontend | 사용자(Frontend 담당) | Codex | FR-MREG, FR-ACL, FR-KAN, FR-PBOT, FR-PERM, FR-OWN 기준의 프로젝트 상세, 회의 관리/ACL, 칸반, Project AI, 멤버/오너 관리 UX | `frontend/src/App.tsx`, `frontend/src/types.ts`, `frontend/src/api/workspace.ts`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/TeamMembersPage.tsx`, `frontend/src/pages/MeetingAiPage.tsx`, future kanban component/page, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | M006/M017 state 경계, `contracts/meeting-api.md`, `contracts/kanban-api.md`, `contracts/ai-api.md`, `contracts/space-api.md`, permissions/status-values |
+| Meeting Workspace Frontend | 사용자(Frontend 담당) | Codex | FR-RPT, FR-MBOT, FR-TASK 기준의 Meeting AI, report candidate/편집/확정, 태스크 후보 검토/칸반 등록 UX | `frontend/src/App.tsx`, `frontend/src/types.ts`, `frontend/src/api/workspace.ts`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/pages/LiveRoomPage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | M018 회의 ACL, `contracts/meeting-api.md`, `contracts/ai-api.md`, `contracts/kanban-api.md`, AI prototype endpoints |
 | AI | 사용자 | Codex | 백엔드/프론트엔드 구현 없이 AI 서버에서 RAG chunk 형식, mock/in-memory retriever, 용어 설명, 회의 요약/보고서 생성, 회의별/프로젝트별 챗봇, 태스크 추출 prototype API를 준비한다. Backend 권한 필터 이후 컨텍스트 조립은 target architecture로 유지한다. | `ai/**`, `specs/001-meetingmind-core/*` | Backend 권한 필터, 실제 STT 저장 API, pgvector migration, Frontend 화면 연결은 후속 담당자 작업. 그 전까지 mock 또는 권한 필터링된 prototype context만 사용 |
 | Data | TBD | TBD | PostgreSQL/pgvector 스키마 초안과 migration | `backend/**`, `specs/001-meetingmind-core/data-model.md` | Q-001, Q-002 |
 
@@ -131,6 +134,146 @@
 8. Frontend와 AI는 확정된 계약에 맞춰 병렬 구현한다.
 9. Data migration은 Backend 모델과 맞춘 뒤 순차 통합한다.
 10. Frontend, Backend, AI 권장 검증을 실행하고 통합 흐름을 수동 확인한다.
+
+## Dashboard and Calendar Frontend Plan
+
+FR-DASH/FR-CAL 구현은 현재 prototype 경계를 숨기지 않는다. Backend target API는 Space 생성/목록/회의 생성 일부만 구현되어 있고, Space 수정/삭제, dashboard summary, calendar events는 `contracts/space-api.md`의 target contract 단계다. 따라서 1차 구현은 frontend mock fallback과 local state를 기준으로 화면 흐름을 완성하고, API client/type 이름은 target contract와 맞춰 둔다.
+
+### Scope
+
+- FR-DASH-01/02/06/07: `/spaces`를 프로젝트 대시보드 홈으로 정리한다. 참여 프로젝트 목록, 검색/필터, 오늘 회의, 최근 활동, 미완료 Action Item 요약을 같은 화면에서 제공한다.
+- FR-DASH-03: `/project-overview`는 회의 목록, 최근 문서, Action Item, Project AI 진입점을 유지하되 선택 Space 기준 데이터와 빈 상태가 깨지지 않게 한다.
+- FR-DASH-04/05: 프로젝트 수정/삭제는 owner/admin 권한 UI affordance와 확인 절차를 먼저 구현한다. 현재 prototype은 local state/mock fallback으로 반영하고, target API는 `PATCH /api/v1/spaces/{spaceId}`, `DELETE /api/v1/spaces/{spaceId}`에 연결할 수 있게 client 경계를 둔다.
+- FR-CAL-01/02/03: 월/주/일 전환 가능한 캘린더 뷰를 추가하고 접근 가능한 회의 일정만 표시한다. 일정 클릭은 기존 회의 대기 또는 보고서 화면 라우팅 규칙을 재사용한다.
+- FR-CAL-04: 캘린더에서 회의 일정 생성은 `POST /api/v1/spaces/{spaceId}/meetings`와 같은 request shape를 사용한다. 현재 local state 생성은 제목/일시를 보존하도록 확장한다.
+- FR-CAL-05: 회의 알림은 아직 발송 backend가 없으므로 다가오는 회의 표시와 알림 준비 상태까지만 frontend에서 표현하고, 실제 발송은 후속 backend/notification task로 둔다.
+
+### Implementation Slices
+
+1. 현재 화면/계약 gap을 `implement.md`에 기록하고 M017 task를 확정한다.
+2. Frontend type/API client에 dashboard summary, calendar event, Space update/delete 후보를 추가한다.
+3. `/spaces`를 프로젝트 대시보드 홈으로 정리하고 mock/API 데이터 소스 표시를 낮은 비중으로 추가한다.
+4. 프로젝트 수정/삭제 local flow를 추가하되 owner/admin 권한 문구와 확인 절차를 분리한다.
+5. 캘린더 월/주/일 뷰와 일정 클릭 라우팅을 추가한다.
+6. 캘린더 일정 생성 flow를 기존 회의 생성 local state와 연결한다.
+7. `npm run build`, 주요 route smoke 결과, 미구현 backend gap을 `implement.md`에 기록한다.
+
+## Project Workspace Frontend Plan
+
+FR-MREG/FR-ACL/FR-KAN/FR-PBOT/FR-PERM/FR-OWN 구현은 프로젝트 상세 화면을 단순 정보 카드가 아니라 운영 화면으로 확장하는 작업이다. 핵심 원칙은 Space 멤버십과 MeetingParticipant ACL을 화면 상태에서도 분리하는 것이다. 일반 멤버는 Space에 속해도 명시 MeetingParticipant 또는 owner/admin override가 없으면 회의 상세, Meeting AI, transcript/report 진입점이 제한되어야 한다.
+
+### Scope
+
+- FR-MREG-01/05/06: `/project-overview`의 회의 목록을 생성, 상태 표시, 상태 변경 후보, 회의 상세 진입이 가능한 관리 목록으로 정리한다.
+- FR-MREG-02/03, FR-ACL-01/02/03/04/05/06/07: 회의별 참여자/role UI를 추가한다. `VIEWER`, `EDITOR`, `HOST`, `ACTIVE`, `REVOKED`, owner/admin override, 마지막 active HOST 보호, 삭제 권한 제한을 화면 copy와 disabled state에 반영한다. 감사 로그는 backend target gap이므로 이번 frontend slice에서는 "기록 대상 이벤트"를 UI/문서에 남긴다.
+- FR-KAN-01~08: 프로젝트 안의 TaskCard 칸반을 추가한다. 상태는 `TODO`, `IN_PROGRESS`, `DONE`만 사용하고, drag-and-drop은 새 dependency 없이 HTML drag event 또는 명시 이동 버튼 중 기존 코드에 더 작은 방식을 선택한다.
+- FR-PBOT-01~05: Project AI 패널은 공식 Project Knowledge와 접근 가능한 meeting source를 구분해 출처를 표시한다. backend 권한 선필터가 들어오기 전까지 frontend는 prototype context임을 유지하고, 권한 밖 데이터 혼입을 피하도록 mock source를 선택 Space/허용 회의로 제한한다.
+- FR-PERM-01~05: `TeamMembersPage`의 멤버 목록/초대/요청 승인 흐름을 SpaceMember role 기준으로 정리한다. Space invitation과 Meeting invitation은 같은 UI copy로 섞지 않는다.
+- FR-OWN-01~03: owner transfer는 별도 확인 절차가 필요한 위험 작업으로 분리한다. 실제 backend transaction 전까지는 frontend local flow와 확인 모달, 후속 backend gap 기록까지만 구현한다.
+
+### Implementation Slices
+
+1. Project workspace 요구/계약 gap을 기록하고 M018 task를 확정한다.
+2. Frontend type/API client에 Meeting detail/participant/invitation/update/delete, TaskCard CRUD, Space member/invitation/owner transfer, Project AI source 후보를 보강한다.
+3. `App.tsx` local state를 SpaceMember, MeetingParticipant, TaskCard, Project AI source가 분리되도록 정리한다.
+4. `/project-overview` 회의 목록을 관리형 목록으로 확장하고 회의 생성/삭제/상태 표시/권한 제한 affordance를 추가한다.
+5. 회의별 ACL 패널을 추가해 참여자 초대, role 변경, access 회수, 마지막 HOST 보호 상태를 표현한다.
+6. 칸반 보드와 카드 생성/편집/상태 이동/삭제/필터를 추가한다.
+7. Project AI 패널에서 공식 지식과 회의 기록 출처를 구분하고 근거 없음/unsupported 상태를 UI에 반영한다.
+8. `TeamMembersPage`에서 Space 멤버 초대, 역할 변경, 제거, owner transfer 확인 flow를 정리한다.
+9. `npm run build`, 주요 route smoke, 권한 관련 negative case를 `implement.md`에 기록한다.
+
+### Backend and Contract Gaps
+
+- Backend는 target Space/Meeting 생성 일부를 구현했지만 Meeting participant 관리, meeting invitation, meeting delete/update, Kanban, Space invitation/member role/owner transfer, Project AI backend 권한 필터는 아직 target contract 단계다.
+- AuditLog 저장은 문서와 ERD에 있지만 runtime 구현 전이다. 권한 부여/회수, task 변경, owner transfer는 후속 backend task에서 audit event를 검증해야 한다.
+- Project AI prototype은 AI 서버에 구현되어 있지만 target architecture의 Backend 권한 필터 이후 context 조립은 후속 backend/AI integration 작업이다.
+
+## Meeting Workspace Frontend Plan
+
+FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보장하는 작업이다. Report Agent와 Meeting AI는 같은 회의 transcript/decision/action/report source를 공유하되, Project 전체 데이터나 다른 meeting source를 섞지 않는다. AI가 만든 저장성 산출물은 바로 공식 데이터로 취급하지 않고 `CANDIDATE` 상태로 보여준 뒤 사용자가 확정해야 한다.
+
+### Scope
+
+- FR-RPT-01/02: 완료된 transcript/dialogue에서 AI 회의록 후보를 생성한다. 후보에는 생성 시각, 생성자, 원천 meeting id, source ids를 표시하고 확정 전 공식 report 목록과 구분한다.
+- FR-RPT-03/06: 후보 또는 초안을 확정하면 `MeetingReport.CONFIRMED`가 되고, 회의당 current confirmed report는 하나만 유지한다. 현재 frontend slice는 confirm UX와 version 표시를 먼저 만들고, backend 저장은 target API gap으로 기록한다.
+- FR-RPT-04/05: Report Agent의 AI 대화 편집과 수동 편집을 같은 draft state에 반영한다. 범위 밖 내용 추가 요청은 확인 필요 또는 unsupported 상태로 표현한다.
+- FR-RPT-07: Markdown export는 frontend에서 현재 draft를 기준으로 우선 제공할 수 있다. PDF/DOCX는 후속 backend/export task로 분리한다.
+- FR-MBOT-01~04: Meeting AI는 `POST /api/meeting-ai/chat` target shape로 전환하고, 단일 `meetingId` source만 전달한다. 응답은 source 시간/발화자/결정 id를 표시하며 근거 없음은 추정 답변처럼 보이지 않게 한다.
+- FR-TASK-01~04: report/transcript에서 TaskCandidate를 추출하고, 등록 전 검토/편집 후 `TaskCard`로 확정하는 흐름을 만든다. 확정 전 candidate는 칸반 카드로 표시하지 않는다.
+
+### Implementation Slices
+
+1. Meeting workspace 요구/계약 gap을 기록하고 M019 task를 확정한다.
+2. Frontend type/API client에 Meeting AI chat, generate report, report list/confirm/update/download, task candidate extract/confirm 후보를 추가한다.
+3. `App.tsx` 또는 meeting-scoped local state에 report candidate/draft/current confirmed report/task candidate를 분리한다.
+4. `MeetingAiPage`를 legacy `/api/meeting-ai/ask`에서 source-aware `/api/meeting-ai/chat` shape로 전환하고 출처/unsupported UI를 추가한다.
+5. `ReportAgentPage`에 report candidate 생성, draft 편집, confirm, version/current 표시, Markdown export를 연결한다.
+6. AI 대화 편집과 수동 편집 충돌을 막기 위한 pending change/apply/revert 상태를 정리한다.
+7. Task candidate 추출, 검토, 등록 전 편집, 칸반 등록 local flow를 추가하고 M018 칸반 state와 연결한다.
+8. scope negative case를 점검한다. 다른 meeting/project source가 Meeting AI, report generation, task extraction payload에 들어가지 않아야 한다.
+9. `npm run build`, AI endpoint smoke 가능 여부, 수동 route smoke 결과와 backend gap을 `implement.md`에 기록한다.
+
+### Backend and AI Gaps
+
+- AI 서버에는 `/api/meeting-ai/chat`, `/api/meeting-ai/generate-report`, `/api/meeting-ai/extract-tasks` prototype이 있지만, target architecture의 Backend 권한 필터 이후 context 조립은 아직 없다.
+- Backend에는 `MeetingReport`와 artifact domain 일부가 있으나 report candidate 생성/저장/confirm/update/download controller, TaskCandidate 저장/confirm controller는 아직 target contract 단계다.
+- Report export는 Markdown 우선 결정이 있으나 PDF/DOCX 생성 방식은 후속 작업이다.
+- TaskCandidate confirm은 Kanban API 계약에 있지만 실제 칸반 저장소와 frontend state 연결은 M018/M019 통합 지점이다.
+
+## Project AI Backend Permission Prefilter Plan
+
+### Scope
+
+- Public route: `POST /api/v1/spaces/{spaceId}/ai/chat`
+- Internal route: `POST /api/internal/project-ai/chat`
+- Backend는 활성 SpaceMember를 확인한 뒤 ProjectKnowledge와 사용자가 읽을 수 있는 회의의 current/confirmed report summary만 AI context로 조립한다.
+- AI 서버는 `projectKnowledge`, `meetingSummary` source만 project scope에서 검색하고 source project/meeting allowlist를 다시 검증한다.
+- Frontend는 질문만 Backend에 전달하며 mock transcript/decision/action context를 직접 보내지 않는다.
+- 실제 PostgreSQL/pgvector 검색, embedding worker, 대화 이력, persistent audit log는 이번 slice에서 제외한다.
+
+### Parallel Work Plan
+
+- Team members: 1
+- Agents: 1 Codex
+- Workstreams: contracts -> AI -> Backend -> Frontend -> verification 순차 처리
+- Shared contracts: `contracts/ai-api.md`, `contracts/space-api.md`
+- Conflict boundaries: AI는 `ai/**`, Backend는 Project AI controller/service/dto와 기존 policy/domain의 최소 확장, Frontend는 `App.tsx`, `api/workspace.ts`, `ProjectOverviewPage.tsx`만 수정한다.
+- Integration order: 계약 확정 후 AI strict schema, Backend context/gateway, Frontend 호출 전환, 전체 검증 순서로 통합한다.
+
+### Security and Data Rules
+
+- Project AI는 SpaceMember만 사용할 수 있고 meeting guest는 사용할 수 없다.
+- OWNER/ADMIN은 기존 `MeetingAccessPolicy` manager override를 따르고 MEMBER는 active MeetingParticipant인 회의만 포함한다.
+- `REVOKED` participant의 회의는 `allowedMeetingIds`와 `sources[]` 모두에서 제외한다.
+- ProjectKnowledge는 `PUBLISHED`, `embeddingStatus=COMPLETED`이고 삭제되지 않은 항목만 포함한다.
+- 회의 기록은 1차 연동에서 current confirmed report summary만 포함하며 원문 transcript 전체를 프로젝트 컨텍스트로 확장하지 않는다.
+
+## AI Report Candidate Backend Route Plan
+
+### Scope
+
+- Public route: `POST /api/v1/meetings/{meetingId}/reports/generate`
+- Internal route: `POST /api/internal/meeting-ai/generate-report`
+- Backend는 `OWNER`/`ADMIN` 또는 `HOST`/`EDITOR` 권한을 확인한 뒤 해당 회의 transcript와 current/confirmed report의 decision/action source만 조립한다.
+- AI 서버는 source type과 meeting scope를 다시 검증하고, 근거가 없으면 LLM 호출 없이 `unsupported=true`를 반환한다.
+- 지원되는 결과만 `MeetingReport.CANDIDATE`로 임시 저장하고 공식 report와 Project AI source에서는 제외한다.
+- Frontend Report Agent는 인증 header와 `meetingId`만 사용해 Backend endpoint를 호출한다.
+
+### Integration Order
+
+1. 계약, 권한, candidate 저장 shape와 ERD/data-model 영향을 확정한다.
+2. AI strict schema와 단일 meeting source validator를 구현한다.
+3. Backend 권한 검증, context 조립, AI gateway, candidate 저장을 연결한다.
+4. Frontend 로컬 candidate 생성을 Backend 응답으로 전환한다.
+5. 단위 테스트, 권한 negative case, 실제 API smoke를 실행한다.
+
+### Persistence Boundary
+
+- 현재 runtime 저장소는 in-memory지만 target schema에는 `markdown`, `createdBy`, `sourceIds`를 반영한다.
+- candidate version은 동일 meeting의 기존 report 최대 version 다음 값으로 생성한다.
+- AI `unsupported=true` 또는 provider 실패 결과는 저장하지 않는다.
+- confirm, manual edit, version history 조회, export는 M022 이후 범위다.
 
 ## Test Plan
 

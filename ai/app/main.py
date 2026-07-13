@@ -4,12 +4,14 @@ import os
 from pathlib import Path
 import ssl
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .rag import (
@@ -118,6 +120,26 @@ class MeetingAiChatResponse(BaseModel):
     model: str
 
 
+class BackendMeetingAiSource(BaseModel):
+    sourceId: str = Field(min_length=1)
+    type: RagSourceType
+    meetingId: str = Field(min_length=1)
+    title: str | None = None
+    speaker: str | None = None
+    time: str | None = None
+    startMs: int | None = None
+    endMs: int | None = None
+    text: str = Field(min_length=1)
+
+
+class BackendMeetingAiChatRequest(BaseModel):
+    projectId: str
+    meetingId: str = Field(min_length=1)
+    meetingTitle: str | None = None
+    question: str = Field(min_length=1)
+    sources: list[BackendMeetingAiSource] = Field(default_factory=list)
+
+
 class ProjectKnowledgeItem(BaseModel):
     sourceId: str | None = None
     title: str
@@ -144,6 +166,22 @@ class ProjectAiChatResponse(BaseModel):
     model: str
 
 
+class BackendProjectAiSource(BaseModel):
+    sourceId: str = Field(min_length=1)
+    type: RagSourceType
+    projectId: str = Field(min_length=1)
+    meetingId: str | None = None
+    title: str | None = None
+    text: str = Field(min_length=1)
+
+
+class BackendProjectAiChatRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    allowedMeetingIds: list[str] = Field(default_factory=list)
+    sources: list[BackendProjectAiSource] = Field(default_factory=list)
+
+
 class GenerateReportRequest(BaseModel):
     projectId: str | None = None
     meetingId: str
@@ -152,6 +190,14 @@ class GenerateReportRequest(BaseModel):
     decisions: list[NamedItem] = Field(default_factory=list)
     actions: list[NamedItem] = Field(default_factory=list)
     format: str = "markdown"
+
+
+class BackendGenerateReportRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    meetingId: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    format: Literal["markdown"] = "markdown"
+    sources: list[BackendMeetingAiSource] = Field(default_factory=list)
 
 
 class ReportDecision(BaseModel):
@@ -517,6 +563,90 @@ def build_meeting_chat_sources(payload: MeetingAiChatRequest) -> list[AiSource]:
     return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
 
 
+def build_backend_meeting_chat_sources(payload: BackendMeetingAiChatRequest) -> list[AiSource]:
+    validate_backend_meeting_sources(payload)
+    chunks = backend_sources_to_rag_chunks(payload)
+    retriever = InMemoryRagRetriever(chunks)
+    results = retriever.search(
+        RagSearchRequest(
+            query=payload.question,
+            scope="meeting",
+            projectId=payload.projectId,
+            meetingId=payload.meetingId,
+            sourceTypes=("transcript", "decision", "actionItem", "report"),
+            limit=5,
+        )
+    )
+    return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
+
+
+def validate_backend_meeting_sources(payload: BackendMeetingAiChatRequest) -> None:
+    forbidden_source = next(
+        (source for source in payload.sources if source.meetingId != payload.meetingId),
+        None,
+    )
+    if forbidden_source is None:
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "AI_CONTEXT_FORBIDDEN",
+            "message": "AI context source meetingId must match request meetingId.",
+        },
+    )
+
+
+def backend_sources_to_rag_chunks(payload: BackendMeetingAiChatRequest) -> list[RagChunk]:
+    chunks: list[RagChunk] = []
+    for index, source in enumerate(payload.sources, start=1):
+        chunks.append(
+            RagChunk(
+                chunkId=f"{payload.meetingId}:{source.type}:{index:04d}",
+                scope="meeting",
+                projectId=payload.projectId,
+                meetingId=payload.meetingId,
+                sourceType=source.type,
+                sourceId=source.sourceId,
+                title=source.title or payload.meetingTitle or source.type,
+                speakerNames=(source.speaker,) if source.speaker else (),
+                startMs=source.startMs,
+                endMs=source.endMs,
+                content=source.text,
+                embeddingText=format_backend_source_embedding(payload, source),
+                metadata=backend_source_metadata(source),
+            )
+        )
+    return chunks
+
+
+def format_backend_source_embedding(
+    payload: BackendMeetingAiChatRequest,
+    source: BackendMeetingAiSource,
+) -> str:
+    lines = [
+        f"회의: {source.title or payload.meetingTitle or payload.meetingId}",
+        "범위: meeting",
+        f"출처: {source.type}",
+    ]
+    if source.time:
+        lines.append(f"시간: {source.time}")
+    if source.speaker:
+        lines.append(f"발화자: {source.speaker}")
+    lines.extend(["내용:", source.text])
+    return "\n".join(lines)
+
+
+def backend_source_metadata(source: BackendMeetingAiSource) -> dict[str, str]:
+    metadata = {
+        "visibility": "already_filtered",
+        "createdFrom": source.type,
+    }
+    if source.time:
+        metadata["timeRange"] = source.time
+    return metadata
+
+
 def build_report_chunks(payload: GenerateReportRequest) -> list[RagChunk]:
     project_id = payload.projectId or payload.meetingId
     return build_meeting_rag_chunks(
@@ -532,6 +662,41 @@ def build_report_chunks(payload: GenerateReportRequest) -> list[RagChunk]:
 def build_report_sources(payload: GenerateReportRequest) -> list[AiSource]:
     chunks = build_report_chunks(payload)
     return [rag_source_to_ai_source(chunk_to_source(chunk)) for chunk in chunks]
+
+
+def build_backend_report_sources(payload: BackendGenerateReportRequest) -> list[AiSource]:
+    validate_backend_report_sources(payload)
+    return [
+        AiSource(
+            sourceId=source.sourceId,
+            type=source.type,
+            title=source.title or payload.title,
+            speaker=source.speaker,
+            time=source.time,
+            startMs=source.startMs,
+            endMs=source.endMs,
+            text=source.text,
+        )
+        for source in payload.sources
+    ]
+
+
+def validate_backend_report_sources(payload: BackendGenerateReportRequest) -> None:
+    for source in payload.sources:
+        if source.meetingId != payload.meetingId:
+            raise meeting_context_forbidden("Report source meetingId must match request meetingId.")
+        if source.type not in ("transcript", "decision", "actionItem"):
+            raise meeting_context_forbidden("Report source type is not allowed.")
+
+
+def meeting_context_forbidden(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "AI_CONTEXT_FORBIDDEN",
+            "message": message,
+        },
+    )
 
 
 def build_task_extraction_chunks(payload: ExtractTasksRequest) -> list[RagChunk]:
@@ -623,6 +788,74 @@ def build_project_chat_sources(payload: ProjectAiChatRequest) -> list[AiSource]:
         )
     )
     return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
+
+
+def build_backend_project_chat_sources(payload: BackendProjectAiChatRequest) -> list[AiSource]:
+    validate_backend_project_sources(payload)
+    chunks = backend_project_sources_to_rag_chunks(payload)
+    retriever = InMemoryRagRetriever(chunks)
+    results = retriever.search(
+        RagSearchRequest(
+            query=payload.question,
+            scope="project",
+            projectId=payload.projectId,
+            allowedMeetingIds=tuple(payload.allowedMeetingIds),
+            sourceTypes=("projectKnowledge", "meetingSummary"),
+            limit=6,
+        )
+    )
+    return [rag_source_to_ai_source(chunk_to_source(result.chunk)) for result in results]
+
+
+def validate_backend_project_sources(payload: BackendProjectAiChatRequest) -> None:
+    allowed_meeting_ids = set(payload.allowedMeetingIds)
+    for source in payload.sources:
+        if source.projectId != payload.projectId:
+            raise project_context_forbidden("AI context source projectId must match request projectId.")
+        if source.type not in ("projectKnowledge", "meetingSummary"):
+            raise project_context_forbidden("Project AI source type is not allowed.")
+        if source.type == "meetingSummary" and (
+            not source.meetingId or source.meetingId not in allowed_meeting_ids
+        ):
+            raise project_context_forbidden("Meeting source is outside the allowed meeting scope.")
+        if source.type == "projectKnowledge" and source.meetingId is not None:
+            raise project_context_forbidden("Project Knowledge source must not carry a meeting scope.")
+
+
+def project_context_forbidden(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "AI_CONTEXT_FORBIDDEN",
+            "message": message,
+        },
+    )
+
+
+def backend_project_sources_to_rag_chunks(payload: BackendProjectAiChatRequest) -> list[RagChunk]:
+    return [
+        RagChunk(
+            chunkId=f"{payload.projectId}:{source.type}:{index:04d}",
+            scope="project",
+            projectId=payload.projectId,
+            meetingId=source.meetingId,
+            sourceType=source.type,
+            sourceId=source.sourceId,
+            title=source.title or source.sourceId,
+            content=source.text,
+            embeddingText=(
+                f"프로젝트: {payload.projectId}\n"
+                f"범위: project\n"
+                f"출처: {source.type}\n"
+                f"내용:\n{source.text}"
+            ),
+            metadata={
+                "visibility": "already_filtered",
+                "recordType": "official" if source.type == "projectKnowledge" else "meeting",
+            },
+        )
+        for index, source in enumerate(payload.sources, start=1)
+    ]
 
 
 def transcript_rows_to_segments(
@@ -744,6 +977,19 @@ def explain_term(payload: ExplainTermRequest) -> ExplainTermResponse:
 
 def meeting_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
     sources = build_meeting_chat_sources(payload)
+    return answer_meeting_chat(payload.meetingId, payload.question, sources)
+
+
+def backend_meeting_chat(payload: BackendMeetingAiChatRequest) -> MeetingAiChatResponse:
+    sources = build_backend_meeting_chat_sources(payload)
+    return answer_meeting_chat(payload.meetingId, payload.question, sources)
+
+
+def answer_meeting_chat(
+    meeting_id: str,
+    question: str,
+    sources: list[AiSource],
+) -> MeetingAiChatResponse:
     if not sources:
         return MeetingAiChatResponse(
             answer="제공된 회의 맥락에서는 답변 근거를 찾을 수 없습니다.",
@@ -766,8 +1012,8 @@ def meeting_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
             "답변은 한국어로 간결하게 작성하고, 관련 근거를 함께 언급해라."
         ),
         user_content=(
-            f"[회의 ID]\n{payload.meetingId}\n\n"
-            f"[사용자 질문]\n{payload.question}\n\n"
+            f"[회의 ID]\n{meeting_id}\n\n"
+            f"[사용자 질문]\n{question}\n\n"
             f"[검색된 회의 근거]\n{context_lines}"
         ),
     )
@@ -779,8 +1025,34 @@ def meeting_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
     )
 
 
+def as_provider_unavailable(error: HTTPException) -> HTTPException:
+    if error.status_code not in (500, 502, 503):
+        return error
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "AI_PROVIDER_UNAVAILABLE",
+            "message": "AI provider 응답을 받을 수 없습니다.",
+        },
+    )
+
+
 def generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
     sources = build_report_sources(payload)
+    return generate_report_from_sources(payload.meetingId, payload.title or payload.meetingId, payload.format, sources)
+
+
+def backend_generate_report(payload: BackendGenerateReportRequest) -> GenerateReportResponse:
+    sources = build_backend_report_sources(payload)
+    return generate_report_from_sources(payload.meetingId, payload.title, payload.format, sources)
+
+
+def generate_report_from_sources(
+    meeting_id: str,
+    title: str,
+    report_format: str,
+    sources: list[AiSource],
+) -> GenerateReportResponse:
     if not sources:
         return GenerateReportResponse(
             summary="제공된 회의 맥락에서는 보고서를 생성할 근거를 찾을 수 없습니다.",
@@ -808,9 +1080,9 @@ def generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
             "confirmationState는 candidate로 둔다."
         ),
         user_content=(
-            f"[회의 ID]\n{payload.meetingId}\n\n"
-            f"[회의 제목]\n{payload.title or payload.meetingId}\n\n"
-            f"[출력 형식]\n{payload.format}\n\n"
+            f"[회의 ID]\n{meeting_id}\n\n"
+            f"[회의 제목]\n{title}\n\n"
+            f"[출력 형식]\n{report_format}\n\n"
             f"[회의 근거]\n{context_lines}"
         ),
     )
@@ -990,6 +1262,15 @@ def first_non_empty_line(value: str) -> str | None:
 
 def project_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
     sources = build_project_chat_sources(payload)
+    return answer_project_chat(payload.projectId, payload.question, sources)
+
+
+def backend_project_chat(payload: BackendProjectAiChatRequest) -> ProjectAiChatResponse:
+    sources = build_backend_project_chat_sources(payload)
+    return answer_project_chat(payload.projectId, payload.question, sources)
+
+
+def answer_project_chat(project_id: str, question: str, sources: list[AiSource]) -> ProjectAiChatResponse:
     if not sources:
         return ProjectAiChatResponse(
             answer="제공된 프로젝트 맥락에서는 답변 근거를 찾을 수 없습니다.",
@@ -1012,8 +1293,8 @@ def project_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
             "답변은 한국어로 간결하게 작성해라."
         ),
         user_content=(
-            f"[프로젝트 ID]\n{payload.projectId}\n\n"
-            f"[사용자 질문]\n{payload.question}\n\n"
+            f"[프로젝트 ID]\n{project_id}\n\n"
+            f"[사용자 질문]\n{question}\n\n"
             f"[검색된 프로젝트 근거]\n{context_lines}"
         ),
     )
@@ -1034,6 +1315,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(_request: Any, _exception: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": "INVALID_REQUEST",
+            "message": "요청값이 잘못되었습니다.",
+            "fieldErrors": [],
+        },
+    )
 
 
 @app.get("/health")
@@ -1060,9 +1353,28 @@ def meeting_ai_chat(payload: MeetingAiChatRequest) -> MeetingAiChatResponse:
     return observe_ai_endpoint("meeting-ai.chat", lambda: meeting_chat(payload))
 
 
+@app.post("/api/internal/meeting-ai/chat", response_model=MeetingAiChatResponse)
+def backend_meeting_ai_chat(payload: BackendMeetingAiChatRequest) -> MeetingAiChatResponse:
+    try:
+        return observe_ai_endpoint("meeting-ai.chat.internal", lambda: backend_meeting_chat(payload))
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
+
+
 @app.post("/api/meeting-ai/generate-report", response_model=GenerateReportResponse)
 def meeting_ai_generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
     return observe_ai_endpoint("meeting-ai.generate-report", lambda: generate_report(payload))
+
+
+@app.post("/api/internal/meeting-ai/generate-report", response_model=GenerateReportResponse)
+def backend_meeting_ai_generate_report(payload: BackendGenerateReportRequest) -> GenerateReportResponse:
+    try:
+        return observe_ai_endpoint(
+            "meeting-ai.generate-report.internal",
+            lambda: backend_generate_report(payload),
+        )
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
 
 
 @app.post("/api/meeting-ai/extract-tasks", response_model=ExtractTasksResponse)
@@ -1073,3 +1385,11 @@ def meeting_ai_extract_tasks(payload: ExtractTasksRequest) -> ExtractTasksRespon
 @app.post("/api/project-ai/chat", response_model=ProjectAiChatResponse)
 def project_ai_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
     return observe_ai_endpoint("project-ai.chat", lambda: project_chat(payload))
+
+
+@app.post("/api/internal/project-ai/chat", response_model=ProjectAiChatResponse)
+def backend_project_ai_chat(payload: BackendProjectAiChatRequest) -> ProjectAiChatResponse:
+    try:
+        return observe_ai_endpoint("project-ai.chat.internal", lambda: backend_project_chat(payload))
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
