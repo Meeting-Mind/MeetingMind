@@ -501,3 +501,43 @@
 - report manual update, version history 조회/복원, Markdown/PDF/DOCX download
 - PostgreSQL repository transaction과 partial unique index 실제 적용 검증
 - `REPORT_CONFIRMED` persistent audit log
+
+## M025 Task Candidate Backend Route and TaskCard Confirmation
+
+### Contract and Decision
+
+- public 생성/조회/확정 route와 internal `/api/internal/meeting-ai/extract-tasks` 계약을 추가했다.
+- 후보 생성은 회의 편집 권한, 조회는 회의 읽기 권한, TaskCard 확정은 회의 편집 권한과 active SpaceMember를 모두 요구한다.
+- `TaskCandidate`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 상태를 사용하고 후보당 `TaskCard.sourceCandidateId`는 unique다.
+- candidate TTL은 기준값이 없어 `Q-009`로 분리했으며 이번 slice에서는 상태와 중복만 검증한다.
+
+### Implementation
+
+- AI strict endpoint는 `transcript`, `report`, `decision`, `actionItem`만 허용하고 다른 project/meeting source를 `AI_CONTEXT_FORBIDDEN`으로 거부한다.
+- Backend는 권한 검증 후 transcript와 current confirmed report를 canonical context로 조립하고, source 근거가 있는 supported 결과만 in-memory `TaskCandidate`로 저장한다.
+- active participant 표시 이름이 active SpaceMember와 정확히 일치할 때만 `suggestedAssigneeId`를 연결한다.
+- 후보 확정은 제목, 설명, 담당자, 마감일, 상태를 검증하고 candidate 상태 전이와 TaskCard 생성을 하나의 synchronized domain operation으로 처리한다.
+- 생성/조회 응답은 `canConfirm` capability를 반환하고, true일 때만 active SpaceMember 담당자 선택지를 제공한다. 회의 게스트와 VIEWER에는 Space 멤버 목록을 노출하지 않는다.
+- Frontend는 `canConfirm`이 false면 후보 편집/등록을 비활성화하고 유효한 `assigneeId`만 확정 요청에 사용한다.
+- Frontend Report Agent는 AI 직접 호출과 로컬 등록을 제거하고 Backend 생성/조회/확정 API, 재진입 후보 복원, loading/error, 제목·설명·담당자·마감일 편집을 사용한다.
+- target PostgreSQL 기준선으로 `V6__create_task_candidates_cards.sql`을 추가했다.
+
+### Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 29 tests
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd frontend && npm run build` (기존 500 kB 초과 bundle warning 유지)
+- Passed: `git diff --check`
+- Passed: AI test에서 project/meeting/type allowlist, no-source LLM 미호출, provider `503`을 검증했다.
+- Passed: Backend test에서 edit 권한 선차단, candidate 저장/조회, source allowlist, 담당자 매핑, VIEWER 확정 거부, guest 확정 거부, invalid assignee, 중복 확정을 검증했다.
+- Passed: Backend `18080` 실제 public API smoke에서 source 없는 owner 생성 `200 unsupported/context-only`, 생성/조회 `canConfirm=true`, active SpaceMember 담당자 1명, 없는 후보 확정 `404 TASK_CANDIDATE_NOT_FOUND`, 무인증 조회 `401`을 확인했다.
+- Not run: V6 migration 실제 PostgreSQL 적용. 로컬 DB profile datasource가 구성되지 않아 후속 data verification이 필요하다.
+- Not run: STT가 존재하는 public supported 생성과 성공 confirm E2E. 현재 외부 API로 transcript를 주입할 수 없어 AI/Backend service test로 검증했다.
+
+### Remaining Boundary
+
+- `Q-009` candidate TTL 결정, 만료 검증과 정리 작업
+- 후보 제외 API와 일반 Kanban 카드 CRUD/목록의 Backend 전환
+- PostgreSQL repository transaction과 V6 unique/FK 제약 실제 적용 검증
+- `AI_REQUESTED`, `TASK_CANDIDATE_CONFIRMED`, `TASK_CARD_CHANGED` persistent audit log

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app.main import (
     AiSource,
+    BackendExtractTasksRequest,
     BackendGenerateReportRequest,
     BackendMeetingAiChatRequest,
     BackendMeetingAiSource,
@@ -16,9 +17,11 @@ from app.main import (
     TranscriptRow,
     ai_observability_fields,
     backend_meeting_ai_chat,
+    backend_meeting_ai_extract_tasks,
     backend_meeting_ai_generate_report,
     backend_meeting_chat,
     backend_generate_report,
+    backend_extract_tasks,
     backend_project_ai_chat,
     backend_project_chat,
     explain_term,
@@ -525,6 +528,107 @@ class RagSafetyTest(unittest.TestCase):
         self.assertTrue(response.unsupported)
         self.assertEqual(response.tasks, [])
         self.assertEqual(response.sources, [])
+
+    def test_backend_task_extraction_rejects_source_from_another_meeting(self):
+        payload = BackendExtractTasksRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-999",
+                    type="transcript",
+                    projectId="space-001",
+                    meetingId="meeting-999",
+                    text="다른 회의 내용입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_extract_tasks(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "AI_CONTEXT_FORBIDDEN")
+
+    def test_backend_task_extraction_rejects_source_from_another_project(self):
+        payload = BackendExtractTasksRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    projectId="space-999",
+                    meetingId="meeting-001",
+                    text="다른 프로젝트 내용입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_extract_tasks(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_backend_task_extraction_rejects_disallowed_source_type(self):
+        payload = BackendExtractTasksRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="summary-001",
+                    type="meetingSummary",
+                    projectId="space-001",
+                    meetingId="meeting-001",
+                    text="회의 요약입니다.",
+                )
+            ],
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            backend_extract_tasks(payload)
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_backend_task_extraction_returns_unsupported_without_sources(self):
+        payload = BackendExtractTasksRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+        )
+
+        with patch("app.main.call_openai_text") as call_openai_text:
+            response = backend_extract_tasks(payload)
+
+        call_openai_text.assert_not_called()
+        self.assertTrue(response.unsupported)
+        self.assertEqual(response.model, "context-only")
+
+    def test_backend_task_extraction_filters_sources_and_maps_provider_error(self):
+        payload = BackendExtractTasksRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="주간 회의",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    projectId="space-001",
+                    meetingId="meeting-001",
+                    text="ERD 수정안을 문서화합니다.",
+                )
+            ],
+        )
+
+        with patch("app.main.call_openai_text", side_effect=HTTPException(status_code=502, detail="boom")):
+            with self.assertRaises(HTTPException) as raised:
+                backend_meeting_ai_extract_tasks(payload)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
 
     def test_generated_source_ids_are_filtered_to_provided_sources(self):
         sources = [

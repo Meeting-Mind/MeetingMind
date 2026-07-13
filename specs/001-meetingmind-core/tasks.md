@@ -56,6 +56,7 @@
 | M022 | AI 회의록 candidate Backend 경유 전환 | AI 회의록 생성이 회의 편집 권한과 단일 meeting source 검증 뒤에서 실행되고 candidate 저장/화면 연결 경계가 생긴다. | T174-T181 |
 | M023 | Session handoff 공용/개인 상태 분리 | 팀 공용 기준선과 개인 작업 상태가 별도 파일로 관리되고 개인 파일은 Git에서 제외된다. | T182-T184 |
 | M024 | Report candidate 확정과 current version 전환 | 편집 권한자가 candidate를 공식 report로 확정하고 회의당 current confirmed report를 하나만 유지한다. | T185-T190 |
+| M025 | AI 태스크 후보 Backend 경유와 TaskCard 확정 | 편집 권한자가 단일 회의 근거로 태스크 후보를 생성하고 검토한 후보를 중복 없이 프로젝트 TaskCard로 확정한다. | T191-T199 |
 
 ## Foundation
 
@@ -311,6 +312,20 @@
 | T189 | M024 | [x] | verification | 사용자 | Codex | T187, T188 | `backend/**`, `frontend/**`, `specs/001-meetingmind-core/implement.md` | Backend/Frontend 테스트, API smoke, diff 검증을 실행한다. | current 교체, 권한 거부, 중복 확정, Frontend build, public API 오류 매핑이 검증됐다. |
 | T190 | M024 | [x] | docs/closeout | 사용자 | Codex | T189 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md`, `.specify/memory/session-handoff.md` | M024 완료 범위와 TTL/update/history/export 후속 경계를 정리한다. | TTL은 `Q-008`, update/history/export와 persistent audit는 후속 범위로 명시되어 있다. |
 
+### M025: Task Candidate Backend Route and TaskCard Confirmation
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T191 | M025 | [x] | contracts/task | 사용자 | Codex | T190 | `requirements/permissions.md`, `requirements/status-values.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/contracts/kanban-api.md`, `specs/001-meetingmind-core/plan.md` | 태스크 추출/조회/확정 권한, 상태 전이, source 범위, candidate 만료 정책 경계를 확정한다. | public/internal 계약과 권한이 문서화되고 TTL은 `Q-009`로 분리되어 있다. |
+| T192 | M025 | [x] | data/task | 사용자 | Codex | T191 | `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/erd.md`, `backend/src/main/resources/db/migration/**`, `backend/src/main/java/com/meetingmind/demo/domain/**` | TaskCandidate와 TaskCard 모델, unique 제약, target migration을 구현한다. | candidate 상태와 source가 보존되고 sourceCandidateId당 카드가 최대 하나다. |
+| T193 | M025 | [x] | ai/task | 사용자 | Codex | T191 | `ai/app/main.py`, `ai/tests/**` | Backend가 선필터한 단일 회의 source만 받는 strict 태스크 추출 endpoint를 구현한다. | source type/meeting allowlist 위반은 403, 근거 없음은 LLM 미호출 unsupported, provider 오류는 503이다. |
+| T194 | M025 | [x] | backend/task-generate | 사용자 | Codex | T192, T193 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/test/**` | 편집 권한 선검증, canonical context 조립, AI 호출, TaskCandidate 저장을 구현한다. | 권한 검증이 데이터/AI 호출보다 먼저 수행되고 지원되는 후보만 저장된다. |
+| T195 | M025 | [x] | backend/task-query | 사용자 | Codex | T192 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/test/**` | 회의 접근 권한을 적용한 TaskCandidate 조회 API를 구현한다. | 해당 meeting 후보만 반환하고 권한이 회수된 사용자는 조회할 수 없다. |
+| T196 | M025 | [x] | backend/task-confirm | 사용자 | Codex | T192, T195 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/test/**` | 후보 확정, 입력 검증, TaskCard 생성, 중복 방지를 하나의 domain transition으로 구현한다. | 활성 SpaceMember이면서 편집 권한인 사용자만 확정하고 후보당 카드 하나만 생성된다. |
+| T197 | M025 | [x] | frontend/task | 사용자 | Codex | T194, T196 | `frontend/src/api/workspace.ts`, `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/types.ts` | 로컬 태스크 추출/등록 flow를 Backend 생성/조회/확정 API로 전환한다. | 재진입 후보 복원, loading/error, 제목·설명·담당자·마감일 편집, 확정 결과가 Backend 응답과 일치한다. |
+| T198 | M025 | [x] | verification | 사용자 | Codex | T193-T197 | `ai/**`, `backend/**`, `frontend/**`, `specs/001-meetingmind-core/implement.md` | AI/Backend/Frontend 테스트, API smoke, diff와 계약 정합성 리뷰를 실행한다. | scope/권한/중복 negative case와 정상 생성/확정 흐름이 검증된다. |
+| T199 | M025 | [x] | docs/closeout | 사용자 | Codex | T198 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md` | 구현 범위, 검증 결과, TTL과 일반 Kanban API 후속 경계를 정리한다. | 완료 task와 미실행 사유, 남은 위험이 원본 문서에 기록되어 있다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -331,6 +346,7 @@
 - [x] V015 Session handoff 분리 검증: `git check-ignore -v .specify/memory/session-handoff.local.md`, 공용 파일 개인 상태 검색, `git diff --check`
 - [x] V016 AI report candidate Backend route 검증: AI 24 tests/compile, Backend test, Frontend build, supported candidate 저장 service test, public `200 unsupported`, 비권한 `403 MEETING_ACCESS_DENIED`, `git diff --check`
 - [x] V017 Report confirm/current version 검증: Backend current 교체·중복 확정·다른 meeting·VIEWER 테스트, Frontend build, public `404 REPORT_NOT_FOUND`와 비권한 `403 MEETING_ACCESS_DENIED`, AI regression 24 tests/compile, `git diff --check`
+- [x] V018 Task candidate Backend route 검증: AI 29 tests/compile, Backend 전체 test, Frontend build, source scope·권한·게스트·중복 확정 test, public `200 context-only`/조회 `200`/없는 후보 `404`/무인증 `401`, `git diff --check`
 
 ## Notes
 

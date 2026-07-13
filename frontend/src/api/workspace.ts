@@ -21,8 +21,6 @@ import type {
   DeleteMeetingResponse,
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
-  ExtractTaskCandidatesRequest,
-  ExtractTaskCandidatesResponse,
   MeetingListResponse,
   MeetingParticipantsResponse,
   OwnerTransferRequest,
@@ -38,6 +36,7 @@ import type {
   SpaceListResponse,
   SpaceMembersResponse,
   TaskCandidatesResponse,
+  TaskCandidateGenerationResponse,
   TaskListResponse,
   UpdateReportRequest,
   UpdateReportResponse,
@@ -55,7 +54,6 @@ import type {
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
-const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL?.trim() || "http://localhost:8000";
 
 export async function fetchLegacyWorkspaceSnapshot(session: AuthSession): Promise<Partial<WorkspaceData>> {
   return requestJson<Partial<WorkspaceData>>("/api/workspace", {
@@ -279,13 +277,16 @@ export async function generateReportCandidate(
 }
 
 export async function extractTaskCandidates(
-  request: ExtractTaskCandidatesRequest
-): Promise<ExtractTaskCandidatesResponse> {
-  return requestAiJson<ExtractTaskCandidatesResponse>("/api/meeting-ai/extract-tasks", {
-    method: "POST",
-    headers: plainJsonHeaders(),
-    body: JSON.stringify(request)
-  });
+  session: AuthSession,
+  meetingId: string
+): Promise<TaskCandidateGenerationResponse> {
+  return requestJson<TaskCandidateGenerationResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates/generate`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(session)
+    }
+  );
 }
 
 export async function fetchMeetingReports(
@@ -500,29 +501,12 @@ function jsonHeaders(session: AuthSession): HeadersInit {
   };
 }
 
-function plainJsonHeaders(): HeadersInit {
-  return {
-    "Content-Type": "application/json"
-  };
-}
-
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, init);
 
   if (!response.ok) {
     const message = await readErrorMessage(response);
     throw new Error(message || `API request failed with ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-async function requestAiJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await fetch(`${AI_API_BASE_URL}${path}`, init);
-
-  if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message || `AI request failed with ${response.status}`);
   }
 
   return (await response.json()) as T;

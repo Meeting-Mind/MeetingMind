@@ -34,6 +34,7 @@
 | 403 | `AI_CONTEXT_FORBIDDEN` | 권한 필터 전 데이터가 AI context로 요청됨 |
 | 404 | `SPACE_NOT_FOUND` | Space를 찾을 수 없음 |
 | 404 | `MEETING_NOT_FOUND` | 회의를 찾을 수 없음 |
+| 404 | `TASK_CANDIDATE_NOT_FOUND` | 태스크 후보를 찾을 수 없거나 path meeting과 불일치 |
 | 404 | `SPEAKER_NOT_FOUND` | 발화자를 찾을 수 없음 |
 | 409 | `MEETING_NOT_COMPLETED` | 처리 완료 전 transcript/report/summary 요청 |
 | 409 | `MEETING_ALREADY_PROCESSING` | 이미 처리 중인 회의에 중복 처리 요청 |
@@ -62,7 +63,7 @@ Endpoint별 문서에는 위 공통 오류 중 해당 endpoint에서 반환 가�
 | `Meeting.status` | `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED` |
 | `Transcript.status` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
 | `MeetingReport.status` | `CANDIDATE`, `DRAFT`, `CONFIRMED` |
-| `TaskCandidate.status` | `CANDIDATE` |
+| `TaskCandidate.status` | `CANDIDATE`, `CONFIRMED`, `DISMISSED` |
 | `TaskCard.status` | `TODO`, `IN_PROGRESS`, `DONE` |
 | `SpaceInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |
 | `MeetingInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |

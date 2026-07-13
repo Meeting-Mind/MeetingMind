@@ -8,6 +8,7 @@ import com.meetingmind.demo.authz.SpaceAccessPolicy;
 import com.meetingmind.demo.authz.SpaceRole;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -181,6 +182,35 @@ public class WorkspaceDomainService {
         );
     }
 
+    public TaskCandidateContext taskCandidateContext(String meetingId) {
+        MeetingAiContext context = meetingAiContext(meetingId);
+        List<TaskParticipant> participants = store.findMeetingParticipants(meetingId).stream()
+                .map(participant -> store.findUserById(participant.userId())
+                        .map(user -> new TaskParticipant(
+                                user.id(),
+                                user.displayName(),
+                                participant.role(),
+                                participant.accessStatus(),
+                                store.findSpaceMember(context.meeting().spaceId(), user.id()).isPresent()
+                        ))
+                        .orElse(null))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        List<TaskAssignee> assignees = store.findSpaceMembers(context.meeting().spaceId()).stream()
+                .map(member -> store.findUserById(member.userId())
+                        .map(user -> new TaskAssignee(user.id(), user.displayName()))
+                        .orElse(null))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        return new TaskCandidateContext(
+                context.meeting(),
+                context.transcriptSegments(),
+                context.reports(),
+                participants,
+                assignees
+        );
+    }
+
     public MeetingReport saveReportCandidate(
             String meetingId,
             String createdBy,
@@ -259,6 +289,99 @@ public class WorkspaceDomainService {
         return store.saveMeetingReport(target.confirmed(Instant.now(clock)));
     }
 
+    public TaskCandidate saveTaskCandidate(
+            String meetingId,
+            String createdBy,
+            String title,
+            String assigneeName,
+            String suggestedAssigneeId,
+            LocalDate dueDate,
+            List<String> sourceIds
+    ) {
+        requireUser(createdBy);
+        Meeting meeting = store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        validateRequired(title, "태스크 제목은 필수입니다.");
+        if (suggestedAssigneeId != null && store.findSpaceMember(meeting.spaceId(), suggestedAssigneeId).isEmpty()) {
+            suggestedAssigneeId = null;
+        }
+        return store.saveTaskCandidate(new TaskCandidate(
+                "task-candidate-" + UUID.randomUUID(),
+                meetingId,
+                title.trim(),
+                blankToNull(assigneeName),
+                suggestedAssigneeId,
+                dueDate,
+                TaskCandidateStatus.CANDIDATE,
+                sourceIds,
+                createdBy,
+                Instant.now(clock),
+                null
+        ));
+    }
+
+    public List<TaskCandidate> taskCandidates(String meetingId) {
+        store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        return store.findTaskCandidates(meetingId);
+    }
+
+    public synchronized TaskConfirmationResult confirmTaskCandidate(
+            String meetingId,
+            String candidateId,
+            String title,
+            String description,
+            String assigneeId,
+            LocalDate dueDate,
+            TaskCardStatus status
+    ) {
+        validateRequired(title, "태스크 제목은 필수입니다.");
+        Meeting meeting = store.findMeetingById(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "MEETING_NOT_FOUND",
+                        "회의를 찾을 수 없습니다."
+                ));
+        TaskCandidate candidate = store.findTaskCandidateById(candidateId)
+                .filter(found -> found.meetingId().equals(meetingId))
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "TASK_CANDIDATE_NOT_FOUND",
+                        "태스크 후보를 찾을 수 없습니다."
+                ));
+        if (candidate.status() != TaskCandidateStatus.CANDIDATE
+                || store.findTaskCardBySourceCandidateId(candidateId).isPresent()) {
+            throw invalidRequest("확정 가능한 태스크 후보가 아닙니다.");
+        }
+        if (assigneeId != null && store.findSpaceMember(meeting.spaceId(), assigneeId).isEmpty()) {
+            throw invalidRequest("담당자는 active SpaceMember여야 합니다.");
+        }
+        Instant now = Instant.now(clock);
+        TaskCard taskCard = store.saveTaskCard(new TaskCard(
+                "task-" + UUID.randomUUID(),
+                meeting.spaceId(),
+                meetingId,
+                candidateId,
+                title.trim(),
+                blankToNull(description),
+                status == null ? TaskCardStatus.TODO : status,
+                assigneeId,
+                dueDate,
+                now,
+                now
+        ));
+        TaskCandidate confirmed = store.saveTaskCandidate(candidate.confirmed(now));
+        return new TaskConfirmationResult(confirmed, taskCard);
+    }
+
     public ProjectAiContext projectAiContext(String spaceId) {
         Space space = store.findSpaceById(spaceId)
                 .orElseThrow(() -> new AuthorizationException(
@@ -321,6 +444,36 @@ public class WorkspaceDomainService {
             transcriptSegments = transcriptSegments == null ? List.of() : List.copyOf(transcriptSegments);
             reports = reports == null ? List.of() : List.copyOf(reports);
         }
+    }
+
+    public record TaskCandidateContext(
+            Meeting meeting,
+            List<TranscriptSegment> transcriptSegments,
+            List<MeetingReport> reports,
+            List<TaskParticipant> participants,
+            List<TaskAssignee> assignees
+    ) {
+        public TaskCandidateContext {
+            transcriptSegments = transcriptSegments == null ? List.of() : List.copyOf(transcriptSegments);
+            reports = reports == null ? List.of() : List.copyOf(reports);
+            participants = participants == null ? List.of() : List.copyOf(participants);
+            assignees = assignees == null ? List.of() : List.copyOf(assignees);
+        }
+    }
+
+    public record TaskParticipant(
+            String userId,
+            String displayName,
+            MeetingRole role,
+            com.meetingmind.demo.authz.ParticipantAccessStatus accessStatus,
+            boolean spaceMember
+    ) {
+    }
+
+    public record TaskAssignee(String userId, String displayName) {
+    }
+
+    public record TaskConfirmationResult(TaskCandidate candidate, TaskCard taskCard) {
     }
 
     public record ProjectAiContext(

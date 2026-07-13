@@ -672,6 +672,75 @@ Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호�
 - FR-RPT-02: candidate 반환
 - NFR-AZ-01, NFR-AZ-04: 권한 선필터와 scope 강제
 
+## POST /api/internal/meeting-ai/extract-tasks
+
+Backend가 권한 선필터 후 조립한 단일 회의 source에서 태스크 후보를 추출한다.
+
+### Status
+
+- Target Backend-to-AI Internal
+
+### Auth and Permissions
+
+- 외부 사용자에게 직접 노출하지 않는다.
+- Backend가 public route에서 회의 편집 권한을 먼저 검증한다.
+
+### Data Scope
+
+- request `meetingId`와 같은 source만 허용한다.
+- 허용 source type은 `transcript`, `report`, `decision`, `actionItem`이다.
+
+### Request
+
+```json
+{
+  "projectId": "project-001",
+  "meetingId": "meeting-001",
+  "title": "Sprint Planning #12",
+  "participants": [
+    {"name": "김진수", "role": "EDITOR"}
+  ],
+  "sources": [
+    {
+      "sourceId": "segment-001",
+      "type": "transcript",
+      "projectId": "project-001",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12",
+      "text": "ERD 수정안 문서화가 필요합니다."
+    }
+  ]
+}
+```
+
+### Validation
+
+- `projectId`, `meetingId`, `title`: required
+- 모든 source의 `projectId`, `meetingId`는 request scope와 같아야 한다.
+- source type allowlist 위반 또는 다른 meeting/project source는 `403 AI_CONTEXT_FORBIDDEN`이다.
+- 응답 task의 `sourceIds`는 request source ID allowlist로 다시 필터링한다.
+
+### Response
+
+- 기존 `POST /api/meeting-ai/extract-tasks`의 `ExtractTasksResponse`와 같다.
+- source가 없으면 LLM을 호출하지 않고 `unsupported=true`, `model=context-only`를 반환한다.
+
+### Errors
+
+- `400 INVALID_REQUEST`: 필수값 또는 format 검증 실패
+- `403 AI_CONTEXT_FORBIDDEN`: source scope/type 검증 실패
+- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정, 호출, 응답 파싱 실패
+
+### Audit
+
+- AI server observability log
+- Backend가 public 요청에 대해 `AI_REQUESTED` 기록 예정
+
+### Requirement Trace
+
+- FR-TASK-01: 단일 회의 근거 기반 태스크 후보 추출
+- NFR-AZ-01, NFR-AZ-04: 권한 선필터와 scope 강제
+
 ## POST /api/meeting-ai/extract-tasks
 
 회의 transcript와 summary에서 태스크 후보를 추출한다.
@@ -679,7 +748,7 @@ Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호�
 ### Status
 
 - Current Prototype
-- Backend-to-AI Internal target 후보
+- prototype 호환 경로. Target 내부 호출은 `/api/internal/meeting-ai/extract-tasks`를 사용한다.
 
 ### Auth and Permissions
 

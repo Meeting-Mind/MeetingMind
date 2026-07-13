@@ -25,6 +25,8 @@ public class InMemoryWorkspaceStore {
     private final Map<String, MeetingSpeaker> meetingSpeakersById = new LinkedHashMap<>();
     private final Map<String, TranscriptSegment> transcriptSegmentsById = new LinkedHashMap<>();
     private final Map<String, MeetingReport> meetingReportsById = new LinkedHashMap<>();
+    private final Map<String, TaskCandidate> taskCandidatesById = new LinkedHashMap<>();
+    private final Map<String, TaskCard> taskCardsById = new LinkedHashMap<>();
     private final Map<String, ProjectKnowledge> projectKnowledgeById = new LinkedHashMap<>();
     private final Map<String, EmbeddingChunk> embeddingChunksById = new LinkedHashMap<>();
 
@@ -76,6 +78,13 @@ public class InMemoryWorkspaceStore {
         return spaceMembersById.values()
                 .stream()
                 .filter(member -> member.userId().equals(userId))
+                .toList();
+    }
+
+    synchronized List<SpaceMember> findSpaceMembers(String spaceId) {
+        return spaceMembersById.values()
+                .stream()
+                .filter(member -> member.spaceId().equals(spaceId))
                 .toList();
     }
 
@@ -208,6 +217,34 @@ public class InMemoryWorkspaceStore {
                 .stream()
                 .filter(report -> report.meetingId().equals(meetingId))
                 .toList();
+    }
+
+    synchronized TaskCandidate saveTaskCandidate(TaskCandidate candidate) {
+        taskCandidatesById.put(candidate.id(), candidate);
+        return candidate;
+    }
+
+    synchronized Optional<TaskCandidate> findTaskCandidateById(String candidateId) {
+        return Optional.ofNullable(taskCandidatesById.get(candidateId));
+    }
+
+    synchronized List<TaskCandidate> findTaskCandidates(String meetingId) {
+        return taskCandidatesById.values()
+                .stream()
+                .filter(candidate -> candidate.meetingId().equals(meetingId))
+                .toList();
+    }
+
+    synchronized TaskCard saveTaskCard(TaskCard taskCard) {
+        taskCardsById.put(taskCard.id(), taskCard);
+        return taskCard;
+    }
+
+    synchronized Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId) {
+        return taskCardsById.values()
+                .stream()
+                .filter(taskCard -> candidateId.equals(taskCard.sourceCandidateId()))
+                .findFirst();
     }
 
     synchronized ProjectKnowledge saveProjectKnowledge(ProjectKnowledge knowledge) {

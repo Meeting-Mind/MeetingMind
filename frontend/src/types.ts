@@ -544,17 +544,37 @@ export interface TaskCandidateSummary {
   meetingId: string;
   title: string;
   assigneeName: string | null;
+  suggestedAssigneeId: string | null;
   dueDate: ApiDate | null;
-  status: "CANDIDATE";
+  status: "CANDIDATE" | "CONFIRMED" | "DISMISSED";
   sourceIds: string[];
+  createdBy: string;
+  createdAt: ApiDateTime;
+}
+
+export interface TaskCandidateGenerationResponse {
+  candidates: TaskCandidateSummary[];
+  assignees: TaskAssigneeOption[];
+  canConfirm: boolean;
+  sources: AiSource[];
+  unsupported: boolean;
+  model: string;
 }
 
 export interface TaskCandidatesResponse {
   candidates: TaskCandidateSummary[];
+  assignees: TaskAssigneeOption[];
+  canConfirm: boolean;
+}
+
+export interface TaskAssigneeOption {
+  id: string;
+  displayName: string;
 }
 
 export interface ConfirmTaskCandidateRequest {
   title: string;
+  description?: string | null;
   assigneeId?: string | null;
   dueDate?: ApiDate | null;
   status: TaskCardStatus;

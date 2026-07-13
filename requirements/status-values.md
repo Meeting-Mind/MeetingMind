@@ -17,6 +17,8 @@ Google Sheets 상태값 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | MeetingReport | 초안 | DRAFT | 사용자가 편집 중인 회의록. | 후보 수락 또는 수동 작성 시작 | meeting_reports.status | FR-RPT-04~05 |
 | MeetingReport | 확정 | CONFIRMED | 프로젝트 문서로 저장된 공식 회의록. | 사용자 확정 시 | meeting_reports.status | FR-RPT-03 |
 | TaskCandidate | 후보 | CANDIDATE | AI가 추출했지만 아직 칸반에 등록되지 않은 태스크 후보. | 태스크 추출 직후 | task_candidates.status | FR-TASK-01~02 |
+| TaskCandidate | 확정 | CONFIRMED | 사용자가 검토하고 TaskCard로 등록한 태스크 후보. | TaskCard 생성과 같은 전이에서 변경 | task_candidates.status | FR-TASK-02~03 |
+| TaskCandidate | 제외 | DISMISSED | 사용자가 칸반 등록 대상에서 제외한 태스크 후보. | 후보 제외 시 | task_candidates.status | FR-TASK-02 |
 | TaskCard | 할 일 | TODO | 아직 시작하지 않은 칸반 카드. | 카드 생성 기본 상태 | task_cards.status | FR-KAN-01~04 |
 | TaskCard | 진행 중 | IN_PROGRESS | 현재 처리 중인 칸반 카드. | 드래그 또는 상태 변경 | task_cards.status | FR-KAN-04 |
 | TaskCard | 완료 | DONE | 작업이 완료된 칸반 카드. | 드래그 또는 상태 변경 | task_cards.status | FR-KAN-04 |

@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { confirmMeetingReport, generateReportCandidate } from "../api/workspace";
+import {
+  confirmMeetingReport,
+  confirmTaskCandidate,
+  extractTaskCandidates,
+  fetchTaskCandidates,
+  generateReportCandidate
+} from "../api/workspace";
 import type { AuthSession } from "../auth/session";
-import type { WorkspaceData } from "../types";
+import type { TaskAssigneeOption, TaskCandidateSummary, WorkspaceData } from "../types";
 
 type ChangeCommit = {
   id: string;
@@ -53,11 +59,30 @@ type ReportCandidateDraft = {
 type TaskCandidateDraft = {
   id: string;
   title: string;
-  assignee: string;
+  description: string;
+  assigneeId: string | null;
   dueDate: string;
-  status: "candidate" | "registered";
+  status: "candidate" | "registered" | "dismissed";
   sourceIds: string[];
+  taskId: string | null;
 };
+
+function toTaskCandidateDraft(candidate: TaskCandidateSummary): TaskCandidateDraft {
+  return {
+    id: candidate.id,
+    title: candidate.title,
+    description: "",
+    assigneeId: candidate.suggestedAssigneeId,
+    dueDate: candidate.dueDate || "",
+    status: candidate.status === "CONFIRMED"
+      ? "registered"
+      : candidate.status === "DISMISSED"
+        ? "dismissed"
+        : "candidate",
+    sourceIds: candidate.sourceIds,
+    taskId: null
+  };
+}
 
 type ChatMessage = {
   id: string;
@@ -115,22 +140,6 @@ function buildReportMarkdown(report: ReportView) {
     "## Action Item",
     ...report.actions.map((action) => `- ${action}`)
   ].join("\n");
-}
-
-function buildTaskCandidatesFromReport(report: ReportView): TaskCandidateDraft[] {
-  return report.actions.map((action, index) => {
-    const [assignee, ...titleParts] = action.split("—");
-    const title = titleParts.join("—").trim() || action.trim();
-
-    return {
-      id: `candidate-local-${index + 1}`,
-      title,
-      assignee: assignee.trim() || "미지정",
-      dueDate: "",
-      status: "candidate",
-      sourceIds: [`${report.breadcrumb} Action Item ${index + 1}`]
-    };
-  });
 }
 
 function inferReportTrack(projectName: string, meetingTitle: string) {
@@ -413,6 +422,12 @@ export function ReportAgentPage({
   const [isConfirmingReport, setIsConfirmingReport] = useState(false);
   const [reportGenerationError, setReportGenerationError] = useState("");
   const [taskCandidates, setTaskCandidates] = useState<TaskCandidateDraft[]>([]);
+  const [taskAssignees, setTaskAssignees] = useState<TaskAssigneeOption[]>([]);
+  const [canConfirmTaskCandidates, setCanConfirmTaskCandidates] = useState(false);
+  const [isLoadingTaskCandidates, setIsLoadingTaskCandidates] = useState(false);
+  const [isExtractingTasks, setIsExtractingTasks] = useState(false);
+  const [confirmingTaskCandidateId, setConfirmingTaskCandidateId] = useState<string | null>(null);
+  const [taskCandidateError, setTaskCandidateError] = useState("");
   const changeCommits = reportState.commits;
 
   const selectedCommit = changeCommits.find((commit) => commit.id === selectedCommitId) ?? null;
@@ -435,7 +450,48 @@ export function ReportAgentPage({
     setIsConfirmingReport(false);
     setReportGenerationError("");
     setTaskCandidates([]);
+    setTaskAssignees([]);
+    setCanConfirmTaskCandidates(false);
+    setIsLoadingTaskCandidates(false);
+    setIsExtractingTasks(false);
+    setConfirmingTaskCandidateId(null);
+    setTaskCandidateError("");
   }, [projectName, meetingTitle, reportView, round]);
+
+  useEffect(() => {
+    let active = true;
+    if (!session || !meetingId) {
+      return () => {
+        active = false;
+      };
+    }
+
+    setIsLoadingTaskCandidates(true);
+    setTaskCandidateError("");
+    fetchTaskCandidates(session, meetingId)
+      .then((response) => {
+        if (!active) {
+          return;
+        }
+        setTaskCandidates(response.candidates.map(toTaskCandidateDraft));
+        setTaskAssignees(response.assignees);
+        setCanConfirmTaskCandidates(response.canConfirm);
+      })
+      .catch((error) => {
+        if (active) {
+          setTaskCandidateError(error instanceof Error ? error.message : "태스크 후보 조회에 실패했습니다.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingTaskCandidates(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [meetingId, session]);
 
   function buildCommitId(seed: number) {
     return `${Math.abs(seed).toString(16).slice(0, 7)}`.padEnd(7, "0");
@@ -726,22 +782,72 @@ export function ReportAgentPage({
     }
   }
 
-  function handleExtractTaskCandidates() {
-    setTaskCandidates(buildTaskCandidatesFromReport(reportState));
-    setSaveLabel("● 태스크 candidate 추출됨 · 검토 대기");
+  async function handleExtractTaskCandidates() {
+    if (!session || !meetingId || isExtractingTasks) {
+      return;
+    }
+    setIsExtractingTasks(true);
+    setTaskCandidateError("");
+    try {
+      const response = await extractTaskCandidates(session, meetingId);
+      if (response.unsupported || !response.candidates.length) {
+        setTaskCandidateError("현재 회의에는 태스크 후보를 생성할 근거가 없습니다.");
+        return;
+      }
+      const generatedCandidates = response.candidates.map(toTaskCandidateDraft);
+      const generatedIds = new Set(generatedCandidates.map((candidate) => candidate.id));
+      setTaskCandidates((current) => [
+        ...current.filter((candidate) => !generatedIds.has(candidate.id)),
+        ...generatedCandidates
+      ]);
+      setTaskAssignees(response.assignees);
+      setCanConfirmTaskCandidates(response.canConfirm);
+      setSaveLabel("● 태스크 candidate 추출됨 · 검토 대기");
+    } catch (error) {
+      setTaskCandidateError(error instanceof Error ? error.message : "태스크 후보 생성에 실패했습니다.");
+    } finally {
+      setIsExtractingTasks(false);
+    }
   }
 
-  function handleUpdateTaskCandidate(candidateId: string, updates: Partial<Pick<TaskCandidateDraft, "assignee" | "dueDate" | "title">>) {
+  function handleUpdateTaskCandidate(
+    candidateId: string,
+    updates: Partial<Pick<TaskCandidateDraft, "assigneeId" | "description" | "dueDate" | "title">>
+  ) {
     setTaskCandidates((current) =>
       current.map((candidate) => (candidate.id === candidateId ? { ...candidate, ...updates } : candidate))
     );
   }
 
-  function handleRegisterTaskCandidate(candidateId: string) {
-    setTaskCandidates((current) =>
-      current.map((candidate) => (candidate.id === candidateId ? { ...candidate, status: "registered" } : candidate))
-    );
-    setSaveLabel("● 태스크 candidate 승인됨 · 칸반 API 연결 대기");
+  async function handleRegisterTaskCandidate(candidateId: string) {
+    if (!session || !meetingId || !canConfirmTaskCandidates || confirmingTaskCandidateId) {
+      return;
+    }
+    const candidate = taskCandidates.find((item) => item.id === candidateId);
+    if (!candidate || candidate.status !== "candidate") {
+      return;
+    }
+    setConfirmingTaskCandidateId(candidateId);
+    setTaskCandidateError("");
+    try {
+      const response = await confirmTaskCandidate(session, meetingId, candidateId, {
+        title: candidate.title,
+        description: candidate.description || null,
+        assigneeId: candidate.assigneeId,
+        dueDate: candidate.dueDate || null,
+        status: "TODO"
+      });
+      setTaskCandidates((current) => current.map((item) => (
+        item.id === candidateId
+          ? { ...item, status: "registered", taskId: response.taskId }
+          : item
+      )));
+      setSaveLabel("● 태스크 candidate 승인됨 · 칸반 등록 완료");
+    } catch (error) {
+      setTaskCandidateError(error instanceof Error ? error.message : "태스크 후보 확정에 실패했습니다.");
+    } finally {
+      setConfirmingTaskCandidateId(null);
+    }
   }
 
   function handleExportPdf() {
@@ -1098,10 +1204,17 @@ export function ReportAgentPage({
                 <button disabled={isGeneratingReport || !meetingId} onClick={handleGenerateReportCandidate} type="button">
                   {isGeneratingReport ? "생성 중..." : "회의록 candidate 생성"}
                 </button>
-                <button onClick={handleExtractTaskCandidates} type="button">태스크 후보 추출</button>
+                <button
+                  disabled={isLoadingTaskCandidates || isExtractingTasks || !meetingId || !session}
+                  onClick={handleExtractTaskCandidates}
+                  type="button"
+                >
+                  {isLoadingTaskCandidates ? "불러오는 중..." : isExtractingTasks ? "추출 중..." : "태스크 후보 추출"}
+                </button>
               </div>
 
               {reportGenerationError ? <p className="report-agent-candidate-error">{reportGenerationError}</p> : null}
+              {taskCandidateError ? <p className="report-agent-candidate-error">{taskCandidateError}</p> : null}
 
               {reportCandidate ? (
                 <div className="report-agent-report-candidate">
@@ -1135,27 +1248,52 @@ export function ReportAgentPage({
                   {taskCandidates.map((candidate) => (
                     <div key={candidate.id} className="report-agent-task-candidate">
                       <div className="report-agent-task-candidate-top">
-                        <strong>{candidate.status === "candidate" ? "검토 대기" : "등록 승인"}</strong>
-                        <span>{candidate.sourceIds[0]}</span>
+                        <strong>
+                          {candidate.status === "candidate"
+                            ? "검토 대기"
+                            : candidate.status === "registered"
+                              ? "등록 승인"
+                              : "등록 제외"}
+                        </strong>
+                        <span>{candidate.sourceIds[0] || "근거 없음"}</span>
                       </div>
                       <label>
                         <span>제목</span>
                         <input
+                          disabled={!canConfirmTaskCandidates || candidate.status !== "candidate"}
                           onChange={(event) => handleUpdateTaskCandidate(candidate.id, { title: event.target.value })}
                           value={candidate.title}
+                        />
+                      </label>
+                      <label>
+                        <span>설명</span>
+                        <textarea
+                          disabled={!canConfirmTaskCandidates || candidate.status !== "candidate"}
+                          onChange={(event) => handleUpdateTaskCandidate(candidate.id, { description: event.target.value })}
+                          rows={2}
+                          value={candidate.description}
                         />
                       </label>
                       <div className="report-agent-task-candidate-grid">
                         <label>
                           <span>담당자</span>
-                          <input
-                            onChange={(event) => handleUpdateTaskCandidate(candidate.id, { assignee: event.target.value })}
-                            value={candidate.assignee}
-                          />
+                          <select
+                            disabled={!canConfirmTaskCandidates || candidate.status !== "candidate"}
+                            onChange={(event) => handleUpdateTaskCandidate(candidate.id, {
+                              assigneeId: event.target.value || null
+                            })}
+                            value={candidate.assigneeId || ""}
+                          >
+                            <option value="">미지정</option>
+                            {taskAssignees.map((assignee) => (
+                              <option key={assignee.id} value={assignee.id}>{assignee.displayName}</option>
+                            ))}
+                          </select>
                         </label>
                         <label>
                           <span>마감일</span>
                           <input
+                            disabled={!canConfirmTaskCandidates || candidate.status !== "candidate"}
                             onChange={(event) => handleUpdateTaskCandidate(candidate.id, { dueDate: event.target.value })}
                             type="date"
                             value={candidate.dueDate}
@@ -1163,20 +1301,28 @@ export function ReportAgentPage({
                         </label>
                       </div>
                       <button
-                        disabled={candidate.status === "registered"}
+                        disabled={
+                          !canConfirmTaskCandidates
+                          || candidate.status !== "candidate"
+                          || confirmingTaskCandidateId === candidate.id
+                          || !candidate.title.trim()
+                        }
                         onClick={() => handleRegisterTaskCandidate(candidate.id)}
                         type="button"
                       >
-                        칸반 등록 승인
+                        {confirmingTaskCandidateId === candidate.id
+                          ? "등록 중..."
+                          : candidate.status === "registered"
+                            ? "칸반 등록 완료"
+                            : candidate.status === "dismissed"
+                              ? "등록 제외됨"
+                              : "칸반 등록 승인"}
                       </button>
                     </div>
                   ))}
                 </div>
               ) : null}
 
-              <p className="report-agent-candidate-gap">
-                실제 저장, 확정, 칸반 등록은 Backend report/task-candidate API 연결 후 서버 권한 검증과 감사 로그로 처리합니다.
-              </p>
             </section>
           </aside>
         </main>
