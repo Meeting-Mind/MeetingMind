@@ -465,3 +465,39 @@
 - `MeetingReport` PostgreSQL repository와 candidate 만료/취소 정책
 - `AI_REQUESTED`, `REPORT_CANDIDATE_CREATED` persistent audit log
 - 실제 STT 입력 API 연결 후 supported public end-to-end smoke
+
+## M024 Report Confirm and Current Version
+
+### Contract and Decision
+
+- `POST /api/v1/meetings/{meetingId}/reports/{reportId}/confirm`을 구현 대상으로 확정했다.
+- 확정 권한은 Space `OWNER`/`ADMIN` 또는 Meeting `HOST`/`EDITOR`다.
+- `CANDIDATE`/`DRAFT`만 확정하고 중복 확정은 `INVALID_REQUEST`, report 불일치는 `REPORT_NOT_FOUND`로 처리한다.
+- 더 높은 version이 존재하는 오래된 candidate는 `REPORT_VERSION_CONFLICT`로 거부해 낮은 version이 current를 덮어쓰지 못하게 한다.
+- candidate TTL은 기준값이 없어 `Q-008`로 분리하고 이번 slice에서 임의 만료 정책을 넣지 않았다.
+- 기존 `D-017` 중복 번호를 해소하기 위해 candidate 임시 저장 결정을 `D-022`로 정리했다.
+
+### Implementation
+
+- `MeetingReport`에 nullable `confirmedAt`과 immutable `confirmed`/`withoutCurrent` transition을 추가했다.
+- domain confirm은 기존 current confirmed report를 모두 `current=false`로 바꾸고 대상 report만 `CONFIRMED/current=true`로 저장한다.
+- lifecycle service는 인증과 `requireEditAccess`를 domain 변경 전에 적용한다.
+- Frontend candidate card는 Backend confirm API를 호출하고 confirmed/version/current/loading/error 상태를 반영한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd frontend && npm run build` (기존 500 kB 초과 bundle warning 유지)
+- Passed: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, 24 regression tests
+- Passed: `cd ai && ./.venv/bin/python -m compileall app`
+- Passed: `git diff --check`
+- Passed: Backend service test에서 current report 교체, version 1/2 보존, 중복·stale 확정 거부, 다른 meeting report 거부, VIEWER 사전 차단을 검증했다.
+- Passed: Backend `18080` public API smoke에서 edit 권한 사용자의 없는 report는 `404 REPORT_NOT_FOUND`, 비권한 사용자는 report 조회 전에 `403 MEETING_ACCESS_DENIED`를 반환했다.
+- Not run: public 성공 confirm E2E. 현재 외부 API로 transcript/candidate를 주입할 수 없어 supported 생성·확정 성공은 Backend service 통합 테스트로 검증했다.
+
+### Remaining Boundary
+
+- `Q-008` candidate TTL 결정과 만료/정리 작업
+- report manual update, version history 조회/복원, Markdown/PDF/DOCX download
+- PostgreSQL repository transaction과 partial unique index 실제 적용 검증
+- `REPORT_CONFIRMED` persistent audit log

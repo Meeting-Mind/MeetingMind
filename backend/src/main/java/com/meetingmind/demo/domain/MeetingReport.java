@@ -16,12 +16,27 @@ public record MeetingReport(
         String createdBy,
         int version,
         boolean current,
-        Instant createdAt
+        Instant createdAt,
+        Instant confirmedAt
 ) {
     public MeetingReport {
         decisions = decisions == null ? List.of() : List.copyOf(decisions);
         actionItems = actionItems == null ? List.of() : List.copyOf(actionItems);
         sourceIds = sourceIds == null ? List.of() : List.copyOf(sourceIds);
+    }
+
+    public MeetingReport confirmed(Instant confirmedAt) {
+        return new MeetingReport(
+                id, meetingId, MeetingReportStatus.CONFIRMED, title, summary, markdown,
+                decisions, actionItems, sourceIds, createdBy, version, true, createdAt, confirmedAt
+        );
+    }
+
+    public MeetingReport withoutCurrent() {
+        return new MeetingReport(
+                id, meetingId, status, title, summary, markdown,
+                decisions, actionItems, sourceIds, createdBy, version, false, createdAt, confirmedAt
+        );
     }
 
     public record ReportDecision(String id, String title, String content, List<String> sourceIds) {

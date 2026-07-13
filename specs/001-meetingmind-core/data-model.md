@@ -112,6 +112,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `version`
 - `isCurrent`: 회의당 현재 공식 CONFIRMED report는 하나만 true
 - `createdAt`
+- `confirmedAt`: `CONFIRMED` 전환 시각, 확정 전에는 null
 
 ### ProjectKnowledge
 
@@ -164,6 +165,9 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `MeetingReport(meetingId)` 기준 `status=CONFIRMED and isCurrent=true`는 최대 1개다.
 - `MeetingReport.status=CANDIDATE`는 임시 저장되지만 기본 공식 회의록 조회와 Project AI source에서 제외한다.
 - AI가 근거 부족으로 `unsupported=true`를 반환한 결과는 `MeetingReport`로 저장하지 않는다.
+- `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환할 수 있고, 중복 확정은 거부한다.
+- 같은 meeting에 더 높은 version이 존재하면 오래된 candidate 확정을 거부한다.
+- 새 report를 확정할 때 기존 `CONFIRMED and isCurrent=true` report를 `isCurrent=false`로 전환하고 새 report만 `isCurrent=true`로 둔다.
 - `TaskCard.sourceCandidateId`는 nullable이지만 값이 있으면 unique다.
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.

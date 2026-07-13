@@ -70,6 +70,7 @@ class MeetingAiServiceTest {
                 owner.id(),
                 1,
                 true,
+                FIXED_CLOCK.instant(),
                 FIXED_CLOCK.instant()
         ));
 

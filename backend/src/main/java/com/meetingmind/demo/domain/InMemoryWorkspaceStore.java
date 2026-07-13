@@ -199,6 +199,10 @@ public class InMemoryWorkspaceStore {
         return report;
     }
 
+    synchronized Optional<MeetingReport> findMeetingReportById(String reportId) {
+        return Optional.ofNullable(meetingReportsById.get(reportId));
+    }
+
     synchronized List<MeetingReport> findMeetingReports(String meetingId) {
         return meetingReportsById.values()
                 .stream()

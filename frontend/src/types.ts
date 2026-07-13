@@ -522,6 +522,7 @@ export interface ConfirmReportResponse {
   status: "CONFIRMED";
   version: number;
   isCurrent: boolean;
+  confirmedAt: ApiDateTime;
 }
 
 export interface UpdateReportRequest {

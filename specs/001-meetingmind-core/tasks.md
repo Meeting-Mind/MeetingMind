@@ -55,6 +55,7 @@
 | M021 | Project AI Backend 권한 선필터 연동 | Project AI가 SpaceMember 인증과 회의 ACL 선필터 이후의 공식 지식/회의 요약만 사용하고 Frontend가 Backend API를 호출한다. | T166-T173 |
 | M022 | AI 회의록 candidate Backend 경유 전환 | AI 회의록 생성이 회의 편집 권한과 단일 meeting source 검증 뒤에서 실행되고 candidate 저장/화면 연결 경계가 생긴다. | T174-T181 |
 | M023 | Session handoff 공용/개인 상태 분리 | 팀 공용 기준선과 개인 작업 상태가 별도 파일로 관리되고 개인 파일은 Git에서 제외된다. | T182-T184 |
+| M024 | Report candidate 확정과 current version 전환 | 편집 권한자가 candidate를 공식 report로 확정하고 회의당 current confirmed report를 하나만 유지한다. | T185-T190 |
 
 ## Foundation
 
@@ -299,6 +300,17 @@
 | T183 | M023 | [x] | docs/handoff | 사용자 | Codex | T182 | `.specify/memory/session-handoff.md`, `.specify/memory/session-handoff.example.md`, `.specify/memory/session-handoff.local.md` | 누적 세션 로그를 팀 공통 기준선으로 정리하고 개인 작업용 템플릿과 local 파일을 만든다. | 공용 파일에 개인 브랜치 상태가 없고 local 파일은 owner와 작업 상태를 기록할 수 있으며 Git에서 제외된다. |
 | T184 | M023 | [x] | verification | 사용자 | Codex | T183 | `.gitignore`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | ignore 적용, tracked/untracked 범위, 문서 중복과 diff 형식을 검증한다. | `git check-ignore`, stale 개인 상태 검색, `git diff --check`가 통과했다. |
 
+### M024: Report Confirm and Current Version
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T185 | M024 | [x] | contracts/report | 사용자 | Codex | T181 | `requirements/functional-requirements-detail.md`, `requirements/permissions.md`, `requirements/status-values.md`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/erd.md`, `specs/001-meetingmind-core/plan.md` | confirm 권한, 상태 전이, current 단일 제약, `confirmedAt`, candidate 만료 정책 경계를 확정한다. | confirm 계약과 모델 영향이 문서화되고 TTL은 `Q-008`로 분리되어 있다. |
+| T186 | M024 | [x] | backend/domain | 사용자 | Codex | T185 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/**` | candidate/draft 확정과 기존 current report 해제를 하나의 domain transition으로 구현한다. | 최신 version 대상만 `CONFIRMED/current=true`가 되고 기존 current는 false이며 중복/다른 meeting/stale 확정이 거부된다. |
+| T187 | M024 | [x] | backend/api | 사용자 | Codex | T186 | `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/main/java/com/meetingmind/demo/dto/**`, `backend/src/main/java/com/meetingmind/demo/service/**`, `backend/src/test/**` | 인증과 report 편집 권한을 적용한 confirm endpoint를 구현한다. | edit 권한만 성공하고 VIEWER는 domain 변경 전에 차단되며 report 불일치는 `REPORT_NOT_FOUND`로 응답한다. |
+| T188 | M024 | [x] | frontend/report | 사용자 | Codex | T187 | `frontend/src/api/workspace.ts`, `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/types.ts` | 비활성 confirm 버튼을 Backend API와 연결하고 status/version/current 상태를 표시한다. | 성공 시 confirmed/current가 표시되고 loading/error와 중복 제출 방지가 동작한다. |
+| T189 | M024 | [x] | verification | 사용자 | Codex | T187, T188 | `backend/**`, `frontend/**`, `specs/001-meetingmind-core/implement.md` | Backend/Frontend 테스트, API smoke, diff 검증을 실행한다. | current 교체, 권한 거부, 중복 확정, Frontend build, public API 오류 매핑이 검증됐다. |
+| T190 | M024 | [x] | docs/closeout | 사용자 | Codex | T189 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md`, `.specify/memory/session-handoff.md` | M024 완료 범위와 TTL/update/history/export 후속 경계를 정리한다. | TTL은 `Q-008`, update/history/export와 persistent audit는 후속 범위로 명시되어 있다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -318,6 +330,7 @@
 - [x] V014 Project AI Backend 권한 선필터 검증: AI 19 tests/compile, Backend test, Frontend build, public `200 context-only`, 비멤버 `403 SPACE_ACCESS_DENIED`, internal allowlist 위반 `403 AI_CONTEXT_FORBIDDEN`, `git diff --check`
 - [x] V015 Session handoff 분리 검증: `git check-ignore -v .specify/memory/session-handoff.local.md`, 공용 파일 개인 상태 검색, `git diff --check`
 - [x] V016 AI report candidate Backend route 검증: AI 24 tests/compile, Backend test, Frontend build, supported candidate 저장 service test, public `200 unsupported`, 비권한 `403 MEETING_ACCESS_DENIED`, `git diff --check`
+- [x] V017 Report confirm/current version 검증: Backend current 교체·중복 확정·다른 meeting·VIEWER 테스트, Frontend build, public `404 REPORT_NOT_FOUND`와 비권한 `403 MEETING_ACCESS_DENIED`, AI regression 24 tests/compile, `git diff --check`
 
 ## Notes
 
