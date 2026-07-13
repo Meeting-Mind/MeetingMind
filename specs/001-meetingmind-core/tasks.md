@@ -57,6 +57,7 @@
 | M023 | Session handoff 공용/개인 상태 분리 | 팀 공용 기준선과 개인 작업 상태가 별도 파일로 관리되고 개인 파일은 Git에서 제외된다. | T182-T184 |
 | M024 | Report candidate 확정과 current version 전환 | 편집 권한자가 candidate를 공식 report로 확정하고 회의당 current confirmed report를 하나만 유지한다. | T185-T190 |
 | M025 | AI 태스크 후보 Backend 경유와 TaskCard 확정 | 편집 권한자가 단일 회의 근거로 태스크 후보를 생성하고 검토한 후보를 중복 없이 프로젝트 TaskCard로 확정한다. | T191-T199 |
+| M026 | AI provider 오류·timeout 안전성 | provider 원문을 노출하지 않고 기능별 timeout과 공통 오류 응답 shape가 테스트로 검증되어 있다. | T200-T203 |
 
 ## Foundation
 
@@ -326,6 +327,15 @@
 | T198 | M025 | [x] | verification | 사용자 | Codex | T193-T197 | `ai/**`, `backend/**`, `frontend/**`, `specs/001-meetingmind-core/implement.md` | AI/Backend/Frontend 테스트, API smoke, diff와 계약 정합성 리뷰를 실행한다. | scope/권한/중복 negative case와 정상 생성/확정 흐름이 검증된다. |
 | T199 | M025 | [x] | docs/closeout | 사용자 | Codex | T198 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md` | 구현 범위, 검증 결과, TTL과 일반 Kanban API 후속 경계를 정리한다. | 완료 task와 미실행 사유, 남은 위험이 원본 문서에 기록되어 있다. |
 
+### M026: AI Provider Safety
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T200 | M026 | [x] | contracts/ai | 사용자 | Codex | T199 | `requirements/performance.md`, `requirements/non-functional-requirements-detail.md`, `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/plan.md`, `specs/001-meetingmind-core/feature-implementation-comparison.md` | OpenAI timeout과 외부 오류 응답 기준을 확정하고 구현 비교 기준선을 최신화한다. | 챗봇·용어·태스크 30초, 보고서 60초 timeout, 공통 오류 body와 현재 구현 경계가 문서화되고 자동 재시도 제외 근거가 기록되어 있다. |
+| T201 | M026 | [x] | ai/provider | 사용자 | Codex | T200 | `ai/app/main.py` | OpenAI 공통 호출의 timeout을 기능별로 적용하고 provider 원문 오류 노출을 제거한다. | 설정 누락, HTTP 오류, 연결 오류, 빈 provider 응답이 raw detail 없이 고정 `503 AI_PROVIDER_UNAVAILABLE`와 공통 오류 body로 반환된다. |
+| T202 | M026 | [x] | ai/test | 사용자 | Codex | T201 | `ai/tests/test_meeting_ai.py` | provider 오류 비노출, 기능별 timeout, 공통 오류 body를 단위 테스트한다. | raw provider body/연결 사유가 응답에 없고 30초/60초 timeout과 `{code, message, fieldErrors, traceId}`가 검증된다. |
+| T203 | M026 | [x] | docs/closeout | 사용자 | Codex | T202 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md`, `specs/001-meetingmind-core/feature-implementation-comparison.md` | 구현 범위, 현재 구현 비교, 검증 결과, 후속 의존 작업을 정리한다. | AI 검증 결과와 internal service auth, pgvector, embedding worker, 실제 STT 선행 의존성이 기록되어 있다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -347,6 +357,7 @@
 - [x] V016 AI report candidate Backend route 검증: AI 24 tests/compile, Backend test, Frontend build, supported candidate 저장 service test, public `200 unsupported`, 비권한 `403 MEETING_ACCESS_DENIED`, `git diff --check`
 - [x] V017 Report confirm/current version 검증: Backend current 교체·중복 확정·다른 meeting·VIEWER 테스트, Frontend build, public `404 REPORT_NOT_FOUND`와 비권한 `403 MEETING_ACCESS_DENIED`, AI regression 24 tests/compile, `git diff --check`
 - [x] V018 Task candidate Backend route 검증: AI 29 tests/compile, Backend 전체 test, Frontend build, source scope·권한·게스트·중복 확정 test, public `200 context-only`/조회 `200`/없는 후보 `404`/무인증 `401`, `git diff --check`
+- [x] V019 AI provider safety 검증: AI 35 tests/compile, provider raw detail 비노출, 설정 누락 고정 `503`, 공통 오류 body, 기본 30초와 보고서 60초 timeout 전달, `git diff --check`
 
 ## Notes
 

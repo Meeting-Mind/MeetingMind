@@ -41,6 +41,9 @@ DOTENV_CANDIDATES = [
 ENV_ALIASES = {
     "OPENAI_API_KEY": ("OPEN_AI_KEY",),
 }
+
+OPENAI_DEFAULT_TIMEOUT_SECONDS = 30
+OPENAI_REPORT_TIMEOUT_SECONDS = 60
 LOGGER = logging.getLogger("meetingmind.ai")
 
 
@@ -355,8 +358,18 @@ def get_env(key: str, default: str | None = None) -> str | None:
 def require_env(key: str) -> str:
     value = get_env(key)
     if not value:
-        raise HTTPException(status_code=500, detail=f"{key} is not configured.")
+        raise provider_unavailable()
     return value
+
+
+def provider_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "AI_PROVIDER_UNAVAILABLE",
+            "message": "AI provider 응답을 받을 수 없습니다.",
+        },
+    )
 
 
 def build_context_block(payload: MeetingAiAskRequest) -> str:
@@ -393,10 +406,15 @@ def extract_output_text(response_data: dict[str, Any]) -> str:
                 if text:
                     return text
 
-    raise HTTPException(status_code=502, detail="OpenAI response did not contain output text.")
+    raise provider_unavailable()
 
 
-def call_openai_text(developer_content: str, user_content: str) -> tuple[str, str]:
+def call_openai_text(
+    developer_content: str,
+    user_content: str,
+    *,
+    timeout_seconds: int = OPENAI_DEFAULT_TIMEOUT_SECONDS,
+) -> tuple[str, str]:
     api_key = require_env("OPENAI_API_KEY")
     model = get_env("OPENAI_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini"
 
@@ -425,13 +443,10 @@ def call_openai_text(developer_content: str, user_content: str) -> tuple[str, st
     )
 
     try:
-        with urlopen(request, timeout=60, context=openai_ssl_context()) as response:
+        with urlopen(request, timeout=timeout_seconds, context=openai_ssl_context()) as response:
             response_data = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        detail = error.read().decode("utf-8", errors="ignore")
-        raise HTTPException(status_code=502, detail=f"OpenAI API error: {detail}") from error
-    except URLError as error:
-        raise HTTPException(status_code=502, detail=f"OpenAI API connection failed: {error.reason}") from error
+    except (HTTPError, URLError, TimeoutError, ValueError, UnicodeError) as error:
+        raise provider_unavailable() from error
 
     return extract_output_text(response_data), model
 
@@ -1061,13 +1076,7 @@ def answer_meeting_chat(
 def as_provider_unavailable(error: HTTPException) -> HTTPException:
     if error.status_code not in (500, 502, 503):
         return error
-    return HTTPException(
-        status_code=503,
-        detail={
-            "code": "AI_PROVIDER_UNAVAILABLE",
-            "message": "AI provider 응답을 받을 수 없습니다.",
-        },
-    )
+    return provider_unavailable()
 
 
 def generate_report(payload: GenerateReportRequest) -> GenerateReportResponse:
@@ -1118,6 +1127,7 @@ def generate_report_from_sources(
             f"[출력 형식]\n{report_format}\n\n"
             f"[회의 근거]\n{context_lines}"
         ),
+        timeout_seconds=OPENAI_REPORT_TIMEOUT_SECONDS,
     )
 
     return parse_report_response(text, model=model, sources=sources)
@@ -1369,6 +1379,29 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(HTTPException)
+def http_exception_handler(_request: Any, exception: HTTPException) -> JSONResponse:
+    detail = exception.detail if isinstance(exception.detail, dict) else {}
+    is_provider_error = exception.status_code >= 500
+    code = "AI_PROVIDER_UNAVAILABLE" if is_provider_error else detail.get("code") or "INVALID_REQUEST"
+    message = (
+        "AI provider 응답을 받을 수 없습니다."
+        if is_provider_error
+        else detail.get("message") or "요청값이 잘못되었습니다."
+    )
+    field_errors = detail.get("fieldErrors")
+
+    return JSONResponse(
+        status_code=exception.status_code,
+        content={
+            "code": code,
+            "message": message,
+            "fieldErrors": field_errors if isinstance(field_errors, list) else [],
+            "traceId": detail.get("traceId"),
+        },
+    )
+
+
 @app.exception_handler(RequestValidationError)
 def validation_exception_handler(_request: Any, _exception: RequestValidationError) -> JSONResponse:
     return JSONResponse(
@@ -1377,6 +1410,7 @@ def validation_exception_handler(_request: Any, _exception: RequestValidationErr
             "code": "INVALID_REQUEST",
             "message": "요청값이 잘못되었습니다.",
             "fieldErrors": [],
+            "traceId": None,
         },
     )
 

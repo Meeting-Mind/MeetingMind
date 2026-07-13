@@ -1,6 +1,7 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
 
 from app.main import (
     AiSource,
@@ -24,8 +25,11 @@ from app.main import (
     backend_extract_tasks,
     backend_project_ai_chat,
     backend_project_chat,
+    call_openai_text,
     explain_term,
     extract_tasks,
+    generate_report_from_sources,
+    http_exception_handler,
     meeting_ai_chat,
     meeting_chat,
     parse_report_response,
@@ -308,9 +312,43 @@ class RagSafetyTest(unittest.TestCase):
 
     def test_backend_meeting_chat_validation_error_uses_contract_shape(self):
         response = validation_exception_handler(None, RequestValidationError([]))
+        content = json.loads(response.body.decode("utf-8"))
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(json.loads(response.body.decode("utf-8"))["code"], "INVALID_REQUEST")
+        self.assertEqual(
+            content,
+            {
+                "code": "INVALID_REQUEST",
+                "message": "요청값이 잘못되었습니다.",
+                "fieldErrors": [],
+                "traceId": None,
+            },
+        )
+
+    def test_backend_meeting_chat_provider_error_uses_common_error_shape(self):
+        response = http_exception_handler(
+            None,
+            HTTPException(
+                status_code=503,
+                detail={
+                    "code": "AI_PROVIDER_UNAVAILABLE",
+                    "message": "secret-provider-detail",
+                },
+            ),
+        )
+        content = json.loads(response.body.decode("utf-8"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            content,
+            {
+                "code": "AI_PROVIDER_UNAVAILABLE",
+                "message": "AI provider 응답을 받을 수 없습니다.",
+                "fieldErrors": [],
+                "traceId": None,
+            },
+        )
+        self.assertNotIn("secret-provider-detail", response.body.decode("utf-8"))
 
     def test_backend_generate_report_rejects_source_from_another_meeting(self):
         payload = BackendGenerateReportRequest(
@@ -659,6 +697,84 @@ class RagSafetyTest(unittest.TestCase):
         self.assertEqual(report.actionItems[0].confirmationState, "candidate")
         self.assertEqual(tasks.tasks[0].sourceIds, ["segment-001"])
         self.assertEqual(tasks.tasks[0].confirmationState, "candidate")
+
+
+class ProviderSafetyTest(unittest.TestCase):
+    def test_openai_call_uses_default_timeout(self):
+        response = MagicMock()
+        response.read.return_value = (
+            b'{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}'
+        )
+        response_context = MagicMock()
+        response_context.__enter__.return_value = response
+
+        with (
+            patch("app.main.require_env", return_value="test-key"),
+            patch("app.main.get_env", return_value="test-model"),
+            patch("app.main.openai_ssl_context", return_value=None),
+            patch("app.main.urlopen", return_value=response_context) as urlopen,
+        ):
+            text, model = call_openai_text("developer", "user")
+
+        self.assertEqual(text, "ok")
+        self.assertEqual(model, "test-model")
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
+
+    def test_openai_http_error_does_not_expose_provider_detail(self):
+        provider_error = HTTPError(
+            "https://api.openai.com/v1/responses",
+            429,
+            "secret-provider-detail",
+            {},
+            None,
+        )
+
+        with (
+            patch("app.main.require_env", return_value="test-key"),
+            patch("app.main.get_env", return_value="test-model"),
+            patch("app.main.urlopen", side_effect=provider_error),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            call_openai_text("developer", "user")
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
+        self.assertNotIn("secret-provider-detail", str(raised.exception.detail))
+
+    def test_openai_connection_error_does_not_expose_reason(self):
+        with (
+            patch("app.main.require_env", return_value="test-key"),
+            patch("app.main.get_env", return_value="test-model"),
+            patch("app.main.urlopen", side_effect=URLError("private-network-detail")),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            call_openai_text("developer", "user")
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertNotIn("private-network-detail", str(raised.exception.detail))
+
+    def test_missing_provider_config_uses_safe_error(self):
+        with patch("app.main.get_env", return_value=None), self.assertRaises(HTTPException) as raised:
+            call_openai_text("developer", "user")
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
+        self.assertNotIn("OPENAI_API_KEY", str(raised.exception.detail))
+
+    def test_report_generation_uses_report_timeout(self):
+        sources = [AiSource(sourceId="segment-001", type="transcript", text="보고서 근거")]
+
+        with patch(
+            "app.main.call_openai_text",
+            return_value=(
+                '{"summary":"요약","decisions":[],"actionItems":[],"markdown":"## 요약"}',
+                "test-model",
+            ),
+        ) as call_openai:
+            response = generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(call_openai.call_args.kwargs["timeout_seconds"], 60)
 
 
 class AiObservabilityTest(unittest.TestCase):
