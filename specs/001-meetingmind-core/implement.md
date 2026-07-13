@@ -403,3 +403,28 @@
 - M018 Frontend 후속: TeamMembersPage의 Space role 변경/멤버 제거/owner transfer 확인 절차, 마지막 active HOST 보호 disabled state, ACL 감사 로그 표시, 칸반 검색/필터와 `sourceCandidateId` 표시
 - M019 Frontend 후속: Report current confirmed/version UI, Markdown export 버튼, task candidate confirm 후 M018 칸반 state와 `TaskCard.sourceCandidateId` 연계, Meeting AI source 시간/발화자/결정 ID 세분 표시
 - Backend/API gap: Space 수정/삭제, dashboard/calendar events, MeetingParticipant/Invitation, meeting update/delete, Kanban CRUD, report confirm/update/download, TaskCandidate 저장/confirm, Project/Meeting AI backend 권한 필터와 audit log runtime 구현
+
+## M023 Session Handoff Shared/Local Split
+
+### Decision
+
+- `.specify/memory/session-handoff.md`는 병합 후에도 유효한 팀 공통 기준, 통합 경계, 다음 shared milestone만 유지한다.
+- 개인 이름, 브랜치, 로컬 커밋, 변경 파일, 개인 TODO는 `.specify/memory/session-handoff.local.md`에 기록한다.
+- local 파일은 `.gitignore`로 제외하고, 팀이 같은 구조를 사용할 수 있도록 `.specify/memory/session-handoff.example.md`만 추적한다.
+- 상세 구현 로그는 `implement.md`, task 상태는 `tasks.md`, PR 변경 설명은 PR 본문을 기준으로 하여 공용 handoff의 중복 누적을 막는다.
+
+### Changes
+
+- `AGENTS.md`에 공용/local handoff의 읽기 시점, 허용 내용, 커밋 금지 규칙을 추가했다.
+- 누적된 과거 브랜치와 세션 로그를 공용 handoff에서 제거하고 현재 통합 기준과 M022만 남겼다.
+- owner, branch, base commit, progress, verification, blocker를 기록하는 개인 템플릿을 추가했다.
+- 개인 local handoff를 생성했으며 이 파일은 Git 상태에 노출되지 않는다.
+- API 계약, ERD, data model, 애플리케이션 코드에는 영향이 없다.
+
+### Verification
+
+- Passed: `git check-ignore -v .specify/memory/session-handoff.local.md`
+- Passed: 공용 handoff에서 owner, branch, base commit, 과거 session heading, 커밋 전/미추적 상태 패턴이 검색되지 않음
+- Passed: ignored local handoff가 `git status --short --untracked-files=all`에 나타나지 않음
+- Passed: `git diff --check`
+- Not run: Frontend/Backend/AI 검증. 이번 변경은 docs/process와 ignore 규칙에만 한정된다.

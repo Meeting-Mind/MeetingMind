@@ -54,6 +54,7 @@
 | M020 | AI 계약 prototype/target 경계 정리 | Current Prototype과 Target Backend-to-AI 차이가 문서화되고 Backend Meeting AI chat 1차 연동 경로가 분리되어 있다. | T158-T165 |
 | M021 | Project AI Backend 권한 선필터 연동 | Project AI가 SpaceMember 인증과 회의 ACL 선필터 이후의 공식 지식/회의 요약만 사용하고 Frontend가 Backend API를 호출한다. | T166-T173 |
 | M022 | AI 회의록 candidate Backend 경유 전환 | AI 회의록 생성이 회의 편집 권한과 단일 meeting source 검증 뒤에서 실행되고 candidate 저장/화면 연결 경계가 생긴다. | T174-T181 |
+| M023 | Session handoff 공용/개인 상태 분리 | 팀 공용 기준선과 개인 작업 상태가 별도 파일로 관리되고 개인 파일은 Git에서 제외된다. | T182-T184 |
 
 ## Foundation
 
@@ -290,6 +291,14 @@
 | T180 | M022 | [ ] | verification/integration | 사용자 | Codex | T179 | `ai/**`, `backend/**`, `specs/001-meetingmind-core/implement.md` | Backend-to-AI report candidate 실제 API smoke를 수행한다. | signup -> Space/Meeting 생성 -> report candidate 생성과 권한 거부 결과 또는 미실행 사유가 기록되어 있다. |
 | T181 | M022 | [ ] | docs/closeout | 사용자 | Codex | T180 | `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `.specify/memory/session-handoff.md` | M022 상태와 report confirm/version/export 후속 경계를 정리한다. | 완료 태스크만 `[x]`이고 confirm/update/download 및 실제 DB 전환 후속이 명시되어 있다. |
 
+### M023: Shared and Local Session Handoff
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T182 | M023 | [x] | docs/process | 사용자 | Codex | T020 | `AGENTS.md`, `.gitignore` | 공용 handoff와 개인 local handoff의 작성 및 Git 관리 규칙을 정의한다. | 공용 파일의 허용 범위와 local 파일의 커밋 금지 규칙이 명시되어 있다. |
+| T183 | M023 | [x] | docs/handoff | 사용자 | Codex | T182 | `.specify/memory/session-handoff.md`, `.specify/memory/session-handoff.example.md`, `.specify/memory/session-handoff.local.md` | 누적 세션 로그를 팀 공통 기준선으로 정리하고 개인 작업용 템플릿과 local 파일을 만든다. | 공용 파일에 개인 브랜치 상태가 없고 local 파일은 owner와 작업 상태를 기록할 수 있으며 Git에서 제외된다. |
+| T184 | M023 | [x] | verification | 사용자 | Codex | T183 | `.gitignore`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | ignore 적용, tracked/untracked 범위, 문서 중복과 diff 형식을 검증한다. | `git check-ignore`, stale 개인 상태 검색, `git diff --check`가 통과했다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -307,6 +316,7 @@
 - [x] V012 Meeting AI route `meetingId` 연결 검증: `cd frontend && npm run build`, `git diff --check`
 - [x] V013 Backend-to-AI target schema/API 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, `cd ai && ./.venv/bin/python -m compileall app`, `cd backend && ./gradlew test`, `cd frontend && npm run build`, Backend `18080` + AI `18000` real API smoke, `git diff --check`
 - [x] V014 Project AI Backend 권한 선필터 검증: AI 19 tests/compile, Backend test, Frontend build, public `200 context-only`, 비멤버 `403 SPACE_ACCESS_DENIED`, internal allowlist 위반 `403 AI_CONTEXT_FORBIDDEN`, `git diff --check`
+- [x] V015 Session handoff 분리 검증: `git check-ignore -v .specify/memory/session-handoff.local.md`, 공용 파일 개인 상태 검색, `git diff --check`
 
 ## Notes
 
