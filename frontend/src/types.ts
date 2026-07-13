@@ -200,29 +200,38 @@ export interface UpdateMeetingParticipantResponse {
 }
 
 export type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
+export type MeetingJoinRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
 
-export interface CreateMeetingInvitationRequest {
-  email: string;
-  meetingRole: MeetingRole;
-  participantType: ParticipantType;
+export interface CreateMeetingJoinRequestRequest {
+  joinCodeOrUrl: string;
 }
 
-export interface CreateMeetingInvitationResponse {
-  invitationId: string;
-  status: InvitationStatus;
-  expiresAt: ApiDateTime;
+export interface CreateMeetingJoinRequestResponse {
+  requestId: string;
+  meetingId: string;
+  status: MeetingJoinRequestStatus;
+}
+
+export interface MeetingJoinRequestSummary {
+  id: string;
+  userId: string;
+  status: MeetingJoinRequestStatus;
+  requestedAt: ApiDateTime;
+}
+
+export interface MeetingJoinRequestsResponse {
+  requests: MeetingJoinRequestSummary[];
+}
+
+export interface ReviewMeetingJoinRequestResponse {
+  requestId: string;
+  status: MeetingJoinRequestStatus;
+  participantId: string | null;
+  participantType: ParticipantType | null;
 }
 
 export interface ResolveInvitationRequest {
   token: string;
-}
-
-export interface ResolveMeetingInvitationResponse {
-  participantId?: string;
-  invitationId?: string;
-  role?: MeetingRole;
-  participantType?: ParticipantType;
-  status: InvitationStatus;
 }
 
 export interface MeetingDetail extends MeetingSummary {
@@ -240,6 +249,8 @@ export interface CreateMeetingRequest {
 export interface CreateMeetingResponse {
   id: string;
   status: MeetingStatus;
+  joinCode: string;
+  joinUrl: string;
 }
 
 export interface MeetingSpeakerSummary {

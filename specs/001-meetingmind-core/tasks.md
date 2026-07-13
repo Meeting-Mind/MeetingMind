@@ -248,6 +248,45 @@
 | T156 | M019 | [ ] | frontend/smoke | 사용자(Frontend 담당) | Codex | T148, T151, T153 | `frontend/**`, `specs/001-meetingmind-core/implement.md` | Meeting AI, Report Agent, task candidate, report export route 흐름을 수동 점검한다. | 주요 route 이동 결과와 발견 이슈 또는 미실행 사유가 `implement.md`에 기록되어 있다. |
 | T157 | M019 | [ ] | frontend/verification | 사용자(Frontend 담당) | Codex | T156 | `frontend/**`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | Frontend build와 diff 검증을 실행하고 M019 완료 상태를 정리한다. | `cd frontend && npm run build`, `git diff --check` 결과가 기록되고 완료된 task만 `[x]`로 표시되어 있다. |
 
+### M020: Backend Permission Matrix Runtime
+
+M020은 M018에서 frontend local flow로 표현한 권한 규칙을 backend domain/store/API 경계에 연결하는 보안 선행 작업이다. M019 잔여 frontend 작업을 계속하기 전, Project AI와 Meeting AI context 후보가 backend 권한 필터를 먼저 통과하도록 만든다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T158 | M020 | [x] | backend/design | 사용자(Backend 담당) | Codex | T040, T120, T144 | `requirements/permissions.md`, `requirements/functional-requirements-detail.md`, `specs/001-meetingmind-core/contracts/space-api.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/plan.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | SpaceMember, MeetingParticipant, Project AI 권한 요구와 target contract를 재확인하고 backend 구현 순서를 고정한다. | M020 plan/task가 상세 요구조건, 계약, negative smoke 항목과 연결되어 있고 baseline `cd backend && ./gradlew test` 결과가 기록되어 있다. |
+| T159 | M020 | [x] | backend/space-members | 사용자(Backend 담당) | Codex | T158 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/controller/SpaceController.java`, `backend/src/test/java/com/meetingmind/demo/**` | SpaceMember role 변경/제거 domain/store/API를 구현한다. | role 변경은 OWNER 전용이고 대상 role은 `ADMIN`/`MEMBER`만 허용한다. owner 제거는 금지되고, 제거된 member는 project 접근과 Project AI 접근이 즉시 차단되며 기존 회의 접근은 MeetingParticipant ACL에 따라 유지된다. |
+| T160 | M020 | [x] | backend/meeting-participants | 사용자(Backend 담당) | Codex | T158, T159 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/test/java/com/meetingmind/demo/**` | MeetingParticipant add/update/revoke API와 mutation 검증을 구현한다. | `OWNER`/`ADMIN` override 또는 active `HOST`만 참여자 변경이 가능하고, role/access 변경과 revoke/remove는 마지막 active `HOST`를 깨면 `LAST_ACTIVE_HOST_REQUIRED`로 거부된다. |
+| T161 | M020 | [x] | backend/member-removal-cascade | 사용자(Backend 담당) | Codex | T159, T160 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/java/com/meetingmind/demo/**` | SpaceMember 제거 시 같은 Space의 member MeetingParticipant를 회의 단독 `GUEST`로 전환한다. | SpaceMember 제거는 프로젝트 전체 접근권만 제거하고, 기존 active MeetingParticipant는 회의 범위 read/edit/delete/LiveKit/Meeting AI 권한을 유지한다. 회의 접근을 끊으려면 participant revoke API를 별도로 사용한다. |
+| T162 | M020 | [x] | backend/owner-transfer | 사용자(Backend 담당) | Codex | T159 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/controller/SpaceController.java`, `backend/src/test/java/com/meetingmind/demo/**` | owner transfer transaction local domain flow를 구현한다. | 대상은 active SpaceMember만 허용하고 확인 문자열 누락/불일치 시 API 실행을 거부한다. 성공 시 새 owner는 `OWNER`, 기존 owner는 요청한 `ADMIN` 또는 `MEMBER`로 강등되며 owner 공백/중복이 생기지 않는다. |
+| T163 | M020 | [x] | backend/project-ai-auth-filter | 사용자(Backend 담당) | Codex | T159, T160 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/test/java/com/meetingmind/demo/**` | Project AI context 후보 조회 시 backend 권한 선필터를 구현한다. | Project AI는 active SpaceMember만 사용할 수 있고, 후보 payload는 `projectKnowledge[]`와 `meetings[]`로 분리되며 revoked/default-deny/guest-only meeting source는 후보에서 제외된다. |
+| T164 | M020 | [x] | backend/audit | 사용자(Backend 담당) | Codex | T159, T160, T162 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/java/com/meetingmind/demo/**`, `specs/001-meetingmind-core/implement.md` | 권한 변경 audit를 최소 in-memory event로 남기거나 runtime gap을 명시한다. | role 변경, participant grant/update/revoke, member removal cascade, owner transfer가 actor/target/before/after/timestamp 기준으로 in-memory event에 기록된다. |
+| T165 | M020 | [x] | backend/verification | 사용자(Backend 담당) | Codex | T159, T160, T161, T162, T163, T164 | `backend/**`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md` | negative permission smoke와 backend 검증을 실행하고 문서를 정리한다. | default-deny, participant revoke 즉시 차단, owner/admin override, 마지막 HOST 보호, owner transfer 확인 누락, SpaceMember 제거 후 Project AI 차단/회의 접근 유지, Project AI 후보 필터 테스트가 통과하고 `cd backend && ./gradlew test`, `git diff --check` 결과가 기록되어 있다. |
+
+### M021: Meeting Join Request Approval
+
+M021은 사용자-facing 회의 참여를 URL/코드 참가 신청과 HOST 승인 흐름으로 전환한다. Space invitation 및 운영상 participant ACL 직접 조정과 분리하며, Backend in-memory prototype 경계에서 상태 전이와 권한을 검증한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T166 | M021 | [x] | contracts/requirements | 사용자(Backend 담당) | Codex | T165 | `requirements/functional-requirements*.md`, `requirements/permissions.md`, `requirements/status-values.md`, `specs/001-meetingmind-core/clarify.md`, `plan.md`, `contracts/*`, `data-model.md`, `erd.md` | 회의 URL/코드 참가 신청과 HOST 승인 계약을 기존 Invitation/직접 ACL 흐름에서 분리한다. | code-only 신청 endpoint, PENDING/APPROVED/REJECTED 상태, 승인 권한, SpaceMember 비생성, 수동 ACL 경계가 문서에서 일치한다. |
+| T167 | M021 | [x] | backend/domain-api | 사용자(Backend 담당) | Codex | T166 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/main/java/com/meetingmind/demo/dto/**` | 안전한 joinCode 생성, URL/code lookup, 신청 생성/목록/승인/거절 API를 구현한다. | code 또는 URL만으로 신청 가능하고 승인 전 접근은 없으며, 승인 시 VIEWER participant만 생성된다. |
+| T168 | M021 | [x] | backend/test | 사용자(Backend 담당) | Codex | T167 | `backend/src/test/java/com/meetingmind/demo/**` | 참가 신청 상태와 negative permission 테스트를 추가한다. | URL/code, invalid code, duplicate pending, existing participant, unauthorized review, approve/reject replay, guest/member 분기가 검증된다. |
+| T169 | M021 | [x] | backend/verification | 사용자(Backend 담당) | Codex | T168 | `backend/**`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md` | Backend 전체 검증과 문서 closeout을 수행한다. | `cd backend && ./gradlew test`, `git diff --check` 결과와 persistence/frontend gap이 기록된다. |
+
+### M022: Frontend Meeting Access and Permission Surfaces
+
+M022는 이미 존재하는 Space role/회의 ACL 관리 화면을 M021 Backend 참가 신청 계약과 연결하고, 회의 진입 전에 Backend 권한을 확인하는 default-deny 화면을 추가한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T170 | M022 | [x] | frontend/discovery | 사용자(Frontend 담당) | Codex | T169 | `frontend/src/App.tsx`, `frontend/src/pages/**`, `frontend/src/api/workspace.ts`, `specs/001-meetingmind-core/plan.md`, `tasks.md`, `implement.md` | 기존 권한 확인/회의 접근 화면과 M021 연결 gap을 조사한다. | TeamMembers Space role, ProjectOverview meeting ACL은 존재하고 LiveMeeting backend ACL gate, join code form, JoinRequest API 연결은 없음을 기록한다. |
+| T171 | M022 | [x] | frontend/types-api | 사용자(Frontend 담당) | Codex | T170 | `frontend/src/types.ts`, `frontend/src/api/workspace.ts` | MeetingJoinRequest와 access probe type/API client를 추가한다. | create/list/approve/reject response shape가 M021 contract와 일치하고 superseded MeetingInvitation client를 사용하지 않는다. |
+| T172 | M022 | [x] | frontend/access-page | 사용자(Frontend 담당) | Codex | T171 | `frontend/src/pages/MeetingAccessPage.tsx`, `frontend/src/App.tsx`, `frontend/src/components/WorkspaceSidebar.tsx`, `frontend/src/styles/app.css` | URL/코드 참가 신청과 pending/access 확인 화면을 구현한다. | invalid/submitting/pending/allowed/denied 상태와 접근 확인 action이 화면에 분리되어 있다. |
+| T173 | M022 | [x] | frontend/prejoin-gate | 사용자(Frontend 담당) | Codex | T171 | `frontend/src/pages/LiveMeetingPage.tsx`, `frontend/src/pages/LiveRoomPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/WorkspaceHomePage.tsx` | LiveMeeting 진입 전에 Backend meeting ACL을 확인한다. | meetingId 누락/403/API 실패는 default-deny이고 access probe 성공 시에만 media prejoin과 target LiveKit token 요청이 가능하다. |
+| T174 | M022 | [x] | frontend/approval-semantics | 사용자(Frontend 담당) | Codex | T170 | `frontend/src/App.tsx`, `frontend/src/pages/TeamMembersPage.tsx` | 회의 참가 신청 승인 local flow가 MeetingParticipant만 생성하도록 수정한다. | 승인 후 SpaceMember 수/role은 변하지 않고 대상 회의에 VIEWER guest participant만 추가된다. SpaceMember 제거 시 기존 meeting ACL은 guest로 유지된다. |
+| T175 | M022 | [x] | frontend/verification | 사용자(Frontend 담당) | Codex | T172, T173, T174 | `frontend/**`, `specs/001-meetingmind-core/tasks.md`, `implement.md`, `analyze.md` | build, route/visual smoke, diff 검증과 문서 closeout을 수행한다. | `npm run build`, `/meeting-access` HTTP 200, `git diff --check`가 통과했다. in-app browser가 현재 세션에 없어 desktop/mobile visual smoke는 미실행 사유를 기록했다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -259,6 +298,9 @@
 - [x] V006 Auth policy/CI 기준선 검증: `cd backend && ./gradlew test`, `cd frontend && npm run build`, `cd ai && python3 -m compileall app tests`, `cd ai && python3 -m unittest discover -s tests`, `git diff --check`
 - [x] V007 Authz test matrix 문서 검증: `git diff --check`
 - [x] V008 AI observability 검증: `cd ai && python3 -m compileall app tests`, `cd ai && ./.venv/bin/python -m unittest discover -s tests`
+- [x] V009 Backend permission matrix runtime 검증: `cd backend && ./gradlew test`, `git diff --check`
+- [x] V010 Meeting join request approval 검증: `cd backend && ./gradlew test` 64건, `git diff --check`
+- [x] V011 Frontend meeting access 검증: `cd frontend && npm run build`, `/meeting-access` HTTP 200, `git diff --check`; in-app browser unavailable로 visual smoke 미실행
 
 ## Notes
 

@@ -61,6 +61,7 @@ function buildMeetingDestination(space: WorkspaceData["workspaceHome"]["spaces"]
   const params = new URLSearchParams({
     spaceId: space.id,
     project: space.name,
+    meetingId: meeting.id ?? meeting.index,
     meeting: meeting.title,
     round: meeting.index.replace("#", "")
   });

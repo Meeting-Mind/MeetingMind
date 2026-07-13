@@ -8,6 +8,7 @@ import {
 } from "livekit-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { buildAuthHeaders, type AuthSession } from "../auth/session";
 import type { WorkspaceData } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
@@ -261,13 +262,16 @@ function ParticipantTile({
 
 export function LiveRoomPage({
   liveMeeting,
-  meetingAi
+  meetingAi,
+  session
 }: {
   liveMeeting: WorkspaceData["liveMeeting"];
   meetingAi: WorkspaceData["meetingAi"];
+  session: AuthSession;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const meetingId = new URLSearchParams(location.search).get("meetingId");
   const roomRef = useRef<Room | null>(null);
   const [roomReady, setRoomReady] = useState(false);
   const [connectionStateLabel, setConnectionStateLabel] = useState("연결 중");
@@ -362,18 +366,14 @@ export function LiveRoomPage({
       setRoomReady(false);
 
       try {
+        if (!meetingId) {
+          throw new Error("회의 ID가 없어 LiveKit 접근 권한을 확인할 수 없습니다.");
+        }
         let tokenResponse: Response;
         try {
-          tokenResponse = await fetch(`${API_BASE_URL}/api/livekit/token`, {
+          tokenResponse = await fetch(`${API_BASE_URL}/api/v1/meetings/${encodeURIComponent(meetingId)}/livekit-token`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              roomName: liveMeeting.roomCode.toLowerCase(),
-              identity: participantProfile.identity,
-              name: participantProfile.name
-            })
+            headers: buildAuthHeaders(session)
           });
         } catch (error) {
           throw new Error(`토큰 API 연결 실패: ${formatRoomError(error, "백엔드 토큰 요청에 실패했습니다.")}`);
@@ -442,7 +442,7 @@ export function LiveRoomPage({
         void room.disconnect();
       }
     };
-  }, [liveMeeting.roomCode, participantProfile, roleLookup]);
+  }, [meetingId, participantProfile, roleLookup, session]);
 
   async function handleToggleMicrophone() {
     const room = roomRef.current;

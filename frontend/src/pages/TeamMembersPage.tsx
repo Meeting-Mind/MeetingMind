@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type { WorkspaceData } from "../types";
 
@@ -19,6 +19,8 @@ type JoinRequest = {
   name: string;
   email: string;
   role: string;
+  meetingIndex: string;
+  meetingTitle: string;
   requestedAt: string;
   source: "링크" | "코드";
 };
@@ -159,17 +161,17 @@ export function TeamMembersPage({
             <button onClick={() => void handleCopyInvite(invite.link)} type="button">Space 링크 복사</button>
           </article>
           <article>
-            <strong>Meeting invitation</strong>
-            <p>특정 회의의 MeetingParticipant로만 초대합니다. Space 전체 권한과 Project AI 권한은 부여하지 않습니다.</p>
-            <button onClick={() => void handleCopyInvite(`${invite.link}/meeting`)} type="button">회의 초대 copy 복사</button>
+            <strong>Meeting join request</strong>
+            <p>URL/코드 신청을 승인하면 해당 회의의 VIEWER 권한만 부여됩니다. SpaceMember는 생성되지 않습니다.</p>
+            <Link to="/meeting-access">회의 참가 화면</Link>
           </article>
         </section>
 
         <section className="team-members-approval-panel">
           <div className="team-members-approval-head">
             <div>
-              <strong>승인 대기 요청</strong>
-              <p>초대 링크 또는 초대 코드로 접속한 사용자는 승인 후 프로젝트에 접근할 수 있습니다.</p>
+              <strong>회의 참가 승인 대기</strong>
+              <p>회의 URL 또는 참가 코드로 신청한 사용자는 승인 후 해당 회의에만 접근할 수 있습니다.</p>
             </div>
             <span>{requests.length}건</span>
           </div>
@@ -183,7 +185,7 @@ export function TeamMembersPage({
                     <strong>{request.name}</strong>
                     <span>{request.email}</span>
                     <p>
-                      {request.role} · {request.source} 요청 · {request.requestedAt}
+                      {request.meetingIndex} {request.meetingTitle} · {request.source} 요청 · {request.requestedAt}
                     </p>
                   </div>
                   <div className="team-members-request-actions">
@@ -201,8 +203,7 @@ export function TeamMembersPage({
             <div className="team-members-request-empty">
               <strong>아직 승인 대기 중인 요청이 없습니다</strong>
               <p>
-                팀 초대 링크 <strong>{invite.link}</strong> 또는 초대 코드 <strong>{invite.code}</strong> 로 접속한 요청은
-                여기에서 승인할 수 있습니다.
+                회의 URL 또는 참가 코드로 제출된 요청은 여기에서 승인할 수 있습니다. 승인은 프로젝트 멤버십을 만들지 않습니다.
               </p>
             </div>
           )}
@@ -344,7 +345,7 @@ export function TeamMembersPage({
             ) : (
               <div className="team-members-table-empty">
                 <strong>아직 프로젝트 멤버가 없습니다</strong>
-                <p>팀 초대 링크나 초대 코드로 접속한 요청을 승인하면 멤버 목록에 추가됩니다.</p>
+                <p>Space invitation을 수락한 사용자만 프로젝트 멤버 목록에 추가됩니다.</p>
               </div>
             )}
           </div>

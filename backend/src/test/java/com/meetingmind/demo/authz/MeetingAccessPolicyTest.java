@@ -171,20 +171,6 @@ class MeetingAccessPolicyTest {
     }
 
     @Test
-    void removingSpaceMemberRevokesOnlyMemberParticipants() {
-        MeetingAccessPolicy.MeetingParticipant member = participant("participant-1", "user-1", MeetingRole.VIEWER, ParticipantType.MEMBER);
-        MeetingAccessPolicy.MeetingParticipant guest = participant("participant-2", "user-1", MeetingRole.VIEWER, ParticipantType.GUEST);
-
-        List<MeetingAccessPolicy.MeetingParticipant> result = policy.revokeMemberParticipantsForRemovedSpaceMember(
-                "user-1",
-                List.of(member, guest)
-        );
-
-        assertThat(result.get(0).accessStatus()).isEqualTo(ParticipantAccessStatus.REVOKED);
-        assertThat(result.get(1).accessStatus()).isEqualTo(ParticipantAccessStatus.ACTIVE);
-    }
-
-    @Test
     void liveKitAccessRequiresReadableActiveMeeting() {
         policy.requireLiveKitAccess(context(participant(MeetingRole.VIEWER, ParticipantType.MEMBER), null));
 

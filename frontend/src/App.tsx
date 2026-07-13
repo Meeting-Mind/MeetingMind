@@ -7,6 +7,7 @@ import { LandingPage } from "./pages/LandingPage";
 import { LiveMeetingPage } from "./pages/LiveMeetingPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { MeetingAiPage } from "./pages/MeetingAiPage";
+import { MeetingAccessPage } from "./pages/MeetingAccessPage";
 import { ProjectOverviewPage } from "./pages/ProjectOverviewPage";
 import { ReportAgentPage } from "./pages/ReportAgentPage";
 import { TeamMembersPage } from "./pages/TeamMembersPage";
@@ -59,6 +60,8 @@ type JoinRequest = {
   name: string;
   email: string;
   role: string;
+  meetingIndex: string;
+  meetingTitle: string;
   requestedAt: string;
   source: "링크" | "코드";
 };
@@ -104,10 +107,10 @@ const initialProjectMembers: Record<string, TeamMember[]> = {
 
 const initialProjectRequests: Record<string, JoinRequest[]> = {
   "FinPilot Renewal": [
-    { id: "fin-wait-01", name: "서다은", email: "daeun@meetingmind.ai", role: "Frontend Developer", requestedAt: "방금 전", source: "링크" }
+    { id: "fin-wait-01", name: "서다은", email: "daeun@meetingmind.ai", role: "Frontend Developer", meetingIndex: "#08", meetingTitle: "실시간 회의 플로우 최종 점검", requestedAt: "방금 전", source: "링크" }
   ],
   "Campus Admin Assistant": [
-    { id: "caa-wait-01", name: "윤민재", email: "minjae@meetingmind.ai", role: "Operations Manager", requestedAt: "12분 전", source: "코드" }
+    { id: "caa-wait-01", name: "윤민재", email: "minjae@meetingmind.ai", role: "Operations Manager", meetingIndex: "#04", meetingTitle: "배포 전 체크리스트 검토", requestedAt: "12분 전", source: "코드" }
   ]
 };
 
@@ -242,10 +245,10 @@ function ProtectedRoute({
     if (!session) {
       onRequestLogin();
     }
-  }, [location.pathname, onRequestLogin, session]);
+  }, [location.pathname, location.search, onRequestLogin, session]);
 
   if (!session) {
-    return <Navigate replace state={{ requestedPath: location.pathname }} to="/" />;
+    return <Navigate replace state={{ requestedPath: `${location.pathname}${location.search}` }} to="/" />;
   }
 
   return <>{children}</>;
@@ -682,36 +685,22 @@ export function App() {
       [projectName]: (previous[projectName] ?? []).filter((item) => item.id !== requestId)
     }));
 
-    setProjectMembers((previous) => {
-      const nextMembers = [
-        ...(previous[projectName] ?? []),
+    const meetingKey = buildMeetingKey(projectName, request.meetingIndex);
+    setMeetingParticipants((previous) => ({
+      ...previous,
+      [meetingKey]: [
+        ...(previous[meetingKey] ?? []).filter((participant) => participant.email !== request.email),
         {
+          id: `${meetingKey}-${request.email}`,
+          meetingKey,
           name: request.name,
           email: request.email,
-          role: request.role,
-          since: "2026.06 승인",
-          access: "회의 참여 / 문서 열람",
-          spaceRole: "MEMBER" as const,
-          rank: "Member",
-          status: "active" as const
+          role: "VIEWER",
+          accessStatus: "ACTIVE",
+          participantType: "guest"
         }
-      ];
-
-      setData((current) => ({
-        ...current,
-        workspaceHome: {
-          ...current.workspaceHome,
-          spaces: current.workspaceHome.spaces.map((space) =>
-            space.name === projectName ? { ...space, members: `멤버 ${nextMembers.length}명`, updatedAt: "방금 업데이트" } : space
-          )
-        }
-      }));
-
-      return {
-        ...previous,
-        [projectName]: nextMembers
-      };
-    });
+      ]
+    }));
   }
 
   function handleRejectJoinRequest(projectName: string, requestId: string) {
@@ -742,22 +731,6 @@ export function App() {
       return;
     }
 
-    const removesLastHost = Object.entries(meetingParticipants).some(([meetingKey, participants]) => {
-      if (!meetingKey.startsWith(`${projectName}:`)) {
-        return false;
-      }
-
-      const activeHosts = participants.filter(
-        (participant) => participant.role === "HOST" && participant.accessStatus === "ACTIVE"
-      );
-
-      return activeHosts.length === 1 && activeHosts[0]?.email === memberEmail;
-    });
-
-    if (removesLastHost) {
-      return;
-    }
-
     setProjectMembers((previous) => {
       const nextMembers = (previous[projectName] ?? []).filter((item) => item.email !== memberEmail);
 
@@ -782,7 +755,7 @@ export function App() {
       Object.entries(previous).forEach(([meetingKey, participants]) => {
         next[meetingKey] = meetingKey.startsWith(`${projectName}:`)
           ? participants.map((participant) =>
-              participant.email === memberEmail ? { ...participant, accessStatus: "REVOKED" } : participant
+              participant.email === memberEmail ? { ...participant, participantType: "guest" } : participant
             )
           : participants;
       });
@@ -878,10 +851,18 @@ export function App() {
           }
         />
         <Route
+          path="/meeting-access"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              {authSession ? <MeetingAccessPage session={authSession} /> : null}
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/live-meeting"
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
-              <LiveMeetingPage data={data.liveMeeting} />
+              {authSession ? <LiveMeetingPage data={data.liveMeeting} session={authSession} /> : null}
             </ProtectedRoute>
           }
         />
@@ -889,7 +870,7 @@ export function App() {
           path="/live-room"
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
-              <LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} />
+              {authSession ? <LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} session={authSession} /> : null}
             </ProtectedRoute>
           }
         />
@@ -898,6 +879,7 @@ export function App() {
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
               <ProjectOverviewPage
+                currentUserEmail={authSession?.user.email ?? ""}
                 data={data.projectOverview}
                 onDeleteProject={handleDeleteProject}
                 onCreateMeeting={handleCreateMeeting}

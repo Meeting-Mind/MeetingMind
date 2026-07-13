@@ -9,6 +9,7 @@
 | T039 | Space access validation service 또는 policy 계층 | Pure unit test 우선 |
 | T040 | Meeting access validation service 또는 policy 계층 | Pure unit test 우선 |
 | T094 | LiveKit token 발급 권한 연동 | Service unit test, controller slice test 후보 |
+| T168 | Meeting join request 생성/검토 | Domain service unit test, controller unit test |
 
 ## Source Criteria
 
@@ -115,8 +116,8 @@
 
 | ID | Scenario | Given | Action | Expected | Source |
 | --- | --- | --- | --- | --- | --- |
-| M-060 | SpaceMember 제거 시 member participant 회수 | removed user has same Space `participantType=member` participants | remove SpaceMember | those participants become `REVOKED` | D-016 |
-| M-061 | SpaceMember 제거 후 회의 접근 차단 | participant became `REVOKED` | meeting detail, LiveKit, AI context check | `DENY_403_MEETING` | D-016, D-017 |
+| M-060 | SpaceMember 제거 시 member participant 회의 단독 전환 | removed user has same Space `participantType=member` participants | remove SpaceMember | those participants become `participantType=guest` and remain `ACTIVE` | D-016 |
+| M-061 | SpaceMember 제거 후 프로젝트 접근 차단과 회의 접근 유지 | removed user still has active MeetingParticipant | project detail, Project AI, meeting detail, LiveKit, Meeting AI check | project/Project AI denied, meeting-scoped access allowed | D-016, D-017 |
 | M-062 | guest participant는 SpaceMember 제거 영향 없음 | guest participant has no SpaceMember row | remove unrelated SpaceMember | guest participant unchanged | D-016 |
 
 ### Pass Criteria
@@ -154,6 +155,33 @@
 - LiveKit token 발급 전 access token 사용자와 meeting 권한을 모두 확인한다.
 - 발급 token은 Space 전체 권한을 포함하지 않는다.
 - `LIVE_TOKEN_ISSUED` audit event는 성공 케이스에서만 기록한다.
+
+## T168 Meeting Join Request Approval
+
+| ID | Scenario | Given | Action | Expected | Source |
+| --- | --- | --- | --- | --- | --- |
+| J-001 | raw code 신청 | authenticated nonparticipant, valid joinCode | create join request | `PENDING`, target meeting resolved | FR-MREG-02~03 |
+| J-002 | URL 신청 | URL contains valid `joinCode` query | create join request | `PENDING`, same target meeting resolved | FR-MREG-02~03 |
+| J-003 | 잘못된 코드 차단 | unknown code | create join request | `DENY_403_MEETING`, meeting existence not distinguished | FR-MREG-03 |
+| J-004 | 코드 없는 URL 차단 | URL has no `joinCode` query | create join request | `DENY_403_MEETING` | FR-MREG-03 |
+| J-005 | pending 중복 차단 | same user/meeting has `PENDING` request | create another request | `REJECT_400` | Data constraint |
+| J-006 | 기존 접근권 사용자 신청 차단 | same user has active MeetingParticipant | create join request | `REJECT_400` | FR-MREG-02 |
+| J-007 | 승인 전 접근권 없음 | request is `PENDING` | inspect participant/access | no participant, meeting access denied | FR-MREG-02, FR-MREG-07 |
+| J-008 | active HOST 승인 | actor is active HOST without Space override | approve pending request | `APPROVED`, VIEWER participant created | D-022 |
+| J-009 | OWNER/ADMIN 승인 override | actor is active Space OWNER/ADMIN | approve pending request | `APPROVED`, VIEWER participant created | Permission matrix |
+| J-010 | VIEWER/EDITOR 승인 차단 | actor has no participant-management permission | approve/reject request | `DENY_403_MEETING` | FR-ACL-01 |
+| J-011 | guest 승인 결과 | applicant is not SpaceMember | approve request | `participantType=guest`, no SpaceMember created | D-008, D-022 |
+| J-012 | member 승인 결과 | applicant is active SpaceMember | approve request | `participantType=member` | D-022 |
+| J-013 | 승인 재처리 차단 | request is `APPROVED` | approve or reject again | `REJECT_400` | Status transition |
+| J-014 | 거절 재처리 차단 | request is `REJECTED` | approve or reject again | `REJECT_400` | Status transition |
+
+### Pass Criteria
+
+- joinCode는 meeting ID에서 결정적으로 만들지 않고 추측하기 어려운 값으로 생성한다.
+- JoinRequest에는 joinCode 원문을 복제 저장하지 않는다.
+- 승인 전에는 MeetingParticipant, 회의 접근권, SpaceMember가 생기지 않는다.
+- 승인 시 기본 role은 `VIEWER`이며 Space membership 여부는 participant type만 결정한다.
+- 검토 권한과 상태 전이는 Backend domain 경계에서 강제한다.
 
 ## Minimum Implementation Order
 

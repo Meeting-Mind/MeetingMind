@@ -24,5 +24,8 @@ Google Sheets 상태값 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | Invitation | 수락 | ACCEPTED | 초대 대상이 초대를 수락한 상태. | 수락 시 SpaceMember/MeetingParticipant 생성 | invitations.status | FR-PERM-05 |
 | Invitation | 거절 | DECLINED | 초대 대상이 초대를 거절한 상태. | 거절 시 초대 무효 | invitations.status | FR-PERM-05 |
 | Invitation | 만료 | EXPIRED | 초대 유효기간이 지나 더 이상 사용할 수 없는 상태. | 만료시간 도달 시 | invitations.status | FR-PERM-05 |
-| MeetingParticipant | 활성 | ACTIVE | 사용자가 해당 회의에 접근 가능한 상태. | 참여자 추가 또는 회의 초대 수락 시 기본 상태 | meeting_participants.access_status | FR-MREG-07, FR-ACL-01 |
-| MeetingParticipant | 회수 | REVOKED | 사용자의 해당 회의 접근이 회수된 상태. | 회의 권한 회수 또는 SpaceMember 제거 시 전환 | meeting_participants.access_status | FR-ACL-02, FR-PERM-04 |
+| MeetingJoinRequest | 대기 | PENDING | 사용자가 회의 URL 또는 참가 코드로 신청했지만 아직 검토되지 않은 상태. | 참가 신청 생성 직후 | meeting_join_requests.status | FR-MREG-02~03 |
+| MeetingJoinRequest | 승인 | APPROVED | HOST 또는 OWNER/ADMIN override가 신청을 승인한 상태. | 승인과 함께 MeetingParticipant 생성 | meeting_join_requests.status | FR-MREG-02 |
+| MeetingJoinRequest | 거절 | REJECTED | HOST 또는 OWNER/ADMIN override가 신청을 거절한 상태. | 거절 처리 후 | meeting_join_requests.status | FR-MREG-02 |
+| MeetingParticipant | 활성 | ACTIVE | 사용자가 해당 회의에 접근 가능한 상태. | 참가 신청 승인 또는 수동 ACL 부여 시 기본 상태 | meeting_participants.access_status | FR-MREG-02, FR-MREG-07, FR-ACL-01 |
+| MeetingParticipant | 회수 | REVOKED | 사용자의 해당 회의 접근이 회수된 상태. | 회의 권한을 명시적으로 회수할 때 전환 | meeting_participants.access_status | FR-ACL-02 |

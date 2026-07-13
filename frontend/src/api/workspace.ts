@@ -7,10 +7,10 @@ import type {
   ConfirmReportResponse,
   ConfirmTaskCandidateRequest,
   ConfirmTaskCandidateResponse,
+  CreateMeetingJoinRequestRequest,
+  CreateMeetingJoinRequestResponse,
   CreateMeetingRequest,
   CreateMeetingResponse,
-  CreateMeetingInvitationRequest,
-  CreateMeetingInvitationResponse,
   CreateSpaceRequest,
   CreateSpaceResponse,
   CreateSpaceInvitationRequest,
@@ -26,6 +26,7 @@ import type {
   MeetingListResponse,
   MeetingAiChatRequest,
   MeetingParticipantsResponse,
+  MeetingJoinRequestsResponse,
   OwnerTransferRequest,
   OwnerTransferResponse,
   GenerateReportCandidateRequest,
@@ -34,8 +35,8 @@ import type {
   ReportListResponse,
   RemoveSpaceMemberResponse,
   ResolveInvitationRequest,
-  ResolveMeetingInvitationResponse,
   ResolveSpaceInvitationResponse,
+  ReviewMeetingJoinRequestResponse,
   SpaceDetail,
   SpaceListResponse,
   SpaceMembersResponse,
@@ -199,46 +200,51 @@ export async function updateMeetingParticipant(
   );
 }
 
-export async function createMeetingInvitation(
+export async function createMeetingJoinRequest(
   session: AuthSession,
-  meetingId: string,
-  request: CreateMeetingInvitationRequest
-): Promise<CreateMeetingInvitationResponse> {
-  return requestJson<CreateMeetingInvitationResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/invitations`, {
+  request: CreateMeetingJoinRequestRequest
+): Promise<CreateMeetingJoinRequestResponse> {
+  return requestJson<CreateMeetingJoinRequestResponse>("/api/v1/meetings/join-requests", {
     method: "POST",
     headers: jsonHeaders(session),
     body: JSON.stringify(request)
   });
 }
 
-export async function acceptMeetingInvitation(
+export async function fetchMeetingJoinRequests(
+  session: AuthSession,
+  meetingId: string
+): Promise<MeetingJoinRequestsResponse> {
+  return requestJson<MeetingJoinRequestsResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests`,
+    { headers: buildAuthHeaders(session) }
+  );
+}
+
+export async function approveMeetingJoinRequest(
   session: AuthSession,
   meetingId: string,
-  invitationId: string,
-  request: ResolveInvitationRequest
-): Promise<ResolveMeetingInvitationResponse> {
-  return requestJson<ResolveMeetingInvitationResponse>(
-    `/api/v1/meetings/${encodeURIComponent(meetingId)}/invitations/${encodeURIComponent(invitationId)}/accept`,
+  requestId: string
+): Promise<ReviewMeetingJoinRequestResponse> {
+  return requestJson<ReviewMeetingJoinRequestResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests/${encodeURIComponent(requestId)}/approve`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
-      body: JSON.stringify(request)
+      headers: buildAuthHeaders(session)
     }
   );
 }
 
-export async function declineMeetingInvitation(
+export async function rejectMeetingJoinRequest(
   session: AuthSession,
   meetingId: string,
-  invitationId: string,
-  request: ResolveInvitationRequest
-): Promise<ResolveMeetingInvitationResponse> {
-  return requestJson<ResolveMeetingInvitationResponse>(
-    `/api/v1/meetings/${encodeURIComponent(meetingId)}/invitations/${encodeURIComponent(invitationId)}/decline`,
+  requestId: string
+): Promise<ReviewMeetingJoinRequestResponse> {
+  return requestJson<ReviewMeetingJoinRequestResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests/${encodeURIComponent(requestId)}/reject`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
-      body: JSON.stringify(request)
+      headers: buildAuthHeaders(session)
     }
   );
 }
