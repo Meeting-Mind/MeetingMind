@@ -642,7 +642,7 @@
 - CI trigger/concurrency/최소 권한과 Backend/Frontend/AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan, `CI Gate` job 구현을 확인했다.
 - 충돌은 `.gitignore`, `backend/build.gradle`, `tasks.md`에서 해결했다. PostgreSQL local/test profile과 CI dependency 고정, M030 data milestone과 M031 CI milestone을 모두 보존했다.
 - Gitleaks는 44개 커밋에서 `backend/.env` 4건, `ai/.env.example` 1건을 탐지했다. OpenAI key 규칙 3건과 generic API key 규칙 2건이며 secret 값과 전체 hash는 기록하지 않았다.
-- 실제 credential은 history remediation보다 먼저 폐기·회전한다. history rewrite는 사용자 명시 승인, 팀 작업 중지, 백업과 협업자 복구 계획 없이는 실행하지 않는다.
+- OpenAI/LiveKit 기존 credential은 공급자에서 폐기·재발급됐다. 여러 원격 공유 브랜치의 강제 재작성을 피하기 위해 폐기된 5건의 exact fingerprint만 `.gitleaksignore`에 등록하고 신규 secret 차단은 유지한다.
 
 ### Verification
 
@@ -650,18 +650,16 @@
 - Passed: `cd frontend && npm run lint && npm run test && npm run build`; lint 오류 0건/기존 경고 8건, unit 6건
 - Passed: `cd ai && python3 -m compileall app tests && python3 -m unittest discover -s tests`; 35 tests
 - Passed: conflict 0건, `git diff --check`, `git diff --cached --check`
-- Expected failure: `gitleaks git . --redact --no-banner`; 5 findings
+- Passed: OpenAI/LiveKit 기존 credential 폐기·재발급 확인 후 `.gitleaksignore` exact fingerprint 5건 적용, `gitleaks git . --redact --no-banner` 0건
 - Passed: 격리된 `pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL 16에서 `MigrationIntegrationTest`; Flyway V1~V10과 `vector` extension
 - Passed: `meetingmind-backend:ci`, `meetingmind-ai:ci` build와 content digest 생성; 두 image 모두 `meetingmind` non-root 사용자와 예상 entrypoint 확인
 - Passed: Trivy 0.72.0 HIGH/CRITICAL scan; Backend OS/JAR 0건, AI OS/Python package 0건
 - Passed: `cd frontend && npm run test:e2e`; Chromium 로그인, active HOST prejoin 허용, unknown meeting default-deny 2건
 - Fixed: Trivy 0.72.0 Linux 64-bit archive에 32-bit checksum이 지정된 오류를 공식 64-bit checksum으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 대조했다.
 - Hardened: 모든 GitHub Action을 공식 major ref가 가리키는 commit SHA로 고정했다.
-- Not run: 원격 GitHub Actions, Summary/`CI Gate`, `main` branch protection
+- Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했으며 fingerprint 적용 후 재검증한다.
 
 ### Remaining Work
 
-- T241: finding 분류와 실제 credential 폐기·회전
-- T242: 명시 승인 후 history remediation 또는 검증된 오탐의 최소 fingerprint 예외, Gitleaks 0건
 - T243: feature branch 원격 CI 전체 성공과 Summary/digest 확인
 - T244/T245: `main` protection 적용과 문서 closeout

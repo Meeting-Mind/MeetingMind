@@ -476,7 +476,7 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 
 - trigger/concurrency/최소 권한과 Backend/Frontend/AI job, Dockerfile, PostgreSQL V1~V10 migration job, Playwright, scanner, Summary/`CI Gate` 코드는 작성되어 있다.
 - Backend `test bootJar`, Frontend lint/unit/build, AI compile/unit과 Docker 기반 PostgreSQL migration, Playwright, Backend/AI image build/digest, Trivy HIGH/CRITICAL scan은 로컬에서 통과했다.
-- Gitleaks full-history scan은 44개 커밋을 검사해 과거 `backend/.env` 4건과 `ai/.env.example` 1건을 탐지했다. 규칙 기준으로 OpenAI key 후보 3건과 generic API key 후보 2건이며 실제 값은 문서나 로그에 기록하지 않는다.
+- Gitleaks full-history scan은 과거 `backend/.env` 4건과 `ai/.env.example` 1건을 탐지했다. OpenAI/LiveKit 기존 credential은 공급자에서 폐기·재발급됐고, 저장소 전체 이력 재작성 대신 해당 5건의 exact fingerprint만 `.gitleaksignore`에 기록한다. 새로운 commit/path/rule/line 조합은 계속 차단한다.
 - Trivy 0.72.0 Linux 64-bit archive checksum은 공식 release checksum과 대조했고, 잘못 사용된 32-bit checksum을 64-bit 값으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 일치한다.
 - `actions/checkout`, `setup-java`, `setup-node`, `setup-python`, `upload-artifact`는 공식 major ref의 현재 commit SHA로 고정했다.
 - `main` branch protection은 원격에서 `CI Gate` context가 생성된 뒤 적용해야 한다.
@@ -484,8 +484,8 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 
 ### Remaining Execution Plan
 
-1. **Credential response (T241)**: 5개 finding을 실제 credential, 폐기된 credential, 예제/오탐으로 분류한다. 실제 credential은 Git 이력 처리 전에 공급자에서 폐기·회전하고 소유자와 완료 여부만 기록한다.
-2. **History remediation (T242)**: 실제 secret은 이력에서 제거하고, 검증된 오탐만 fingerprint 단위의 최소 allowlist를 사용한다. 이력 재작성은 사용자 명시 승인, 팀 작업 중지, 백업 ref, 영향 브랜치 목록과 협업자 복구 절차를 확보한 뒤 단일 작업자가 수행한다.
+1. **Credential response (T241)**: OpenAI/LiveKit 기존 credential의 공급자 폐기·재발급을 완료했고 값 없이 완료 여부만 기록한다.
+2. **History remediation (T242)**: 여러 공유 브랜치의 강제 재작성 영향을 피하기 위해 폐기된 5건의 exact fingerprint만 `.gitleaksignore`로 예외 처리한다. 예외는 commit/path/rule/line 단위이며 신규 secret은 계속 차단한다.
 3. **Local integration (T235, T236, T238, T239)**: 격리된 pgvector PostgreSQL의 V1~V10 migration, Backend/AI image build와 digest, Trivy HIGH/CRITICAL scan, Playwright 로그인·회의 access smoke를 완료 상태로 유지하고 workflow 변경 시 재검증한다.
 4. **Remote gate (T243)**: Gitleaks 0건과 로컬 통합 검증 후에만 feature branch를 commit/push하고 `dev` 대상 PR에서 전체 workflow를 실행한다. Summary 결과와 image digest를 확인하고 모든 `needs`가 `success`인지 검증한다.
 5. **Protection and closeout (T244, T245)**: 원격에 생성된 정확한 `CI Gate` context를 `main` required check로 지정하고 직접 push/force push/삭제 금지를 확인한 뒤 tasks/implement 문서를 종료 상태로 갱신한다.
@@ -494,7 +494,7 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 
 - `.github/workflows/ci.yml`과 M031 task 상태는 통합 작업자 한 명만 수정한다.
 - secret 값, 회전된 값, credential provider 응답은 저장소 문서와 CI 로그에 남기지 않는다.
-- 실제 credential 폐기·회전 완료 전에는 history rewrite나 allowlist를 수행하지 않는다.
+- 실제 credential 폐기·회전 완료 전에는 history rewrite나 allowlist를 수행하지 않는다. 이번 5건은 폐기·재발급 확인 후 exact fingerprint를 적용했다.
 - history rewrite, force push, branch protection 변경은 각각 사용자 명시 승인과 저장소 관리자 권한이 필요한 외부 상태 변경이다.
 - 원격 workflow 성공 전에는 T243-T245를 완료로 표시하지 않는다.
 

@@ -410,8 +410,8 @@ M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL mi
 | T238 | M031 | [x] | frontend/e2e | 사용자 | Codex | T234, T237 | `frontend/playwright.config.*`, `frontend/e2e/**`, `.github/workflows/ci.yml` | 실제 Frontend/Backend를 기동해 핵심 로그인과 회의 접근 gate를 Playwright로 검증한다. | Chromium에서 로그인 성공, active HOST prejoin 허용, unknown meeting default-deny 2건이 통과했다. |
 | T239 | M031 | [x] | security/image-scan | 사용자 | Codex | T236 | `.github/workflows/ci.yml`, `backend/Dockerfile`, `ai/Dockerfile` | checksum 검증된 Trivy로 Backend/AI image의 HIGH/CRITICAL 취약점을 검사한다. | 공식 64-bit checksum 교정 후 실제 Backend/AI image에서 HIGH/CRITICAL 취약점 0건을 확인했다. |
 | T240 | M031 | [x] | security/secret-discovery | 사용자 | Codex | T233 | `.github/workflows/ci.yml`, `specs/001-meetingmind-core/{plan,implement}.md` | checksum 검증된 Gitleaks로 전체 Git 이력을 검사하고 finding을 값 노출 없이 목록화한다. | 44개 커밋에서 `backend/.env` 4건, `ai/.env.example` 1건을 확인했고 secret 값 없이 규칙/파일/건수만 기록했다. |
-| T241 | M031 | [ ] | security/credential-response | 저장소 관리자/키 소유자 | 사용자 | T240 | credential provider, `specs/001-meetingmind-core/implement.md` | 5개 finding을 실제 credential/폐기된 credential/예제·오탐으로 분류하고 실제 credential을 먼저 폐기·회전한다. | 모든 finding의 분류와 키 소유자 확인이 끝나고 실제 credential은 provider에서 비활성화·재발급되며 값 없이 완료 증적만 기록된다. |
-| T242 | M031 | [ ] | git/history-remediation | 저장소 관리자 | 사용자+Codex | T241 | Git history, `.gitleaksignore` 또는 `.gitleaks.toml`, `specs/001-meetingmind-core/{plan,implement}.md` | 실제 secret은 이력에서 제거하고 검증된 오탐만 fingerprint 단위 최소 예외로 처리한다. | rewrite는 명시 승인·팀 작업 중지·백업·복구 절차 후 수행되고 `gitleaks git . --redact --no-banner`가 0건으로 통과한다. |
+| T241 | M031 | [x] | security/credential-response | 저장소 관리자/키 소유자 | 사용자 | T240 | credential provider, `specs/001-meetingmind-core/implement.md` | 5개 finding의 실제 credential을 공급자에서 폐기·재발급한다. | OpenAI/LiveKit 기존 credential의 폐기·재발급 완료를 확인했고 secret 값 없이 완료 사실만 기록했다. |
+| T242 | M031 | [x] | git/history-remediation | 저장소 관리자 | 사용자+Codex | T241 | `.gitleaksignore`, `specs/001-meetingmind-core/{plan,implement}.md` | 폐기된 5건만 exact fingerprint로 예외 처리해 공유 브랜치 history rewrite를 피하고 신규 secret 차단을 유지한다. | commit/path/rule/line 단위 5건만 등록했고 `gitleaks git . --redact --no-banner`가 0건으로 통과한다. |
 | T243 | M031 | [ ] | ci/summary-gate | 사용자 | Codex | T234-T239, T242 | `.github/workflows/ci.yml` | 테스트, migration, 보안 검사, image digest를 Summary에 집계하고 원격 최종 gate를 검증한다. | `if: always()` summary 코드가 존재하며, 모든 선행 task 완료 후 원격에서 전체 job과 `CI Gate`가 성공하고 결과/digest가 표시되어야 완료한다. |
 | T244 | M031 | [ ] | github/protection | 저장소 관리자 | 사용자 | T243 | GitHub branch ruleset 또는 branch protection 설정 | `main` 직접 push를 금지하고 PR 및 M031 최종 required check 통과를 강제한다. | 관리자 포함 우회 대상 없이 PR merge만 허용되고 `CI Gate`, force-push 금지, branch 삭제 금지가 적용된다. `dev` 보호 강도는 별도 운영 정책으로 결정한다. |
 | T245 | M031 | [ ] | verification/docs | 사용자 | Codex | T243, T244 | `.github/**`, `backend/**`, `ai/**`, `frontend/**`, `specs/001-meetingmind-core/{tasks,implement,analyze}.md` | 로컬/원격 CI 실행 결과와 branch protection 상태를 검증하고 closeout한다. | required workflow, Summary/digest/protection을 확인하고 tasks/implement에 결과 또는 미실행 사유를 남긴다. |
@@ -446,7 +446,7 @@ M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL mi
 - [x] V026 CI hardening discovery 검증: workflow/build/test/migration/container gap 대조, M031 dependency와 PostgreSQL V1~V10 기준 검토, `git diff --check`
 - [x] V027 CI local baseline 검증: Backend `test bootJar`, Frontend lint 오류 0건/unit 6건/build, AI compile/unit 35건, `git diff --check`
 - [x] V028 Gitleaks discovery 검증: 44개 커밋, 2개 파일, secret 후보 5건을 값 노출 없이 확인
-- [ ] V029 credential 폐기·회전 및 history remediation 후 Gitleaks 0건 검증
+- [x] V029 OpenAI/LiveKit credential 폐기·재발급, exact fingerprint 5건 적용 후 Gitleaks 0건 검증
 - [x] V030 Docker 기반 pgvector migration, Backend/AI image build·digest·Trivy 0건, Playwright 2건 검증
 - [ ] V031 원격 GitHub Actions 전체 job과 `CI Gate`/Summary 검증
 - [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증
