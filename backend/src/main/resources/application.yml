@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: meetingmind-backend
+  profiles:
+    default: local
   flyway:
     enabled: false
 
@@ -11,10 +13,20 @@ spring:
 spring:
   config:
     activate:
+      on-profile: "!local & !db"
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+---
+spring:
+  config:
+    activate:
       on-profile: db
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
   flyway:
     enabled: true
-    url: ${SPRING_DATASOURCE_URL}
-    user: ${SPRING_DATASOURCE_USERNAME}
-    password: ${SPRING_DATASOURCE_PASSWORD}
     locations: classpath:db/migration

@@ -61,6 +61,7 @@
 | M027 | Backend 권한 매트릭스 runtime | SpaceMember, MeetingParticipant, owner transfer와 Project AI 후보 권한이 실제 mutation/API에서 강제된다. | T204-T211 |
 | M028 | 회의 참가 신청과 HOST 승인 | URL/코드 신청은 승인 전 접근권을 만들지 않고 HOST 승인 후 회의 단독 participant만 생성한다. | T212-T215 |
 | M029 | Frontend 회의 접근·권한 화면 | 사용자가 참가 신청, 승인 상태, Space role과 meeting ACL, default-deny prejoin을 화면에서 확인한다. | T216-T221 |
+| M030 | 로컬 PostgreSQL/pgvector 영속화 기준선 | 문서와 migration이 일치하고 격리된 로컬 DB에 V1 이후 schema가 재현 가능하게 적용된다. | T222-T231 |
 
 ## Foundation
 
@@ -127,8 +128,8 @@
 | T060 | M008 | [x] | data/schema | 사용자(Data 담당) | Codex | T059 | `backend/src/main/resources/db/migration/V2__create_meetings_acl.sql`, `specs/001-meetingmind-core/implement.md` | Meeting, MeetingParticipant, MeetingSpeaker schema 초안을 migration으로 작성한다. | `meetings`, `meeting_participants`, `meeting_speakers` PK/FK/check 제약, meeting schedule/status index, active participant unique index, active role lookup index, speaker label unique index가 반영되어 있다. |
 | T061 | M008 | [x] | data/schema | 사용자(Data 담당) | Codex | T060 | `backend/src/main/resources/db/migration/V3__create_transcripts_reports.sql`, `specs/001-meetingmind-core/implement.md` | TranscriptSegment와 MeetingReport schema 초안을 migration으로 작성한다. | `transcript_segments`의 `start_ms/end_ms` 시간 제약, `meeting_id/sequence` unique, `meeting_id/start_ms` index, `meeting_reports` version/current confirmed 제약, `report_decisions`/`report_action_items` 하위 테이블과 `source_ids jsonb` 저장 방식이 반영되어 있다. |
 | T062 | M008 | [x] | data/schema | 사용자(Data 담당) | Codex | T061 | `backend/src/main/resources/db/migration/V4__create_knowledge_embeddings.sql`, `specs/001-meetingmind-core/implement.md` | ProjectKnowledge와 EmbeddingChunk schema 초안을 migration으로 작성한다. | `project_knowledge`의 Space FK/type/status/embeddingStatus 제약과 `(space_id,type,updated_at)` index, `embedding_chunks`의 `space_id/scope/source_type/source_id` index, meeting scope `meeting_id` required 제약, ProjectKnowledge FK, `chunk_source_segments` unique 관계가 반영되어 있다. |
-| T063 | M008 | [ ] | data/retention | 팀원(STT/Audio 담당) | TBD | T061 | `backend/**`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/clarify.md` | retentionPolicy, failureReason, STT 원문 보존 정책 필드를 schema/document에 맞춘다. | STT 기본 보존기간 30일과 7/30일/영구 선택지를 기준으로 nullable/default 전략이 문서화되어 있다. |
-| T064 | M008 | [ ] | data/verification | TBD | TBD | T059, T060, T061, T062, T063 | `backend/**`, `specs/001-meetingmind-core/implement.md` | migration 적용 또는 schema 검증 명령을 실행하고 결과를 기록한다. | migration 검증 결과 또는 미실행 사유가 implement.md에 기록되어 있다. |
+| T063 | M008 | [x] | data/retention | 사용자 | Codex | T061 | `backend/**`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/clarify.md` | retentionPolicy, failureReason, STT 원문 보존 정책 필드를 schema/document에 맞춘다. | `DAYS_7`, `DAYS_30`, `PERMANENT`, 기본 30일, `retentionUntil`, `legalHold`, `purgedAt` 전략이 문서와 V8에 반영되어 있다. |
+| T064 | M008 | [x] | data/verification | 사용자 | Codex | T059, T060, T061, T062, T063 | `backend/**`, `specs/001-meetingmind-core/implement.md` | migration 적용 또는 schema 검증 명령을 실행하고 결과를 기록한다. | 격리된 PostgreSQL 16 + pgvector DB에 V1~V9 적용과 재실행 validation이 통과했다. |
 | T065 | M009 | [ ] | integration/backend | TBD | TBD | T043, T064 | `backend/**`, `specs/001-meetingmind-core/implement.md` | Backend 전체 검증을 실행한다. | `cd backend && ./gradlew test` 결과가 implement.md에 기록되어 있다. |
 | T066 | M009 | [ ] | integration/frontend | TBD | TBD | T050 | `frontend/**`, `specs/001-meetingmind-core/implement.md` | Frontend 전체 빌드를 실행한다. | `cd frontend && npm run build` 결과가 implement.md에 기록되어 있다. |
 | T067 | M009 | [ ] | integration/ai | TBD | TBD | T057 | `ai/**`, `specs/001-meetingmind-core/implement.md` | AI 전체 compile 검증을 실행한다. | `cd ai && python -m compileall app` 결과가 implement.md에 기록되어 있다. |
@@ -377,6 +378,22 @@ M029는 이미 존재하는 Space role/회의 ACL 관리 화면을 M028 Backend 
 | T219 | M029 | [x] | frontend/prejoin-gate | 사용자(Frontend 담당) | Codex | T217 | `frontend/src/pages/LiveMeetingPage.tsx`, `frontend/src/pages/LiveRoomPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/pages/WorkspaceHomePage.tsx` | LiveMeeting 진입 전에 Backend meeting ACL을 확인한다. | meetingId 누락/403/API 실패는 default-deny이고 access probe 성공 시에만 media prejoin과 target LiveKit token 요청이 가능하다. |
 | T220 | M029 | [x] | frontend/approval-semantics | 사용자(Frontend 담당) | Codex | T216 | `frontend/src/App.tsx`, `frontend/src/pages/TeamMembersPage.tsx` | 회의 참가 신청 승인 local flow가 MeetingParticipant만 생성하도록 수정한다. | 승인 후 SpaceMember 수/role은 변하지 않고 대상 회의에 VIEWER guest participant만 추가된다. SpaceMember 제거 시 기존 meeting ACL은 guest로 유지된다. |
 | T221 | M029 | [x] | frontend/verification | 사용자(Frontend 담당) | Codex | T218, T219, T220 | `frontend/**`, `specs/001-meetingmind-core/tasks.md`, `implement.md`, `analyze.md` | build, route/visual smoke, diff 검증과 문서 closeout을 수행한다. | `npm run build`, `/meeting-access` HTTP 200, `git diff --check`가 통과했다. in-app browser가 현재 세션에 없어 desktop/mobile visual smoke는 미실행 사유를 기록했다. |
+
+### M030: Local PostgreSQL and pgvector Foundation
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T222 | M030 | [x] | contracts/data | 사용자 | Codex | T221 | `requirements/*`, `specs/001-meetingmind-core/clarify.md`, `specs/001-meetingmind-core/data-model.md`, `specs/001-meetingmind-core/erd.md`, `specs/001-meetingmind-core/plan.md` | 최신 ERD와 V1~V6 migration 차이를 분석하고 참가 신청, 전사 생명주기, 보존, 출처, embedding generation 결정을 확정한다. | 문서가 MeetingJoinRequest, forward-only migration, MeetingTranscript, SourceReference 논리 모델, EmbeddingJob/generation, Q-010 경계를 일관되게 설명한다. |
+| T223 | M030 | [x] | data/local | 사용자 | Codex | T222 | `compose.local.yml`, `README.md` | 다른 프로젝트 DB와 격리된 PostgreSQL 16 + pgvector 로컬 실행 구성을 추가한다. | host 5434에서 health check가 통과하고 실행/중지/Flyway 환경변수 사용법이 문서화되어 있다. |
+| T224 | M030 | [x] | data/schema | 사용자 | Codex | T222 | `backend/src/main/resources/db/migration/V7__*.sql` | AuthIdentity/AuthSession, SpaceInvitation, 기존 MeetingInvitation, MeetingRoom 누락 schema를 forward migration으로 추가한다. | 이미 공유된 V7 checksum을 유지하면서 provider/token/status unique/check/index를 추가한다. |
+| T225 | M030 | [x] | data/schema | 사용자 | Codex | T224 | `backend/src/main/resources/db/migration/V8__*.sql` | MeetingTranscript, retention, DomainTerm, AuditLog schema를 추가한다. | 전사 상태/보존/법적 보류와 용어/감사 index가 요구사항 및 ERD와 일치한다. |
+| T226 | M030 | [x] | data/schema | 사용자 | Codex | T225 | `backend/src/main/resources/db/migration/V9__*.sql` | EmbeddingJob과 EmbeddingChunk generation/active 교체 metadata를 추가한다. | 비동기 재색인 동안 기존 active chunk를 유지할 수 있고 Q-010 전까지 vector 차원/index를 강제하지 않는다. |
+| T227 | M030 | [x] | data/schema | 사용자 | Codex | T226 | `backend/src/main/resources/db/migration/V10__*.sql` | 최신 MeetingJoinRequest와 joinCodeHash schema를 공유 migration을 수정하지 않는 forward migration으로 추가한다. | pending unique, review 상태 제약, joinCodeHash unique index가 ERD와 일치하고 기존 V7 checksum이 유지된다. |
+| T228 | M030 | [x] | data/verification | 사용자 | Codex | T223-T227 | `backend/**`, `specs/001-meetingmind-core/implement.md` | 빈 로컬 DB와 기존 V9 DB에 Flyway V1~V10을 적용하고 table/constraint/index와 backend test를 검증한다. | Flyway 최초 적용/재검증/기존 V9 upgrade, 25개 도메인 테이블, vector extension, join request/default/check/partial index, `./gradlew test`, `git diff --check` 결과가 기록되어 있다. |
+| T229 | M030 | [ ] | backend/persistence | Backend owner | TBD | T228 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/build.gradle`, `backend/src/test/**` | in-memory Auth/Workspace/STT 저장소를 transaction 가능한 PostgreSQL repository로 단계 전환한다. | 권한 선검증과 report/task current/confirm 원자성이 DB transaction 및 제약으로 검증된다. |
+| T230 | M030 | [ ] | ai/pgvector | AI owner | TBD | T228, T229, Q-010 | `ai/**`, `backend/**`, `specs/001-meetingmind-core/contracts/ai-api.md` | embedding worker와 권한 필터된 pgvector retriever를 연결한다. | 완료된 active generation만 검색하고 Meeting/Project scope 및 source citation negative test가 통과한다. |
+| T231 | M030 | [x] | data/local-profile | 사용자 | Codex | T223, T228 | `backend/build.gradle`, `backend/src/main/resources/application.yml`, `backend/src/main/resources/application-local.yml`, `compose.local.yml`, `README.md` | 팀 공용 Docker DB를 Backend 기본 `local` profile과 연결하고 환경변수 기반 `db`, DB 비의존 `test` profile과 분리한다. | 팀원이 Compose 실행 후 `./gradlew bootRun`으로 동일 DataSource/Flyway 환경을 재현하고 Backend test는 Docker 실행 여부와 독립적으로 통과한다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -402,6 +419,9 @@ M029는 이미 존재하는 Space role/회의 ACL 관리 화면을 M028 Backend 
 - [x] V020 Backend permission matrix runtime 검증: `cd backend && ./gradlew test`, `git diff --check`
 - [x] V021 Meeting join request approval 검증: `cd backend && ./gradlew test` 64건, `git diff --check`
 - [x] V022 Frontend meeting access 검증: `cd frontend && npm run build`, `/meeting-access` HTTP 200, `git diff --check`; in-app browser unavailable로 visual smoke 미실행
+- [x] V023 로컬 DB 기준선 검증: PostgreSQL 16.14 + pgvector 0.8.5 healthy, Flyway V1~V10 최초 적용/재검증과 기존 V9 upgrade, 25개 도메인 테이블, join request/retention/default/check/partial index, Backend 전체 test, `git diff --check`
+- [x] V024 Backend local profile 검증: Compose DB healthy, Hikari `localhost:5434` 연결, Flyway v10 up-to-date, Backend `18080` 기동, `/api/workspace` 200, Backend 전체 test
+- [x] V025 Backend 기본 실행 검증: profile 미지정 `./gradlew bootRun`, default `local` 자동 적용, 기존 8080 프로세스를 보존하기 위한 `18080` port override, `/api/workspace` 200
 
 ## Notes
 

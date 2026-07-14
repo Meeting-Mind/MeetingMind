@@ -15,6 +15,7 @@
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
 | Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
 | Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
+| Q-010 | High | pgvector embedding model과 차원 수는 무엇으로 고정할까? | `vector(n)` 타입과 HNSW/IVFFlat index는 차원 수가 확정되어야 안전하게 생성할 수 있다. | Open | |
 
 ## Blocking Decisions
 
@@ -22,6 +23,7 @@
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
 - Q-008은 candidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태·권한·current 전이는 먼저 구현할 수 있다.
 - Q-009는 TaskCandidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태 전이와 중복 확정 방지는 먼저 구현할 수 있다.
+- Q-010은 실제 embedding 생성과 vector index migration 전에 결정해야 한다. 관계형 metadata, embedding job, generation 교체 모델은 먼저 구현할 수 있다.
 
 ## Q-001 Authentication Options
 
@@ -75,3 +77,9 @@
 - D-022: AI 회의록 생성 결과는 재조회와 확정을 위해 `MeetingReport.CANDIDATE`로 임시 저장한다. candidate는 기본 공식 회의록 조회와 Project AI source에서 제외하고, `status=CANDIDATE`를 명시한 조회 또는 생성 응답에서만 노출한다. AI가 `unsupported=true`를 반환하면 저장하지 않는다.
 - D-023: 태스크 추출은 `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`가 실행한다. 후보 조회는 active 회의 접근 권한이 필요하고, TaskCard 확정은 회의 편집 권한과 active `SpaceMember`를 모두 요구한다. AI가 `unsupported=true`를 반환하면 후보를 저장하지 않으며 후보당 TaskCard는 최대 하나만 생성한다.
 - D-024: 회의 생성 시 추측하기 어려운 `joinCode`를 발급한다. 인증 사용자는 회의 URL 또는 코드만으로 `PENDING` 참가 신청을 만들 수 있고, active `HOST`가 승인하면 기본 `VIEWER` MeetingParticipant가 생성된다. Space OWNER/ADMIN은 ACL 관리 override로 승인/거절할 수 있으며, 승인 전에는 회의 접근권이나 SpaceMember가 생기지 않는다.
+- D-025: 로컬 개발 DB는 다른 프로젝트의 PostgreSQL과 분리된 PostgreSQL 16 + pgvector 컨테이너를 사용한다. 기본 host port는 `5434`이며 Backend `db` profile과 Flyway가 schema를 적용한다.
+- D-026: 원격에 공유된 Flyway migration은 수정하지 않는다. `V1`~`V9` 이후 누락 schema와 제약 보강은 `V10`부터 forward-only migration으로 추가한다.
+- D-027: 회의별 전사 생명주기는 `MeetingTranscript` 1개로 관리한다. `status`, `provider`, `language`, `retentionUntil`, `legalHold`, `purgedAt`을 보존하고 `TranscriptSegment`는 기존 `meetingId` 기준 저장을 유지한다.
+- D-028: `SourceReference`는 API 응답용 논리 모델로 유지하고 별도 다형 FK 테이블을 만들지 않는다. 보고서/태스크 근거는 `sourceIds` JSON 배열, transcript chunk 근거는 `CHUNK_SOURCE_SEGMENT` 관계로 보존한다.
+- D-029: embedding 재생성은 `EmbeddingJob`과 generation으로 추적한다. 새 generation이 완료되기 전까지 기존 active chunk를 유지하고, 완료 시 새 generation을 active로 전환한다.
+- D-030: `Meeting.retentionPolicy` DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`를 사용하고 기본값은 `DAYS_30`으로 한다. `retentionUntil`은 기간 보존일 때 계산하며 영구 보존이면 null이다.
