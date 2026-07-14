@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
+import { createMeeting as createMeetingRequest, createSpace, fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
 import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
@@ -281,14 +281,44 @@ export function App() {
     }
   }
 
-  function handleCreateProject({ name, description }: { name: string; description: string }) {
+  async function handleCreateProject({ name, description }: { name: string; description: string }) {
     const normalizedName = name.trim();
     if (!normalizedName) {
       return;
     }
 
+    const existingSpace = data.workspaceHome.spaces.find((space) => space.name === normalizedName);
+    let spaceId = existingSpace?.id ?? buildSpaceId(normalizedName);
+
+    if (!existingSpace && authSession) {
+      try {
+        const response = await createSpace(authSession, { name: normalizedName, description: description.trim() || null });
+        spaceId = response.id;
+      } catch (error) {
+        console.error("[App] createSpace failed, falling back to local-only space", error);
+      }
+    }
+
     setProjectMeetings((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
-    setProjectMembers((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
+    setProjectMembers((previous) => ({
+      ...previous,
+      [normalizedName]:
+        previous[normalizedName] ??
+        (authSession
+          ? [
+              {
+                name: authSession.user.displayName || authSession.user.email,
+                email: authSession.user.email,
+                role: "프로젝트 오너",
+                spaceRole: "OWNER",
+                since: "방금 합류",
+                access: getSpaceRoleAccessLabel("OWNER"),
+                rank: "팀 리드",
+                status: "active"
+              }
+            ]
+          : [])
+    }));
     setProjectRequests((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
     setProjectInvites((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? buildInviteMeta(normalizedName) }));
     setProjectTasks((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
@@ -296,7 +326,7 @@ export function App() {
     setData((previous) => {
       const existingIndex = previous.workspaceHome.spaces.findIndex((space) => space.name === normalizedName);
       const nextSpace = {
-        id: previous.workspaceHome.spaces[existingIndex]?.id ?? buildSpaceId(normalizedName),
+        id: spaceId,
         name: normalizedName,
         members: "멤버 0명",
         meetings: "진행 회의 0건",
@@ -457,7 +487,7 @@ export function App() {
     navigate("/spaces");
   }
 
-  function handleCreateMeeting(projectName: string, payload?: CreateMeetingPayload) {
+  async function handleCreateMeeting(projectName: string, payload?: CreateMeetingPayload) {
     const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
     if (!targetSpace) {
       return;
@@ -465,6 +495,19 @@ export function App() {
 
     const existingMeetings = projectMeetings[projectName] ?? [];
     const nextMeeting = buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload);
+
+    if (authSession) {
+      try {
+        const response = await createMeetingRequest(authSession, targetSpace.id, {
+          title: nextMeeting.title,
+          scheduledAt: nextMeeting.scheduledAt ?? new Date().toISOString()
+          // ponytail: participantUserIds skipped, mock members have no real backend userId to map from email yet
+        });
+        nextMeeting.id = response.id;
+      } catch (error) {
+        console.error("[App] createMeeting failed, falling back to local-only meeting", error);
+      }
+    }
 
     setProjectMeetings((previous) => {
       return {

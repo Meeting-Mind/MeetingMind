@@ -74,8 +74,9 @@ body.app-theme select {
   height: calc(100vh / var(--app-scale));
   transform: scale(var(--app-scale));
   transform-origin: top left;
-  /* ponytail: OS window-snap resizes can leave the scaled layer stale in Chromium until repainted; backface-visibility forces a fresh composite. */
+  /* ponytail: OS window-snap resizes can leave the scaled layer stale in Chromium until repainted; backface-visibility + will-change force a fresh composite. */
   backface-visibility: hidden;
+  will-change: transform;
 }
 
 body.app-theme.meeting-access-body {
