@@ -19,7 +19,10 @@ const STORAGE_KEY = "meetingmind.auth.session";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
 
 export function readStoredAuthSession(): AuthSession | null {
-  const raw = sessionStorage.getItem(STORAGE_KEY);
+  return parseStoredAuthSession(sessionStorage.getItem(STORAGE_KEY));
+}
+
+export function parseStoredAuthSession(raw: string | null): AuthSession | null {
   if (!raw) {
     return null;
   }
