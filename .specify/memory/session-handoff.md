@@ -21,16 +21,18 @@
 
 ## 현재 통합 경계
 
-- 인증, Space/Meeting 권한, AI gateway의 기본 경로는 구현되어 있으나 일부 저장소는 in-memory 구현이다.
-- PostgreSQL/pgvector 기반 실제 RAG 저장소, embedding worker, persistent AI audit log는 후속 작업이다.
+- `local`/`db` profile의 Auth, Space/Meeting ACL, Transcript/Report/Task/ProjectKnowledge/Audit runtime은 Spring JDBC PostgreSQL repository를 사용한다. `test` profile만 in-memory adapter를 사용한다.
+- Auth refresh rotation, owner transfer, join approval, report current 전환, task confirm과 audit는 DB transaction/row lock 경계에 연결되어 있다.
+- Project AI meeting 후보는 PostgreSQL에서 active SpaceMember role과 active MeetingParticipant를 선필터한다. Backend는 허용된 source와 `allowedMeetingIds`만 AI 서버에 전달한다.
+- PostgreSQL/pgvector semantic RAG 저장소, embedding worker/model/차원/index와 persistent AI request audit는 별도 AI/RAG 후속 작업이다.
 - mock/legacy Space와 target Backend Space의 ID 연결은 완료되지 않았으므로 target 목록에 없는 Space에서는 Project AI 호출을 차단한다.
-- AI 회의록 candidate는 Backend 편집 권한과 단일 meeting source 검증 뒤에서 생성되고 supported 결과만 in-memory `CANDIDATE`로 저장된다.
-- report candidate/draft 확정은 Backend 편집 권한 뒤에서 실행되고 기존 current를 해제한 뒤 새 report만 `CONFIRMED/current=true`가 된다.
-- candidate TTL, report update/history/download, 실제 PostgreSQL repository, persistent audit log는 후속 작업이다.
+- AI 회의록 candidate는 Backend 편집 권한과 단일 meeting source 검증 뒤에서 생성되고 supported 결과만 PostgreSQL `CANDIDATE`로 저장된다.
+- report candidate/draft 확정은 Backend 편집 권한 뒤의 transaction에서 기존 current를 해제한 뒤 새 report만 `CONFIRMED/current=true`가 된다.
+- legacy `/api/stt` streaming session/file prototype, candidate TTL, report update/history/download는 별도 후속 작업이다.
 
 ## 다음 Shared Milestone
 
-다음 milestone 후보는 task candidate 추출을 Backend 권한 검증 뒤로 전환하고 Kanban confirm과 연결하는 작업이다.
+다음 shared milestone은 별도 AI/RAG 담당자가 T230의 embedding worker와 권한 필터된 pgvector retriever를 연결하는 작업이다. Backend owner는 기존 source contract와 embedding/vector 파일 경계를 변경하지 않는다.
 
 ## 검증 기준선
 

@@ -7,7 +7,7 @@
 - Frontend는 React/Vite/TypeScript로 워크스페이스, 회의 대기, 라이브룸, Meeting AI, 프로젝트 개요, 팀원, Report Agent 화면을 제공한다.
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
-- Backend 인증/권한과 STT prototype은 구현되어 있으나 runtime 저장소는 여전히 in-memory/file 기반이며 PostgreSQL repository와 pgvector 검색은 아직 없다.
+- Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용하며 legacy STT streaming session/file prototype과 pgvector semantic 검색은 아직 별도 경계다.
 - 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Target Architecture
@@ -32,7 +32,7 @@
 
 ### Data Migration Discovery
 
-- 2026-07-14 기준 backend에는 Flyway core, PostgreSQL Flyway module, PostgreSQL driver, Spring Boot JDBC starter가 있다. `local` profile이 기본 profile이며 Compose 기본값으로 DataSource와 Flyway를 활성화하고 `db` profile은 환경변수 기반 DataSource를 사용한다. JDBC repository 계층은 아직 없고 Docker PostgreSQL이 기본 실행 전제다.
+- 2026-07-14 기준 backend에는 Flyway core, PostgreSQL Flyway module, PostgreSQL driver, Spring Boot JDBC starter가 있다. `local` profile이 기본 profile이며 Compose 기본값으로 DataSource와 Flyway를 활성화하고 `db` profile은 환경변수 기반 DataSource를 사용한다. M032에서 Auth/Workspace JDBC repository 계층을 연결했으며 Docker PostgreSQL이 기본 실행 전제다.
 - migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
 - 원격에 공유된 migration은 수정하지 않는다. `V1`~`V9` 이후 최신 MeetingJoinRequest 보강은 `V10` forward migration으로 추가한다.
 - 로컬 DB는 PostgreSQL 16 + pgvector를 다른 프로젝트 DB와 격리된 컨테이너로 실행하고 host `5434`를 기본값으로 사용한다.
@@ -280,7 +280,7 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 
 ### Persistence Boundary
 
-- 현재 runtime 저장소는 in-memory지만 target schema에는 `markdown`, `createdBy`, `sourceIds`를 반영한다.
+- M022 당시 runtime 저장소는 in-memory였으며 M032에서 같은 `markdown`, `createdBy`, `sourceIds` 계약을 JSONB 포함 PostgreSQL repository에 연결했다.
 - candidate version은 동일 meeting의 기존 report 최대 version 다음 값으로 생성한다.
 - AI `unsupported=true` 또는 provider 실패 결과는 저장하지 않는다.
 - confirm, manual edit, version history 조회, export는 M022 이후 범위다.
@@ -299,7 +299,7 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 
 - candidate TTL은 `Q-008` 결정 전이므로 이번 slice에서 임의 정책을 넣지 않는다.
 - 수동 update, version history 조회/복원, export, persistent audit log는 후속 범위다.
-- runtime 저장소는 in-memory이며 PostgreSQL partial unique index는 기존 V3 target schema를 기준으로 유지한다.
+- M032에서 runtime 저장소를 PostgreSQL로 전환했고 V3 partial unique index와 meeting row lock으로 current confirmed report 단일성을 유지한다.
 
 ### Integration Order
 
@@ -331,7 +331,7 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 
 - candidate TTL은 `Q-009` 결정 전이므로 이번 slice에서 임의 정책을 넣지 않는다.
 - 후보 제외 API와 일반 Kanban 카드 CRUD/목록 화면의 Backend 전환은 후속 범위다.
-- runtime 저장소는 in-memory이며 PostgreSQL migration은 target schema 기준선으로 추가한다.
+- M032에서 runtime 저장소를 PostgreSQL로 전환했고 task candidate/card unique 제약과 row lock을 실제 확정 transaction에 연결했다.
 
 ### Integration Order
 
@@ -454,7 +454,7 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 - workflow는 `pull_request`의 `dev`/`main` 대상과 `push`의 `dev`/`main`에서 실행한다. required check 안정성을 위해 path filter는 두지 않는다.
 - `main`은 PR과 최종 CI gate를 필수로 하고 직접 push, force push, branch 삭제를 금지한다. `dev`는 통합 피드백을 위해 push CI를 우선 적용하며 보호 강도는 팀 운영 정책 확정 후 별도로 올린다.
 - Backend는 Java 21에서 test와 `bootJar`를 모두 실행한다.
-- migration은 M030과 같은 PostgreSQL 16 계열의 pgvector service container에서 Backend가 사용하는 Flyway library로 V1~V10 전체를 적용하고 schema history를 확인한다. runtime repository가 in-memory인 현재 경계와 migration 유효성 검증을 혼동하지 않는다.
+- migration은 M030과 같은 PostgreSQL 16 계열의 pgvector service container에서 Backend가 사용하는 Flyway library로 V1~V10 전체를 적용하고 schema history를 확인한다. M032 이후에는 migration 유효성과 JDBC runtime round-trip을 각각 독립 테스트로 검증한다.
 - Backend/AI Dockerfile은 build context를 각 디렉터리로 제한하고 non-root minimal runtime image를 사용한다. registry push는 이번 범위에 포함하지 않으며 CI가 계산한 content digest를 기록한다.
 - Frontend는 lint/unit/build를 먼저 required gate에 넣고, Playwright는 실제 Backend와 Vite를 기동해 로그인 및 회의 access gate의 허용/거부 흐름을 검증한다.
 - Playwright Backend는 기본 `local` profile의 외부 DB 의존성을 피하도록 `test` profile을 명시한다. PostgreSQL/Flyway 검증 책임은 migration job에만 둔다.
@@ -480,7 +480,7 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 - Trivy 0.72.0 Linux 64-bit archive checksum은 공식 release checksum과 대조했고, 잘못 사용된 32-bit checksum을 64-bit 값으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 일치한다.
 - `actions/checkout`, `setup-java`, `setup-node`, `setup-python`, `upload-artifact`는 공식 major ref의 현재 commit SHA로 고정했다.
 - 원격 PR #29에서 모든 job과 `CI Gate` context 생성·성공을 확인했다. 다만 현재 private repository 요금제는 branch protection API를 `403 Upgrade to GitHub Pro or make this repository public`로 거부하므로 T244 적용은 요금제/공개 범위 결정까지 차단된다.
-- M030의 PostgreSQL schema는 재현 가능하지만 Auth/Workspace/STT runtime repository는 아직 in-memory이므로 T229 전까지 영속화 완료로 간주하지 않는다.
+- M032에서 Auth/Workspace와 저장된 Transcript/Report/Task/Knowledge/Audit runtime repository를 PostgreSQL에 연결했다. legacy STT streaming session/file prototype과 T230 embedding/pgvector semantic retriever는 별도 후속 범위다.
 
 ### Remaining Execution Plan
 
@@ -507,6 +507,48 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 - E2E: 실제 Backend `test` profile과 Frontend를 기동해 Playwright 로그인, default-deny, active participant 허용 시나리오를 통과한다.
 - Remote: GitHub Actions의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan과 최종 `CI Gate`가 모두 성공하고 Summary에 결과/digest가 표시된다.
 - Protection: `main`에서 PR과 `CI Gate`가 필수이며 direct push, force push, branch deletion이 금지된다.
+
+## M032 Backend PostgreSQL Runtime Persistence
+
+M032는 T229를 실행 가능한 단위로 분리해 Backend runtime의 in-memory Auth/Workspace 저장소를 PostgreSQL로 전환한다. 사용자 가치와 API shape는 유지하고 저장소 경계, transaction, 재시작 후 데이터 유지와 권한 선필터를 실제 DB에 연결한다.
+
+### Scope and Ownership
+
+- Team members: Backend persistence 담당 1명, AI/RAG 담당 1명.
+- Agents: Backend persistence는 Codex 1개가 T246~T253을 순차 처리한다. AI/RAG 담당 에이전트는 별도 작업으로 T230을 처리한다.
+- Backend owner: `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/main/java/com/meetingmind/demo/domain/**`, persistence integration test, profile wiring, M032 문서.
+- AI/RAG owner: `ai/app/rag.py`, embedding provider/model, vector 차원/index migration, `embedding_jobs`/`embedding_chunks` runtime, pgvector similarity query.
+- Shared contract: Backend는 `spaceId`, 단일 `meetingId`, `allowedMeetingIds`, source type/id/title/text metadata를 권한 필터 후 제공한다. 이 shape가 바뀌면 양 workstream이 먼저 계약을 갱신한다.
+- Conflict boundary: M032는 기존 V1~V10과 embedding/vector schema를 수정하지 않는다. 관계형 persistence에 schema gap이 발견되면 vector와 무관한 forward-only migration만 별도 검토한다.
+
+### Design
+
+1. `AuthStore`, `WorkspaceStore` port를 도입해 service가 concrete in-memory class에 직접 의존하지 않게 한다.
+2. `test` profile은 기존 in-memory adapter를 사용하고 `local`/`db` profile은 Spring JDBC PostgreSQL adapter를 사용한다.
+3. Auth signup/login/refresh/logout는 user, identity, session mutation을 transaction으로 묶고 DB unique 제약 충돌을 공개 Auth 오류로 정규화한다.
+4. Workspace mutation은 Space 생성+OWNER, Meeting 생성+HOST/participants, owner transfer, join request 승인, report confirm, task confirm, audit 기록을 transaction으로 묶는다.
+5. 회의 join code 원문은 생성 응답에서만 반환하고 DB에는 deterministic hash만 저장한다. 참가 신청 조회는 입력 code를 같은 방식으로 hash해 수행한다.
+6. Report decision/action/sourceIds와 Task sourceIds는 기존 JSONB 계약을 유지한다.
+7. Meeting/Project AI service는 기존 source contract를 유지하되 PostgreSQL에서 읽은 원천 데이터와 active ACL로 context를 조립한다. semantic/vector 검색은 이번 milestone에서 구현하지 않는다.
+
+### Implementation Order
+
+1. 문서/ownership 및 repository port를 확정한다.
+2. Auth JDBC adapter와 transaction을 구현한다.
+3. Workspace/ACL JDBC adapter를 구현한다.
+4. Transcript/Report/Task/Knowledge/Audit JDBC adapter를 구현한다.
+5. profile bean wiring과 service transaction 경계를 연결한다.
+6. PostgreSQL 통합 테스트로 재시작 유지, hash lookup, 권한 선필터, report/task 원자성을 검증한다.
+7. 전체 Backend test와 Flyway migration test를 실행하고 `implement.md`를 갱신한다.
+
+### Verification Plan
+
+- Unit: `cd backend && ./gradlew test`
+- PostgreSQL integration: 실행 중인 `compose.local.yml` DB 또는 격리 DB에서 JDBC repository integration test를 실행한다.
+- Migration: V1~V10 checksum과 pgvector extension이 그대로 유지되는지 `MigrationIntegrationTest`로 확인한다.
+- Runtime: 기본 `local` profile Backend를 재기동한 뒤 생성 데이터가 유지되고 Hikari/Flyway가 정상 연결되는지 확인한다.
+- Security: revoked participant, Space 비멤버, 회의 게스트가 권한 밖 AI source에 포함되지 않는 negative test를 통과한다.
+- Integrity: owner transfer, join approval, current report, task candidate confirm이 실패 시 부분 저장되지 않고 DB unique/transaction 경계를 지킨다.
 
 ## Test Plan
 

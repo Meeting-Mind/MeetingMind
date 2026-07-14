@@ -27,7 +27,7 @@ public record Meeting(
                 null,
                 MeetingStatus.SCHEDULED,
                 null,
-                null
+                "DAYS_30"
         );
     }
 }

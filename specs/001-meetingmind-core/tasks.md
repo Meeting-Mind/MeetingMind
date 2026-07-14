@@ -63,6 +63,7 @@
 | M029 | Frontend 회의 접근·권한 화면 | 사용자가 참가 신청, 승인 상태, Space role과 meeting ACL, default-deny prejoin을 화면에서 확인한다. | T216-T221 |
 | M030 | 로컬 PostgreSQL/pgvector 영속화 기준선 | 문서와 migration이 일치하고 격리된 로컬 DB에 V1 이후 schema가 재현 가능하게 적용된다. | T222-T231 |
 | M031 | CI 품질·공급망 검증 강화 | `dev`/PR 변경이 애플리케이션 빌드, V1~V10 migration, 핵심 테스트, 컨테이너·secret 검사를 통과하고 `main`은 필수 check 없는 직접 변경이 차단된다. | T232-T245 |
+| M032 | Backend PostgreSQL runtime 영속화 | Auth/Workspace/회의 산출물이 PostgreSQL에 유지되고 권한·확정 mutation 및 AI context 선필터가 DB transaction으로 검증된다. | T246-T253 |
 
 ## Foundation
 
@@ -391,8 +392,8 @@ M029는 이미 존재하는 Space role/회의 ACL 관리 화면을 M028 Backend 
 | T226 | M030 | [x] | data/schema | 사용자 | Codex | T225 | `backend/src/main/resources/db/migration/V9__*.sql` | EmbeddingJob과 EmbeddingChunk generation/active 교체 metadata를 추가한다. | 비동기 재색인 동안 기존 active chunk를 유지할 수 있고 Q-010 전까지 vector 차원/index를 강제하지 않는다. |
 | T227 | M030 | [x] | data/schema | 사용자 | Codex | T226 | `backend/src/main/resources/db/migration/V10__*.sql` | 최신 MeetingJoinRequest와 joinCodeHash schema를 공유 migration을 수정하지 않는 forward migration으로 추가한다. | pending unique, review 상태 제약, joinCodeHash unique index가 ERD와 일치하고 기존 V7 checksum이 유지된다. |
 | T228 | M030 | [x] | data/verification | 사용자 | Codex | T223-T227 | `backend/**`, `specs/001-meetingmind-core/implement.md` | 빈 로컬 DB와 기존 V9 DB에 Flyway V1~V10을 적용하고 table/constraint/index와 backend test를 검증한다. | Flyway 최초 적용/재검증/기존 V9 upgrade, 25개 도메인 테이블, vector extension, join request/default/check/partial index, `./gradlew test`, `git diff --check` 결과가 기록되어 있다. |
-| T229 | M030 | [ ] | backend/persistence | Backend owner | TBD | T228 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/build.gradle`, `backend/src/test/**` | in-memory Auth/Workspace/STT 저장소를 transaction 가능한 PostgreSQL repository로 단계 전환한다. | 권한 선검증과 report/task current/confirm 원자성이 DB transaction 및 제약으로 검증된다. |
-| T230 | M030 | [ ] | ai/pgvector | AI owner | TBD | T228, T229, Q-010 | `ai/**`, `backend/**`, `specs/001-meetingmind-core/contracts/ai-api.md` | embedding worker와 권한 필터된 pgvector retriever를 연결한다. | 완료된 active generation만 검색하고 Meeting/Project scope 및 source citation negative test가 통과한다. |
+| T229 | M030 | [x] | backend/persistence | 사용자(Backend 담당) | Codex | T228 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/build.gradle`, `backend/src/test/**` | in-memory Auth/Workspace 저장소와 저장된 Transcript 산출물을 transaction 가능한 PostgreSQL repository로 단계 전환한다. M032 T246~T253으로 실행한다. | 권한 선검증과 report/task current/confirm 원자성이 DB transaction 및 제약으로 검증된다. legacy STT streaming session/file prototype은 실제 STT pipeline 범위로 분리한다. |
+| T230 | M030 | [ ] | ai/pgvector | 별도 AI/RAG 담당 | TBD | T228, T229, Q-010 | `ai/**`, embedding/vector 관련 forward migration, `specs/001-meetingmind-core/contracts/ai-api.md` | embedding worker와 권한 필터된 pgvector retriever를 연결한다. | 완료된 active generation만 검색하고 Meeting/Project scope 및 source citation negative test가 통과한다. |
 | T231 | M030 | [x] | data/local-profile | 사용자 | Codex | T223, T228 | `backend/build.gradle`, `backend/src/main/resources/application.yml`, `backend/src/main/resources/application-local.yml`, `compose.local.yml`, `README.md` | 팀 공용 Docker DB를 Backend 기본 `local` profile과 연결하고 환경변수 기반 `db`, DB 비의존 `test` profile과 분리한다. | 팀원이 Compose 실행 후 `./gradlew bootRun`으로 동일 DataSource/Flyway 환경을 재현하고 Backend test는 Docker 실행 여부와 독립적으로 통과한다. |
 
 ### M031: CI Quality and Supply Chain Gates
@@ -415,6 +416,21 @@ M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL mi
 | T243 | M031 | [x] | ci/summary-gate | 사용자 | Codex | T234-T239, T242 | `.github/workflows/ci.yml` | 테스트, migration, 보안 검사, image digest를 Summary에 집계하고 원격 최종 gate를 검증한다. | PR #29에서 전체 선행 job, Secret Scan, Summary와 최종 `CI Gate`가 성공했다. |
 | T244 | M031 | [ ] | github/protection | 저장소 관리자 | 사용자 | T243 | GitHub branch ruleset 또는 branch protection 설정 | `main` 직접 push를 금지하고 PR 및 M031 최종 required check 통과를 강제한다. | `CI Gate` context는 생성됐으나 private repository의 현재 GitHub 요금제가 protection API를 403으로 차단한다. Pro 업그레이드 또는 공개 전환 후 적용한다. |
 | T245 | M031 | [ ] | verification/docs | 사용자 | Codex | T243, T244 | `.github/**`, `backend/**`, `ai/**`, `frontend/**`, `specs/001-meetingmind-core/{tasks,implement,analyze}.md` | 로컬/원격 CI 실행 결과와 branch protection 상태를 검증하고 closeout한다. | required workflow, Summary/digest/protection을 확인하고 tasks/implement에 결과 또는 미실행 사유를 남긴다. |
+
+### M032: Backend PostgreSQL Runtime Persistence
+
+M032는 T229의 실제 구현 milestone이다. Backend는 관계형 원천 데이터와 권한 선필터를 담당하고, 별도 AI/RAG 담당자는 embedding/vector runtime과 semantic retriever를 담당한다. 두 작업은 기존 AI source contract만 공유하며 같은 파일을 동시에 수정하지 않는다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T246 | M032 | [x] | docs/design | 사용자(Backend 담당) | Codex | T229 | `spec.md`, `clarify.md`, `plan.md`, `tasks.md` | Backend persistence와 AI/RAG 별도 담당의 범위, transaction, profile, 충돌 경계를 확정한다. | T229 실행 단위와 vector 제외 파일 경계가 문서에 일치한다. |
+| T247 | M032 | [x] | backend/auth-persistence | 사용자(Backend 담당) | Codex | T246 | `backend/src/main/java/com/meetingmind/demo/auth/**`, `backend/src/test/**` | AuthStore port와 PostgreSQL JDBC adapter를 구현하고 signup/login/refresh/logout를 transaction으로 묶는다. | user/identity/session이 재시작 후 유지되고 refresh rotation과 unique 충돌이 검증된다. |
+| T248 | M032 | [x] | backend/workspace-persistence | 사용자(Backend 담당) | Codex | T247 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/**` | Space/Meeting/member/participant/join request JDBC adapter와 joinCode hash lookup을 구현한다. | 생성·ACL·승인 데이터가 DB에 유지되고 원문 joinCode가 저장되지 않는다. |
+| T249 | M032 | [x] | backend/artifact-persistence | 사용자(Backend 담당) | Codex | T248 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/**` | Transcript/Speaker/Report/Task/ProjectKnowledge/Audit JDBC adapter를 구현한다. | JSONB source와 산출물 상태가 기존 domain 계약으로 round-trip된다. |
+| T250 | M032 | [x] | backend/transactions | 사용자(Backend 담당) | Codex | T249 | `backend/src/main/java/com/meetingmind/demo/{auth,domain}/**`, `backend/src/test/**` | owner transfer, join approval, report confirm, task confirm과 audit를 transaction 경계에 연결한다. | 오류 시 부분 mutation이 없고 current/unique 제약이 유지된다. |
+| T251 | M032 | [x] | backend/profile-ai-context | 사용자(Backend 담당) | Codex | T250 | `backend/src/main/java/**`, `backend/src/main/resources/**`, `backend/src/test/**` | test in-memory/local·db JDBC bean을 분리하고 DB 기반 Meeting/Project AI context 선필터를 검증한다. | local/db는 JDBC, test는 in-memory이며 권한 밖 source가 AI request에서 제외된다. |
+| T252 | M032 | [x] | backend/integration-test | 사용자(Backend 담당) | Codex | T251 | `backend/src/test/**`, `compose.local.yml` | PostgreSQL repository, 재시작 유지, transaction, migration 회귀 통합 테스트를 실행한다. | JDBC 통합 test, 전체 Backend test, Flyway V1~V10 검증이 통과한다. |
+| T253 | M032 | [x] | docs/closeout | 사용자(Backend 담당) | Codex | T252 | `specs/001-meetingmind-core/{tasks,implement,analyze}.md`, `.specify/memory/session-handoff.md` | 실제 변경, 검증, 남은 AI/RAG 경계와 미실행 사유를 기록한다. | T229/M032 상태와 구현 기록이 실제 결과에 맞고 vector 담당 후속 작업이 보존된다. |
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -450,6 +466,7 @@ M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL mi
 - [x] V030 Docker 기반 pgvector migration, Backend/AI image build·digest·Trivy 0건, Playwright 2건 검증
 - [x] V031 PR #29 원격 GitHub Actions 전체 job과 `CI Gate`/Summary 성공 검증
 - [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증; private repository 현재 요금제 API 403으로 차단
+- [x] V033 Backend PostgreSQL runtime 검증: Auth/Workspace JDBC integration, joinCode hash, ACL 선필터, Transcript/Report/Task/Knowledge/Audit JSONB round-trip, 재시작 후 로그인, 전체 Backend test/bootJar, 빈 pgvector DB Flyway V1~V10
 
 ## Notes
 

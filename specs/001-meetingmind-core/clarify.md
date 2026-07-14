@@ -83,3 +83,4 @@
 - D-028: `SourceReference`는 API 응답용 논리 모델로 유지하고 별도 다형 FK 테이블을 만들지 않는다. 보고서/태스크 근거는 `sourceIds` JSON 배열, transcript chunk 근거는 `CHUNK_SOURCE_SEGMENT` 관계로 보존한다.
 - D-029: embedding 재생성은 `EmbeddingJob`과 generation으로 추적한다. 새 generation이 완료되기 전까지 기존 active chunk를 유지하고, 완료 시 새 generation을 active로 전환한다.
 - D-030: `Meeting.retentionPolicy` DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`를 사용하고 기본값은 `DAYS_30`으로 한다. `retentionUntil`은 기간 보존일 때 계산하며 영구 보존이면 null이다.
+- D-031: Backend PostgreSQL 전환은 Auth/User, Space/Meeting ACL, Transcript/Report/Task, ProjectKnowledge 원문·상태, AuditLog와 권한 선필터된 AI context 조립까지 담당한다. embedding provider/model, vector 차원/index, `EmbeddingJob`/`EmbeddingChunk` runtime, pgvector similarity query와 AI semantic retriever는 별도 AI/RAG 담당자가 구현한다. Backend 작업은 기존 embedding/vector migration과 `ai/app/rag.py`를 수정하지 않는다.

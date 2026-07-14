@@ -20,34 +20,36 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class WorkspaceDomainService {
 
-    private final InMemoryWorkspaceStore store;
+    private final WorkspaceStore store;
     private final SpaceAccessPolicy spaceAccessPolicy;
     private final MeetingAccessPolicy meetingAccessPolicy;
     private final Clock clock;
 
     @Autowired
     public WorkspaceDomainService(
-            InMemoryWorkspaceStore store,
+            WorkspaceStore store,
             SpaceAccessPolicy spaceAccessPolicy,
             MeetingAccessPolicy meetingAccessPolicy
     ) {
         this(store, spaceAccessPolicy, meetingAccessPolicy, Clock.systemUTC());
     }
 
-    public WorkspaceDomainService(InMemoryWorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy) {
+    public WorkspaceDomainService(WorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy) {
         this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), Clock.systemUTC());
     }
 
-    WorkspaceDomainService(InMemoryWorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy, Clock clock) {
+    WorkspaceDomainService(WorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy, Clock clock) {
         this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), clock);
     }
 
     WorkspaceDomainService(
-            InMemoryWorkspaceStore store,
+            WorkspaceStore store,
             SpaceAccessPolicy spaceAccessPolicy,
             MeetingAccessPolicy meetingAccessPolicy,
             Clock clock
@@ -58,6 +60,7 @@ public class WorkspaceDomainService {
         this.clock = clock;
     }
 
+    @Transactional
     public User ensureUser(String id, String email, String displayName, String pictureUrl, String status) {
         return store.findUserById(id)
                 .orElseGet(() -> store.saveUser(new User(
@@ -87,6 +90,7 @@ public class WorkspaceDomainService {
                 .toList();
     }
 
+    @Transactional
     public SpaceCreationResult createSpace(String actorUserId, String name, String description) {
         requireUser(actorUserId);
         validateRequired(name, "Space 이름은 필수입니다.");
@@ -96,6 +100,7 @@ public class WorkspaceDomainService {
         return new SpaceCreationResult(space, owner);
     }
 
+    @Transactional
     public MeetingCreationResult createMeeting(
             String actorUserId,
             String spaceId,
@@ -108,6 +113,7 @@ public class WorkspaceDomainService {
             throw invalidRequest("회의 예정 일시는 필수입니다.");
         }
 
+        store.lockSpace(spaceId);
         SpaceAccessPolicy.SpaceAccessContext spaceContext = spaceAccessContext(spaceId, actorUserId);
         spaceAccessPolicy.requireMemberManagement(spaceContext);
         requireUser(actorUserId);
@@ -151,12 +157,14 @@ public class WorkspaceDomainService {
                 .toList();
     }
 
+    @Transactional
     public SpaceMember updateSpaceMemberRole(String actorUserId, String spaceId, String memberId, String role) {
         requireUser(actorUserId);
         SpaceRole nextRole = SpaceRole.parse(role);
         if (nextRole == SpaceRole.OWNER) {
             throw invalidRequest("OWNER 이양은 owner-transfer API를 사용해야 합니다.");
         }
+        store.lockSpace(spaceId);
         spaceAccessPolicy.requireOwnerManagement(spaceAccessContext(spaceId, actorUserId));
         SpaceMember target = requireSpaceMemberById(spaceId, memberId);
         if (target.role() == SpaceRole.OWNER) {
@@ -175,8 +183,10 @@ public class WorkspaceDomainService {
         return updated;
     }
 
+    @Transactional
     public boolean removeSpaceMember(String actorUserId, String spaceId, String memberId) {
         requireUser(actorUserId);
+        store.lockSpace(spaceId);
         spaceAccessPolicy.requireOwnerManagement(spaceAccessContext(spaceId, actorUserId));
         SpaceMember target = requireSpaceMemberById(spaceId, memberId);
         if (target.role() == SpaceRole.OWNER) {
@@ -197,6 +207,7 @@ public class WorkspaceDomainService {
         return true;
     }
 
+    @Transactional
     public OwnerTransferResult transferOwner(
             String actorUserId,
             String spaceId,
@@ -215,6 +226,7 @@ public class WorkspaceDomainService {
         if (previousRole == SpaceRole.OWNER) {
             throw invalidRequest("기존 OWNER 강등 role은 ADMIN 또는 MEMBER여야 합니다.");
         }
+        store.lockSpace(spaceId);
         spaceAccessPolicy.requireOwnerManagement(spaceAccessContext(spaceId, actorUserId));
         SpaceMember currentOwner = store.findSpaceMember(spaceId, actorUserId)
                 .orElseThrow(() -> new AuthorizationException(
@@ -227,7 +239,7 @@ public class WorkspaceDomainService {
             throw invalidRequest("자기 자신에게 OWNER를 이양할 수 없습니다.");
         }
 
-        InMemoryWorkspaceStore.OwnerTransferUpdate update = store.transferOwner(
+        WorkspaceStore.OwnerTransferUpdate update = store.transferOwner(
                 currentOwner.id(),
                 target.id(),
                 previousRole
@@ -255,6 +267,7 @@ public class WorkspaceDomainService {
                 .toList();
     }
 
+    @Transactional
     public MeetingParticipant addMeetingParticipant(
             String actorUserId,
             String meetingId,
@@ -269,6 +282,7 @@ public class WorkspaceDomainService {
                 ? ParticipantType.GUEST
                 : ParticipantType.parse(participantType);
         Meeting meeting = requireMeeting(meetingId);
+        store.lockMeeting(meetingId);
         meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
         requireUser(userId);
         if (parsedType == ParticipantType.MEMBER && store.findSpaceMember(meeting.spaceId(), userId).isEmpty()) {
@@ -288,6 +302,7 @@ public class WorkspaceDomainService {
     }
 
 
+    @Transactional
     public MeetingJoinRequest createMeetingJoinRequest(String actorUserId, String joinCodeOrUrl) {
         requireUser(actorUserId);
         validateRequired(joinCodeOrUrl, "회의 코드 또는 URL은 필수입니다.");
@@ -301,6 +316,7 @@ public class WorkspaceDomainService {
                         "MEETING_ACCESS_DENIED",
                         "유효하지 않은 회의 코드 또는 URL입니다."
                 ));
+        store.lockMeeting(meeting.id());
         if (store.findMeetingParticipant(meeting.id(), actorUserId)
                 .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE)
                 .isPresent()) {
@@ -323,12 +339,14 @@ public class WorkspaceDomainService {
         return store.findMeetingJoinRequests(meetingId);
     }
 
+    @Transactional
     public MeetingJoinRequest approveMeetingJoinRequest(
             String actorUserId,
             String meetingId,
             String requestId
     ) {
         requireUser(actorUserId);
+        store.lockMeeting(meetingId);
         MeetingJoinRequest request = requireMeetingJoinRequestById(meetingId, requestId);
         meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
         if (request.status() != MeetingJoinRequestStatus.PENDING) {
@@ -354,12 +372,14 @@ public class WorkspaceDomainService {
         return updated;
     }
 
+    @Transactional
     public MeetingJoinRequest rejectMeetingJoinRequest(
             String actorUserId,
             String meetingId,
             String requestId
     ) {
         requireUser(actorUserId);
+        store.lockMeeting(meetingId);
         MeetingJoinRequest request = requireMeetingJoinRequestById(meetingId, requestId);
         meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
         if (request.status() != MeetingJoinRequestStatus.PENDING) {
@@ -382,7 +402,7 @@ public class WorkspaceDomainService {
 
     private MeetingJoinRequest requireMeetingJoinRequestById(String meetingId, String requestId) {
         requireMeeting(meetingId);
-        return store.findMeetingJoinRequestById(meetingId, requestId)
+        return store.findMeetingJoinRequestByIdForUpdate(meetingId, requestId)
                 .orElseThrow(() -> new AuthorizationException(
                         HttpStatus.NOT_FOUND,
                         "MEETING_NOT_FOUND",
@@ -412,6 +432,7 @@ public class WorkspaceDomainService {
         return trimmed;
     }
 
+    @Transactional
     public MeetingParticipant updateMeetingParticipant(
             String actorUserId,
             String meetingId,
@@ -420,6 +441,7 @@ public class WorkspaceDomainService {
             String accessStatus
     ) {
         requireUser(actorUserId);
+        store.lockMeeting(meetingId);
         MeetingParticipant target = requireMeetingParticipantById(meetingId, participantId);
         MeetingRole nextRole = role == null || role.isBlank() ? target.role() : MeetingRole.parse(role);
         ParticipantAccessStatus nextStatus = accessStatus == null || accessStatus.isBlank()
@@ -445,6 +467,7 @@ public class WorkspaceDomainService {
         return updated;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public ProjectAiContextCandidates projectAiContextCandidates(String actorUserId, String spaceId) {
         requireUser(actorUserId);
         spaceAccessPolicy.requireSpaceAccess(spaceAccessContext(spaceId, actorUserId));
@@ -453,10 +476,7 @@ public class WorkspaceDomainService {
                 .filter(item -> item.status() == KnowledgeStatus.PUBLISHED)
                 .filter(item -> item.deletedAt() == null)
                 .toList();
-        List<Meeting> meetings = store.findMeetingsBySpaceId(spaceId)
-                .stream()
-                .filter(meeting -> canReadMeeting(actorUserId, meeting.id()))
-                .toList();
+        List<Meeting> meetings = store.findProjectAiMeetings(spaceId, actorUserId);
         return new ProjectAiContextCandidates(knowledge, meetings);
     }
 
@@ -550,6 +570,7 @@ public class WorkspaceDomainService {
         );
     }
 
+    @Transactional
     public MeetingReport saveReportCandidate(
             String meetingId,
             String createdBy,
@@ -567,6 +588,7 @@ public class WorkspaceDomainService {
                         "MEETING_NOT_FOUND",
                         "회의를 찾을 수 없습니다."
                 ));
+        store.lockMeeting(meetingId);
         int nextVersion = store.findMeetingReports(meetingId).stream()
                 .mapToInt(MeetingReport::version)
                 .max()
@@ -589,6 +611,7 @@ public class WorkspaceDomainService {
         ));
     }
 
+    @Transactional
     public synchronized MeetingReport confirmMeetingReport(String meetingId, String reportId) {
         store.findMeetingById(meetingId)
                 .orElseThrow(() -> new AuthorizationException(
@@ -596,6 +619,7 @@ public class WorkspaceDomainService {
                         "MEETING_NOT_FOUND",
                         "회의를 찾을 수 없습니다."
                 ));
+        store.lockMeeting(meetingId);
         MeetingReport target = store.findMeetingReportById(reportId)
                 .filter(report -> report.meetingId().equals(meetingId))
                 .orElseThrow(() -> new AuthorizationException(
@@ -628,6 +652,7 @@ public class WorkspaceDomainService {
         return store.saveMeetingReport(target.confirmed(Instant.now(clock)));
     }
 
+    @Transactional
     public TaskCandidate saveTaskCandidate(
             String meetingId,
             String createdBy,
@@ -673,6 +698,7 @@ public class WorkspaceDomainService {
         return store.findTaskCandidates(meetingId);
     }
 
+    @Transactional
     public synchronized TaskConfirmationResult confirmTaskCandidate(
             String meetingId,
             String candidateId,
@@ -689,7 +715,8 @@ public class WorkspaceDomainService {
                         "MEETING_NOT_FOUND",
                         "회의를 찾을 수 없습니다."
                 ));
-        TaskCandidate candidate = store.findTaskCandidateById(candidateId)
+        store.lockSpace(meeting.spaceId());
+        TaskCandidate candidate = store.findTaskCandidateByIdForUpdate(candidateId)
                 .filter(found -> found.meetingId().equals(meetingId))
                 .orElseThrow(() -> new AuthorizationException(
                         HttpStatus.NOT_FOUND,
@@ -739,15 +766,6 @@ public class WorkspaceDomainService {
                         "회의를 찾을 수 없습니다."
                 ));
         return new ProjectMeetingContext(meeting, store.findMeetingReports(meetingId));
-    }
-
-    private boolean canReadMeeting(String actorUserId, String meetingId) {
-        try {
-            meetingAccessPolicy.requireReadAccess(meetingAccessContext(meetingId, actorUserId));
-            return true;
-        } catch (AuthorizationException exception) {
-            return false;
-        }
     }
 
     private SpaceMember requireSpaceMemberById(String spaceId, String memberId) {
