@@ -685,7 +685,7 @@ None.
 
 회의 초대 링크를 생성한다. 회의 초대는 특정 회의 접근권만 부여하며 SpaceMember를 만들지 않는다.
 
-> Superseded: D-022에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다. URL/코드 기반 `MeetingJoinRequest`가 대체한다.
+> Superseded: D-010에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다. URL/코드 기반 `MeetingJoinRequest`가 대체한다.
 
 ### Status
 

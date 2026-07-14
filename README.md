@@ -22,7 +22,34 @@ README.md
 
 ## 실행
 
-### 1. 백엔드
+### 1. 로컬 데이터베이스
+
+다른 프로젝트의 PostgreSQL과 분리된 PostgreSQL 16 + pgvector를 host `5434`에서 실행합니다.
+
+```bash
+docker compose -f compose.local.yml up -d meetingmind-db
+```
+
+기본 로컬 접속값은 `meetingmind/meetingmind_local`, DB 이름은 `meetingmind`입니다. 필요하면 `MEETINGMIND_DB_PORT`, `MEETINGMIND_DB_NAME`, `MEETINGMIND_DB_USER`, `MEETINGMIND_DB_PASSWORD`로 덮어씁니다.
+
+Backend는 기본 profile이 `local`로 설정되어 있어 별도 profile 지정 없이도 위 Compose 기본 접속값을 사용하고 시작 시 Flyway migration을 적용합니다.
+
+```bash
+cd backend
+./gradlew bootRun
+```
+
+명시적으로 실행할 때는 `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun`도 동일합니다.
+
+`MEETINGMIND_DB_PORT`, `MEETINGMIND_DB_NAME`, `MEETINGMIND_DB_USER`, `MEETINGMIND_DB_PASSWORD`를 export하면 Compose와 `local` profile에 같은 값이 적용됩니다. `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`로 Backend 접속값만 별도 override할 수도 있습니다. 배포/CI의 `db` profile은 Spring datasource 환경변수 세 개를 필수로 사용합니다.
+
+로컬 DB를 중지할 때는 다음 명령을 사용합니다. volume 삭제는 schema를 처음부터 다시 검증할 때만 명시적으로 수행합니다.
+
+```bash
+docker compose -f compose.local.yml stop meetingmind-db
+```
+
+### 2. 백엔드
 
 ```bash
 cd backend
@@ -31,7 +58,7 @@ cd backend
 
 기본 포트는 `8080`입니다. 현재 주요 API는 `GET /api/workspace`, `POST /api/livekit/token`, `POST /api/v1/auth/*`입니다.
 
-### 2. 프론트엔드
+### 3. 프론트엔드
 
 ```bash
 cd frontend
@@ -47,7 +74,7 @@ npm run dev
 VITE_API_BASE_URL=http://localhost:8080
 ```
 
-### 3. AI 서비스
+### 4. AI 서비스
 
 ```bash
 cd ai
@@ -61,6 +88,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 필요한 주요 환경변수는 `ai/.env.example`을 기준으로 설정합니다.
 
 ## 검증
+
+Backend 테스트는 Gradle이 `test` profile을 적용하므로 로컬 DB 실행 여부와 독립적으로 동작합니다. 실제 PostgreSQL schema는 Backend 기본 실행 시 Flyway가 검증합니다.
 
 ```bash
 cd frontend && npm run build

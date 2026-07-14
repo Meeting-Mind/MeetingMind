@@ -7,7 +7,7 @@
 - Frontend는 React/Vite/TypeScript로 워크스페이스, 회의 대기, 라이브룸, Meeting AI, 프로젝트 개요, 팀원, Report Agent 화면을 제공한다.
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
-- 영속 DB, 인증, 실제 STT, pgvector RAG는 아직 없다.
+- Backend 인증/권한과 STT prototype은 구현되어 있으나 runtime 저장소는 여전히 in-memory/file 기반이며 PostgreSQL repository와 pgvector 검색은 아직 없다.
 - 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Target Architecture
@@ -32,12 +32,20 @@
 
 ### Data Migration Discovery
 
-- 2026-07-09 기준 backend에는 `spring-boot-starter-data-jdbc`, `spring-boot-starter-data-jpa`, PostgreSQL driver, Flyway, Liquibase 의존성이 없다.
-- 2026-07-09 기준 `backend/src/main/resources/application.yml`에는 datasource 또는 migration 설정이 없다.
+- 2026-07-14 기준 backend에는 Flyway core, PostgreSQL Flyway module, PostgreSQL driver, Spring Boot JDBC starter가 있다. `local` profile이 기본 profile이며 Compose 기본값으로 DataSource와 Flyway를 활성화하고 `db` profile은 환경변수 기반 DataSource를 사용한다. JDBC repository 계층은 아직 없고 Docker PostgreSQL이 기본 실행 전제다.
 - migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
-- schema migration은 SQL 파일로 작성한다. 예상 순서는 `V1__create_users_spaces.sql`, `V2__create_meetings_acl.sql`, `V3__create_transcripts_reports.sql`, `V4__create_knowledge_embeddings.sql`이다.
-- PostgreSQL datasource 설정은 후속 schema 작업에서 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` 환경변수를 기준으로 추가한다.
-- T058은 discovery 문서화 단계이므로 dependency, datasource 설정, 실제 schema 파일은 추가하지 않는다. 해당 변경은 T059 이후 schema 작업에서 수행한다.
+- 원격에 공유된 migration은 수정하지 않는다. `V1`~`V9` 이후 최신 MeetingJoinRequest 보강은 `V10` forward migration으로 추가한다.
+- 로컬 DB는 PostgreSQL 16 + pgvector를 다른 프로젝트 DB와 격리된 컨테이너로 실행하고 host `5434`를 기본값으로 사용한다.
+- Backend 기본 `local` profile은 `localhost:5434/meetingmind` 기본값으로 DataSource와 Flyway를 실행한다. `db` profile은 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`를 필수로 사용한다.
+
+### Local Database Foundation
+
+1. `clarify.md`, `data-model.md`, `erd.md`에서 전사 생명주기, 보존, 출처 저장, embedding generation 결정을 먼저 고정한다.
+2. 로컬 PostgreSQL+pgvector compose를 추가하고 다른 프로젝트의 `5432`, `5433` DB를 재사용하지 않는다.
+3. `V7`~`V9`로 인증 세션, Space 초대, 전사 상태·보존, 용어사전·감사 로그, embedding job/generation을 보강하고, 최신 회의 참가 신청은 공유 migration을 수정하지 않고 `V10`으로 추가한다.
+4. 빈 로컬 DB에 Flyway를 처음부터 적용하고 schema/constraint/index를 검증한다.
+5. Backend in-memory store를 repository로 전환한 뒤 AI retriever를 pgvector로 교체한다.
+6. embedding model/차원과 vector index는 `Q-010` 결정 후 별도 migration으로 고정한다.
 
 ## API Contracts
 
@@ -71,10 +79,12 @@
 - Meeting: Space 하위 회의 회차
 - MeetingParticipant: 회의별 접근 권한
 - MeetingSpeaker: 자동 발화자 구분 label과 사용자 지정 displayName
+- MeetingTranscript: 회의별 전사 처리 상태, 보존 만료, 정리 상태
 - TranscriptSegment: `startMs`, `endMs`, 발화자, 텍스트, 회의 참조
 - MeetingReport: 회의 요약, 결정사항, Action Item
 - ProjectKnowledge: 공식 프로젝트 지식
 - EmbeddingChunk: RAG 검색용 chunk와 vector
+- EmbeddingJob: 비동기 embedding 생성 상태와 generation 교체
 
 ## Security and Permissions
 

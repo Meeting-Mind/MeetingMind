@@ -25,6 +25,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'org.flywaydb:flyway-core'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
 
     implementation 'io.livekit:livekit-server:0.13.0'
     implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
@@ -58,4 +59,5 @@ protobuf {
 
 tasks.named('test') {
     useJUnitPlatform()
+    systemProperty 'spring.profiles.active', 'test'
 }

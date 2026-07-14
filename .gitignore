@@ -28,4 +28,4 @@ ai/.env.*
 *.env
 !*.env.example
 .claude
-
+.specify/memory/session-handoff.local.md

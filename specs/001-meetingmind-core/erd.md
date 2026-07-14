@@ -22,11 +22,13 @@ erDiagram
   SPACE ||--o{ DOMAIN_TERM : defines
   SPACE ||--o{ TASK_CARD : has
   SPACE ||--o{ EMBEDDING_CHUNK : indexes
+  SPACE ||--o{ EMBEDDING_JOB : runs
   SPACE ||--o{ AUDIT_LOG : records
 
   MEETING ||--o{ MEETING_PARTICIPANT : grants
   MEETING ||--o{ MEETING_JOIN_REQUEST : receives
   MEETING ||--o{ MEETING_SPEAKER : has
+  MEETING ||--o| MEETING_TRANSCRIPT : transcribes
   MEETING ||--o{ TRANSCRIPT_SEGMENT : contains
   MEETING ||--o{ MEETING_REPORT : has
   MEETING ||--o{ TASK_CANDIDATE : suggests
@@ -39,11 +41,10 @@ erDiagram
   TASK_CANDIDATE ||--o| TASK_CARD : confirmed_as
 
   PROJECT_KNOWLEDGE ||--o{ EMBEDDING_CHUNK : source
+  PROJECT_KNOWLEDGE ||--o{ EMBEDDING_JOB : reindexes
+  EMBEDDING_JOB ||--o{ EMBEDDING_CHUNK : produces
   TRANSCRIPT_SEGMENT ||--o{ CHUNK_SOURCE_SEGMENT : source
   EMBEDDING_CHUNK ||--o{ CHUNK_SOURCE_SEGMENT : includes
-  EMBEDDING_CHUNK ||--o{ SOURCE_REFERENCE : exposes
-  MEETING_REPORT ||--o{ SOURCE_REFERENCE : cites
-  TASK_CANDIDATE ||--o{ SOURCE_REFERENCE : cites
 
   USER {
     string id PK
@@ -154,6 +155,21 @@ erDiagram
     datetime createdAt
   }
 
+  MEETING_TRANSCRIPT {
+    string meetingId PK,FK
+    string status
+    string provider
+    string language
+    datetime startedAt
+    datetime completedAt
+    string failureReason
+    datetime retentionUntil
+    boolean legalHold
+    datetime purgedAt
+    datetime createdAt
+    datetime updatedAt
+  }
+
   TRANSCRIPT_SEGMENT {
     string id PK
     string meetingId FK
@@ -260,28 +276,37 @@ erDiagram
     string scope
     string sourceType
     string sourceId
+    string embeddingJobId FK
+    int generation
+    boolean isActive
     string content
     string embeddingText
     vector embedding
     json metadata
     datetime createdAt
+    datetime replacedAt
+  }
+
+  EMBEDDING_JOB {
+    string id PK
+    string spaceId FK
+    string projectKnowledgeId FK
+    string meetingId FK
+    string status
+    string model
+    int dimension
+    int generation
+    int attemptCount
+    string failureCode
+    datetime createdAt
+    datetime startedAt
+    datetime completedAt
   }
 
   CHUNK_SOURCE_SEGMENT {
     string id PK
     string chunkId FK
     string segmentId FK
-  }
-
-  SOURCE_REFERENCE {
-    string id PK
-    string sourceType
-    string sourceId
-    string title
-    string speaker
-    int startMs
-    int endMs
-    string text
   }
 
   AUDIT_LOG {
@@ -304,8 +329,9 @@ erDiagram
 - SpaceMember 제거 시 같은 Space의 `participantType=member` MeetingParticipant는 `participantType=guest`로 전환한다. SpaceMember 제거는 프로젝트 전체 접근권만 제거하며, 회의 접근 차단은 MeetingParticipant revoke로 처리한다.
 - HOST의 회의방 일시 퇴장은 `MEETING_PARTICIPANT`를 변경하지 않는다. 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 - `TranscriptSegment`는 원본 전사 단위이고 `EmbeddingChunk`는 RAG 검색 단위다.
+- `MeetingTranscript`는 회의당 하나의 전사 상태/보존 aggregate다. 기존 `TranscriptSegment.meetingId` FK는 `Meeting`을 직접 참조한다.
 - 짧은 transcript 발화는 `EmbeddingChunk` 하나에 3-8개 segment를 묶고 `CHUNK_SOURCE_SEGMENT`로 원본을 추적한다.
-- AI 응답과 candidate 산출물은 `SOURCE_REFERENCE` 또는 `sourceIds`로 근거를 추적한다.
+- AI 응답의 `SourceReference`는 논리 response model이다. DB에서는 candidate의 `sourceIds`와 chunk의 `CHUNK_SOURCE_SEGMENT`로 근거를 추적한다.
 - AI가 생성한 회의록과 태스크는 먼저 `CANDIDATE` 상태로 두고, 사용자가 확정한 뒤 `MeetingReport.CONFIRMED` 또는 `TaskCard`가 된다.
 - Project AI는 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk만 사용한다.
 
@@ -341,6 +367,10 @@ erDiagram
 - `MEETING_PARTICIPANT.participantType`은 `member`, `guest` 중 하나다.
 - `MEETING_PARTICIPANT.accessStatus`는 `ACTIVE`, `REVOKED` 중 하나다. 회의 접근 평가는 `ACTIVE`만 허용한다.
 - `MEETING_SPEAKER(meetingId, label)`은 unique다.
+- `MEETING_TRANSCRIPT.meetingId`는 PK/FK이며 회의당 최대 하나다.
+- `MEETING_TRANSCRIPT.status`는 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` 중 하나다.
+- `MEETING.retentionPolicy`는 `DAYS_7`, `DAYS_30`, `PERMANENT` 중 하나이고 기본값은 `DAYS_30`이다.
+- 기간 보존 transcript는 `retentionUntil`을 가지며 `legalHold=true`이면 정리 대상에서 제외한다.
 - `TRANSCRIPT_SEGMENT(meetingId, sequence)`은 unique다.
 - `TRANSCRIPT_SEGMENT(meetingId, startMs)` index를 둔다.
 
@@ -376,6 +406,10 @@ erDiagram
 - `EMBEDDING_CHUNK(spaceId, scope, sourceType, sourceId)` index를 둔다.
 - `EMBEDDING_CHUNK.meetingId`는 meeting-scoped chunk일 때 required이고 ProjectKnowledge-only chunk에서는 null일 수 있다.
 - `CHUNK_SOURCE_SEGMENT(chunkId, segmentId)`는 unique다.
+- `EMBEDDING_JOB`은 ProjectKnowledge 또는 Meeting 중 최소 하나를 source로 가져야 한다.
+- 새 generation의 job이 `COMPLETED`되기 전까지 기존 `EMBEDDING_CHUNK.isActive=true` 행을 유지한다.
+- 완료 시 같은 source의 이전 generation은 inactive/replaced 처리하고 최신 generation만 검색한다.
+- `EMBEDDING_CHUNK.embedding`의 고정 차원과 vector index는 `Q-010` 결정 후 migration으로 추가한다.
 
 ### Audit
 
@@ -387,4 +421,4 @@ erDiagram
 
 - `MeetingSchedule`은 현재 `Meeting.scheduledAt` 중심으로 표현했다. 별도 일정 엔티티가 필요하면 `MEETING_SCHEDULE`로 분리한다.
 - `RetentionPolicy`는 현재 `Meeting.retentionPolicy` 필드 중심이다. Space별 정책 관리가 필요하면 별도 테이블로 분리한다.
-- `SOURCE_REFERENCE`는 응답/검색 추적용 논리 모델이다. 실제 DB table로 둘지 JSON response shape로만 둘지는 Data owner가 결정한다.
+- embedding provider/model, vector 차원, HNSW/IVFFlat index는 `Q-010` 결정 전까지 열어 둔다.
