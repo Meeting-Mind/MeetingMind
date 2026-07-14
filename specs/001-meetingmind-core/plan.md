@@ -445,6 +445,69 @@ M029는 M028 Backend 참가 신청/승인 계약을 사용자가 확인하고 �
 - HOST 승인 local flow가 SpaceMember 수를 늘리거나 Project AI 권한을 만들지 않는다.
 - desktop/mobile에서 권한 상태, 신청 form, denied/pending/allowed 상태가 겹치거나 잘리지 않는다.
 
+## M031 CI Quality and Supply Chain Gates
+
+M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/build 기준선을 merge gate로 강화한다. 제품 API나 데이터 모델은 바꾸지 않으며, target PostgreSQL schema와 배포 image가 실제로 생성 가능한지 검증한다.
+
+### Decisions
+
+- workflow는 `pull_request`의 `dev`/`main` 대상과 `push`의 `dev`/`main`에서 실행한다. required check 안정성을 위해 path filter는 두지 않는다.
+- `main`은 PR과 최종 CI gate를 필수로 하고 직접 push, force push, branch 삭제를 금지한다. `dev`는 통합 피드백을 위해 push CI를 우선 적용하며 보호 강도는 팀 운영 정책 확정 후 별도로 올린다.
+- Backend는 Java 21에서 test와 `bootJar`를 모두 실행한다.
+- migration은 M030과 같은 PostgreSQL 16 계열의 pgvector service container에서 Backend가 사용하는 Flyway library로 V1~V10 전체를 적용하고 schema history를 확인한다. runtime repository가 in-memory인 현재 경계와 migration 유효성 검증을 혼동하지 않는다.
+- Backend/AI Dockerfile은 build context를 각 디렉터리로 제한하고 non-root minimal runtime image를 사용한다. registry push는 이번 범위에 포함하지 않으며 CI가 계산한 content digest를 기록한다.
+- Frontend는 lint/unit/build를 먼저 required gate에 넣고, Playwright는 실제 Backend와 Vite를 기동해 로그인 및 회의 access gate의 허용/거부 흐름을 검증한다.
+- Playwright Backend는 기본 `local` profile의 외부 DB 의존성을 피하도록 `test` profile을 명시한다. PostgreSQL/Flyway 검증 책임은 migration job에만 둔다.
+- secret scan은 repository history를 대상으로 하고 image scan은 Backend/AI image의 합의된 severity를 차단한다. 외부 action은 commit SHA 또는 immutable version으로 고정하고 최소 `contents: read` 권한을 사용한다.
+- 최종 summary job은 모든 선행 job을 `always()`로 집계하되 실패를 성공으로 덮지 않는다. branch protection은 이 안정적인 최종 check를 required context로 사용한다.
+
+### Implementation Order
+
+1. trigger, concurrency, permissions와 stable check 이름을 확정한다.
+2. Backend test/bootJar와 PostgreSQL/pgvector Flyway migration을 독립 job으로 추가한다.
+3. Backend/AI Dockerfile을 추가하고 image build/digest 출력을 만든다.
+4. Frontend ESLint/unit test 기반과 CI script를 추가한다.
+5. 로그인, 무권한 회의 거부, active participant prejoin 허용 Playwright smoke를 추가한다.
+6. secret/image scan을 차단 gate로 추가하고 초기 결과를 triage한다.
+7. GitHub Summary와 최종 gate를 연결한다.
+8. 원격 workflow가 한 번 실행된 뒤 `main` branch protection을 관리자 권한으로 적용한다.
+
+### Current Gaps
+
+- trigger/concurrency/최소 권한과 Backend/Frontend/AI job, Dockerfile, PostgreSQL V1~V10 migration job, Playwright, scanner, Summary/`CI Gate` 코드는 작성되어 있다.
+- Backend `test bootJar`, Frontend lint/unit/build, AI compile/unit과 Docker 기반 PostgreSQL migration, Playwright, Backend/AI image build/digest, Trivy HIGH/CRITICAL scan은 로컬에서 통과했다.
+- Gitleaks full-history scan은 44개 커밋을 검사해 과거 `backend/.env` 4건과 `ai/.env.example` 1건을 탐지했다. 규칙 기준으로 OpenAI key 후보 3건과 generic API key 후보 2건이며 실제 값은 문서나 로그에 기록하지 않는다.
+- Trivy 0.72.0 Linux 64-bit archive checksum은 공식 release checksum과 대조했고, 잘못 사용된 32-bit checksum을 64-bit 값으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 일치한다.
+- `actions/checkout`, `setup-java`, `setup-node`, `setup-python`, `upload-artifact`는 공식 major ref의 현재 commit SHA로 고정했다.
+- `main` branch protection은 원격에서 `CI Gate` context가 생성된 뒤 적용해야 한다.
+- M030의 PostgreSQL schema는 재현 가능하지만 Auth/Workspace/STT runtime repository는 아직 in-memory이므로 T229 전까지 영속화 완료로 간주하지 않는다.
+
+### Remaining Execution Plan
+
+1. **Credential response (T241)**: 5개 finding을 실제 credential, 폐기된 credential, 예제/오탐으로 분류한다. 실제 credential은 Git 이력 처리 전에 공급자에서 폐기·회전하고 소유자와 완료 여부만 기록한다.
+2. **History remediation (T242)**: 실제 secret은 이력에서 제거하고, 검증된 오탐만 fingerprint 단위의 최소 allowlist를 사용한다. 이력 재작성은 사용자 명시 승인, 팀 작업 중지, 백업 ref, 영향 브랜치 목록과 협업자 복구 절차를 확보한 뒤 단일 작업자가 수행한다.
+3. **Local integration (T235, T236, T238, T239)**: 격리된 pgvector PostgreSQL의 V1~V10 migration, Backend/AI image build와 digest, Trivy HIGH/CRITICAL scan, Playwright 로그인·회의 access smoke를 완료 상태로 유지하고 workflow 변경 시 재검증한다.
+4. **Remote gate (T243)**: Gitleaks 0건과 로컬 통합 검증 후에만 feature branch를 commit/push하고 `dev` 대상 PR에서 전체 workflow를 실행한다. Summary 결과와 image digest를 확인하고 모든 `needs`가 `success`인지 검증한다.
+5. **Protection and closeout (T244, T245)**: 원격에 생성된 정확한 `CI Gate` context를 `main` required check로 지정하고 직접 push/force push/삭제 금지를 확인한 뒤 tasks/implement 문서를 종료 상태로 갱신한다.
+
+### Safety and Conflict Boundaries
+
+- `.github/workflows/ci.yml`과 M031 task 상태는 통합 작업자 한 명만 수정한다.
+- secret 값, 회전된 값, credential provider 응답은 저장소 문서와 CI 로그에 남기지 않는다.
+- 실제 credential 폐기·회전 완료 전에는 history rewrite나 allowlist를 수행하지 않는다.
+- history rewrite, force push, branch protection 변경은 각각 사용자 명시 승인과 저장소 관리자 권한이 필요한 외부 상태 변경이다.
+- 원격 workflow 성공 전에는 T243-T245를 완료로 표시하지 않는다.
+
+### M031 Verification Plan
+
+- Baseline: `cd backend && ./gradlew test bootJar`; `cd frontend && npm run lint && npm run test && npm run build`; `cd ai && python3 -m compileall app tests && python3 -m unittest discover -s tests`
+- Secrets: `gitleaks git . --redact --no-banner`이 0건으로 종료한다.
+- Migration: 빈 pgvector PostgreSQL 16 DB에서 `MigrationIntegrationTest`가 V1~V10과 `vector` extension을 검증한다.
+- Containers: `meetingmind-backend:ci`, `meetingmind-ai:ci` build와 content digest 생성 후 Trivy HIGH/CRITICAL 차단 검사를 통과한다.
+- E2E: 실제 Backend `test` profile과 Frontend를 기동해 Playwright 로그인, default-deny, active participant 허용 시나리오를 통과한다.
+- Remote: GitHub Actions의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan과 최종 `CI Gate`가 모두 성공하고 Summary에 결과/digest가 표시된다.
+- Protection: `main`에서 PR과 `CI Gate`가 필수이며 direct push, force push, branch deletion이 금지된다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

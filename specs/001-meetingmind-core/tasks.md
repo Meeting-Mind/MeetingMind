@@ -62,6 +62,7 @@
 | M028 | 회의 참가 신청과 HOST 승인 | URL/코드 신청은 승인 전 접근권을 만들지 않고 HOST 승인 후 회의 단독 participant만 생성한다. | T212-T215 |
 | M029 | Frontend 회의 접근·권한 화면 | 사용자가 참가 신청, 승인 상태, Space role과 meeting ACL, default-deny prejoin을 화면에서 확인한다. | T216-T221 |
 | M030 | 로컬 PostgreSQL/pgvector 영속화 기준선 | 문서와 migration이 일치하고 격리된 로컬 DB에 V1 이후 schema가 재현 가능하게 적용된다. | T222-T231 |
+| M031 | CI 품질·공급망 검증 강화 | `dev`/PR 변경이 애플리케이션 빌드, V1~V10 migration, 핵심 테스트, 컨테이너·secret 검사를 통과하고 `main`은 필수 check 없는 직접 변경이 차단된다. | T232-T245 |
 
 ## Foundation
 
@@ -394,6 +395,26 @@ M029는 이미 존재하는 Space role/회의 ACL 관리 화면을 M028 Backend 
 | T230 | M030 | [ ] | ai/pgvector | AI owner | TBD | T228, T229, Q-010 | `ai/**`, `backend/**`, `specs/001-meetingmind-core/contracts/ai-api.md` | embedding worker와 권한 필터된 pgvector retriever를 연결한다. | 완료된 active generation만 검색하고 Meeting/Project scope 및 source citation negative test가 통과한다. |
 | T231 | M030 | [x] | data/local-profile | 사용자 | Codex | T223, T228 | `backend/build.gradle`, `backend/src/main/resources/application.yml`, `backend/src/main/resources/application-local.yml`, `compose.local.yml`, `README.md` | 팀 공용 Docker DB를 Backend 기본 `local` profile과 연결하고 환경변수 기반 `db`, DB 비의존 `test` profile과 분리한다. | 팀원이 Compose 실행 후 `./gradlew bootRun`으로 동일 DataSource/Flyway 환경을 재현하고 Backend test는 Docker 실행 여부와 독립적으로 통과한다. |
 
+### M031: CI Quality and Supply Chain Gates
+
+M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL migration, Frontend 자동 테스트, 컨테이너·secret 검사까지 확장한다. CI 코드와 GitHub 원격 branch protection 설정을 분리하며, required check 이름이 원격에서 생성된 뒤 `main` 보호 규칙을 적용한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T232 | M031 | [x] | ci/discovery | 사용자 | Codex | T231 | `.github/workflows/ci.yml`, `backend/build.gradle`, `backend/src/main/resources/**`, `frontend/package.json`, `ai/requirements.txt`, `specs/001-meetingmind-core/{plan,tasks,implement}.md` | 현재 CI와 빌드·migration·테스트·Docker·GitHub 설정 gap을 조사하고 구현 순서를 확정한다. | 기존 CI가 `main` push/PR의 Backend test, Frontend build, AI unit만 수행함을 확인하고 `dev` trigger, `bootJar`, V1~V10 migration, Dockerfile/image, Frontend lint/unit/E2E, 보안 검사, Summary, branch protection을 후속 task로 분리했다. |
+| T233 | M031 | [x] | ci/workflow | 사용자 | Codex | T232 | `.github/workflows/ci.yml` | `dev`/`main` 대상 PR/push trigger, concurrency, 최소 권한과 stable Backend/Frontend/AI job 이름을 구성한다. | `contents: read`, 중복 run 취소, `Backend`/`Frontend`/`AI`/`CI Gate` 이름을 정적 검토했고 `git diff --check`가 통과했다. |
+| T234 | M031 | [x] | backend/package | 사용자 | Codex | T233 | `.github/workflows/ci.yml`, `backend/**` | Backend test와 `bootJar` 산출물 생성을 CI에서 검증한다. | Java 21에서 `./gradlew test bootJar`가 통과하고 실행 가능한 jar가 생성됐다. |
+| T235 | M031 | [x] | data/migration | 사용자 | Codex | T233 | `.github/workflows/ci.yml`, `backend/src/main/resources/db/migration/**`, `backend/src/test/**` | pgvector 지원 PostgreSQL 16 service container에 Flyway V1~V10을 순서대로 적용한다. | 격리된 빈 DB에서 migration 10개, schema history와 V4 `vector` extension을 CI와 같은 `MigrationIntegrationTest` 경로로 검증했다. |
+| T236 | M031 | [x] | container/build | 사용자 | Codex | T234 | `backend/Dockerfile`, `backend/.dockerignore`, `ai/Dockerfile`, `ai/.dockerignore`, `.github/workflows/ci.yml` | Backend와 AI production image를 재현 가능한 multi-stage/minimal runtime 기준으로 빌드한다. | 두 image build, `meetingmind` non-root runtime, Backend jar/AI uvicorn entrypoint와 content digest를 확인했다. |
+| T237 | M031 | [x] | frontend/test | 사용자 | Codex | T233 | `frontend/package.json`, `frontend/package-lock.json`, `frontend/eslint.config.*`, `frontend/src/**/*.test.*`, `.github/workflows/ci.yml` | Frontend lint와 unit test 기반을 추가하고 build와 함께 실행한다. | `npm run lint` 오류 0건(기존 경고 8건), unit 6건, `npm run build`가 통과했다. |
+| T238 | M031 | [x] | frontend/e2e | 사용자 | Codex | T234, T237 | `frontend/playwright.config.*`, `frontend/e2e/**`, `.github/workflows/ci.yml` | 실제 Frontend/Backend를 기동해 핵심 로그인과 회의 접근 gate를 Playwright로 검증한다. | Chromium에서 로그인 성공, active HOST prejoin 허용, unknown meeting default-deny 2건이 통과했다. |
+| T239 | M031 | [x] | security/image-scan | 사용자 | Codex | T236 | `.github/workflows/ci.yml`, `backend/Dockerfile`, `ai/Dockerfile` | checksum 검증된 Trivy로 Backend/AI image의 HIGH/CRITICAL 취약점을 검사한다. | 공식 64-bit checksum 교정 후 실제 Backend/AI image에서 HIGH/CRITICAL 취약점 0건을 확인했다. |
+| T240 | M031 | [x] | security/secret-discovery | 사용자 | Codex | T233 | `.github/workflows/ci.yml`, `specs/001-meetingmind-core/{plan,implement}.md` | checksum 검증된 Gitleaks로 전체 Git 이력을 검사하고 finding을 값 노출 없이 목록화한다. | 44개 커밋에서 `backend/.env` 4건, `ai/.env.example` 1건을 확인했고 secret 값 없이 규칙/파일/건수만 기록했다. |
+| T241 | M031 | [ ] | security/credential-response | 저장소 관리자/키 소유자 | 사용자 | T240 | credential provider, `specs/001-meetingmind-core/implement.md` | 5개 finding을 실제 credential/폐기된 credential/예제·오탐으로 분류하고 실제 credential을 먼저 폐기·회전한다. | 모든 finding의 분류와 키 소유자 확인이 끝나고 실제 credential은 provider에서 비활성화·재발급되며 값 없이 완료 증적만 기록된다. |
+| T242 | M031 | [ ] | git/history-remediation | 저장소 관리자 | 사용자+Codex | T241 | Git history, `.gitleaksignore` 또는 `.gitleaks.toml`, `specs/001-meetingmind-core/{plan,implement}.md` | 실제 secret은 이력에서 제거하고 검증된 오탐만 fingerprint 단위 최소 예외로 처리한다. | rewrite는 명시 승인·팀 작업 중지·백업·복구 절차 후 수행되고 `gitleaks git . --redact --no-banner`가 0건으로 통과한다. |
+| T243 | M031 | [ ] | ci/summary-gate | 사용자 | Codex | T234-T239, T242 | `.github/workflows/ci.yml` | 테스트, migration, 보안 검사, image digest를 Summary에 집계하고 원격 최종 gate를 검증한다. | `if: always()` summary 코드가 존재하며, 모든 선행 task 완료 후 원격에서 전체 job과 `CI Gate`가 성공하고 결과/digest가 표시되어야 완료한다. |
+| T244 | M031 | [ ] | github/protection | 저장소 관리자 | 사용자 | T243 | GitHub branch ruleset 또는 branch protection 설정 | `main` 직접 push를 금지하고 PR 및 M031 최종 required check 통과를 강제한다. | 관리자 포함 우회 대상 없이 PR merge만 허용되고 `CI Gate`, force-push 금지, branch 삭제 금지가 적용된다. `dev` 보호 강도는 별도 운영 정책으로 결정한다. |
+| T245 | M031 | [ ] | verification/docs | 사용자 | Codex | T243, T244 | `.github/**`, `backend/**`, `ai/**`, `frontend/**`, `specs/001-meetingmind-core/{tasks,implement,analyze}.md` | 로컬/원격 CI 실행 결과와 branch protection 상태를 검증하고 closeout한다. | required workflow, Summary/digest/protection을 확인하고 tasks/implement에 결과 또는 미실행 사유를 남긴다. |
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -422,6 +443,13 @@ M029는 이미 존재하는 Space role/회의 ACL 관리 화면을 M028 Backend 
 - [x] V023 로컬 DB 기준선 검증: PostgreSQL 16.14 + pgvector 0.8.5 healthy, Flyway V1~V10 최초 적용/재검증과 기존 V9 upgrade, 25개 도메인 테이블, join request/retention/default/check/partial index, Backend 전체 test, `git diff --check`
 - [x] V024 Backend local profile 검증: Compose DB healthy, Hikari `localhost:5434` 연결, Flyway v10 up-to-date, Backend `18080` 기동, `/api/workspace` 200, Backend 전체 test
 - [x] V025 Backend 기본 실행 검증: profile 미지정 `./gradlew bootRun`, default `local` 자동 적용, 기존 8080 프로세스를 보존하기 위한 `18080` port override, `/api/workspace` 200
+- [x] V026 CI hardening discovery 검증: workflow/build/test/migration/container gap 대조, M031 dependency와 PostgreSQL V1~V10 기준 검토, `git diff --check`
+- [x] V027 CI local baseline 검증: Backend `test bootJar`, Frontend lint 오류 0건/unit 6건/build, AI compile/unit 35건, `git diff --check`
+- [x] V028 Gitleaks discovery 검증: 44개 커밋, 2개 파일, secret 후보 5건을 값 노출 없이 확인
+- [ ] V029 credential 폐기·회전 및 history remediation 후 Gitleaks 0건 검증
+- [x] V030 Docker 기반 pgvector migration, Backend/AI image build·digest·Trivy 0건, Playwright 2건 검증
+- [ ] V031 원격 GitHub Actions 전체 job과 `CI Gate`/Summary 검증
+- [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증
 
 ## Notes
 
