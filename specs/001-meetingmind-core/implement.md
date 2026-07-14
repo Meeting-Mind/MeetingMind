@@ -180,6 +180,7 @@
 - 2026-07-11: M028 persistence gap은 `meetings.join_code_hash` unique lookup과 `meeting_join_requests` table/partial unique pending index다. 현재 in-memory prototype은 Meeting에 raw joinCode를 보관한다. 당시 Frontend target type/client는 기존 MeetingInvitation 경계를 사용했으며, 이 gap은 2026-07-12 M029에서 JoinRequest 화면/client로 해소했다.
 - 2026-07-12: T216 조사 결과 `TeamMembersPage`에는 SpaceRole 조회/변경/제거, `ProjectOverviewPage`에는 MeetingParticipant role/accessStatus와 default-deny/override 표시가 있다. 그러나 `LiveMeetingPage`는 인증만 확인한 뒤 고정된 HOST 권한 문구로 prejoin을 허용하고, JoinRequest code/url 입력 화면과 M028 API client는 없다. 또한 기존 local 승인 handler는 회의 신청자를 SpaceMember로 추가해 회의 단독 권한 의도와 충돌한다. M029에서 `/meeting-access`, Backend ACL access probe, meeting-only 승인 semantics를 순서대로 구현한다.
 - 2026-07-12: T217-T221로 Frontend meeting access surface를 M028 계약에 연결했다. `/meeting-access`는 URL/code 신청, PENDING 표시, participant 조회 기반 접근 재확인, HOST/OWNER/ADMIN의 pending 신청 조회·승인·거절을 제공한다. `/live-meeting`은 meetingId와 Backend participant access probe가 성공하기 전 media/prejoin을 노출하지 않고, `/live-room`은 legacy 무인가 token endpoint 대신 Bearer token을 포함한 `/api/v1/meetings/{meetingId}/livekit-token`을 사용한다. Project/Workspace meeting link에는 meetingId를 전달하고, 로그인 redirect는 invite query를 보존한다. ProjectOverview 회의 목록과 Project AI meeting source는 현재 사용자 participant 또는 OWNER/ADMIN override 기준으로 계산하며, 회의 생성/ACL/상태/삭제 control도 현재 role에 따라 제한한다. 회의 생성 form의 직접 참가자 지정은 제거했다. TeamMembers local 회의 승인도 SpaceMember를 만들지 않고 VIEWER guest participant만 생성하며, SpaceMember 제거 시 기존 meeting participant는 REVOKED가 아니라 guest로 유지하도록 수정했다. Verification: `cd frontend && npm run build` 통과, 승인된 local dev server `http://127.0.0.1:5173/meeting-access` HTTP 200, `git diff --check` 통과. 중간 build 1회는 제거한 participant state의 orphan 초기화 호출 때문에 실패했고 해당 호출 제거 후 재실행해 통과했다. Browser 스킬로 in-app browser 연결을 시도했으나 available browser 목록이 비어 있어 desktop/mobile visual smoke는 실행하지 못했다.
+- 2026-07-14: T222로 CI hardening gap을 조사하고 M030/T223-T232 실행 순서를 추가했다. 현재 CI는 `main` push/PR의 Backend test, Frontend build, AI compile/unit만 수행하며 `dev` push, Backend `bootJar`, PostgreSQL V1~V6 실제 migration, Backend/AI image, Frontend lint/unit/Playwright, secret/image scan, GitHub Summary와 final gate가 없다. migration V4는 `vector` extension을 생성하므로 pgvector 지원 PostgreSQL service image를 사용한다. `main`은 stable final check를 required로 설정한 PR-only 보호 규칙을 적용하고, `dev`는 우선 push CI를 실행하는 통합 브랜치로 둔다. Branch protection은 workflow check가 원격에 생성된 뒤 관리자 권한으로 적용한다. 현재 Docker daemon 연결 실패로 local container smoke는 미실행했고, `gh` 미인증 및 GitHub App private repo 접근 실패로 원격 보호 상태도 확인하지 못했다. API/ERD/data-model 변경 영향은 없고 `git diff --check`는 통과했다.
 
 ## Current Frontend Workstream Notes
 
@@ -633,3 +634,32 @@
 - Q-010: embedding model과 vector 차원 확정 후 `vector(n)` 및 HNSW/IVFFlat index migration
 - T230: embedding worker와 권한 필터된 pgvector retriever 연결
 - 보존 만료 정리 scheduler와 `legalHold` 운영 API
+
+## M031 CI Quality and Supply Chain Gates
+
+### Baseline Audit and Planning
+
+- CI trigger/concurrency/최소 권한과 Backend/Frontend/AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan, `CI Gate` job 구현을 확인했다.
+- 충돌은 `.gitignore`, `backend/build.gradle`, `tasks.md`에서 해결했다. PostgreSQL local/test profile과 CI dependency 고정, M030 data milestone과 M031 CI milestone을 모두 보존했다.
+- Gitleaks는 44개 커밋에서 `backend/.env` 4건, `ai/.env.example` 1건을 탐지했다. OpenAI key 규칙 3건과 generic API key 규칙 2건이며 secret 값과 전체 hash는 기록하지 않았다.
+- OpenAI/LiveKit 기존 credential은 공급자에서 폐기·재발급됐다. 여러 원격 공유 브랜치의 강제 재작성을 피하기 위해 폐기된 5건의 exact fingerprint만 `.gitleaksignore`에 등록하고 신규 secret 차단은 유지한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test bootJar`
+- Passed: `cd frontend && npm run lint && npm run test && npm run build`; lint 오류 0건/기존 경고 8건, unit 6건
+- Passed: `cd ai && python3 -m compileall app tests && python3 -m unittest discover -s tests`; 35 tests
+- Passed: conflict 0건, `git diff --check`, `git diff --cached --check`
+- Passed: OpenAI/LiveKit 기존 credential 폐기·재발급 확인 후 `.gitleaksignore` exact fingerprint 5건 적용, `gitleaks git . --redact --no-banner` 0건
+- Passed: 격리된 `pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL 16에서 `MigrationIntegrationTest`; Flyway V1~V10과 `vector` extension
+- Passed: `meetingmind-backend:ci`, `meetingmind-ai:ci` build와 content digest 생성; 두 image 모두 `meetingmind` non-root 사용자와 예상 entrypoint 확인
+- Passed: Trivy 0.72.0 HIGH/CRITICAL scan; Backend OS/JAR 0건, AI OS/Python package 0건
+- Passed: `cd frontend && npm run test:e2e`; Chromium 로그인, active HOST prejoin 허용, unknown meeting default-deny 2건
+- Fixed: Trivy 0.72.0 Linux 64-bit archive에 32-bit checksum이 지정된 오류를 공식 64-bit checksum으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 대조했다.
+- Hardened: 모든 GitHub Action을 공식 major ref가 가리키는 commit SHA로 고정했다.
+- Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했으며 fingerprint 적용 후 재검증한다.
+
+### Remaining Work
+
+- T243: feature branch 원격 CI 전체 성공과 Summary/digest 확인
+- T244/T245: `main` protection 적용과 문서 closeout

@@ -3,7 +3,10 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+frontend/playwright-report/
+frontend/test-results/
 .idea/
+.DS_Store
 output/
 tmp/
 __pycache__/
