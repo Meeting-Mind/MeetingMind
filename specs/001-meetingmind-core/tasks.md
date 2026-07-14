@@ -412,8 +412,8 @@ M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL mi
 | T240 | M031 | [x] | security/secret-discovery | 사용자 | Codex | T233 | `.github/workflows/ci.yml`, `specs/001-meetingmind-core/{plan,implement}.md` | checksum 검증된 Gitleaks로 전체 Git 이력을 검사하고 finding을 값 노출 없이 목록화한다. | 44개 커밋에서 `backend/.env` 4건, `ai/.env.example` 1건을 확인했고 secret 값 없이 규칙/파일/건수만 기록했다. |
 | T241 | M031 | [x] | security/credential-response | 저장소 관리자/키 소유자 | 사용자 | T240 | credential provider, `specs/001-meetingmind-core/implement.md` | 5개 finding의 실제 credential을 공급자에서 폐기·재발급한다. | OpenAI/LiveKit 기존 credential의 폐기·재발급 완료를 확인했고 secret 값 없이 완료 사실만 기록했다. |
 | T242 | M031 | [x] | git/history-remediation | 저장소 관리자 | 사용자+Codex | T241 | `.gitleaksignore`, `specs/001-meetingmind-core/{plan,implement}.md` | 폐기된 5건만 exact fingerprint로 예외 처리해 공유 브랜치 history rewrite를 피하고 신규 secret 차단을 유지한다. | commit/path/rule/line 단위 5건만 등록했고 `gitleaks git . --redact --no-banner`가 0건으로 통과한다. |
-| T243 | M031 | [ ] | ci/summary-gate | 사용자 | Codex | T234-T239, T242 | `.github/workflows/ci.yml` | 테스트, migration, 보안 검사, image digest를 Summary에 집계하고 원격 최종 gate를 검증한다. | `if: always()` summary 코드가 존재하며, 모든 선행 task 완료 후 원격에서 전체 job과 `CI Gate`가 성공하고 결과/digest가 표시되어야 완료한다. |
-| T244 | M031 | [ ] | github/protection | 저장소 관리자 | 사용자 | T243 | GitHub branch ruleset 또는 branch protection 설정 | `main` 직접 push를 금지하고 PR 및 M031 최종 required check 통과를 강제한다. | 관리자 포함 우회 대상 없이 PR merge만 허용되고 `CI Gate`, force-push 금지, branch 삭제 금지가 적용된다. `dev` 보호 강도는 별도 운영 정책으로 결정한다. |
+| T243 | M031 | [x] | ci/summary-gate | 사용자 | Codex | T234-T239, T242 | `.github/workflows/ci.yml` | 테스트, migration, 보안 검사, image digest를 Summary에 집계하고 원격 최종 gate를 검증한다. | PR #29에서 전체 선행 job, Secret Scan, Summary와 최종 `CI Gate`가 성공했다. |
+| T244 | M031 | [ ] | github/protection | 저장소 관리자 | 사용자 | T243 | GitHub branch ruleset 또는 branch protection 설정 | `main` 직접 push를 금지하고 PR 및 M031 최종 required check 통과를 강제한다. | `CI Gate` context는 생성됐으나 private repository의 현재 GitHub 요금제가 protection API를 403으로 차단한다. Pro 업그레이드 또는 공개 전환 후 적용한다. |
 | T245 | M031 | [ ] | verification/docs | 사용자 | Codex | T243, T244 | `.github/**`, `backend/**`, `ai/**`, `frontend/**`, `specs/001-meetingmind-core/{tasks,implement,analyze}.md` | 로컬/원격 CI 실행 결과와 branch protection 상태를 검증하고 closeout한다. | required workflow, Summary/digest/protection을 확인하고 tasks/implement에 결과 또는 미실행 사유를 남긴다. |
 ## Verification
 
@@ -448,8 +448,8 @@ M031은 기존 compile/build 기준선을 실제 배포 산출물, PostgreSQL mi
 - [x] V028 Gitleaks discovery 검증: 44개 커밋, 2개 파일, secret 후보 5건을 값 노출 없이 확인
 - [x] V029 OpenAI/LiveKit credential 폐기·재발급, exact fingerprint 5건 적용 후 Gitleaks 0건 검증
 - [x] V030 Docker 기반 pgvector migration, Backend/AI image build·digest·Trivy 0건, Playwright 2건 검증
-- [ ] V031 원격 GitHub Actions 전체 job과 `CI Gate`/Summary 검증
-- [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증
+- [x] V031 PR #29 원격 GitHub Actions 전체 job과 `CI Gate`/Summary 성공 검증
+- [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증; private repository 현재 요금제 API 403으로 차단
 
 ## Notes
 

@@ -479,7 +479,7 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 - Gitleaks full-history scan은 과거 `backend/.env` 4건과 `ai/.env.example` 1건을 탐지했다. OpenAI/LiveKit 기존 credential은 공급자에서 폐기·재발급됐고, 저장소 전체 이력 재작성 대신 해당 5건의 exact fingerprint만 `.gitleaksignore`에 기록한다. 새로운 commit/path/rule/line 조합은 계속 차단한다.
 - Trivy 0.72.0 Linux 64-bit archive checksum은 공식 release checksum과 대조했고, 잘못 사용된 32-bit checksum을 64-bit 값으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 일치한다.
 - `actions/checkout`, `setup-java`, `setup-node`, `setup-python`, `upload-artifact`는 공식 major ref의 현재 commit SHA로 고정했다.
-- `main` branch protection은 원격에서 `CI Gate` context가 생성된 뒤 적용해야 한다.
+- 원격 PR #29에서 모든 job과 `CI Gate` context 생성·성공을 확인했다. 다만 현재 private repository 요금제는 branch protection API를 `403 Upgrade to GitHub Pro or make this repository public`로 거부하므로 T244 적용은 요금제/공개 범위 결정까지 차단된다.
 - M030의 PostgreSQL schema는 재현 가능하지만 Auth/Workspace/STT runtime repository는 아직 in-memory이므로 T229 전까지 영속화 완료로 간주하지 않는다.
 
 ### Remaining Execution Plan
@@ -487,8 +487,8 @@ M031은 M030의 PostgreSQL/pgvector 기준선을 포함해 현재 CI의 compile/
 1. **Credential response (T241)**: OpenAI/LiveKit 기존 credential의 공급자 폐기·재발급을 완료했고 값 없이 완료 여부만 기록한다.
 2. **History remediation (T242)**: 여러 공유 브랜치의 강제 재작성 영향을 피하기 위해 폐기된 5건의 exact fingerprint만 `.gitleaksignore`로 예외 처리한다. 예외는 commit/path/rule/line 단위이며 신규 secret은 계속 차단한다.
 3. **Local integration (T235, T236, T238, T239)**: 격리된 pgvector PostgreSQL의 V1~V10 migration, Backend/AI image build와 digest, Trivy HIGH/CRITICAL scan, Playwright 로그인·회의 access smoke를 완료 상태로 유지하고 workflow 변경 시 재검증한다.
-4. **Remote gate (T243)**: Gitleaks 0건과 로컬 통합 검증 후에만 feature branch를 commit/push하고 `dev` 대상 PR에서 전체 workflow를 실행한다. Summary 결과와 image digest를 확인하고 모든 `needs`가 `success`인지 검증한다.
-5. **Protection and closeout (T244, T245)**: 원격에 생성된 정확한 `CI Gate` context를 `main` required check로 지정하고 직접 push/force push/삭제 금지를 확인한 뒤 tasks/implement 문서를 종료 상태로 갱신한다.
+4. **Remote gate (T243)**: PR #29에서 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan과 최종 `CI Gate` 성공을 확인했다.
+5. **Protection and closeout (T244, T245)**: `CI Gate` context는 생성됐지만 private repository branch protection이 현재 GitHub 요금제에서 차단된다. GitHub Pro 업그레이드 또는 공개 저장소 전환 결정 후 required check와 직접 push/force push/삭제 금지를 적용하고 closeout한다.
 
 ### Safety and Conflict Boundaries
 

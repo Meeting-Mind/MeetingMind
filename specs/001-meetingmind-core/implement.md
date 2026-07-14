@@ -657,9 +657,10 @@
 - Passed: `cd frontend && npm run test:e2e`; Chromium 로그인, active HOST prejoin 허용, unknown meeting default-deny 2건
 - Fixed: Trivy 0.72.0 Linux 64-bit archive에 32-bit checksum이 지정된 오류를 공식 64-bit checksum으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 대조했다.
 - Hardened: 모든 GitHub Action을 공식 major ref가 가리키는 commit SHA로 고정했다.
-- Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했으며 fingerprint 적용 후 재검증한다.
+- Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했다.
+- Passed: exact fingerprint 적용 후 PR #29 재실행에서 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan과 최종 `CI Gate`가 모두 성공했다.
+- Blocked: `main` branch protection API는 private repository의 현재 GitHub 요금제에서 `403 Upgrade to GitHub Pro or make this repository public`를 반환했다. Pro 업그레이드 또는 공개 전환 전에는 required `CI Gate`, PR-only, force-push/삭제 금지를 적용할 수 없다.
 
 ### Remaining Work
 
-- T243: feature branch 원격 CI 전체 성공과 Summary/digest 확인
-- T244/T245: `main` protection 적용과 문서 closeout
+- T244/T245: GitHub Pro 업그레이드 또는 공개 저장소 전환 후 `main` protection 적용과 최종 closeout
