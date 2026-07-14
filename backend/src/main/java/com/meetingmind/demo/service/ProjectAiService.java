@@ -3,8 +3,6 @@ package com.meetingmind.demo.service;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
-import com.meetingmind.demo.authz.MeetingAccessPolicy;
-import com.meetingmind.demo.authz.SpaceAccessPolicy;
 import com.meetingmind.demo.domain.EmbeddingStatus;
 import com.meetingmind.demo.domain.KnowledgeStatus;
 import com.meetingmind.demo.domain.Meeting;
@@ -27,34 +25,24 @@ public class ProjectAiService {
 
     private final AuthService authService;
     private final WorkspaceDomainService workspaceDomainService;
-    private final SpaceAccessPolicy spaceAccessPolicy;
-    private final MeetingAccessPolicy meetingAccessPolicy;
     private final ProjectAiGatewayClient aiGatewayClient;
 
     public ProjectAiService(
             AuthService authService,
             WorkspaceDomainService workspaceDomainService,
-            SpaceAccessPolicy spaceAccessPolicy,
-            MeetingAccessPolicy meetingAccessPolicy,
             ProjectAiGatewayClient aiGatewayClient
     ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
-        this.spaceAccessPolicy = spaceAccessPolicy;
-        this.meetingAccessPolicy = meetingAccessPolicy;
         this.aiGatewayClient = aiGatewayClient;
     }
 
     public AiChatResponse chat(String authorizationHeader, String spaceId, BackendProjectAiChatRequest request) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
-        spaceAccessPolicy.requireSpaceAccess(workspaceDomainService.spaceAccessContext(spaceId, user.id()));
-        WorkspaceDomainService.ProjectAiContext context = workspaceDomainService.projectAiContext(spaceId);
+        WorkspaceDomainService.ProjectAiContextCandidates context =
+                workspaceDomainService.projectAiContextCandidates(user.id(), spaceId);
 
-        List<Meeting> allowedMeetingRecords = context.meetings().stream()
-                .filter(meeting -> meetingAccessPolicy.canReadAccess(
-                        workspaceDomainService.meetingAccessContext(meeting.id(), user.id())
-                ))
-                .toList();
+        List<Meeting> allowedMeetingRecords = context.meetings();
         List<String> allowedMeetingIds = allowedMeetingRecords.stream()
                 .map(Meeting::id)
                 .toList();
@@ -62,14 +50,14 @@ public class ProjectAiService {
                 .map(meeting -> workspaceDomainService.projectMeetingContext(meeting.id()))
                 .toList();
         List<ProjectAiGatewayChatRequest.SourceContext> sources = Stream.concat(
-                        projectKnowledgeSources(context),
-                        meetingSummarySources(context.space().id(), allowedMeetings)
+                        projectKnowledgeSources(spaceId, context.projectKnowledge()),
+                        meetingSummarySources(spaceId, allowedMeetings)
                 )
                 .toList();
 
         try {
             return aiGatewayClient.chat(new ProjectAiGatewayChatRequest(
-                    context.space().id(),
+                    spaceId,
                     request.question().trim(),
                     allowedMeetingIds,
                     sources
@@ -84,9 +72,10 @@ public class ProjectAiService {
     }
 
     private Stream<ProjectAiGatewayChatRequest.SourceContext> projectKnowledgeSources(
-            WorkspaceDomainService.ProjectAiContext context
+            String spaceId,
+            List<ProjectKnowledge> knowledgeItems
     ) {
-        return context.projectKnowledge().stream()
+        return knowledgeItems.stream()
                 .filter(knowledge -> knowledge.status() == KnowledgeStatus.PUBLISHED)
                 .filter(knowledge -> knowledge.embeddingStatus() == EmbeddingStatus.COMPLETED)
                 .filter(knowledge -> knowledge.deletedAt() == null)
@@ -94,7 +83,7 @@ public class ProjectAiService {
                 .map(knowledge -> new ProjectAiGatewayChatRequest.SourceContext(
                         knowledge.id(),
                         "projectKnowledge",
-                        context.space().id(),
+                        spaceId,
                         null,
                         knowledge.title(),
                         knowledge.content()

@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
-import com.meetingmind.demo.authz.MeetingAccessPolicy;
 import com.meetingmind.demo.authz.MeetingRole;
 import com.meetingmind.demo.authz.ParticipantType;
 import com.meetingmind.demo.authz.SpaceAccessPolicy;
@@ -133,8 +132,6 @@ class ProjectAiServiceTest {
         ProjectAiService service = new ProjectAiService(
                 authService,
                 workspace,
-                spaceAccessPolicy,
-                new MeetingAccessPolicy(spaceAccessPolicy),
                 gateway
         );
         return new TestContext(store, workspace, gateway, service);

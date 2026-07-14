@@ -657,9 +657,45 @@
 - Passed: `cd frontend && npm run test:e2e`; Chromium 로그인, active HOST prejoin 허용, unknown meeting default-deny 2건
 - Fixed: Trivy 0.72.0 Linux 64-bit archive에 32-bit checksum이 지정된 오류를 공식 64-bit checksum으로 교정했다. Gitleaks 8.30.1 Linux x64 checksum도 공식 release와 대조했다.
 - Hardened: 모든 GitHub Action을 공식 major ref가 가리키는 commit SHA로 고정했다.
-- Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했으며 fingerprint 적용 후 재검증한다.
+- Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했다.
+- Passed: exact fingerprint 적용 후 PR #29 재실행에서 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan과 최종 `CI Gate`가 모두 성공했다.
+- Blocked: `main` branch protection API는 private repository의 현재 GitHub 요금제에서 `403 Upgrade to GitHub Pro or make this repository public`를 반환했다. Pro 업그레이드 또는 공개 전환 전에는 required `CI Gate`, PR-only, force-push/삭제 금지를 적용할 수 없다.
 
 ### Remaining Work
 
-- T243: feature branch 원격 CI 전체 성공과 Summary/digest 확인
-- T244/T245: `main` protection 적용과 문서 closeout
+- T244/T245: GitHub Pro 업그레이드 또는 공개 저장소 전환 후 `main` protection 적용과 최종 closeout
+
+## M032 Backend PostgreSQL Runtime Persistence
+
+### Design
+
+- `AuthStore`와 `WorkspaceStore` port로 service의 concrete in-memory 의존을 제거했다.
+- `test` profile은 기존 in-memory adapter를 유지하고 기본 `local` 및 배포용 `db` profile은 Spring JDBC adapter를 사용한다.
+- 기존 V1~V10 schema가 현재 관계형 domain 계약을 수용하므로 migration, ERD 관계, vector schema는 변경하지 않았다.
+- join code는 생성 응답에서만 원문을 반환하고 PostgreSQL에는 SHA-256 hash만 저장한다.
+- Backend owner는 관계형 원천 데이터와 ACL 선필터를 담당한다. embedding provider/model, vector 차원/index, `EmbeddingJob`/`EmbeddingChunk` runtime과 `ai/app/rag.py`는 별도 AI/RAG owner 경계로 남겼다.
+
+### Changes
+
+- Auth: user/identity/session JDBC round-trip, signup/login/google/refresh/logout transaction, refresh row lock과 rotation을 연결했다.
+- Workspace: Space/member/owner, Meeting/participant/join request, speaker/transcript segment를 JDBC로 저장·조회한다.
+- Artifacts: report/decision/action/sourceIds, task candidate/card, ProjectKnowledge metadata와 AuditLog를 기존 JSONB/schema 계약으로 저장한다.
+- Transactions: Space/Meeting row lock 순서를 두고 owner transfer, participant mutation, join approval/reject, report version/current, task candidate confirm과 audit를 원자적으로 처리한다.
+- AI context: Project AI meeting 후보를 PostgreSQL query에서 active SpaceRole과 MeetingParticipant ACL로 선필터한다. Meeting AI는 DB transcript/report source를 기존 internal contract로 전달한다.
+- Profile wiring: in-memory adapter는 `test`, JDBC adapter는 `local`/`db`에서만 등록한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test bootJar`
+- Passed: host `5434` local DB에서 `JdbcAuthStoreIntegrationTest`, `JdbcWorkspaceStoreIntegrationTest`; refresh rotation, joinCode hash, ACL/guest, transcript/report/task/knowledge/audit JSONB round-trip
+- Passed: member는 active participant 회의만, OWNER는 전체 회의를 Project AI 후보로 조회하고 meeting guest는 Project AI를 거부하는 PostgreSQL 선필터 negative test
+- Passed: 임시 빈 `pgvector/pgvector:pg16` DB(host `55432`)에서 Flyway V1~V10 최초 적용과 Auth/Workspace JDBC integration test
+- Passed: 기본 `local` profile Backend 기동, Hikari/Flyway v10 확인, signup `200`, Backend 재시작 후 같은 계정 login `200`; 검증 계정/세션은 이후 삭제했다.
+- Passed: `git diff --check`
+- Not run: Frontend/AI 검증. 이번 변경은 Backend persistence와 문서만 수정하고 frontend/AI/vector owner 파일은 변경하지 않았다.
+
+### Remaining Boundary
+
+- legacy `/api/stt` streaming session과 transcript file prototype은 실제 STT pipeline 계약이 Future Draft라 이번 관계형 artifact persistence에서 제외했다.
+- T230 embedding worker, model/dimension/index, pgvector similarity query와 semantic retriever는 별도 AI/RAG 담당 범위다.
+- `Q-008`, `Q-009` candidate TTL과 report history/export는 여전히 후속 결정이 필요하다.

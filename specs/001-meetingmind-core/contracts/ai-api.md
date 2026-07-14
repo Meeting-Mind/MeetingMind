@@ -427,7 +427,7 @@ Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 stri
 - Project scope
 - `projectKnowledge`: 해당 Space의 `PUBLISHED`, `embeddingStatus=COMPLETED` 공식 지식
 - `meetingSummary`: `allowedMeetingIds`에 포함된 회의의 current/confirmed report summary
-- 실제 transcript/pgvector 검색은 후속 저장소 연동 범위다.
+- Backend는 PostgreSQL의 official knowledge와 권한을 통과한 current/confirmed report summary를 전달한다. transcript embedding과 pgvector semantic 검색은 별도 AI/RAG 담당 후속 범위다.
 
 ### Request
 
