@@ -13,11 +13,15 @@
 | Q-005 | Low | 보고서 파일 포맷은 Markdown, HTML, PDF, DOCX 중 무엇을 우선할까? | Report Agent 저장/다운로드 구현 방향을 결정한다. | Decided | Markdown을 우선한다. PDF/DOCX export는 후속 옵션으로 둔다. |
 | Q-006 | Medium | Target API Base URL은 `/api/v1`로 고정할까, 현재 prototype 경로와 병행할까? | Frontend client 구성과 Backend route migration 순서를 결정한다. | Open | |
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
+| Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
+| Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
 
 ## Blocking Decisions
 
 - Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다. 단, Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 먼저 시작한다.
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
+- Q-008은 candidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태·권한·current 전이는 먼저 구현할 수 있다.
+- Q-009는 TaskCandidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태 전이와 중복 확정 방지는 먼저 구현할 수 있다.
 
 ## Q-001 Authentication Options
 
@@ -56,16 +60,18 @@
 - D-007: MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다. `participant`는 MeetingRole 값으로 쓰지 않고, 일반 참석자는 `VIEWER` 또는 별도 `participantType=member`로 표현한다.
 - D-008: 회의 게스트는 특정 회의의 `MeetingParticipant`로 등록되며 Space 전체 권한, Project Knowledge, Project AI 권한을 기본으로 갖지 않는다.
 - D-009: Meeting status는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED`를 기준으로 한다. 전사/보고서 후처리는 `Transcript.status`, `MeetingReport.status`로 분리한다.
-- D-010: Space 초대와 Meeting 초대는 `SPACE_INVITATION`, `MEETING_INVITATION`으로 분리한다. Space 초대 수락은 `SpaceMember`를 만들고, Meeting 초대 수락은 `MeetingParticipant`만 만든다.
+- D-010: Space 초대와 회의 참가 흐름을 분리한다. `SPACE_INVITATION` 수락은 `SpaceMember`를 만들고, 사용자-facing 회의 참여는 URL/코드 기반 `MEETING_JOIN_REQUEST`를 HOST가 승인한 뒤 `MeetingParticipant`만 만든다. 기존 `MEETING_INVITATION` 계약은 현재 기본 흐름에서 제외한다.
 - D-011: 회의당 현재 공식 회의록은 `status=CONFIRMED`와 `isCurrent=true`를 만족하는 report 최대 1개로 제한한다. 과거 버전은 version history로 보존한다.
 - D-012: ProjectKnowledge 변경 후 embedding 재생성은 비동기로 처리한다. 기존 chunk는 유지하고 새 chunk가 `COMPLETED`가 되면 교체한다.
 - D-013: 보고서 파일 포맷은 Markdown을 우선한다. Report Agent 저장 모델과 우선 export는 Markdown 기준으로 맞추고, PDF/DOCX는 후속 export 옵션으로 둔다.
 - D-014: 비밀번호 정책은 `POL-PW-01` 수준으로 적용한다. 자체 회원가입 비밀번호는 최소 8자이며 영대문자, 영소문자, 숫자, 특수문자 중 3종 이상을 포함해야 한다.
 - D-015: Backend auth/권한 후속 구현 순서는 `T039/T040` Space/Meeting 접근 검증 service, `T094` LiveKit token 권한 연동, Auth store DB 영속화 순서로 진행한다. 이유는 LiveKit/AI/회의 데이터 접근이 먼저 MeetingParticipant 권한 판단을 필요로 하기 때문이다.
-- D-016: SpaceMember 제거 시 해당 Space의 `participantType=member`인 active MeetingParticipant는 모두 `accessStatus=REVOKED`로 전환한다. 회의 guest participant는 SpaceMember 제거 API 대상이 아니므로 이 정책으로 회수하지 않는다.
-- D-017: AI 회의록 생성 결과는 재조회와 확정을 위해 `MeetingReport.CANDIDATE`로 임시 저장한다. candidate는 기본 공식 회의록 조회와 Project AI source에서 제외하고, `status=CANDIDATE`를 명시한 조회 또는 생성 응답에서만 노출한다. AI가 `unsupported=true`를 반환하면 저장하지 않는다.
+- D-016: SpaceMember 제거 시 해당 Space의 `participantType=member`인 active MeetingParticipant는 `participantType=guest`로 전환한다. SpaceMember 제거는 프로젝트 전체 접근권만 제거하며, 특정 회의 접근 차단은 MeetingParticipant revoke로 별도 처리한다.
 - D-017: `MeetingParticipant.accessStatus`는 `ACTIVE`, `REVOKED`를 canonical 값으로 사용한다. `ACTIVE`만 회의 접근 권한으로 인정하고 `REVOKED`는 조회, 수정, LiveKit token, AI context 접근을 모두 차단한다.
 - D-018: HOST의 회의방 일시 퇴장은 허용하며 role/accessStatus를 유지한다. HOST가 회의를 종료하면 Meeting status를 `ENDED`로 전환한다. 마지막 active HOST의 강등, 접근 회수, participant 제거는 거부하며, 마지막 HOST를 없애려면 다른 참여자를 먼저 HOST로 승격해야 한다.
 - D-019: `ADMIN`은 서비스 전체 운영자나 프로그램 관리자가 아니라 특정 Space 안에서 오너가 위임한 프로젝트 관리자 역할이다. 서비스 전체 운영자 역할은 현재 Core Prototype 범위 밖이다.
 - D-020: 회의 삭제 권한은 기본 `OWNER` 또는 해당 회의 `HOST` 전용이다. `ADMIN`은 회의 생성/참여자 관리/수정 override를 가질 수 있지만 삭제 권한은 기본 포함하지 않는다. `ADMIN` 삭제는 명시적 예외 정책이 문서화된 경우에만 허용한다.
 - D-021: `AuthIdentity.provider` 값은 `local`, `google`로 통일한다. 자체 이메일/비밀번호 계정은 `provider=local`이며 `passwordHash`는 `provider=local`일 때만 required다.
+- D-022: AI 회의록 생성 결과는 재조회와 확정을 위해 `MeetingReport.CANDIDATE`로 임시 저장한다. candidate는 기본 공식 회의록 조회와 Project AI source에서 제외하고, `status=CANDIDATE`를 명시한 조회 또는 생성 응답에서만 노출한다. AI가 `unsupported=true`를 반환하면 저장하지 않는다.
+- D-023: 태스크 추출은 `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`가 실행한다. 후보 조회는 active 회의 접근 권한이 필요하고, TaskCard 확정은 회의 편집 권한과 active `SpaceMember`를 모두 요구한다. AI가 `unsupported=true`를 반환하면 후보를 저장하지 않으며 후보당 TaskCard는 최대 하나만 생성한다.
+- D-024: 회의 생성 시 추측하기 어려운 `joinCode`를 발급한다. 인증 사용자는 회의 URL 또는 코드만으로 `PENDING` 참가 신청을 만들 수 있고, active `HOST`가 승인하면 기본 `VIEWER` MeetingParticipant가 생성된다. Space OWNER/ADMIN은 ACL 관리 override로 승인/거절할 수 있으며, 승인 전에는 회의 접근권이나 SpaceMember가 생기지 않는다.

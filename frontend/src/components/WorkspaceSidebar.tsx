@@ -110,6 +110,10 @@ export function WorkspaceSidebar({
               <span>팀 멤버</span>
             </NavLink>
           )}
+          <NavLink className="workspace-catalog-nav-item" to="/meeting-access">
+            <span className="workspace-catalog-nav-icon" />
+            <span>회의 참가</span>
+          </NavLink>
         </nav>
 
         {contextText ? <div className="workspace-catalog-context">{contextText}</div> : null}

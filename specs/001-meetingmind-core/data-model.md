@@ -65,6 +65,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `startedAt`
 - `endedAt`
 - `status`: SCHEDULED, IN_PROGRESS, ENDED, CANCELED
+- `joinCode`: in-memory prototype의 추측하기 어려운 원문 코드. 영속화 시에는 원문 대신 hash 저장을 우선한다.
 - `failureReason`
 - `retentionPolicy`
 
@@ -78,6 +79,16 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `accessStatus`: ACTIVE, REVOKED
 
 회의 게스트는 SpaceMember가 아닐 수 있지만 특정 회의의 `MeetingParticipant`로 등록된다. 회의 게스트는 지정된 회의 밖의 STT, 보고서, Meeting AI, 회의 파일, Project Knowledge, Project AI에 기본 접근할 수 없다.
+
+### MeetingJoinRequest
+
+- `id`
+- `meetingId`
+- `userId`
+- `status`: PENDING, APPROVED, REJECTED
+- `requestedAt`
+- `reviewedAt`
+- `reviewedBy`
 
 ### MeetingSpeaker
 
@@ -112,6 +123,35 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `version`
 - `isCurrent`: 회의당 현재 공식 CONFIRMED report는 하나만 true
 - `createdAt`
+- `confirmedAt`: `CONFIRMED` 전환 시각, 확정 전에는 null
+
+### TaskCandidate
+
+- `id`
+- `meetingId`
+- `title`
+- `assigneeName`: AI가 제안한 담당자 표시 이름, 없으면 null
+- `suggestedAssigneeId`: 표시 이름이 active participant이자 active SpaceMember와 정확히 일치할 때의 사용자 id
+- `dueDate`: AI가 제안한 마감일, 없으면 null
+- `status`: CANDIDATE, CONFIRMED, DISMISSED
+- `sourceIds`: Backend가 AI에 전달한 canonical source 중 후보 근거 ID
+- `createdBy`: 후보 생성 요청 사용자
+- `createdAt`
+- `confirmedAt`: TaskCard 생성과 함께 CONFIRMED로 전환된 시각, 확정 전에는 null
+
+### TaskCard
+
+- `id`
+- `spaceId`
+- `meetingId`: 회의 후보에서 생성되지 않은 일반 카드면 null 가능
+- `sourceCandidateId`: AI 후보에서 생성되지 않은 일반 카드면 null, 값이 있으면 unique
+- `title`
+- `description`
+- `status`: TODO, IN_PROGRESS, DONE
+- `assigneeId`: active SpaceMember 사용자 id, 미지정 시 null
+- `dueDate`
+- `createdAt`
+- `updatedAt`
 
 ### ProjectKnowledge
 
@@ -158,13 +198,24 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `SpaceMember(spaceId, userId)`는 active member 기준 unique다.
 - Space당 active `OWNER`는 정확히 1명이어야 한다.
 - `MeetingParticipant(meetingId, userId)`는 active participant 기준 unique다.
+- `MeetingJoinRequest(meetingId, userId, status)`는 `PENDING` 기준 unique다.
+- `Meeting.joinCode`는 unique이고 회의 ID에서 결정적으로 만들지 않는다. DB 전환 시 lookup용 `joinCodeHash` 저장을 사용한다.
 - `MeetingSpeaker(meetingId, label)`은 unique다.
 - `TranscriptSegment(meetingId, sequence)`은 unique다.
 - `MeetingReport(meetingId, version)`은 unique다.
 - `MeetingReport(meetingId)` 기준 `status=CONFIRMED and isCurrent=true`는 최대 1개다.
 - `MeetingReport.status=CANDIDATE`는 임시 저장되지만 기본 공식 회의록 조회와 Project AI source에서 제외한다.
 - AI가 근거 부족으로 `unsupported=true`를 반환한 결과는 `MeetingReport`로 저장하지 않는다.
+- `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환할 수 있고, 중복 확정은 거부한다.
+- 같은 meeting에 더 높은 version이 존재하면 오래된 candidate 확정을 거부한다.
+- 새 report를 확정할 때 기존 `CONFIRMED and isCurrent=true` report를 `isCurrent=false`로 전환하고 새 report만 `isCurrent=true`로 둔다.
 - `TaskCard.sourceCandidateId`는 nullable이지만 값이 있으면 unique다.
+- `TaskCandidate.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나다.
+- `TaskCandidate`는 AI가 반환한 source ID를 Backend canonical source allowlist로 필터링해 저장한다.
+- `TaskCandidate.CANDIDATE`만 TaskCard로 확정할 수 있고 확정과 카드 생성은 하나의 domain transition으로 처리한다.
+- `TaskCandidate.suggestedAssigneeId`와 `TaskCard.assigneeId`는 active SpaceMember만 허용한다.
+- TaskCandidate 생성/조회 응답의 담당자 선택지는 해당 Space의 active SpaceMember에서 파생하며 별도 entity로 저장하지 않는다.
+- TaskCandidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
 
@@ -243,7 +294,8 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - transcript, report, summary 조회는 `MeetingParticipant` 권한 확인 후 허용한다.
 - AI 서버로 전달되는 transcript segment는 Backend 권한 필터 이후에 구성한다.
 - `MeetingParticipant.accessStatus=ACTIVE`만 회의 접근 권한으로 인정한다. `REVOKED`는 조회, 수정, LiveKit token, Meeting AI, Project AI meeting context 접근을 모두 차단한다.
-- SpaceMember 제거 시 같은 Space에 속한 `participantType=member` MeetingParticipant는 `REVOKED`로 전환한다. `participantType=guest`는 SpaceMember가 아니므로 이 정책으로 회수하지 않는다.
+- SpaceMember 제거 시 같은 Space에 속한 `participantType=member` MeetingParticipant는 `participantType=guest`로 전환한다. 프로젝트 접근권 제거와 회의 접근권 revoke는 분리하며, 회의 접근 차단은 MeetingParticipant `REVOKED`로 처리한다.
+- 회의 참가 신청은 URL 또는 코드만으로 대상을 식별해 `MeetingJoinRequest`로 기록하고, active HOST 승인 후 기본 `VIEWER` MeetingParticipant가 생성된다. OWNER/ADMIN은 ACL 관리 override로 검토할 수 있다.
 - HOST의 회의방 일시 퇴장은 `MeetingParticipant` 권한을 바꾸지 않는다. 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 
 ## API Representation Rules

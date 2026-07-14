@@ -7,10 +7,10 @@ import type {
   ConfirmReportResponse,
   ConfirmTaskCandidateRequest,
   ConfirmTaskCandidateResponse,
+  CreateMeetingJoinRequestRequest,
+  CreateMeetingJoinRequestResponse,
   CreateMeetingRequest,
   CreateMeetingResponse,
-  CreateMeetingInvitationRequest,
-  CreateMeetingInvitationResponse,
   CreateSpaceRequest,
   CreateSpaceResponse,
   CreateSpaceInvitationRequest,
@@ -21,10 +21,9 @@ import type {
   DeleteMeetingResponse,
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
-  ExtractTaskCandidatesRequest,
-  ExtractTaskCandidatesResponse,
   MeetingListResponse,
   MeetingParticipantsResponse,
+  MeetingJoinRequestsResponse,
   OwnerTransferRequest,
   OwnerTransferResponse,
   ReportCandidateResponse,
@@ -32,12 +31,13 @@ import type {
   ReportListResponse,
   RemoveSpaceMemberResponse,
   ResolveInvitationRequest,
-  ResolveMeetingInvitationResponse,
   ResolveSpaceInvitationResponse,
+  ReviewMeetingJoinRequestResponse,
   SpaceDetail,
   SpaceListResponse,
   SpaceMembersResponse,
   TaskCandidatesResponse,
+  TaskCandidateGenerationResponse,
   TaskListResponse,
   UpdateReportRequest,
   UpdateReportResponse,
@@ -55,7 +55,6 @@ import type {
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
-const AI_API_BASE_URL = import.meta.env.VITE_AI_API_BASE_URL?.trim() || "http://localhost:8000";
 
 export async function fetchLegacyWorkspaceSnapshot(session: AuthSession): Promise<Partial<WorkspaceData>> {
   return requestJson<Partial<WorkspaceData>>("/api/workspace", {
@@ -197,46 +196,51 @@ export async function updateMeetingParticipant(
   );
 }
 
-export async function createMeetingInvitation(
+export async function createMeetingJoinRequest(
   session: AuthSession,
-  meetingId: string,
-  request: CreateMeetingInvitationRequest
-): Promise<CreateMeetingInvitationResponse> {
-  return requestJson<CreateMeetingInvitationResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/invitations`, {
+  request: CreateMeetingJoinRequestRequest
+): Promise<CreateMeetingJoinRequestResponse> {
+  return requestJson<CreateMeetingJoinRequestResponse>("/api/v1/meetings/join-requests", {
     method: "POST",
     headers: jsonHeaders(session),
     body: JSON.stringify(request)
   });
 }
 
-export async function acceptMeetingInvitation(
+export async function fetchMeetingJoinRequests(
+  session: AuthSession,
+  meetingId: string
+): Promise<MeetingJoinRequestsResponse> {
+  return requestJson<MeetingJoinRequestsResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests`,
+    { headers: buildAuthHeaders(session) }
+  );
+}
+
+export async function approveMeetingJoinRequest(
   session: AuthSession,
   meetingId: string,
-  invitationId: string,
-  request: ResolveInvitationRequest
-): Promise<ResolveMeetingInvitationResponse> {
-  return requestJson<ResolveMeetingInvitationResponse>(
-    `/api/v1/meetings/${encodeURIComponent(meetingId)}/invitations/${encodeURIComponent(invitationId)}/accept`,
+  requestId: string
+): Promise<ReviewMeetingJoinRequestResponse> {
+  return requestJson<ReviewMeetingJoinRequestResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests/${encodeURIComponent(requestId)}/approve`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
-      body: JSON.stringify(request)
+      headers: buildAuthHeaders(session)
     }
   );
 }
 
-export async function declineMeetingInvitation(
+export async function rejectMeetingJoinRequest(
   session: AuthSession,
   meetingId: string,
-  invitationId: string,
-  request: ResolveInvitationRequest
-): Promise<ResolveMeetingInvitationResponse> {
-  return requestJson<ResolveMeetingInvitationResponse>(
-    `/api/v1/meetings/${encodeURIComponent(meetingId)}/invitations/${encodeURIComponent(invitationId)}/decline`,
+  requestId: string
+): Promise<ReviewMeetingJoinRequestResponse> {
+  return requestJson<ReviewMeetingJoinRequestResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests/${encodeURIComponent(requestId)}/reject`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
-      body: JSON.stringify(request)
+      headers: buildAuthHeaders(session)
     }
   );
 }
@@ -279,13 +283,16 @@ export async function generateReportCandidate(
 }
 
 export async function extractTaskCandidates(
-  request: ExtractTaskCandidatesRequest
-): Promise<ExtractTaskCandidatesResponse> {
-  return requestAiJson<ExtractTaskCandidatesResponse>("/api/meeting-ai/extract-tasks", {
-    method: "POST",
-    headers: plainJsonHeaders(),
-    body: JSON.stringify(request)
-  });
+  session: AuthSession,
+  meetingId: string
+): Promise<TaskCandidateGenerationResponse> {
+  return requestJson<TaskCandidateGenerationResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates/generate`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(session)
+    }
+  );
 }
 
 export async function fetchMeetingReports(
@@ -500,29 +507,12 @@ function jsonHeaders(session: AuthSession): HeadersInit {
   };
 }
 
-function plainJsonHeaders(): HeadersInit {
-  return {
-    "Content-Type": "application/json"
-  };
-}
-
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, init);
 
   if (!response.ok) {
     const message = await readErrorMessage(response);
     throw new Error(message || `API request failed with ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-async function requestAiJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await fetch(`${AI_API_BASE_URL}${path}`, init);
-
-  if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message || `AI request failed with ${response.status}`);
   }
 
   return (await response.json()) as T;

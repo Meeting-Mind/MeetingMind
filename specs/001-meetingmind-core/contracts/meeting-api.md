@@ -1,6 +1,7 @@
 # Meeting, ACL, Transcript, Report API Contract
 
 회의 데이터 접근은 `SpaceMember`보다 좁은 `MeetingParticipant` ACL을 우선한다. `OWNER`/`ADMIN` override는 권한 매트릭스를 따른다.
+사용자-facing 회의 참가 흐름은 `joinCode` 또는 회의 URL로 참가 신청을 만든 뒤 active `HOST`가 승인하는 방식이다. `OWNER`/`ADMIN`은 ACL 관리 override로 검토할 수 있고, `POST /participants`는 관리자/호스트의 수동 ACL 조정용이다.
 
 ## Document Status
 
@@ -9,7 +10,7 @@
 | Status | Target Backend |
 | Owner | Backend, Frontend |
 | Related requirements | FR-MREG-01, FR-MREG-02, FR-MREG-04, FR-MREG-05, FR-MREG-06, FR-MREG-07, FR-ACL-01, FR-ACL-02, FR-ACL-03, FR-ACL-05, FR-ACL-06, FR-MBOT-01, FR-MBOT-02, FR-MBOT-03, FR-MBOT-04, FR-RPT-03, FR-RPT-04, FR-RPT-05, FR-RPT-06, FR-RPT-07, FR-STT-04, FR-STT-05, NFR-AI-01, NFR-AI-02, NFR-AZ-01, NFR-AZ-03, NFR-AZ-04, NFR-SEC-06 |
-| Related data model | Meeting, MeetingParticipant, MeetingInvitation, MeetingSpeaker, TranscriptSegment, MeetingReport, SourceReference, AuditLog |
+| Related data model | Meeting, MeetingJoinRequest, MeetingParticipant, MeetingSpeaker, TranscriptSegment, MeetingReport, SourceReference, AuditLog |
 
 ## GET /api/v1/spaces/{spaceId}/meetings
 
@@ -100,7 +101,7 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 {
   "title": "Sprint Planning #12",
   "scheduledAt": "2026-07-10T10:00:00+09:00",
-  "participantUserIds": ["user-001", "user-002"]
+  "participantUserIds": []
 }
 ```
 
@@ -108,14 +109,17 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 
 - `title`: required, blank 금지
 - `scheduledAt`: required, ISO-8601
-- `participantUserIds`: optional, 대상은 SpaceMember여야 한다.
+- `participantUserIds`: optional, 운영상 초기 ACL 지정용이다. 일반 사용자 참여는 회의 생성 후 URL/코드 참가 신청을 사용한다. 대상은 기존 사용자여야 하며 SpaceMember가 아니면 회의 단독 `guest` participant로 등록한다.
+- 회의 생성 결과의 `joinCode` 또는 `joinUrl`은 이후 참가 신청에 사용한다.
 
 ### Response
 
 ```json
 {
   "id": "meeting-001",
-  "status": "SCHEDULED"
+  "status": "SCHEDULED",
+  "joinCode": "4f97c8e2a58f4d58a4476bcb6b65c208",
+  "joinUrl": "/meetings/meeting-001?joinCode=4f97c8e2a58f4d58a4476bcb6b65c208"
 }
 ```
 
@@ -410,9 +414,10 @@ None.
 
 ### Validation
 
-- `userId`: required for member participant
+- `userId`: required
 - `role`: `HOST`, `EDITOR`, `VIEWER`
-- `participantType`: `member`, `guest`
+- `participantType`: optional `member`, `guest`; 기본값은 `guest`
+- `member` participant로 등록하려면 이미 SpaceMember여야 한다. `guest` participant는 특정 회의 접근권만 갖고 SpaceMember 또는 프로젝트 접근권을 생성하지 않는다.
 
 ### Response
 
@@ -442,15 +447,249 @@ None.
 
 ### Notes
 
-- 직접 추가는 내부 멤버 대상 관리 API다. 초대 링크가 필요한 회의 guest는 Meeting invitation endpoint를 사용한다.
+- 직접 추가는 host/admin의 수동 ACL 조정용이다. 일반 사용자 참가 흐름은 join request와 host 승인으로 처리한다.
+- 프로젝트 전체 접근권은 SpaceMember API 또는 Space invitation 수락으로만 생성한다.
+
+## GET /api/v1/meetings/{meetingId}/join-requests
+
+회의 참가 신청 목록을 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 `HOST`
+
+### Data Scope
+
+- MeetingJoinRequest scope
+
+### Request
+
+None.
+
+### Validation
+
+- `meetingId` 접근 권한 확인
+
+### Response
+
+```json
+{
+  "requests": [
+    {
+      "id": "join-request-001",
+      "userId": "user-002",
+      "status": "PENDING",
+      "requestedAt": "2026-07-10T10:00:00+09:00"
+    }
+  ]
+}
+```
+
+### Errors
+
+- `403 MEETING_ACCESS_DENIED`: 회의 접근 권한 없음
+- `404 MEETING_NOT_FOUND`: 회의 없음
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- FR-MREG-02: 회의 참가 신청/승인
+- FR-MREG-07: 회의별 접근제어
+
+### Notes
+
+- Host는 pending 요청을 승인/거절하기 전에 먼저 확인한다.
+
+## POST /api/v1/meetings/join-requests
+
+회의 참가 신청을 만든다. 사용자는 회의 URL 또는 joinCode 하나만 입력하며 Backend가 대상 회의를 식별한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- joinCode 또는 회의 URL 일치
+
+### Data Scope
+
+- MeetingJoinRequest scope
+
+### Request
+
+```json
+{
+  "joinCodeOrUrl": "4f97c8e2a58f4d58a4476bcb6b65c208"
+}
+```
+
+### Validation
+
+- `joinCodeOrUrl`: required
+- 입력값은 joinCode 또는 `joinCode` query가 포함된 회의 URL일 수 있다.
+- joinCode는 추측하기 어려운 난수여야 하며 회의 ID에서 결정적으로 만들지 않는다.
+- 유효한 code로 식별한 meeting에 이미 active participant가 있으면 거부한다.
+- 같은 사용자와 meeting의 `PENDING` 신청은 최대 1개다.
+
+### Response
+
+```json
+{
+  "requestId": "join-request-001",
+  "meetingId": "meeting-001",
+  "status": "PENDING"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 검증 실패
+- `403 MEETING_ACCESS_DENIED`: joinCode 또는 URL이 유효하지 않음. 회의 존재 여부를 별도로 노출하지 않는다.
+
+### Audit
+
+- `MEETING_JOIN_REQUEST_CREATED`
+
+### Requirement Trace
+
+- FR-MREG-02: 회의 참가 신청
+- FR-MREG-03: 초대 알림/링크
+- FR-MREG-07: 회의별 접근제어
+
+### Notes
+
+- join request는 SpaceMember를 만들지 않는다.
+- 승인 전까지는 회의 데이터 접근이 없다.
+
+## POST /api/v1/meetings/{meetingId}/join-requests/{requestId}/approve
+
+회의 host가 참가 신청을 승인한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 `HOST`
+
+### Data Scope
+
+- MeetingJoinRequest scope
+- 승인 시 MeetingParticipant scope를 생성한다.
+
+### Request
+
+None.
+
+### Validation
+
+- request 상태가 `PENDING`
+- 승인 시 이미 participant가 있으면 거부
+
+### Response
+
+```json
+{
+  "requestId": "join-request-001",
+  "status": "APPROVED",
+  "participantId": "participant-002",
+  "participantType": "guest"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 상태 오류 또는 중복 참가
+- `403 MEETING_ACCESS_DENIED`: 승인 권한 없음
+- `404 MEETING_NOT_FOUND`: 회의 또는 request 없음
+
+### Audit
+
+- `MEETING_JOIN_REQUEST_RESOLVED`
+
+### Requirement Trace
+
+- FR-MREG-02: 회의 참가 신청/승인
+- FR-MREG-07: 회의별 접근제어
+
+### Notes
+
+- 승인 후 참여자 role은 기본 `VIEWER`로 등록한다. 프로젝트 membership이 있으면 `participantType=member`, 아니면 `guest`로 만든다.
+
+## POST /api/v1/meetings/{meetingId}/join-requests/{requestId}/reject
+
+회의 host가 참가 신청을 거절한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 `HOST`
+
+### Data Scope
+
+- MeetingJoinRequest scope
+
+### Request
+
+None.
+
+### Validation
+
+- request 상태가 `PENDING`
+
+### Response
+
+```json
+{
+  "requestId": "join-request-001",
+  "status": "REJECTED"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 상태 오류
+- `403 MEETING_ACCESS_DENIED`: 거절 권한 없음
+- `404 MEETING_NOT_FOUND`: 회의 또는 request 없음
+
+### Audit
+
+- `MEETING_JOIN_REQUEST_RESOLVED`
+
+### Requirement Trace
+
+- FR-MREG-02: 회의 참가 신청/승인
+- FR-MREG-07: 회의별 접근제어
+
+### Notes
+
+- 거절 후 동일 joinCode 재신청은 정책에 따라 허용할 수 있다.
 
 ## POST /api/v1/meetings/{meetingId}/invitations
 
 회의 초대 링크를 생성한다. 회의 초대는 특정 회의 접근권만 부여하며 SpaceMember를 만들지 않는다.
 
+> Superseded: D-022에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다. URL/코드 기반 `MeetingJoinRequest`가 대체한다.
+
 ### Status
 
-- Target Backend
+- Superseded
 
 ### Auth and Permissions
 
@@ -496,7 +735,7 @@ None.
 
 ### Audit
 
-- `MEETING_INVITATION_CREATED`
+- Superseded. No runtime event.
 
 ### Requirement Trace
 
@@ -513,9 +752,11 @@ None.
 
 회의 초대를 수락하고 `MeetingParticipant`를 생성한다.
 
+> Superseded: D-022에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다.
+
 ### Status
 
-- Target Backend
+- Superseded
 
 ### Auth and Permissions
 
@@ -559,7 +800,7 @@ None.
 
 ### Audit
 
-- `MEETING_INVITATION_RESOLVED`
+- Superseded. No runtime event.
 
 ### Requirement Trace
 
@@ -574,9 +815,11 @@ None.
 
 회의 초대를 거절한다.
 
+> Superseded: D-022에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다.
+
 ### Status
 
-- Target Backend
+- Superseded
 
 ### Auth and Permissions
 
@@ -615,7 +858,7 @@ None.
 
 ### Audit
 
-- `MEETING_INVITATION_RESOLVED`
+- Superseded. No runtime event.
 
 ### Requirement Trace
 
@@ -1064,6 +1307,9 @@ None.
 - report가 해당 meeting에 속해야 한다.
 - `status=CANDIDATE` 또는 `DRAFT`만 확정 가능하다.
 - 새 report를 확정하면 기존 current confirmed report는 `isCurrent=false`가 된다.
+- 중복 확정은 `400 INVALID_REQUEST`로 거부한다.
+- 대상 report보다 높은 version이 존재하면 오래된 candidate 확정을 `409 REPORT_VERSION_CONFLICT`로 거부한다.
+- candidate 만료 검증은 `Q-008` 정책 결정 후 추가한다.
 
 ### Response
 
@@ -1072,15 +1318,18 @@ None.
   "id": "report-001",
   "status": "CONFIRMED",
   "version": 1,
-  "isCurrent": true
+  "isCurrent": true,
+  "confirmedAt": "2026-07-13T12:00:00Z"
 }
 ```
 
 ### Errors
 
 - `400 INVALID_REQUEST`: 상태 전이 오류
+- `409 REPORT_VERSION_CONFLICT`: 최신 report version이 아님
 - `403 MEETING_ACCESS_DENIED`: 확정 권한 없음
-- `404 MEETING_NOT_FOUND`: 회의 또는 report 없음
+- `404 MEETING_NOT_FOUND`: 회의 없음
+- `404 REPORT_NOT_FOUND`: report 없음 또는 path meeting과 불일치
 
 ### Audit
 

@@ -142,16 +142,16 @@
 - 2026-07-09: 자체 회원가입 비밀번호 정책을 `POL-PW-01` 수준으로 올렸다. Backend signup은 최소 8자와 영대문자/영소문자/숫자/특수문자 중 3종 이상 포함을 서버에서 검증한다.
 - 2026-07-09: Backend auth/권한 후속 구현 순서는 `T039/T040` Space/Meeting 접근 검증 service, `T094` LiveKit token 권한 연동, Auth store DB 영속화 순서로 확정했다.
 - 2026-07-09: GitHub Actions CI 기준선을 추가했다. PR/push에서 Backend test, Frontend build, AI compile/unit test를 분리 job으로 실행한다.
-- 2026-07-09: SpaceMember 제거 시 같은 Space의 member MeetingParticipant를 `REVOKED`로 전환하는 정책을 확정했다. `MeetingParticipant.accessStatus` canonical 값은 `ACTIVE`, `REVOKED`로 status-values, data-model, ERD, contracts에 반영했다.
+- 2026-07-09: `MeetingParticipant.accessStatus` canonical 값은 `ACTIVE`, `REVOKED`로 status-values, data-model, ERD, contracts에 반영했다. SpaceMember 제거 시 MeetingParticipant 처리 정책은 2026-07-10 M027 보정에서 프로젝트 권한 제거와 회의 단독 권한 유지를 분리하는 방향으로 갱신했다.
 - 2026-07-09: HOST 일시 퇴장, 회의 종료, 마지막 HOST 회수/강등/삭제 금지 정책을 확정했다. `ADMIN`은 서비스 전체 운영자가 아니라 SpaceRole의 프로젝트 관리자임을 용어집과 결정 로그에 명시했다.
 - 2026-07-09: 회의 삭제 권한은 기본 `OWNER`/`HOST` 전용으로 확정하고, `ADMIN` 삭제는 명시적 예외 정책이 있을 때만 허용하도록 정책/권한/API 계약에 반영했다.
 - 2026-07-09: `AuthIdentity.provider` 표기를 `local`, `google`로 통일했다. ERD의 로컬 인증 provider 제약도 같은 기준으로 맞췄다.
 - 2026-07-09: T039/T040/T094 구현 전에 사용할 `test-matrix.md`를 추가했다. 요구사항의 성공/실패 기준을 Space access, Meeting access, HOST 보호, SpaceMember 제거, LiveKit token 발급 단위 테스트 케이스로 분해했다.
 - 2026-07-09: T102 Backend 영향도 점검을 수행했다. 현재 Auth token 발급은 요구사항 기준과 정합하지만, legacy `/api/livekit/token`은 아직 인증 사용자와 회의 권한을 확인하지 않고 request body의 `identity`/`roomName`을 신뢰한다. 이 gap은 T094에서 target `/api/v1/meetings/{meetingId}/livekit-token`로 전환하며 닫는다.
-- 2026-07-09: T039/T040 선행 slice로 `backend/src/main/java/com/meetingmind/demo/authz/**` 권한 policy 계층을 추가했다. `SpaceAccessPolicy`는 active `SpaceMember`와 `OWNER`/`ADMIN` 멤버 관리 권한을 default-deny로 검증하고, `MeetingAccessPolicy`는 `ACTIVE` participant, `OWNER`/`ADMIN` override, `OWNER`/`HOST` 삭제, 마지막 active `HOST` 보호, SpaceMember 제거 시 member participant 회수, LiveKit 접근 상태 차단을 검증한다. 전체 T039/T040 task status는 기존 dependency인 T036/T037 도메인 모델/DTO 통합 전까지 open으로 유지한다.
+- 2026-07-09: T039/T040 선행 slice로 `backend/src/main/java/com/meetingmind/demo/authz/**` 권한 policy 계층을 추가했다. `SpaceAccessPolicy`는 active `SpaceMember`와 `OWNER`/`ADMIN` 멤버 관리 권한을 default-deny로 검증하고, `MeetingAccessPolicy`는 `ACTIVE` participant, `OWNER`/`ADMIN` override, `OWNER`/`HOST` 삭제, 마지막 active `HOST` 보호, LiveKit 접근 상태 차단을 검증한다. SpaceMember 제거에 따른 회의 접근 처리는 M027 domain mutation에서 관리한다.
 - 2026-07-09: 마지막 active `HOST` 보호 실패 code `LAST_ACTIVE_HOST_REQUIRED`를 공통 오류 계약과 Meeting participant 변경 계약에 추가했다.
 - 2026-07-09: T035 Backend 구조 조사를 수행했다. 현재 backend는 JPA/DB 없이 Auth의 `InMemoryAuthStore`, service, controller, 단위 테스트 패턴을 사용하므로 Space/Meeting 도메인도 같은 in-memory repository/service 경계로 시작한다.
-- 2026-07-09: T036/T037로 `backend/src/main/java/com/meetingmind/demo/domain/**` 최소 도메인 record와 `InMemoryWorkspaceStore`, `WorkspaceDomainService`를 추가했다. Space 생성은 생성자를 `OWNER` SpaceMember로 등록하고, 회의 생성은 `OWNER`/`ADMIN`만 허용하며 생성자를 `HOST` MeetingParticipant로 등록한다. 추가 참여자는 SpaceMember인 경우 `VIEWER` participant로 등록한다.
+- 2026-07-09: T036/T037로 `backend/src/main/java/com/meetingmind/demo/domain/**` 최소 도메인 record와 `InMemoryWorkspaceStore`, `WorkspaceDomainService`를 추가했다. Space 생성은 생성자를 `OWNER` SpaceMember로 등록하고, 회의 생성은 `OWNER`/`ADMIN`만 허용하며 생성자를 `HOST` MeetingParticipant로 등록한다. 추가 참여자 처리는 M027 보정 이후 SpaceMember 여부와 프로젝트 접근권 생성을 분리한다.
 - 2026-07-09: T039/T040 policy를 domain service context adapter와 연결했다. `WorkspaceDomainService`가 Space/Meeting 저장 데이터에서 `SpaceAccessContext`, `MeetingAccessContext`를 구성해 기존 authz policy에 전달할 수 있다.
 - 2026-07-09: T094 target LiveKit token 발급 경로를 추가했다. `/api/v1/meetings/{meetingId}/livekit-token`은 `AuthService.currentUser`로 인증 사용자를 확인하고, `MeetingAccessPolicy.requireLiveKitAccess` 통과 후 request body가 아니라 `meetingId`, 인증 사용자 id/displayName으로 LiveKit token을 발급한다. legacy `/api/livekit/token`은 prototype endpoint로 유지한다.
 - 2026-07-09: `AuthExceptionHandler`를 전역 REST advice로 확장해 Auth/Authz 예외를 공통 `code`, `message`, `fieldErrors`, `traceId` 응답으로 반환하도록 했다. LiveKit 설정 누락은 target 경로에서 `LIVEKIT_NOT_CONFIGURED`로 변환한다.
@@ -169,8 +169,17 @@
 - 2026-07-10: T123-T130로 `/spaces`를 프로젝트 대시보드/캘린더 홈으로 확장했다. 프로젝트 생성/수정/삭제, 회의 일정 local 생성, 월/주/일 캘린더 표시, 일정→회의/보고서 라우팅, 오늘 회의/최근 활동/Action Item 요약, mock fallback 데이터 소스 표시를 추가했다. Space 수정/삭제, dashboard summary, calendar events backend는 아직 target API gap이며 실제 저장/권한 판정처럼 표현하지 않는다.
 - 2026-07-10: T132로 M018 target frontend type/API client 경계를 추가했다. Meeting update/delete, MeetingParticipant CRUD, MeetingInvitation, TaskCard CRUD, SpaceMember/Invitation/OwnerTransfer client 함수와 type을 `WorkspaceData` legacy mock shape와 분리했다.
 - 2026-07-10: M018 일부 구현으로 `App.tsx`에 `MeetingParticipant`와 프로젝트 TaskCard local state를 추가하고, `/project-overview`에 회의 상태 변경/삭제, 회의별 ACL role 부여/회수, default-deny 안내, 프로젝트 칸반 카드 생성/상태 이동/삭제 UI를 추가했다. 다만 T133-T139 완료 기준 중 Project AI 공식 지식/source 분리, TeamMembersPage role 변경/멤버 제거/owner transfer, 마지막 active HOST 보호, 감사 로그 표시, 칸반 필터/검색은 아직 남아 있어 해당 task는 open으로 유지한다.
+- 2026-07-10: M018 ACL/칸반 보강 준비로 `SpaceMember.spaceRole` local state를 추가하고, 회의 생성 form이 제목/일시/참여자 후보를 받아 `MeetingParticipant` local state로 연결되도록 했다. `/project-overview` 회의 삭제는 회차 입력 확인 절차를 거치며, ACL 패널은 owner/admin override, default-deny 대상, 마지막 active HOST 보호를 UI와 local update handler에서 표시/차단한다. 칸반은 검색/담당자/상태 필터, 카드 상세 편집, `sourceCandidateId` 표시를 추가했다. `cd frontend && npm run build`, `git diff --check`는 통과했다. T133-T135는 Project AI source 분리, 접근 가능 회의 목록 필터, 감사 로그/Backend gap 정리가 남아 open으로 유지한다.
+- 2026-07-10: T137-T144로 M018 Project Workspace Frontend를 frontend local state 기준 완료 처리했다. Project AI 패널은 `projectKnowledge[]`와 접근 가능한 `meetings[]` 후보를 분리하고, 공식 Project Knowledge / Meeting record source count와 unsupported/확인 불가 copy를 표시한다. 접근 회수되어 ACTIVE participant가 없는 회의는 회의 목록/Project AI meeting source 후보에서 제외한다. TeamMembersPage는 Space invitation과 Meeting invitation copy를 분리하고, `OWNER`/`ADMIN`/`MEMBER` 표시/변경, owner 제거 제한, 멤버 제거 시 해당 Space의 MeetingParticipant `REVOKED` 전환, 마지막 active HOST 제거 방지, owner transfer 확인 문구(`TRANSFER OWNER`)와 기존 owner 강등 role 선택을 local flow로 구현했다. Negative permission smoke 결과: default-deny 안내/empty source copy 표시, 회수 즉시 Project AI meeting source 제외, owner/admin override 표시, 마지막 active HOST role/access/member removal 차단, owner transfer 확인 누락 시 disabled 상태를 확인했다. Route smoke: 승인된 local dev server `http://127.0.0.1:5173/`에서 `/spaces`, `/project-overview`, `/team-members`가 HTTP 200을 반환했다. Verification: `cd frontend && npm run build`, `git diff --check` 통과. Backend/API gap은 실제 MeetingParticipant/Invitation persistence, SpaceMember role/remove API, owner transfer transaction, Kanban persistence, Project AI backend 권한 선필터/context 조립, AuditLog 저장이며 다음 권한 매트릭스 backend 구현에서 닫는다.
 - 2026-07-10: T146으로 M019 source-aware AI/report/task candidate type과 client 경계를 추가했다. `chatMeetingAi`, `generateReportCandidate`, `extractTaskCandidates`, report list/confirm/update/download, task candidate fetch/confirm 함수가 target contract 이름으로 분리되어 있다.
 - 2026-07-10: T148-T150으로 `MeetingAiPage`를 `/api/meeting-ai/chat` request shape로 전환하고 `sources[]`, `unsupported` 표시를 추가했다. `ReportAgentPage`에는 회의록 candidate 생성/확정 local flow, task candidate 추출/등록 전 편집/등록 승인 local flow, backend gap 안내를 추가했다. T151-T153 완료 기준 중 current confirmed version 전환, Markdown export 버튼, M018 칸반 state와 `sourceCandidateId` 연계는 아직 후속 작업이다.
+- 2026-07-10: T158로 backend 권한 매트릭스 구현 전 상세 요구와 계약을 재확인했다. 기준 문서는 `requirements/permissions.md`, `requirements/functional-requirements-detail.md`의 FR-ACL/FR-PERM/FR-OWN, `contracts/space-api.md`, `contracts/meeting-api.md`, `contracts/ai-api.md`, `test-matrix.md`다. M020은 SpaceMember role/remove API, SpaceMember 제거 시 프로젝트 권한 제거와 회의 단독 권한 유지 분리, 마지막 active `HOST` 보호의 실제 participant mutation 적용, owner transfer local transaction flow, MeetingParticipant add/update/revoke API, Project AI context 후보 backend 선필터, audit 최소 event 또는 gap 명시 순서로 진행한다. Baseline verification은 `cd backend && ./gradlew test` 통과했다. 첫 sandbox 실행은 Gradle lock file 권한 문제로 실패했고 승인 후 재실행해 통과했다. 작업 branch는 `backend-permission-matrix`이며 M018 frontend 완료 commit은 `120c6a6 feat: complete project workspace frontend`다. `.specify/memory/session-handoff.md`는 작업 전부터 unstaged 변경이 있어 이번 backend 문서/구현 범위에서 제외한다.
+- 2026-07-10: T205-T211로 backend 권한 매트릭스 runtime을 in-memory domain/store/API에 연결했다. `SpaceAccessPolicy.requireOwnerManagement`를 추가하고, `SpaceController`에 SpaceMember 목록/role 변경/제거, owner transfer, Project AI context candidate endpoint를 연결했다. `MeetingController`는 MeetingParticipant list/add/update(revoke 포함)를 제공한다. `WorkspaceDomainService`는 OWNER 전용 SpaceMember role/remove, 제거 시 member MeetingParticipant를 `GUEST`로 전환해 회의 단독 권한을 유지, participant revoke/role 변경의 마지막 active `HOST` 보호, owner transfer 확인 문자열(`TRANSFER OWNER`)과 기존 owner `ADMIN`/`MEMBER` 강등, Project AI `projectKnowledge[]`/accessible `meetings[]` 후보 선필터를 수행한다. AuditLog는 DB 전환 전 최소 in-memory `AuditEvent`로 role 변경, member removal, participant change, owner transfer의 actor/target/before/after/timestamp를 남긴다. Negative permission coverage는 owner/admin/member 권한 차단, participant revoke 즉시 차단, SpaceMember 제거 후 Project AI 차단/회의 접근 유지, 마지막 active HOST 보호, owner transfer 확인 누락, Project AI inaccessible meeting 제외를 `WorkspaceDomainServiceTest`로 고정했다. Verification: `cd backend && ./gradlew test` 통과, `git diff --check` 통과.
+- 2026-07-10: 사용자 의도 확인에 따라 회의 참가자 권한과 프로젝트 전체 접근권을 더 엄격히 분리했다. `MeetingParticipant`는 기본적으로 특정 회의 접근권만 만들며 SpaceMember 또는 프로젝트 접근권을 생성하지 않는다. 프로젝트 전체 접근권은 Space owner가 SpaceMember/Space invitation으로 명시 부여한 경우에만 생긴다. 회의 생성의 추가 참여자는 SpaceMember가 아니어도 `GUEST` participant로 등록 가능하고, SpaceMember 제거 시 기존 회의 participant는 `GUEST`로 전환되어 회의 ACL 범위 접근만 유지된다.
+- 2026-07-11: T212-T215로 사용자-facing 회의 참여를 URL/코드 참가 신청과 HOST 승인 흐름으로 전환했다. 회의 생성은 UUID 기반 32자리 `joinCode`와 URL을 반환하고, `POST /api/v1/meetings/join-requests`는 meetingId 없이 code 또는 URL만 받아 meeting을 조회해 `PENDING` 신청을 만든다. JoinRequest에는 코드 원문을 복제 저장하지 않는다. active HOST 또는 Space OWNER/ADMIN override만 목록 조회와 승인/거절이 가능하고, 승인 시 기본 `VIEWER` participant를 만든 뒤 SpaceMember 여부에 따라 `member`/`guest`를 결정한다. 승인 전에는 participant와 회의 접근권이 없으며 SpaceMember는 생성하지 않는다. 기존 participant 직접 추가 API는 운영상 ACL 조정용으로 유지하고 `MEETING_INVITATION` target 계약은 superseded 처리했다. URL/code, invalid code, duplicate pending, existing participant, viewer 승인 거부, 순수 HOST 승인, ADMIN override 승인, approve/reject replay, member/guest 분기와 controller response를 테스트했다. Verification: `cd backend && ./gradlew test` 64건 통과, `git diff --check` 통과.
+- 2026-07-11: M028 persistence gap은 `meetings.join_code_hash` unique lookup과 `meeting_join_requests` table/partial unique pending index다. 현재 in-memory prototype은 Meeting에 raw joinCode를 보관한다. 당시 Frontend target type/client는 기존 MeetingInvitation 경계를 사용했으며, 이 gap은 2026-07-12 M029에서 JoinRequest 화면/client로 해소했다.
+- 2026-07-12: T216 조사 결과 `TeamMembersPage`에는 SpaceRole 조회/변경/제거, `ProjectOverviewPage`에는 MeetingParticipant role/accessStatus와 default-deny/override 표시가 있다. 그러나 `LiveMeetingPage`는 인증만 확인한 뒤 고정된 HOST 권한 문구로 prejoin을 허용하고, JoinRequest code/url 입력 화면과 M028 API client는 없다. 또한 기존 local 승인 handler는 회의 신청자를 SpaceMember로 추가해 회의 단독 권한 의도와 충돌한다. M029에서 `/meeting-access`, Backend ACL access probe, meeting-only 승인 semantics를 순서대로 구현한다.
+- 2026-07-12: T217-T221로 Frontend meeting access surface를 M028 계약에 연결했다. `/meeting-access`는 URL/code 신청, PENDING 표시, participant 조회 기반 접근 재확인, HOST/OWNER/ADMIN의 pending 신청 조회·승인·거절을 제공한다. `/live-meeting`은 meetingId와 Backend participant access probe가 성공하기 전 media/prejoin을 노출하지 않고, `/live-room`은 legacy 무인가 token endpoint 대신 Bearer token을 포함한 `/api/v1/meetings/{meetingId}/livekit-token`을 사용한다. Project/Workspace meeting link에는 meetingId를 전달하고, 로그인 redirect는 invite query를 보존한다. ProjectOverview 회의 목록과 Project AI meeting source는 현재 사용자 participant 또는 OWNER/ADMIN override 기준으로 계산하며, 회의 생성/ACL/상태/삭제 control도 현재 role에 따라 제한한다. 회의 생성 form의 직접 참가자 지정은 제거했다. TeamMembers local 회의 승인도 SpaceMember를 만들지 않고 VIEWER guest participant만 생성하며, SpaceMember 제거 시 기존 meeting participant는 REVOKED가 아니라 guest로 유지하도록 수정했다. Verification: `cd frontend && npm run build` 통과, 승인된 local dev server `http://127.0.0.1:5173/meeting-access` HTTP 200, `git diff --check` 통과. 중간 build 1회는 제거한 participant state의 orphan 초기화 호출 때문에 실패했고 해당 호출 제거 후 재실행해 통과했다. Browser 스킬로 in-app browser 연결을 시도했으나 available browser 목록이 비어 있어 desktop/mobile visual smoke는 실행하지 못했다.
 
 ## Current Frontend Workstream Notes
 
@@ -204,7 +213,7 @@
 
 - 관련 상세 요구는 FR-MREG-01~07, FR-ACL-01~07, FR-KAN-01~08, FR-PBOT-01~05, FR-PERM-01~05, FR-OWN-01~03이다.
 - `ProjectOverviewPage.tsx`는 회의 목록과 Project AI 진입점이 이미 있으나 회의 ACL, 회의 삭제/상태 변경, 칸반, 권한별 disabled state는 아직 없다. M018에서는 이 파일이 회의 관리, ACL, 칸반, Project AI source 표시의 중심이 된다.
-- `TeamMembersPage.tsx`는 멤버/초대/요청 승인 UI가 있으나 Space invitation, Meeting invitation, role change, owner transfer가 요구사항 기준으로 분리되어 있지 않다. M018에서는 SpaceMember role과 owner transfer 확인 절차를 정리한다.
+- `TeamMembersPage.tsx`는 SpaceMember role/owner transfer와 회의 참가 신청을 분리해 표시한다. 실제 Backend 신청 조회/검토는 M022의 `/meeting-access?meetingId=...` 관리 화면이 담당하고, TeamMembers local 요청은 mock fallback 검증용이다.
 - Meeting ACL의 canonical role은 `VIEWER`, `EDITOR`, `HOST`이고 access status는 `ACTIVE`, `REVOKED`다. 마지막 active `HOST`의 강등/회수/제거는 금지되며, 이 상태는 UI에서도 막아야 한다.
 - Space owner/admin은 회의 ACL 없이 접근할 수 있지만, 회의 삭제는 기본적으로 `OWNER` 또는 해당 회의 `HOST` 전용이다. `ADMIN` 삭제는 명시적 예외 정책 전까지 기본 허용으로 표현하지 않는다.
 - Kanban 상태는 `TODO`, `IN_PROGRESS`, `DONE`만 사용한다. 새 drag-and-drop dependency는 추가하지 않고 기존 React/DOM 이벤트나 명시 이동 버튼 중 작은 구현을 선택한다.
@@ -358,6 +367,9 @@
 - Passed: `cd frontend && npm run build` after full Meeting AI Backend-to-AI review
 - Passed: `git diff --check` after full Meeting AI Backend-to-AI review
 - Passed: real API smoke on Backend `18080` and AI `18000`: signup, space creation, meeting creation, Backend Meeting AI chat returned `200` with `unsupported=true`, `model=context-only`
+- Passed: `cd backend && ./gradlew test` after M028 meeting join request approval flow, total 64 backend tests
+- Passed: `git diff --check` after M028 meeting join request approval flow
+- Passed: `cd backend && ./gradlew test` and `cd frontend && npm run build` after integrating M027-M029 permission and meeting access work onto `origin/dev`
 - Passed: `cd frontend && npm run build` after T045 target frontend API types
 - Passed: `git diff --check` after T044-T045 frontend workstream docs/types
 - Passed: `cd frontend && npm run build` after T046 stable project route state
@@ -400,7 +412,7 @@
 - Project AI 실제 DB/pgvector RAG 연결과 Backend 권한 선필터 통합
 - Frontend 연결: Live Room 용어 설명 UI, Meeting/Project AI source 표시, Report Agent 연결은 Frontend 담당 TBD
 - Frontend/Backend 연결: AI prototype endpoint를 권한 필터 이후 Backend route와 화면에 연결
-- M018 Frontend 후속: TeamMembersPage의 Space role 변경/멤버 제거/owner transfer 확인 절차, 마지막 active HOST 보호 disabled state, ACL 감사 로그 표시, 칸반 검색/필터와 `sourceCandidateId` 표시
+- M018 Backend/API 후속: MeetingParticipant/Invitation persistence, SpaceMember role/remove API, owner transfer transaction, Kanban persistence, Project AI backend 권한 선필터/context 조립, AuditLog 저장
 - M019 Frontend 후속: Report current confirmed/version UI, Markdown export 버튼, task candidate confirm 후 M018 칸반 state와 `TaskCard.sourceCandidateId` 연계, Meeting AI source 시간/발화자/결정 ID 세분 표시
 - Backend/API gap: Space 수정/삭제, dashboard/calendar events, MeetingParticipant/Invitation, meeting update/delete, Kanban CRUD, report confirm/update/download, TaskCandidate 저장/confirm, Project/Meeting AI backend 권한 필터와 audit log runtime 구현
 
@@ -465,3 +477,107 @@
 - `MeetingReport` PostgreSQL repository와 candidate 만료/취소 정책
 - `AI_REQUESTED`, `REPORT_CANDIDATE_CREATED` persistent audit log
 - 실제 STT 입력 API 연결 후 supported public end-to-end smoke
+
+## M024 Report Confirm and Current Version
+
+### Contract and Decision
+
+- `POST /api/v1/meetings/{meetingId}/reports/{reportId}/confirm`을 구현 대상으로 확정했다.
+- 확정 권한은 Space `OWNER`/`ADMIN` 또는 Meeting `HOST`/`EDITOR`다.
+- `CANDIDATE`/`DRAFT`만 확정하고 중복 확정은 `INVALID_REQUEST`, report 불일치는 `REPORT_NOT_FOUND`로 처리한다.
+- 더 높은 version이 존재하는 오래된 candidate는 `REPORT_VERSION_CONFLICT`로 거부해 낮은 version이 current를 덮어쓰지 못하게 한다.
+- candidate TTL은 기준값이 없어 `Q-008`로 분리하고 이번 slice에서 임의 만료 정책을 넣지 않았다.
+- 기존 `D-017` 중복 번호를 해소하기 위해 candidate 임시 저장 결정을 `D-022`로 정리했다.
+
+### Implementation
+
+- `MeetingReport`에 nullable `confirmedAt`과 immutable `confirmed`/`withoutCurrent` transition을 추가했다.
+- domain confirm은 기존 current confirmed report를 모두 `current=false`로 바꾸고 대상 report만 `CONFIRMED/current=true`로 저장한다.
+- lifecycle service는 인증과 `requireEditAccess`를 domain 변경 전에 적용한다.
+- Frontend candidate card는 Backend confirm API를 호출하고 confirmed/version/current/loading/error 상태를 반영한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd frontend && npm run build` (기존 500 kB 초과 bundle warning 유지)
+- Passed: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, 24 regression tests
+- Passed: `cd ai && ./.venv/bin/python -m compileall app`
+- Passed: `git diff --check`
+- Passed: Backend service test에서 current report 교체, version 1/2 보존, 중복·stale 확정 거부, 다른 meeting report 거부, VIEWER 사전 차단을 검증했다.
+- Passed: Backend `18080` public API smoke에서 edit 권한 사용자의 없는 report는 `404 REPORT_NOT_FOUND`, 비권한 사용자는 report 조회 전에 `403 MEETING_ACCESS_DENIED`를 반환했다.
+- Not run: public 성공 confirm E2E. 현재 외부 API로 transcript/candidate를 주입할 수 없어 supported 생성·확정 성공은 Backend service 통합 테스트로 검증했다.
+
+### Remaining Boundary
+
+- `Q-008` candidate TTL 결정과 만료/정리 작업
+- report manual update, version history 조회/복원, Markdown/PDF/DOCX download
+- PostgreSQL repository transaction과 partial unique index 실제 적용 검증
+- `REPORT_CONFIRMED` persistent audit log
+
+## M025 Task Candidate Backend Route and TaskCard Confirmation
+
+### Contract and Decision
+
+- public 생성/조회/확정 route와 internal `/api/internal/meeting-ai/extract-tasks` 계약을 추가했다.
+- 후보 생성은 회의 편집 권한, 조회는 회의 읽기 권한, TaskCard 확정은 회의 편집 권한과 active SpaceMember를 모두 요구한다.
+- `TaskCandidate`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 상태를 사용하고 후보당 `TaskCard.sourceCandidateId`는 unique다.
+- candidate TTL은 기준값이 없어 `Q-009`로 분리했으며 이번 slice에서는 상태와 중복만 검증한다.
+
+### Implementation
+
+- AI strict endpoint는 `transcript`, `report`, `decision`, `actionItem`만 허용하고 다른 project/meeting source를 `AI_CONTEXT_FORBIDDEN`으로 거부한다.
+- Backend는 권한 검증 후 transcript와 current confirmed report를 canonical context로 조립하고, source 근거가 있는 supported 결과만 in-memory `TaskCandidate`로 저장한다.
+- active participant 표시 이름이 active SpaceMember와 정확히 일치할 때만 `suggestedAssigneeId`를 연결한다.
+- 후보 확정은 제목, 설명, 담당자, 마감일, 상태를 검증하고 candidate 상태 전이와 TaskCard 생성을 하나의 synchronized domain operation으로 처리한다.
+- 생성/조회 응답은 `canConfirm` capability를 반환하고, true일 때만 active SpaceMember 담당자 선택지를 제공한다. 회의 게스트와 VIEWER에는 Space 멤버 목록을 노출하지 않는다.
+- Frontend는 `canConfirm`이 false면 후보 편집/등록을 비활성화하고 유효한 `assigneeId`만 확정 요청에 사용한다.
+- Frontend Report Agent는 AI 직접 호출과 로컬 등록을 제거하고 Backend 생성/조회/확정 API, 재진입 후보 복원, loading/error, 제목·설명·담당자·마감일 편집을 사용한다.
+- target PostgreSQL 기준선으로 `V6__create_task_candidates_cards.sql`을 추가했다.
+
+### Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests`, 29 tests
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`
+- Passed: `cd backend && ./gradlew test`
+- Passed: `cd frontend && npm run build` (기존 500 kB 초과 bundle warning 유지)
+- Passed: `git diff --check`
+- Passed: AI test에서 project/meeting/type allowlist, no-source LLM 미호출, provider `503`을 검증했다.
+- Passed: Backend test에서 edit 권한 선차단, candidate 저장/조회, source allowlist, 담당자 매핑, VIEWER 확정 거부, guest 확정 거부, invalid assignee, 중복 확정을 검증했다.
+- Passed: Backend `18080` 실제 public API smoke에서 source 없는 owner 생성 `200 unsupported/context-only`, 생성/조회 `canConfirm=true`, active SpaceMember 담당자 1명, 없는 후보 확정 `404 TASK_CANDIDATE_NOT_FOUND`, 무인증 조회 `401`을 확인했다.
+- Not run: V6 migration 실제 PostgreSQL 적용. 로컬 DB profile datasource가 구성되지 않아 후속 data verification이 필요하다.
+- Not run: STT가 존재하는 public supported 생성과 성공 confirm E2E. 현재 외부 API로 transcript를 주입할 수 없어 AI/Backend service test로 검증했다.
+
+### Remaining Boundary
+
+- `Q-009` candidate TTL 결정, 만료 검증과 정리 작업
+- 후보 제외 API와 일반 Kanban 카드 CRUD/목록의 Backend 전환
+- PostgreSQL repository transaction과 V6 unique/FK 제약 실제 적용 검증
+- `AI_REQUESTED`, `TASK_CANDIDATE_CONFIRMED`, `TASK_CARD_CHANGED` persistent audit log
+
+## M026 AI Provider Safety
+
+### Scope and Decision
+
+- `requirements/performance.md`의 prototype 기준에 따라 OpenAI 호출은 기본 30초, 보고서 생성은 60초 timeout을 사용한다.
+- 설정 누락, provider HTTP/connection 오류, timeout, 잘못된 응답은 public/internal 경로 모두 `503 AI_PROVIDER_UNAVAILABLE` 고정 응답으로 정규화한다.
+- provider raw body, 연결 사유, 환경변수 이름은 클라이언트 응답에 포함하지 않는다.
+- AI `HTTPException`과 validation 오류는 `{code, message, fieldErrors, traceId}` 공통 body를 반환하며 현재 AI traceId는 `null`이다.
+- 생성 요청 자동 재시도는 중복 과금 가능성이 있고 idempotency 보장이 없어 제외했다.
+- API request/response 데이터 모델, ERD, RAG scope 변경은 없다.
+- `feature-implementation-comparison.md`를 현재 권한 기반 AI 통합 prototype 상태로 갱신하고 상세 기준 문서로의 경계를 명시했다.
+
+### Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 35 tests
+- Passed: HTTP 오류 detail, connection reason, 환경변수 이름 비노출 테스트
+- Passed: validation/provider 오류의 `{code, message, fieldErrors, traceId}` 공통 body 테스트
+- Passed: OpenAI 기본 30초와 보고서 60초 timeout 전달 테스트
+- Passed: `git diff --check`
+
+### Remaining Boundary
+
+- internal API 서비스 인증은 Backend credential/header 연동이 필요한 shared contract 작업이다.
+- PostgreSQL/pgvector retriever와 embedding worker는 Data/Backend 영속 저장소가 선행되어야 한다.
+- 실제 STT 기반 context 연동은 STT 저장·조회 계약과 권한 필터 구현이 선행되어야 한다.
+- persistent `AI_REQUESTED` audit와 token budget 자동 축소는 별도 후속 milestone이다.

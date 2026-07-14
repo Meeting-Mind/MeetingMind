@@ -261,6 +261,92 @@ None.
 
 - soft delete와 archive status 중 하나를 Data owner가 확정한다.
 
+## POST /api/v1/meetings/{meetingId}/task-candidates/generate
+
+회의 transcript와 current confirmed report를 기반으로 태스크 후보를 생성하고 임시 저장한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`
+- 권한 검증은 meeting context 조회와 AI 호출보다 먼저 수행한다.
+
+### Data Scope
+
+- Meeting scope
+- Backend가 해당 meeting의 transcript와 current confirmed report만 조립해 AI 서버로 전달한다.
+
+### Request
+
+None.
+
+### Validation
+
+- `meetingId`와 모든 source의 meeting scope가 같아야 한다.
+- AI가 반환한 `sourceIds`는 Backend가 전달한 canonical source ID 안에서만 보존한다.
+- `unsupported=true` 결과는 저장하지 않는다.
+- 담당자 제안은 active meeting participant의 표시 이름과 정확히 일치하고 active SpaceMember인 경우에만 `suggestedAssigneeId`로 연결한다.
+
+### Response
+
+```json
+{
+  "candidates": [
+    {
+      "id": "candidate-001",
+      "meetingId": "meeting-001",
+      "title": "ERD 수정안 문서화",
+      "assigneeName": "김진수",
+      "suggestedAssigneeId": "user-001",
+      "dueDate": null,
+      "status": "CANDIDATE",
+      "sourceIds": ["segment-001"],
+      "createdBy": "user-002",
+      "createdAt": "2026-07-13T10:30:00Z"
+    }
+  ],
+  "assignees": [
+    {"id": "user-001", "displayName": "김진수"}
+  ],
+  "canConfirm": true,
+  "sources": [
+    {
+      "sourceId": "segment-001",
+      "type": "transcript",
+      "title": "Sprint Planning #12",
+      "text": "ERD 수정안 문서화가 필요합니다."
+    }
+  ],
+  "unsupported": false,
+  "model": "gpt-4.1-mini"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 입력 또는 AI 응답 검증 실패
+- `403 MEETING_ACCESS_DENIED`: 회의 편집 권한 없음
+- `404 MEETING_NOT_FOUND`: 회의 없음
+- `503 AI_PROVIDER_UNAVAILABLE`: AI provider 오류
+
+### Audit
+
+- `AI_REQUESTED`
+
+### Requirement Trace
+
+- FR-TASK-01: AI 회의록/전사 기반 태스크 후보 추출
+- NFR-AZ-01, NFR-AZ-04: 권한 선필터와 scope 강제
+
+### Notes
+
+- 후보는 확정 전까지 칸반 카드가 아니다.
+- candidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
+
 ## GET /api/v1/meetings/{meetingId}/task-candidates
 
 회의에서 추출된 태스크 후보를 조회한다.
@@ -297,11 +383,18 @@ None.
       "meetingId": "meeting-001",
       "title": "ERD 수정안 문서화",
       "assigneeName": "김진수",
+      "suggestedAssigneeId": "user-001",
       "dueDate": null,
       "status": "CANDIDATE",
-      "sourceIds": ["segment-001"]
+      "sourceIds": ["segment-001"],
+      "createdBy": "user-002",
+      "createdAt": "2026-07-13T10:30:00Z"
     }
-  ]
+  ],
+  "assignees": [
+    {"id": "user-001", "displayName": "김진수"}
+  ],
+  "canConfirm": true
 }
 ```
 
@@ -321,6 +414,8 @@ None.
 ### Notes
 
 - 후보는 확정 전까지 칸반 카드가 아니다.
+- `canConfirm`은 active SpaceMember와 회의 편집 권한을 모두 만족할 때만 true다.
+- `assignees`는 `canConfirm=true`일 때만 해당 Space의 active SpaceMember를 반환한다. 회의 게스트와 VIEWER에는 빈 배열을 반환한다.
 
 ## POST /api/v1/meetings/{meetingId}/task-candidates/{candidateId}/confirm
 
@@ -333,8 +428,8 @@ None.
 ### Auth and Permissions
 
 - 인증 필요
-- Space 접근 권한 필요
-- 후보가 속한 회의 접근 권한 필요
+- active SpaceMember 필요
+- `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`
 
 ### Data Scope
 
@@ -345,6 +440,7 @@ None.
 ```json
 {
   "title": "ERD 수정안 문서화",
+  "description": "회의에서 합의한 ERD 제약과 검증 기준을 정리한다.",
   "assigneeId": "user-001",
   "dueDate": null,
   "status": "TODO"
@@ -354,8 +450,10 @@ None.
 ### Validation
 
 - candidate가 해당 meeting에 속해야 한다.
-- candidate는 아직 확정되지 않은 상태여야 한다.
-- `assigneeId`는 SpaceMember여야 한다.
+- candidate는 `CANDIDATE` 상태여야 한다.
+- `title`은 공백일 수 없고 `status`는 `TODO`, `IN_PROGRESS`, `DONE` 중 하나여야 한다.
+- `description`은 optional이며 공백 문자열은 null로 정규화한다.
+- `assigneeId`가 있으면 active SpaceMember여야 한다.
 
 ### Response
 
@@ -369,8 +467,10 @@ None.
 ### Errors
 
 - `400 INVALID_REQUEST`: 입력 또는 candidate 상태 오류
-- `403 MEETING_ACCESS_DENIED`: 회의 접근 권한 없음
-- `404 MEETING_NOT_FOUND`: meeting 또는 candidate 없음
+- `403 SPACE_ACCESS_DENIED`: active SpaceMember가 아님
+- `403 MEETING_ACCESS_DENIED`: 회의 편집 권한 없음
+- `404 MEETING_NOT_FOUND`: meeting 없음
+- `404 TASK_CANDIDATE_NOT_FOUND`: candidate 없음 또는 path meeting과 불일치
 
 ### Audit
 
@@ -385,3 +485,5 @@ None.
 ### Notes
 
 - 후보 하나에서 카드 하나만 생성되도록 unique 제약을 둔다.
+- 확정과 TaskCard 생성은 하나의 domain transition으로 처리하고 candidate 상태를 `CONFIRMED`로 변경한다.
+- candidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.

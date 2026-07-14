@@ -34,6 +34,7 @@
 | 403 | `AI_CONTEXT_FORBIDDEN` | 권한 필터 전 데이터가 AI context로 요청됨 |
 | 404 | `SPACE_NOT_FOUND` | Space를 찾을 수 없음 |
 | 404 | `MEETING_NOT_FOUND` | 회의를 찾을 수 없음 |
+| 404 | `TASK_CANDIDATE_NOT_FOUND` | 태스크 후보를 찾을 수 없거나 path meeting과 불일치 |
 | 404 | `SPEAKER_NOT_FOUND` | 발화자를 찾을 수 없음 |
 | 409 | `MEETING_NOT_COMPLETED` | 처리 완료 전 transcript/report/summary 요청 |
 | 409 | `MEETING_ALREADY_PROCESSING` | 이미 처리 중인 회의에 중복 처리 요청 |
@@ -62,10 +63,10 @@ Endpoint별 문서에는 위 공통 오류 중 해당 endpoint에서 반환 가�
 | `Meeting.status` | `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED` |
 | `Transcript.status` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
 | `MeetingReport.status` | `CANDIDATE`, `DRAFT`, `CONFIRMED` |
-| `TaskCandidate.status` | `CANDIDATE` |
+| `TaskCandidate.status` | `CANDIDATE`, `CONFIRMED`, `DISMISSED` |
 | `TaskCard.status` | `TODO`, `IN_PROGRESS`, `DONE` |
 | `SpaceInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |
-| `MeetingInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |
+| `MeetingJoinRequest.status` | `PENDING`, `APPROVED`, `REJECTED` |
 | `MeetingParticipant.accessStatus` | `ACTIVE`, `REVOKED` |
 | `ProjectKnowledge.embeddingStatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
 
@@ -97,8 +98,8 @@ AI 응답과 RAG 결과는 사용자가 근거를 추적할 수 있도록 아래
 | `SPACE_DELETED` | Space 삭제 또는 비활성화 |
 | `SPACE_MEMBER_INVITED` | Space 초대 생성 |
 | `SPACE_INVITATION_RESOLVED` | 초대 수락/거절 |
-| `MEETING_INVITATION_CREATED` | 회의 초대 생성 |
-| `MEETING_INVITATION_RESOLVED` | 회의 초대 수락/거절 |
+| `MEETING_JOIN_REQUEST_CREATED` | 회의 참가 신청 생성 |
+| `MEETING_JOIN_REQUEST_RESOLVED` | 회의 참가 신청 승인/거절 |
 | `SPACE_MEMBER_ROLE_CHANGED` | Space role 변경 |
 | `SPACE_MEMBER_REMOVED` | Space 멤버 제거 |
 | `SPACE_OWNER_TRANSFERRED` | 오너 권한 이양 |

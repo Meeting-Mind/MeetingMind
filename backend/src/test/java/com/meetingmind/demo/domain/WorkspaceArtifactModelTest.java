@@ -75,7 +75,8 @@ class WorkspaceArtifactModelTest {
                 "user-backend",
                 1,
                 false,
-                NOW
+                NOW,
+                null
         );
 
         assertThat(report.status()).isEqualTo(MeetingReportStatus.CANDIDATE);

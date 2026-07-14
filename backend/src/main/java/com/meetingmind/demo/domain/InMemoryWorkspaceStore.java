@@ -25,8 +25,12 @@ public class InMemoryWorkspaceStore {
     private final Map<String, MeetingSpeaker> meetingSpeakersById = new LinkedHashMap<>();
     private final Map<String, TranscriptSegment> transcriptSegmentsById = new LinkedHashMap<>();
     private final Map<String, MeetingReport> meetingReportsById = new LinkedHashMap<>();
+    private final Map<String, TaskCandidate> taskCandidatesById = new LinkedHashMap<>();
+    private final Map<String, TaskCard> taskCardsById = new LinkedHashMap<>();
     private final Map<String, ProjectKnowledge> projectKnowledgeById = new LinkedHashMap<>();
     private final Map<String, EmbeddingChunk> embeddingChunksById = new LinkedHashMap<>();
+    private final Map<String, AuditEvent> auditEventsById = new LinkedHashMap<>();
+    private final Map<String, MeetingJoinRequest> meetingJoinRequestsById = new LinkedHashMap<>();
 
     synchronized User saveUser(User user) {
         usersById.put(user.id(), user);
@@ -72,11 +76,76 @@ public class InMemoryWorkspaceStore {
                 .findFirst();
     }
 
+    synchronized Optional<SpaceMember> findSpaceMemberById(String spaceId, String memberId) {
+        SpaceMember member = spaceMembersById.get(memberId);
+        if (member == null || !member.spaceId().equals(spaceId)) {
+            return Optional.empty();
+        }
+        return Optional.of(member);
+    }
+
+    synchronized List<SpaceMember> findSpaceMembersBySpaceId(String spaceId) {
+        return spaceMembersById.values()
+                .stream()
+                .filter(member -> member.spaceId().equals(spaceId))
+                .toList();
+    }
+
     synchronized List<SpaceMember> findSpaceMembersByUserId(String userId) {
         return spaceMembersById.values()
                 .stream()
                 .filter(member -> member.userId().equals(userId))
                 .toList();
+    }
+
+    synchronized List<SpaceMember> findSpaceMembers(String spaceId) {
+        return spaceMembersById.values()
+                .stream()
+                .filter(member -> member.spaceId().equals(spaceId))
+                .toList();
+    }
+
+    synchronized SpaceMember updateSpaceMemberRole(String memberId, SpaceRole role) {
+        SpaceMember current = spaceMembersById.get(memberId);
+        SpaceMember updated = new SpaceMember(
+                current.id(),
+                current.spaceId(),
+                current.userId(),
+                role,
+                current.joinedAt()
+        );
+        spaceMembersById.put(memberId, updated);
+        return updated;
+    }
+
+    synchronized void removeSpaceMember(String memberId) {
+        spaceMembersById.remove(memberId);
+    }
+
+    synchronized OwnerTransferUpdate transferOwner(
+            String currentOwnerMemberId,
+            String targetMemberId,
+            SpaceRole previousOwnerRole
+    ) {
+        SpaceMember currentOwner = spaceMembersById.get(currentOwnerMemberId);
+        SpaceMember target = spaceMembersById.get(targetMemberId);
+        SpaceMember downgradedOwner = new SpaceMember(
+                currentOwner.id(),
+                currentOwner.spaceId(),
+                currentOwner.userId(),
+                previousOwnerRole,
+                currentOwner.joinedAt()
+        );
+        SpaceMember newOwner = new SpaceMember(
+                target.id(),
+                target.spaceId(),
+                target.userId(),
+                SpaceRole.OWNER,
+                target.joinedAt()
+        );
+        spaceMembersById.put(downgradedOwner.id(), downgradedOwner);
+        spaceMembersById.put(newOwner.id(), newOwner);
+        return new OwnerTransferUpdate(newOwner, downgradedOwner);
     }
 
     synchronized Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt) {
@@ -94,6 +163,13 @@ public class InMemoryWorkspaceStore {
         return Optional.ofNullable(meetingsById.get(meetingId));
     }
 
+    synchronized Optional<Meeting> findMeetingByJoinCode(String joinCode) {
+        return meetingsById.values()
+                .stream()
+                .filter(meeting -> meeting.joinCode().equals(joinCode))
+                .findFirst();
+    }
+
     synchronized long countMeetingsBySpaceId(String spaceId) {
         return meetingsById.values()
                 .stream()
@@ -106,6 +182,59 @@ public class InMemoryWorkspaceStore {
                 .stream()
                 .filter(meeting -> meeting.spaceId().equals(spaceId))
                 .toList();
+    }
+
+    synchronized MeetingJoinRequest createMeetingJoinRequest(
+            String meetingId,
+            String userId,
+            Instant requestedAt
+    ) {
+        MeetingJoinRequest request = new MeetingJoinRequest(
+                "join-request-" + UUID.randomUUID(),
+                meetingId,
+                userId,
+                MeetingJoinRequestStatus.PENDING,
+                requestedAt,
+                null,
+                null
+        );
+        meetingJoinRequestsById.put(request.id(), request);
+        return request;
+    }
+
+    synchronized Optional<MeetingJoinRequest> findMeetingJoinRequestById(String meetingId, String requestId) {
+        MeetingJoinRequest request = meetingJoinRequestsById.get(requestId);
+        if (request == null || !request.meetingId().equals(meetingId)) {
+            return Optional.empty();
+        }
+        return Optional.of(request);
+    }
+
+    synchronized List<MeetingJoinRequest> findMeetingJoinRequests(String meetingId) {
+        return meetingJoinRequestsById.values()
+                .stream()
+                .filter(request -> request.meetingId().equals(meetingId))
+                .toList();
+    }
+
+    synchronized MeetingJoinRequest updateMeetingJoinRequest(
+            String requestId,
+            MeetingJoinRequestStatus status,
+            Instant reviewedAt,
+            String reviewedBy
+    ) {
+        MeetingJoinRequest current = meetingJoinRequestsById.get(requestId);
+        MeetingJoinRequest updated = new MeetingJoinRequest(
+                current.id(),
+                current.meetingId(),
+                current.userId(),
+                status,
+                current.requestedAt(),
+                reviewedAt,
+                reviewedBy
+        );
+        meetingJoinRequestsById.put(requestId, updated);
+        return updated;
     }
 
     synchronized MeetingParticipant addMeetingParticipant(
@@ -133,11 +262,54 @@ public class InMemoryWorkspaceStore {
                 .findFirst();
     }
 
+    synchronized Optional<MeetingParticipant> findMeetingParticipantById(String meetingId, String participantId) {
+        MeetingParticipant participant = meetingParticipantsById.get(participantId);
+        if (participant == null || !participant.meetingId().equals(meetingId)) {
+            return Optional.empty();
+        }
+        return Optional.of(participant);
+    }
+
     synchronized List<MeetingParticipant> findMeetingParticipants(String meetingId) {
         return meetingParticipantsById.values()
                 .stream()
                 .filter(participant -> participant.meetingId().equals(meetingId))
                 .toList();
+    }
+
+    synchronized MeetingParticipant updateMeetingParticipant(
+            String participantId,
+            MeetingRole role,
+            ParticipantAccessStatus accessStatus
+    ) {
+        MeetingParticipant current = meetingParticipantsById.get(participantId);
+        MeetingParticipant updated = new MeetingParticipant(
+                current.id(),
+                current.meetingId(),
+                current.userId(),
+                role,
+                current.participantType(),
+                accessStatus
+        );
+        meetingParticipantsById.put(participantId, updated);
+        return updated;
+    }
+
+    synchronized MeetingParticipant updateMeetingParticipantType(
+            String participantId,
+            ParticipantType participantType
+    ) {
+        MeetingParticipant current = meetingParticipantsById.get(participantId);
+        MeetingParticipant updated = new MeetingParticipant(
+                current.id(),
+                current.meetingId(),
+                current.userId(),
+                current.role(),
+                participantType,
+                current.accessStatus()
+        );
+        meetingParticipantsById.put(participantId, updated);
+        return updated;
     }
 
     synchronized MeetingSpeaker addMeetingSpeaker(String meetingId, String label, String displayName, Instant createdAt) {
@@ -199,11 +371,43 @@ public class InMemoryWorkspaceStore {
         return report;
     }
 
+    synchronized Optional<MeetingReport> findMeetingReportById(String reportId) {
+        return Optional.ofNullable(meetingReportsById.get(reportId));
+    }
+
     synchronized List<MeetingReport> findMeetingReports(String meetingId) {
         return meetingReportsById.values()
                 .stream()
                 .filter(report -> report.meetingId().equals(meetingId))
                 .toList();
+    }
+
+    synchronized TaskCandidate saveTaskCandidate(TaskCandidate candidate) {
+        taskCandidatesById.put(candidate.id(), candidate);
+        return candidate;
+    }
+
+    synchronized Optional<TaskCandidate> findTaskCandidateById(String candidateId) {
+        return Optional.ofNullable(taskCandidatesById.get(candidateId));
+    }
+
+    synchronized List<TaskCandidate> findTaskCandidates(String meetingId) {
+        return taskCandidatesById.values()
+                .stream()
+                .filter(candidate -> candidate.meetingId().equals(meetingId))
+                .toList();
+    }
+
+    synchronized TaskCard saveTaskCard(TaskCard taskCard) {
+        taskCardsById.put(taskCard.id(), taskCard);
+        return taskCard;
+    }
+
+    synchronized Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId) {
+        return taskCardsById.values()
+                .stream()
+                .filter(taskCard -> candidateId.equals(taskCard.sourceCandidateId()))
+                .findFirst();
     }
 
     synchronized ProjectKnowledge saveProjectKnowledge(ProjectKnowledge knowledge) {
@@ -228,5 +432,35 @@ public class InMemoryWorkspaceStore {
                 .stream()
                 .filter(chunk -> chunk.sourceType() == sourceType && chunk.sourceId().equals(sourceId))
                 .toList();
+    }
+
+    synchronized AuditEvent addAuditEvent(
+            String type,
+            String actorUserId,
+            String targetUserId,
+            String resourceId,
+            String beforeValue,
+            String afterValue,
+            Instant createdAt
+    ) {
+        AuditEvent event = new AuditEvent(
+                "audit-" + UUID.randomUUID(),
+                type,
+                actorUserId,
+                targetUserId,
+                resourceId,
+                beforeValue,
+                afterValue,
+                createdAt
+        );
+        auditEventsById.put(event.id(), event);
+        return event;
+    }
+
+    synchronized List<AuditEvent> findAuditEvents() {
+        return List.copyOf(auditEventsById.values());
+    }
+
+    record OwnerTransferUpdate(SpaceMember newOwner, SpaceMember previousOwner) {
     }
 }
