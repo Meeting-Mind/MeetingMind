@@ -85,22 +85,6 @@ public class MeetingAccessPolicy {
         }
     }
 
-    public List<MeetingParticipant> revokeMemberParticipantsForRemovedSpaceMember(
-            String removedUserId,
-            List<MeetingParticipant> participants
-    ) {
-        return participants.stream()
-                .map(participant -> {
-                    if (participant.userId().equals(removedUserId)
-                            && participant.participantType() == ParticipantType.MEMBER
-                            && participant.accessStatus() == ParticipantAccessStatus.ACTIVE) {
-                        return participant.withRoleAndAccessStatus(participant.role(), ParticipantAccessStatus.REVOKED);
-                    }
-                    return participant;
-                })
-                .toList();
-    }
-
     private boolean hasActiveParticipant(MeetingAccessContext context) {
         return context.participant() != null && context.participant().accessStatus() == ParticipantAccessStatus.ACTIVE;
     }
@@ -149,8 +133,5 @@ public class MeetingAccessPolicy {
             return role == MeetingRole.HOST && accessStatus == ParticipantAccessStatus.ACTIVE;
         }
 
-        MeetingParticipant withRoleAndAccessStatus(MeetingRole nextRole, ParticipantAccessStatus nextAccessStatus) {
-            return new MeetingParticipant(id, meetingId, userId, nextRole, participantType, nextAccessStatus);
-        }
     }
 }

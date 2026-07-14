@@ -12,6 +12,7 @@ erDiagram
   USER ||--o{ MEETING_PARTICIPANT : participates
   USER ||--o{ MEETING_REPORT : creates
   USER ||--o{ TASK_CANDIDATE : creates
+  USER ||--o{ MEETING_JOIN_REQUEST : requests
   USER ||--o{ TASK_CARD : assigned
 
   SPACE ||--o{ SPACE_MEMBER : has
@@ -25,7 +26,7 @@ erDiagram
   SPACE ||--o{ AUDIT_LOG : records
 
   MEETING ||--o{ MEETING_PARTICIPANT : grants
-  MEETING ||--o{ MEETING_INVITATION : invites
+  MEETING ||--o{ MEETING_JOIN_REQUEST : receives
   MEETING ||--o{ MEETING_SPEAKER : has
   MEETING ||--o| MEETING_TRANSCRIPT : transcribes
   MEETING ||--o{ TRANSCRIPT_SEGMENT : contains
@@ -105,19 +106,6 @@ erDiagram
     datetime declinedAt
   }
 
-  MEETING_INVITATION {
-    string id PK
-    string meetingId FK
-    string email
-    string meetingRole
-    string participantType
-    string status
-    string tokenHash
-    datetime expiresAt
-    datetime acceptedAt
-    datetime declinedAt
-  }
-
   MEETING {
     string id PK
     string spaceId FK
@@ -128,6 +116,7 @@ erDiagram
     string status
     string failureReason
     string retentionPolicy
+    string joinCodeHash
   }
 
   MEETING_PARTICIPANT {
@@ -137,6 +126,16 @@ erDiagram
     string role
     string participantType
     string accessStatus
+  }
+
+  MEETING_JOIN_REQUEST {
+    string id PK
+    string meetingId FK
+    string userId FK
+    string status
+    datetime requestedAt
+    datetime reviewedAt
+    string reviewedBy FK
   }
 
   MEETING_ROOM {
@@ -327,7 +326,7 @@ erDiagram
 
 - `SpaceMember`와 `MeetingParticipant`는 분리한다. Space 멤버라도 MeetingParticipant 또는 owner/admin override 없이는 특정 회의 데이터에 접근할 수 없다.
 - 회의 게스트는 `MeetingParticipant.participantType=guest`로 표현하고 Space 전체 권한을 갖지 않는다.
-- SpaceMember 제거 시 같은 Space의 `participantType=member` MeetingParticipant는 `accessStatus=REVOKED`로 전환한다. 회의 guest participant는 SpaceMember 제거로 회수하지 않는다.
+- SpaceMember 제거 시 같은 Space의 `participantType=member` MeetingParticipant는 `participantType=guest`로 전환한다. SpaceMember 제거는 프로젝트 전체 접근권만 제거하며, 회의 접근 차단은 MeetingParticipant revoke로 처리한다.
 - HOST의 회의방 일시 퇴장은 `MEETING_PARTICIPANT`를 변경하지 않는다. 마지막 active HOST의 role 강등, `REVOKED` 전환, participant 제거는 거부한다.
 - `TranscriptSegment`는 원본 전사 단위이고 `EmbeddingChunk`는 RAG 검색 단위다.
 - `MeetingTranscript`는 회의당 하나의 전사 상태/보존 aggregate다. 기존 `TranscriptSegment.meetingId` FK는 `Meeting`을 직접 참조한다.
@@ -353,9 +352,11 @@ erDiagram
 - `SPACE_MEMBER.role`은 `OWNER`, `ADMIN`, `MEMBER` 중 하나다.
 - Space당 active `OWNER`는 정확히 1명이어야 한다.
 - `SPACE_INVITATION.spaceId`는 required이며, 수락 시 `SpaceMember`를 생성한다.
-- `MEETING_INVITATION.meetingId`는 required이며, 수락 시 `MeetingParticipant`를 생성한다. 회의 guest는 SpaceMember를 생성하지 않는다.
-- `SPACE_INVITATION.status`와 `MEETING_INVITATION.status`는 `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` 중 하나다.
-- `SPACE_INVITATION.tokenHash`와 `MEETING_INVITATION.tokenHash`는 unique이며 token 원문은 저장하지 않는다.
+- `SPACE_INVITATION.status`는 `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` 중 하나다.
+- `SPACE_INVITATION.tokenHash`는 unique이며 token 원문은 저장하지 않는다.
+- `MEETING_JOIN_REQUEST(meetingId, userId)`는 pending 기준 unique다. join request는 회의 URL 또는 joinCode로 생성되고 host 승인 후 `MeetingParticipant`를 생성한다.
+- `MEETING_JOIN_REQUEST.status`는 `PENDING`, `APPROVED`, `REJECTED` 중 하나다.
+- `MEETING.joinCodeHash`는 unique다. 원문 코드는 생성/인가된 조회 응답에만 노출하고 영속 저장하지 않는다.
 
 ### Meeting and Transcript
 

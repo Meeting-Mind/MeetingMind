@@ -52,6 +52,7 @@ class SpaceControllerTest {
         var spaces = context.controller.listSpaces("Bearer access-token");
 
         assertThat(meeting.status()).isEqualTo("SCHEDULED");
+        assertThat(meeting.joinCode()).matches("[0-9a-f]{32}");
         assertThat(spaces.spaces().getFirst().meetingCount()).isEqualTo(1);
     }
 
