@@ -4851,7 +4851,8 @@ body.app-theme select {
 
   .workspace-catalog-main,
   .project-overview-shell .workspace-catalog-main,
-  .project-detail-main {
+  .project-detail-main,
+  .meeting-prejoin-main {
     height: auto;
     overflow: visible;
   }
