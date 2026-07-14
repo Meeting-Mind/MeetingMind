@@ -340,6 +340,101 @@ FR-RPT/FR-MBOT/FR-TASK 구현은 단일 회의 scope를 제품 경험에서 보�
 - 구현 비교 문서는 현재 권한 기반 AI 통합 prototype 경계를 요약하고 상세 상태는 `tasks.md`, `implement.md`, `contracts/*`로 연결한다.
 - internal API 서비스 인증은 Backend가 동일 credential/header를 전송해야 하므로 별도 shared contract milestone으로 분리한다.
 
+## M027 Backend Permission Matrix Runtime Plan
+
+M027은 권한 매트릭스를 backend runtime 경계에 연결하는 작업이다. 현재 backend에는 `SpaceAccessPolicy`와 `MeetingAccessPolicy` 단위 검증이 있으나, SpaceMember role/remove, MeetingParticipant mutation, owner transfer, Project AI context 후보 조회가 실제 controller/domain mutation에 모두 연결되어 있지는 않다. 이번 milestone은 in-memory store/service 패턴을 유지하면서 보안 규칙을 API 실행 경계에 적용한다.
+
+### Scope
+
+- SpaceMember role 변경/제거: `PATCH /api/v1/spaces/{spaceId}/members/{memberId}`, `DELETE /api/v1/spaces/{spaceId}/members/{memberId}` target contract에 맞춘다. role 변경은 `OWNER` 전용이고 변경 대상 role은 `ADMIN` 또는 `MEMBER`만 허용한다.
+- SpaceMember 제거 cascade: 제거된 member의 같은 Space 내 `participantType=member` MeetingParticipant는 `participantType=guest`로 전환해 회의 단독 권한으로 남긴다. 프로젝트 접근권 제거와 특정 회의 접근권 revoke는 분리한다.
+- MeetingParticipant 관리: add/update/revoke API는 관리자/host의 수동 ACL 조정용으로 둔다. 사용자-facing 참가 흐름은 join request 생성과 host 승인이다. `VIEWER`/`EDITOR`/`HOST` role hierarchy와 `ACTIVE`/`REVOKED` access status를 적용한다. `guest` participant는 SpaceMember 또는 프로젝트 접근권을 만들지 않는다.
+- 마지막 active HOST 보호: participant role 변경, access revoke, meeting participant 삭제성 mutation에 적용한다. SpaceMember 제거는 meeting participant를 제거하지 않으므로 마지막 HOST를 깨지 않는다.
+- Owner transfer: 현재 `OWNER`만 실행할 수 있고 대상은 active SpaceMember만 허용한다. 확인 문자열은 `TRANSFER OWNER`로 고정하며, 성공 시 새 owner는 `OWNER`, 기존 owner는 요청한 `ADMIN` 또는 `MEMBER`로 강등한다.
+- Project AI context 후보: backend가 RAG/AI 서버 호출 전에 `projectKnowledge[]`와 accessible `meetings[]`를 분리해 후보를 만들고, revoked/default-deny/guest-only source는 제외한다. 회의 게스트는 SpaceMember가 아니므로 Project AI 권한을 기본으로 갖지 않는다.
+- AuditLog: 이번 in-memory runtime에서 작은 event list로 구현할 수 있으면 actor, target, before/after, timestamp를 남긴다. 저장소 범위가 커지면 gap을 명시하고 DB/Audit milestone로 분리한다.
+
+### Non-Scope
+
+- DB/JPA 영속화 전환은 M027 범위가 아니다. 현재 backend의 in-memory domain/store 경계를 유지한다.
+- Kanban persistence, MeetingReport confirm/download, TaskCandidate 저장/confirm은 후속 backend API milestone로 분리한다.
+- 실제 pgvector 검색과 AI 서버 호출은 M027에서 구현하지 않는다. M027은 AI context 후보가 backend 권한 필터를 통과하는 경계까지만 닫는다.
+- ADMIN의 SpaceMember 제거 권한은 기본 허용하지 않는다. 요구사항과 삭제 정책의 보수적 기준에 맞춰 owner-only로 시작하고, ADMIN 제거 허용은 명시 정책이 생기면 별도 변경한다.
+
+### Permission Rules
+
+- Default-deny: SpaceMember 또는 MeetingParticipant ACL이 없으면 접근을 거부한다. 예외는 active `OWNER`/`ADMIN` override가 명시된 API뿐이다.
+- Owner/admin override: active SpaceMember `OWNER`/`ADMIN`은 meeting read/edit/participant management를 override할 수 있다. meeting delete는 기본 `OWNER` 또는 active `HOST`만 허용하며 `ADMIN` delete는 허용하지 않는다.
+- Revocation immediate effect: `REVOKED` participant는 meeting read/edit/delete, LiveKit, Meeting AI에서 즉시 제외된다. removed SpaceMember는 프로젝트, Project Knowledge, Project AI context 후보에서 즉시 제외되지만, active MeetingParticipant가 남아 있으면 해당 회의 범위 접근은 유지된다.
+- Last active HOST: 각 meeting에는 active `HOST`가 최소 1명 남아야 한다. role downgrade, revoke, delete성 mutation이 이 제약을 깨면 `LAST_ACTIVE_HOST_REQUIRED`로 거부한다.
+- Owner transfer safety: 확인 문자열이 없거나 불일치하면 domain mutation을 시작하지 않는다. 성공 결과는 owner 공백과 중복 owner가 없는 단일 transaction local flow로 처리한다.
+
+### Implementation Slices
+
+1. `InMemoryWorkspaceStore`에 SpaceMember update/remove, MeetingParticipant create/update/revoke, optional AuditEvent 저장 helper를 추가한다.
+2. `WorkspaceDomainService`에 SpaceMember role 변경/제거, owner transfer, participant add/update/revoke, Project AI 후보 조회 use case를 추가한다.
+3. `SpaceController`와 meeting 관련 controller에 target endpoint를 연결하고 공통 error code를 contract와 맞춘다.
+4. SpaceMember 제거 시 프로젝트 권한만 제거하고 기존 member participant는 guest participant로 전환한다.
+5. 회의 참가 신청은 `joinCode` 또는 회의 URL을 입력받아 `MeetingJoinRequest`를 만들고, host가 승인/거절한다.
+6. Project AI 후보 조회는 active SpaceMember 확인 뒤 Project Knowledge와 `MeetingAccessPolicy.requireReadAccess`를 통과한 meeting source만 반환한다.
+7. 권한 negative case를 controller/domain test로 고정한다.
+8. `cd backend && ./gradlew test`, `git diff --check` 결과와 runtime gap을 `implement.md`와 `tasks.md`에 기록한다.
+
+### Verification Targets
+
+- SpaceMember role change: owner succeeds, admin/member/nonmember denied, owner self downgrade is owner-transfer only.
+- SpaceMember removal: owner removal denied, removed member blocked from project/Project AI, existing meeting participant remains active as guest unless separately revoked.
+- Meeting join request: joinCode/url로 신청 가능, host 승인 전까지 participant 미생성, 승인 시 viewer + member/guest 분기.
+- MeetingParticipant mutation: host/owner/admin allowed, editor/viewer/default-deny denied, revoked target blocked immediately.
+- Owner transfer: active target only, missing confirmation denied, previous owner becomes selected lower role, no duplicate owner.
+- Project AI context: SpaceMember only, Project Knowledge separated from Meeting record, inaccessible/revoked meeting source excluded, unsupported/no-source path remains explicit.
+
+## M028 Meeting Join Request Approval
+
+M028은 회의 생성 시 사용자를 직접 지정하는 방식을 사용자-facing 기본 흐름에서 제외하고, URL/코드 기반 참가 신청과 HOST 승인으로 전환한다. 기존 participant add API는 OWNER/ADMIN/active HOST의 운영상 ACL 조정 경계로 유지한다.
+
+### Implementation Slices
+
+1. 회의 생성 시 UUID 기반의 추측하기 어려운 unique `joinCode`를 만든다.
+2. `POST /api/v1/meetings/join-requests`가 URL 또는 코드만 받아 meeting을 조회하고 `PENDING` 신청을 만든다.
+3. 신청 승인/거절은 active HOST 또는 Space OWNER/ADMIN override만 허용한다.
+4. 승인 시 기본 `VIEWER` participant를 만들고 SpaceMember 여부에 따라 `member`/`guest`만 분기한다.
+5. 잘못된 코드, 중복 pending, 기존 participant, 권한 없는 검토, 완료 신청 재처리를 거부한다.
+6. JoinRequest에는 참가 코드 원문을 복제 저장하지 않고 meeting/user/status/review 정보만 보존한다.
+7. 영속화 시에는 Meeting의 코드 원문 대신 `joinCodeHash` 저장을 사용한다. 현재 in-memory prototype은 raw code 보관 gap을 명시한다.
+
+### Verification Targets
+
+- raw code와 generated URL이 같은 meeting의 pending request를 만든다.
+- meeting ID에서 joinCode를 추측할 수 없다.
+- invalid code는 meeting 존재 여부를 구분해 노출하지 않는다.
+- 승인 전에는 participant와 회의 접근권이 없다.
+- viewer/editor/nonparticipant는 승인/거절할 수 없다.
+- 승인 후 guest는 해당 회의만 접근하고 Project AI/Project Knowledge 권한을 얻지 않는다.
+- 승인 또는 거절된 신청은 다시 처리할 수 없다.
+
+## M029 Frontend Meeting Access and Permission Surfaces
+
+M029는 M028 Backend 참가 신청/승인 계약을 사용자가 확인하고 실행할 수 있는 Frontend 화면에 연결한다. 기존 `TeamMembersPage`의 Space role 관리와 `ProjectOverviewPage`의 회의 ACL 관리 UI는 유지하되, 회의 참가 승인이 SpaceMember를 생성하지 않도록 의미를 바로잡는다.
+
+### Implementation Slices
+
+1. Frontend target type/API client에 JoinRequest 생성/목록/승인/거절 계약을 추가하고 superseded MeetingInvitation client는 제거한다.
+2. `/meeting-access`에서 URL 또는 코드를 입력해 `PENDING` 신청을 만들고 승인 대기 상태를 표시한다.
+3. 승인 후 사용자가 직접 접근 상태를 다시 확인할 수 있도록 meeting participant 조회를 access probe로 사용한다.
+4. `/live-meeting`은 `meetingId` 기준 Backend access probe가 성공한 경우에만 prejoin/media 진입을 허용한다. ID 누락, 403, API 실패는 default-deny로 처리한다.
+5. `TeamMembersPage`의 회의 참가 신청 승인은 프로젝트 멤버가 아니라 해당 회의의 `VIEWER` guest participant만 local state에 추가한다.
+6. ProjectOverview/WorkspaceHome meeting link에 stable `meetingId`를 전달하고, 직접 participant 추가 UI는 운영 ACL 조정임을 표시한다.
+
+### Verification Targets
+
+- Space role과 회의 ACL을 서로 다른 화면/표현으로 확인할 수 있다.
+- URL/코드 신청 성공 후 승인 전에는 회의 입장 CTA가 노출되지 않는다.
+- Backend access probe 실패 시 카메라/마이크 요청과 회의 시작을 수행하지 않는다.
+- active participant 또는 OWNER/ADMIN override access probe 성공 시 role/override 상태를 표시하고 prejoin을 허용한다.
+- HOST 승인 local flow가 SpaceMember 수를 늘리거나 Project AI 권한을 만들지 않는다.
+- desktop/mobile에서 권한 상태, 신청 form, denied/pending/allowed 상태가 겹치거나 잘리지 않는다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

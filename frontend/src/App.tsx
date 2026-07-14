@@ -7,6 +7,7 @@ import { LandingPage } from "./pages/LandingPage";
 import { LiveMeetingPage } from "./pages/LiveMeetingPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { MeetingAiPage } from "./pages/MeetingAiPage";
+import { MeetingAccessPage } from "./pages/MeetingAccessPage";
 import { ProjectOverviewPage } from "./pages/ProjectOverviewPage";
 import { ReportAgentPage } from "./pages/ReportAgentPage";
 import { TeamMembersPage } from "./pages/TeamMembersPage";
@@ -19,6 +20,7 @@ type WorkspaceDataSource = "legacy-api" | "mock-fallback";
 type CreateMeetingPayload = {
   title?: string;
   scheduledAt?: string;
+  participantEmails?: string[];
 };
 type UpdateProjectPayload = {
   name: string;
@@ -47,6 +49,7 @@ type TeamMember = {
   name: string;
   email: string;
   role: string;
+  spaceRole: "OWNER" | "ADMIN" | "MEMBER";
   since: string;
   access: string;
   rank: string;
@@ -57,6 +60,8 @@ type JoinRequest = {
   name: string;
   email: string;
   role: string;
+  meetingIndex: string;
+  meetingTitle: string;
   requestedAt: string;
   source: "링크" | "코드";
 };
@@ -87,25 +92,25 @@ const initialProjectMeetings: Record<string, ProjectMeeting[]> = {
 
 const initialProjectMembers: Record<string, TeamMember[]> = {
   "FinPilot Renewal": [
-    { name: "이미주", email: "miju@meetingmind.ai", role: "Product Manager", since: "2026.03 합류", access: "프로젝트 관리자", rank: "팀 리드", status: "active" },
-    { name: "김진수", email: "jinsu@meetingmind.ai", role: "Backend Lead", since: "2026.02 합류", access: "설계 회의 편집", rank: "Lead", status: "active" },
-    { name: "박서윤", email: "seoyun@meetingmind.ai", role: "Product Designer", since: "2026.04 합류", access: "회의 참여 / 문서 열람", rank: "Senior", status: "active" },
-    { name: "최민호", email: "minho@meetingmind.ai", role: "Data Engineer", since: "2026.01 합류", access: "기술 회의 참여", rank: "Senior", status: "away" }
+    { name: "이미주", email: "miju@meetingmind.ai", role: "Product Manager", spaceRole: "OWNER", since: "2026.03 합류", access: "프로젝트 오너", rank: "팀 리드", status: "active" },
+    { name: "김진수", email: "jinsu@meetingmind.ai", role: "Backend Lead", spaceRole: "ADMIN", since: "2026.02 합류", access: "프로젝트 관리자", rank: "Lead", status: "active" },
+    { name: "박서윤", email: "seoyun@meetingmind.ai", role: "Product Designer", spaceRole: "MEMBER", since: "2026.04 합류", access: "회의 참여 / 문서 열람", rank: "Senior", status: "active" },
+    { name: "최민호", email: "minho@meetingmind.ai", role: "Data Engineer", spaceRole: "MEMBER", since: "2026.01 합류", access: "기술 회의 참여", rank: "Senior", status: "away" }
   ],
   "Campus Admin Assistant": [
-    { name: "정하늘", email: "haneul@meetingmind.ai", role: "Project Manager", since: "2026.02 합류", access: "프로젝트 관리자", rank: "팀 리드", status: "active" },
-    { name: "김도윤", email: "doyun@meetingmind.ai", role: "Frontend Developer", since: "2026.03 합류", access: "회의 참여 / 산출물 편집", rank: "Mid-level", status: "active" },
-    { name: "이서진", email: "seojin@meetingmind.ai", role: "Backend Developer", since: "2026.01 합류", access: "기술 회의 편집", rank: "Senior", status: "active" },
-    { name: "박가은", email: "gaeun@meetingmind.ai", role: "QA Engineer", since: "2026.04 합류", access: "문서 열람 / 회의 참여", rank: "Associate", status: "away" }
+    { name: "정하늘", email: "haneul@meetingmind.ai", role: "Project Manager", spaceRole: "OWNER", since: "2026.02 합류", access: "프로젝트 오너", rank: "팀 리드", status: "active" },
+    { name: "김도윤", email: "doyun@meetingmind.ai", role: "Frontend Developer", spaceRole: "ADMIN", since: "2026.03 합류", access: "프로젝트 관리자", rank: "Mid-level", status: "active" },
+    { name: "이서진", email: "seojin@meetingmind.ai", role: "Backend Developer", spaceRole: "MEMBER", since: "2026.01 합류", access: "기술 회의 편집", rank: "Senior", status: "active" },
+    { name: "박가은", email: "gaeun@meetingmind.ai", role: "QA Engineer", spaceRole: "MEMBER", since: "2026.04 합류", access: "문서 열람 / 회의 참여", rank: "Associate", status: "away" }
   ]
 };
 
 const initialProjectRequests: Record<string, JoinRequest[]> = {
   "FinPilot Renewal": [
-    { id: "fin-wait-01", name: "서다은", email: "daeun@meetingmind.ai", role: "Frontend Developer", requestedAt: "방금 전", source: "링크" }
+    { id: "fin-wait-01", name: "서다은", email: "daeun@meetingmind.ai", role: "Frontend Developer", meetingIndex: "#08", meetingTitle: "실시간 회의 플로우 최종 점검", requestedAt: "방금 전", source: "링크" }
   ],
   "Campus Admin Assistant": [
-    { id: "caa-wait-01", name: "윤민재", email: "minjae@meetingmind.ai", role: "Operations Manager", requestedAt: "12분 전", source: "코드" }
+    { id: "caa-wait-01", name: "윤민재", email: "minjae@meetingmind.ai", role: "Operations Manager", meetingIndex: "#04", meetingTitle: "배포 전 체크리스트 검토", requestedAt: "12분 전", source: "코드" }
   ]
 };
 
@@ -179,6 +184,18 @@ function buildMeetingKey(projectName: string, meetingIndex: string) {
   return `${projectName}:${meetingIndex}`;
 }
 
+function getSpaceRoleAccessLabel(spaceRole: TeamMember["spaceRole"]) {
+  if (spaceRole === "OWNER") {
+    return "프로젝트 오너";
+  }
+
+  if (spaceRole === "ADMIN") {
+    return "프로젝트 관리자";
+  }
+
+  return "회의 참여 / 문서 열람";
+}
+
 function inferMeetingTitle(projectName: string, description: string, index: number) {
   const source = `${projectName} ${description}`.toLowerCase();
   const defaultTitles = ["킥오프 회의", "프로젝트 범위 정의", "핵심 흐름 리뷰", "세부 안건 정리", "다음 단계 확정"];
@@ -228,10 +245,10 @@ function ProtectedRoute({
     if (!session) {
       onRequestLogin();
     }
-  }, [location.pathname, onRequestLogin, session]);
+  }, [location.pathname, location.search, onRequestLogin, session]);
 
   if (!session) {
-    return <Navigate replace state={{ requestedPath: location.pathname }} to="/" />;
+    return <Navigate replace state={{ requestedPath: `${location.pathname}${location.search}` }} to="/" />;
   }
 
   return <>{children}</>;
@@ -446,13 +463,35 @@ export function App() {
       return;
     }
 
+    const existingMeetings = projectMeetings[projectName] ?? [];
+    const nextMeeting = buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload);
+
     setProjectMeetings((previous) => {
-      const existingMeetings = previous[projectName] ?? [];
       return {
         ...previous,
-        [projectName]: [...existingMeetings, buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload)]
+        [projectName]: [...(previous[projectName] ?? []), nextMeeting]
       };
     });
+
+    if (payload?.participantEmails?.length) {
+      const meetingKey = buildMeetingKey(projectName, nextMeeting.index);
+      const selectedMembers = (projectMembers[projectName] ?? []).filter((member) =>
+        payload.participantEmails?.includes(member.email)
+      );
+
+      setMeetingParticipants((previous) => ({
+        ...previous,
+        [meetingKey]: selectedMembers.map((member, index) => ({
+          id: `${meetingKey}-${member.email}`,
+          meetingKey,
+          name: member.name,
+          email: member.email,
+          role: index === 0 ? "HOST" : "VIEWER",
+          accessStatus: "ACTIVE",
+          participantType: "member"
+        }))
+      }));
+    }
 
     setData((previous) => ({
       ...previous,
@@ -530,12 +569,20 @@ export function App() {
     setMeetingParticipants((previous) => {
       const currentParticipants = previous[meetingKey] ?? [];
       const existingParticipant = currentParticipants.find((item) => item.email === participant.email);
+      const activeHostCount = currentParticipants.filter(
+        (item) => item.role === "HOST" && item.accessStatus === "ACTIVE"
+      ).length;
+      const keepsLastHost =
+        existingParticipant?.role === "HOST" &&
+        existingParticipant.accessStatus === "ACTIVE" &&
+        activeHostCount === 1 &&
+        participant.role !== "HOST";
       const nextParticipant: MeetingParticipantState = {
         id: existingParticipant?.id ?? `${meetingKey}-${participant.email}`,
         meetingKey,
         name: participant.name,
         email: participant.email,
-        role: participant.role,
+        role: keepsLastHost ? "HOST" : participant.role,
         accessStatus: "ACTIVE",
         participantType: participant.participantType
       };
@@ -556,12 +603,29 @@ export function App() {
     updates: Pick<MeetingParticipantState, "accessStatus" | "role">
   ) {
     const meetingKey = buildMeetingKey(projectName, meetingIndex);
-    setMeetingParticipants((previous) => ({
-      ...previous,
-      [meetingKey]: (previous[meetingKey] ?? []).map((participant) =>
-        participant.id === participantId ? { ...participant, ...updates } : participant
-      )
-    }));
+    setMeetingParticipants((previous) => {
+      const currentParticipants = previous[meetingKey] ?? [];
+      const activeHostCount = currentParticipants.filter(
+        (participant) => participant.role === "HOST" && participant.accessStatus === "ACTIVE"
+      ).length;
+
+      return {
+        ...previous,
+        [meetingKey]: currentParticipants.map((participant) => {
+          if (participant.id !== participantId) {
+            return participant;
+          }
+
+          const wouldRemoveLastHost =
+            participant.role === "HOST" &&
+            participant.accessStatus === "ACTIVE" &&
+            activeHostCount === 1 &&
+            (updates.role !== "HOST" || updates.accessStatus !== "ACTIVE");
+
+          return wouldRemoveLastHost ? participant : { ...participant, ...updates };
+        })
+      };
+    });
   }
 
   function handleCreateProjectTask(
@@ -591,6 +655,19 @@ export function App() {
     }));
   }
 
+  function handleUpdateProjectTask(
+    projectName: string,
+    taskId: string,
+    updates: Pick<ProjectTaskState, "assignee" | "description" | "dueDate" | "status" | "title">
+  ) {
+    setProjectTasks((previous) => ({
+      ...previous,
+      [projectName]: (previous[projectName] ?? []).map((task) =>
+        task.id === taskId ? { ...task, ...updates } : task
+      )
+    }));
+  }
+
   function handleDeleteProjectTask(projectName: string, taskId: string) {
     setProjectTasks((previous) => ({
       ...previous,
@@ -609,19 +686,54 @@ export function App() {
       [projectName]: (previous[projectName] ?? []).filter((item) => item.id !== requestId)
     }));
 
-    setProjectMembers((previous) => {
-      const nextMembers = [
-        ...(previous[projectName] ?? []),
+    const meetingKey = buildMeetingKey(projectName, request.meetingIndex);
+    setMeetingParticipants((previous) => ({
+      ...previous,
+      [meetingKey]: [
+        ...(previous[meetingKey] ?? []).filter((participant) => participant.email !== request.email),
         {
+          id: `${meetingKey}-${request.email}`,
+          meetingKey,
           name: request.name,
           email: request.email,
-          role: request.role,
-          since: "2026.06 승인",
-          access: "회의 참여 / 문서 열람",
-          rank: "Member",
-          status: "active" as const
+          role: "VIEWER",
+          accessStatus: "ACTIVE",
+          participantType: "guest"
         }
-      ];
+      ]
+    }));
+  }
+
+  function handleRejectJoinRequest(projectName: string, requestId: string) {
+    setProjectRequests((previous) => ({
+      ...previous,
+      [projectName]: (previous[projectName] ?? []).filter((item) => item.id !== requestId)
+    }));
+  }
+
+  function handleUpdateSpaceMemberRole(
+    projectName: string,
+    memberEmail: string,
+    spaceRole: Exclude<TeamMember["spaceRole"], "OWNER">
+  ) {
+    setProjectMembers((previous) => ({
+      ...previous,
+      [projectName]: (previous[projectName] ?? []).map((member) =>
+        member.email === memberEmail && member.spaceRole !== "OWNER"
+          ? { ...member, spaceRole, access: getSpaceRoleAccessLabel(spaceRole) }
+          : member
+      )
+    }));
+  }
+
+  function handleRemoveSpaceMember(projectName: string, memberEmail: string) {
+    const member = projectMembers[projectName]?.find((item) => item.email === memberEmail);
+    if (!member || member.spaceRole === "OWNER") {
+      return;
+    }
+
+    setProjectMembers((previous) => {
+      const nextMembers = (previous[projectName] ?? []).filter((item) => item.email !== memberEmail);
 
       setData((current) => ({
         ...current,
@@ -638,13 +750,54 @@ export function App() {
         [projectName]: nextMembers
       };
     });
+
+    setMeetingParticipants((previous) => {
+      const next: Record<string, MeetingParticipantState[]> = {};
+      Object.entries(previous).forEach(([meetingKey, participants]) => {
+        next[meetingKey] = meetingKey.startsWith(`${projectName}:`)
+          ? participants.map((participant) =>
+              participant.email === memberEmail ? { ...participant, participantType: "guest" } : participant
+            )
+          : participants;
+      });
+      return next;
+    });
   }
 
-  function handleRejectJoinRequest(projectName: string, requestId: string) {
-    setProjectRequests((previous) => ({
-      ...previous,
-      [projectName]: (previous[projectName] ?? []).filter((item) => item.id !== requestId)
-    }));
+  function handleTransferProjectOwner(
+    projectName: string,
+    targetMemberEmail: string,
+    previousOwnerRole: Exclude<TeamMember["spaceRole"], "OWNER">,
+    confirmation: string
+  ) {
+    if (confirmation !== "TRANSFER OWNER") {
+      return;
+    }
+
+    setProjectMembers((previous) => {
+      const currentMembers = previous[projectName] ?? [];
+      const currentOwner = currentMembers.find((member) => member.spaceRole === "OWNER");
+      const targetMember = currentMembers.find((member) => member.email === targetMemberEmail);
+
+      if (!currentOwner || !targetMember || targetMember.status !== "active" || targetMember.spaceRole === "OWNER") {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [projectName]: currentMembers.map((member) => {
+          if (member.email === targetMember.email) {
+            return { ...member, spaceRole: "OWNER", access: getSpaceRoleAccessLabel("OWNER") };
+          }
+
+          if (member.email === currentOwner.email) {
+            return { ...member, spaceRole: previousOwnerRole, access: getSpaceRoleAccessLabel(previousOwnerRole) };
+          }
+
+          return member;
+        })
+      };
+    });
   }
 
   useEffect(() => {
@@ -712,10 +865,18 @@ export function App() {
           }
         />
         <Route
+          path="/meeting-access"
+          element={
+            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+              {authSession ? <MeetingAccessPage session={authSession} /> : null}
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/live-meeting"
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
-              <LiveMeetingPage data={data.liveMeeting} />
+              {authSession ? <LiveMeetingPage data={data.liveMeeting} session={authSession} /> : null}
             </ProtectedRoute>
           }
         />
@@ -723,7 +884,7 @@ export function App() {
           path="/live-room"
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
-              <LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} />
+              {authSession ? <LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} session={authSession} /> : null}
             </ProtectedRoute>
           }
         />
@@ -732,6 +893,7 @@ export function App() {
           element={
             <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
               <ProjectOverviewPage
+                currentUserEmail={authSession?.user.email ?? ""}
                 data={data.projectOverview}
                 session={authSession}
                 projectAiSpaceIds={projectAiSpaceIds}
@@ -748,6 +910,7 @@ export function App() {
                 onDeleteMeeting={handleDeleteMeeting}
                 onDeleteProjectTask={handleDeleteProjectTask}
                 onMoveProjectTask={handleMoveProjectTask}
+                onUpdateProjectTask={handleUpdateProjectTask}
                 onUpdateMeetingParticipant={handleUpdateMeetingParticipant}
                 onUpdateMeetingStatus={handleUpdateMeetingStatus}
                 spaces={data.workspaceHome.spaces}
@@ -763,7 +926,10 @@ export function App() {
                 inviteMeta={projectInvites}
                 onApproveRequest={handleApproveJoinRequest}
                 onCreateProject={handleCreateProject}
+                onRemoveMember={handleRemoveSpaceMember}
                 onRejectRequest={handleRejectJoinRequest}
+                onTransferOwner={handleTransferProjectOwner}
+                onUpdateMemberRole={handleUpdateSpaceMemberRole}
                 pendingRequests={projectRequests}
                 projectMembers={projectMembers}
                 spaces={data.workspaceHome.spaces}
