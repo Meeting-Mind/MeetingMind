@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:${MEETINGMIND_DB_PORT:5434}/${MEETINGMIND_DB_NAME:meetingmind}
+    username: ${MEETINGMIND_DB_USER:meetingmind}
+    password: ${MEETINGMIND_DB_PASSWORD:meetingmind_local}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

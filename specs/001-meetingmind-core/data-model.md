@@ -87,6 +87,23 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `displayName`: 사용자가 지정한 실제 이름, 미지정 시 null
 - `createdAt`
 
+### MeetingTranscript
+
+- `meetingId`: PK이자 Meeting FK, 회의당 하나의 논리 전사
+- `status`: PENDING, PROCESSING, COMPLETED, FAILED
+- `provider`: STT provider 식별자, 작업 시작 전에는 null 가능
+- `language`: BCP 47 language tag 후보, 미확정이면 null
+- `startedAt`
+- `completedAt`
+- `failureReason`: FAILED일 때만 사용
+- `retentionUntil`: 7일/30일 보존 만료 시각, PERMANENT면 null
+- `legalHold`: 보존 만료 자동 삭제 예외 여부
+- `purgedAt`: 원문 segment 삭제 완료 시각
+- `createdAt`
+- `updatedAt`
+
+`MeetingTranscript`는 전사 작업과 보존 상태를 관리한다. 음성 원본 경로나 blob은 이 엔티티에 장기 저장하지 않는다.
+
 ### TranscriptSegment
 
 - `id`
@@ -177,8 +194,28 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `sourceType`
 - `sourceId`
 - `content`
+- `embeddingJobId`
+- `generation`
+- `isActive`
+- `replacedAt`
 - `embedding`
 - `createdAt`
+
+### EmbeddingJob
+
+- `id`
+- `spaceId`
+- `projectKnowledgeId`: 지식 재색인 작업이면 required
+- `meetingId`: 회의 전사/보고서 재색인 작업이면 required
+- `status`: PENDING, PROCESSING, COMPLETED, FAILED
+- `model`: 실제 embedding model 식별자
+- `dimension`: 생성 vector 차원
+- `generation`: 동일 source의 교체 세대
+- `attemptCount`
+- `failureCode`: provider 원문 대신 내부 정규화 코드
+- `createdAt`
+- `startedAt`
+- `completedAt`
 
 ### Data Constraints
 
@@ -188,6 +225,9 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - Space당 active `OWNER`는 정확히 1명이어야 한다.
 - `MeetingParticipant(meetingId, userId)`는 active participant 기준 unique다.
 - `MeetingSpeaker(meetingId, label)`은 unique다.
+- `MeetingTranscript.meetingId`는 PK/FK이며 회의당 최대 하나다.
+- `MeetingTranscript.status=COMPLETED`이면 `completedAt`이 required이고, `FAILED`이면 `failureReason`이 required다.
+- `MeetingTranscript.retentionUntil`은 `Meeting.retentionPolicy=PERMANENT`이면 null이고 기간 보존이면 설정한다.
 - `TranscriptSegment(meetingId, sequence)`은 unique다.
 - `MeetingReport(meetingId, version)`은 unique다.
 - `MeetingReport(meetingId)` 기준 `status=CONFIRMED and isCurrent=true`는 최대 1개다.
@@ -205,6 +245,9 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - TaskCandidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
+- `EmbeddingJob`은 `projectKnowledgeId`와 `meetingId` 중 최소 하나를 참조해야 한다.
+- 동일 source의 active `EmbeddingChunk`는 최신 완료 generation만 사용한다. 새 generation 완료 전에는 기존 active chunk를 유지한다.
+- embedding model과 vector 차원/index 방식은 `Q-010` 결정 후 고정한다.
 
 ## RAG Chunk Shape
 
@@ -241,6 +284,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - `embeddingText`: embedding provider에 전달할 정규화된 텍스트
 - `metadata`: language, visibility, tags, createdFrom, approvedState 등 검색 필터용 값
 - `embedding`: pgvector 저장 시 vector 값
+- `embeddingJobId`, `generation`, `isActive`: 비동기 재색인 세대와 현재 검색 대상 여부
 - `createdAt`
 
 ### Embedding Text Rule
@@ -266,6 +310,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - 회의별 챗봇은 단일 `meetingId`에 속한 chunk만 검색한다.
 - 프로젝트별 챗봇은 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk만 검색한다.
 - prototype 단계에서는 Backend 권한 필터가 없으므로 프론트/AI 서버가 받는 context를 already-filtered mock context로 간주한다.
+- 실제 pgvector 검색은 `isActive=true`이고 완료된 `EmbeddingJob`에 속한 chunk만 대상으로 한다.
 
 ## Permission Rules
 
@@ -293,5 +338,5 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 ## Retention
 
 - 음성 원본: 기본 장기 보관 없음
-- STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상. 선택지는 7일/30일/영구이며 기본값은 30일이다.
+- STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상. DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`이며 기본값은 `DAYS_30`이다. `legalHold=true`이면 자동 삭제를 보류한다.
 - 보고서/공식 지식: Space 정책에 따른 보존

@@ -1,0 +1,20 @@
+services:
+  meetingmind-db:
+    image: pgvector/pgvector:pg16
+    container_name: meetingmind-postgres-local
+    environment:
+      POSTGRES_DB: ${MEETINGMIND_DB_NAME:-meetingmind}
+      POSTGRES_USER: ${MEETINGMIND_DB_USER:-meetingmind}
+      POSTGRES_PASSWORD: ${MEETINGMIND_DB_PASSWORD:-meetingmind_local}
+    ports:
+      - "${MEETINGMIND_DB_PORT:-5434}:5432"
+    volumes:
+      - meetingmind-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  meetingmind-postgres-data:

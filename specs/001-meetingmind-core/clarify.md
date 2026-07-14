@@ -15,6 +15,7 @@
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
 | Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
 | Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
+| Q-010 | High | pgvector embedding model과 차원 수는 무엇으로 고정할까? | `vector(n)` 타입과 HNSW/IVFFlat index는 차원 수가 확정되어야 안전하게 생성할 수 있다. | Open | |
 
 ## Blocking Decisions
 
@@ -22,6 +23,7 @@
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
 - Q-008은 candidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태·권한·current 전이는 먼저 구현할 수 있다.
 - Q-009는 TaskCandidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태 전이와 중복 확정 방지는 먼저 구현할 수 있다.
+- Q-010은 실제 embedding 생성과 vector index migration 전에 결정해야 한다. 관계형 metadata, embedding job, generation 교체 모델은 먼저 구현할 수 있다.
 
 ## Q-001 Authentication Options
 
@@ -74,3 +76,9 @@
 - D-019: `ADMIN`은 서비스 전체 운영자나 프로그램 관리자가 아니라 특정 Space 안에서 오너가 위임한 프로젝트 관리자 역할이다. 서비스 전체 운영자 역할은 현재 Core Prototype 범위 밖이다.
 - D-020: 회의 삭제 권한은 기본 `OWNER` 또는 해당 회의 `HOST` 전용이다. `ADMIN`은 회의 생성/참여자 관리/수정 override를 가질 수 있지만 삭제 권한은 기본 포함하지 않는다. `ADMIN` 삭제는 명시적 예외 정책이 문서화된 경우에만 허용한다.
 - D-021: `AuthIdentity.provider` 값은 `local`, `google`로 통일한다. 자체 이메일/비밀번호 계정은 `provider=local`이며 `passwordHash`는 `provider=local`일 때만 required다.
+- D-024: 로컬 개발 DB는 다른 프로젝트의 PostgreSQL과 분리된 PostgreSQL 16 + pgvector 컨테이너를 사용한다. 기본 host port는 `5434`이며 Backend `db` profile과 Flyway가 schema를 적용한다.
+- D-025: 공유된 Flyway `V1`~`V6` migration은 수정하지 않는다. 누락 schema와 제약 보강은 `V7` 이후 forward-only migration으로 추가한다.
+- D-026: 회의별 전사 생명주기는 `MeetingTranscript` 1개로 관리한다. `status`, `provider`, `language`, `retentionUntil`, `legalHold`, `purgedAt`을 보존하고 `TranscriptSegment`는 기존 `meetingId` 기준 저장을 유지한다.
+- D-027: `SourceReference`는 API 응답용 논리 모델로 유지하고 별도 다형 FK 테이블을 만들지 않는다. 보고서/태스크 근거는 `sourceIds` JSON 배열, transcript chunk 근거는 `CHUNK_SOURCE_SEGMENT` 관계로 보존한다.
+- D-028: embedding 재생성은 `EmbeddingJob`과 generation으로 추적한다. 새 generation이 완료되기 전까지 기존 active chunk를 유지하고, 완료 시 새 generation을 active로 전환한다.
+- D-029: `Meeting.retentionPolicy` DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`를 사용하고 기본값은 `DAYS_30`으로 한다. `retentionUntil`은 기간 보존일 때 계산하며 영구 보존이면 null이다.

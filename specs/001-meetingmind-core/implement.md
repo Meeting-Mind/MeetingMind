@@ -65,7 +65,7 @@
 | 사용자(Data 담당) | Codex | T060 | Flyway 기반 Meeting, MeetingParticipant, MeetingSpeaker V2 schema migration 작성 |
 | 사용자(Data 담당) | Codex | T061 | Flyway 기반 TranscriptSegment, MeetingReport, report decision/action item V3 schema migration 작성 |
 | 사용자(Data 담당) | Codex | T062 | Flyway 기반 ProjectKnowledge, EmbeddingChunk, chunk source segment V4 schema migration 작성 |
-| 팀원(STT/Audio 담당) | TBD | T063 | retentionPolicy, failureReason, STT 원문 보존 정책 field/default 전략 정리 |
+| 사용자 | Codex | T063-T064, T204-T209 | 로컬 PostgreSQL/pgvector, 전사 보존, 누락 schema, embedding generation migration과 검증 |
 
 ## Files Changed
 
@@ -569,3 +569,52 @@
 - PostgreSQL/pgvector retriever와 embedding worker는 Data/Backend 영속 저장소가 선행되어야 한다.
 - 실제 STT 기반 context 연동은 STT 저장·조회 계약과 권한 필터 구현이 선행되어야 한다.
 - persistent `AI_REQUESTED` audit와 token budget 자동 축소는 별도 후속 milestone이다.
+
+## M027 Local PostgreSQL and pgvector Foundation
+
+### Design
+
+- 공유된 Flyway V1~V6은 수정하지 않고 누락 schema와 제약을 V7~V9 forward migration으로 추가했다.
+- 로컬 DB는 다른 프로젝트 PostgreSQL과 격리된 `pgvector/pgvector:pg16` 컨테이너와 host `5434`를 사용한다.
+- 회의당 `MeetingTranscript` 하나가 `PENDING/PROCESSING/COMPLETED/FAILED`, `retentionUntil`, `legalHold`, `purgedAt`을 관리하고 segment는 기존 `meetingId` FK를 유지한다.
+- `SourceReference`는 DB table이 아닌 API 논리 모델로 결정했다. report/task는 `sourceIds`, transcript chunk는 `chunk_source_segments`로 근거를 보존한다.
+- `requirements/glossary.md`의 물리 이름도 `response.sources`, `source_ids`, `chunk_source_segments`로 맞췄으며 `requirements/INDEX.md` 라우팅 변경은 필요하지 않다.
+- 비동기 재색인은 `EmbeddingJob`, `generation`, `isActive`, `replacedAt`으로 추적한다. embedding model/차원/vector index는 `Q-010` 결정 전까지 강제하지 않는다.
+
+### Changes
+
+- `compose.local.yml`: PostgreSQL 16 + pgvector, named volume, health check, host `5434` 기본값을 추가했다.
+- V7: `auth_identities`, `auth_sessions`, `space_invitations`, `meeting_invitations`, `meeting_rooms`와 token/status/partial unique 제약을 추가했다.
+- V8: retention 기본값/enum, `meeting_transcripts`, `domain_terms`, `audit_logs`와 보존 정리 index를 추가했다.
+- V9: `embedding_jobs`와 chunk generation/active 교체 metadata/index를 추가했다.
+- Spring Boot JDBC starter와 `application-local.yml`을 추가했다. `local` profile을 기본 profile로 지정해 Docker Compose DB와 DataSource/Flyway를 기본 활성화하고, `db` profile은 환경변수 기반 DataSource를 사용한다.
+- README에 로컬 DB 실행, Flyway 적용, 중지 명령과 환경변수 경계를 추가했다.
+
+### Verification
+
+- Passed: `docker compose -f compose.local.yml config`
+- Passed: `meetingmind-postgres-local` health check, PostgreSQL 16.14, pgvector 0.8.5
+- Passed: 빈 DB에 Flyway V1~V9 최초 적용, 9개 migration 모두 success
+- Passed: Flyway 재실행에서 schema version 9 up-to-date 확인
+- Passed: 24개 도메인 table 생성, `DAYS_30` retention 기본값, 핵심 check constraint 6개와 partial index 3개 조회
+- Passed: `cd backend && ./gradlew test`
+- Passed: `git diff --check`
+
+### Local Profile Refinement
+
+- `SPRING_PROFILES_ACTIVE=local`은 기본적으로 `jdbc:postgresql://localhost:5434/meetingmind`, 사용자 `meetingmind`를 사용한다.
+- Compose와 local profile은 동일한 `MEETINGMIND_DB_*` 이름, 사용자, 비밀번호, port 기본값을 공유하며 Spring 표준 datasource 환경변수로 Backend만 별도 override할 수 있다.
+- Passed: `SPRING_PROFILES_ACTIVE=local SERVER_PORT=18080 ./gradlew bootRun`, Hikari PostgreSQL 연결, Flyway v9 up-to-date
+- Passed: `GET http://127.0.0.1:18080/api/workspace` -> `200`
+- Passed: profile 미지정 `./gradlew bootRun`, default `local` 자동 적용, Tomcat `8080` 기동, `GET http://127.0.0.1:8080/api/workspace` -> `200`
+- `./gradlew bootRun`은 기본 `local` profile로 Docker PostgreSQL에 연결한다. Docker 없이 실행할 별도 in-memory profile은 현재 제공하지 않는다.
+- Gradle `test` task는 `test` profile을 명시해 DataSource/Flyway를 비활성화한다. 따라서 단위/컨텍스트 테스트는 Docker 실행 여부와 독립적이고, 실제 schema는 별도 Compose/Flyway 검증으로 확인한다.
+- Passed: `meetingmind-db` 중지 상태에서 `cd backend && ./gradlew test`
+- `db` profile은 배포/CI용으로 분리하고 datasource URL/username/password 환경변수를 필수로 요구한다.
+
+### Remaining Boundary
+
+- T210: Auth/Workspace/STT in-memory/file 저장소의 PostgreSQL repository 및 transaction 전환
+- Q-010: embedding model과 vector 차원 확정 후 `vector(n)` 및 HNSW/IVFFlat index migration
+- T211: embedding worker와 권한 필터된 pgvector retriever 연결
+- 보존 만료 정리 scheduler와 `legalHold` 운영 API

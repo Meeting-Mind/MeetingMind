@@ -35,7 +35,7 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | AI/RAG | 프로젝트 AI | ProjectAI | 프로젝트 내 접근 가능한 공식지식과 회의기록을 바탕으로 답변하는 AI 기능. | Space scope에서 동작하되 권한 필터를 먼저 적용한다. | /spaces/{spaceId}/ai/messages | MeetingAI와 혼용 금지 | FR-PBOT-01~05, NFR-AZ-04 |
 | AI/RAG | 회의 AI | MeetingAI | 단일 회의 범위의 전사, 결정, 회의록을 바탕으로 답변하는 AI 기능. | Meeting scope에서만 동작한다. | /meetings/{meetingId}/ai/messages | ProjectAI와 혼용 금지 | FR-MBOT-01~04 |
 | AI/RAG | 검색 범위 | SearchScope | AI 또는 검색이 참조할 수 있는 데이터 범위. PROJECT, MEETING 등으로 분리한다. | 권한 필터와 함께 평가한다. | scope, sourceScope | 프롬프트 문구만으로 제한했다고 표현 금지 | NFR-AZ-01~04 |
-| AI/RAG | 출처 | SourceReference | AI 응답이나 청크가 근거로 삼은 회의, 시간, 발화자, 문서 위치 정보. | EmbeddingChunk와 AI 응답에 포함한다. | source_references 또는 response.sources | 단순 URL과 혼용 금지 | FR-PBOT-03, FR-MBOT-03, NFR-AI-02 |
+| AI/RAG | 출처 | SourceReference | AI 응답이나 청크가 근거로 삼은 회의, 시간, 발화자, 문서 위치 정보. | EmbeddingChunk와 AI 응답에 포함한다. | response.sources, source_ids, chunk_source_segments | 단순 URL과 혼용 금지. 별도 다형 FK 테이블로 저장하지 않는다. | FR-PBOT-03, FR-MBOT-03, NFR-AI-02 |
 | 회의록 | 회의록 | MeetingReport | 전사 기반으로 생성·편집·확정되는 공식 회의 기록 문서. | Meeting에 속하며 버전과 확정 상태를 가진다. | meeting_reports, /meetings/{meetingId}/reports | 요약/Summary와 혼용 금지 | FR-RPT-01~07 |
 | 회의록 | 요약 | Summary | 전사 또는 회의록 일부를 짧게 압축한 내용. | MeetingReport의 한 섹션 또는 AI 응답 일부가 될 수 있다. | summary 필드 | 회의록 전체와 혼용 금지 | FR-RPT-01 |
 | 회의록 | 결정사항 | Decision | 회의 중 합의되거나 확정된 사항. | MeetingReport에 포함되며 SourceReference를 가진다. | decisions | 의견/논의사항과 혼용 금지 | FR-RPT-01, FR-MBOT-03 |
