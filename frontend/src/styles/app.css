@@ -23,6 +23,11 @@
   --app-radius-md: 18px;
 }
 
+html:has(body.app-theme) {
+  overflow: hidden;
+  height: 100%;
+}
+
 body.app-theme {
   margin: 0;
   min-width: 100vw;
@@ -74,8 +79,9 @@ body.app-theme select {
   height: calc(100vh / var(--app-scale));
   transform: scale(var(--app-scale));
   transform-origin: top left;
-  /* ponytail: OS window-snap resizes can leave the scaled layer stale in Chromium until repainted; backface-visibility forces a fresh composite. */
+  /* ponytail: OS window-snap resizes can leave the scaled layer stale in Chromium until repainted; backface-visibility + will-change force a fresh composite. */
   backface-visibility: hidden;
+  will-change: transform;
 }
 
 body.app-theme.meeting-access-body {
@@ -3342,7 +3348,7 @@ body.app-theme.meeting-access-body {
   flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 440px;
-  align-items: start;
+  align-items: stretch;
   gap: 24px;
   padding-top: 20px;
   overflow: hidden;
@@ -3383,7 +3389,7 @@ body.app-theme.meeting-access-body {
   width: 100%;
   aspect-ratio: 16 / 9;
   min-height: 0;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   max-height: calc((100vh / var(--app-scale)) - 360px);
   overflow: hidden;
   padding: 20px;
@@ -3501,6 +3507,7 @@ body.app-theme.meeting-access-body {
   justify-content: center;
   gap: 18px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
 .meeting-prejoin-control,
@@ -3568,6 +3575,7 @@ body.app-theme.meeting-access-body {
 .meeting-prejoin-footer-row {
   display: flex;
   justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .meeting-prejoin-actions {

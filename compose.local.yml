@@ -18,3 +18,5 @@ services:
 
 volumes:
   meetingmind-postgres-data:
+
+# docker compose -f compose.local.yml up -d
