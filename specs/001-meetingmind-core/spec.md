@@ -41,15 +41,17 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - Meeting AI는 현재 회의 맥락만 사용해 질문에 답한다.
 - Project AI는 Backend가 Space 접근과 회의 ACL을 선필터한 공식 지식/회의 요약으로 1차 질의응답 경계를 제공한다.
 - Report Agent는 AI 생성 회의 보고서 편집 흐름을 제공한다.
-- 현재는 mock 데이터와 최소 API를 허용하되 실제 구현 전환 지점을 명확히 문서화한다.
+- Auth, Space/Meeting ACL, Transcript, Report, Task, Project Knowledge, Audit 데이터를 PostgreSQL에 영속화한다.
+- Meeting AI와 Project AI의 source 후보는 PostgreSQL 원천 데이터에서 읽고 Backend 권한 선필터 후 AI 서버에 전달한다.
+- Frontend demo fallback과 Backend test profile에서는 mock/in-memory 구현을 허용하되 실제 runtime 데이터 소스와 분리한다.
 
 ### Out of Scope
 
 - 조직 관리, 초대 승인 정책, 감사 로그까지 포함한 완전한 사용자/관리자 인가
 - 실제 STT 파이프라인
-- PostgreSQL/pgvector 영속화
 - S3 파일 저장
 - Project AI의 실제 PostgreSQL/pgvector 멀티 회의 RAG와 embedding worker
+- embedding provider/model, vector 차원, HNSW/IVFFlat index와 semantic retriever 구현
 - 운영 배포 자동화
 
 ## Functional Requirements
@@ -91,6 +93,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 - AC-002: 스펙, 계획, 작업 목록이 권한 기반 AI 원칙과 충돌하지 않는다.
 - AC-003: 향후 구현자가 mock 데이터 제거, 인증 추가, RAG 도입의 순서를 이해할 수 있다.
 - AC-004: 최소 검증 명령이 문서화되어 있다.
+- AC-005: Backend 재시작 후 Auth/Workspace/회의 산출물이 유지되고 권한·확정 mutation이 DB transaction과 제약으로 검증된다.
 
 ## Resolved Decisions
 

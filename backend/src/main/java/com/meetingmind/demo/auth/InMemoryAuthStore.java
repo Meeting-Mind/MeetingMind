@@ -5,33 +5,39 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class InMemoryAuthStore {
+@Profile("test")
+public class InMemoryAuthStore implements AuthStore {
 
     private final Map<String, AuthUser> usersById = new HashMap<>();
     private final Map<String, String> userIdByEmail = new HashMap<>();
     private final Map<String, AuthIdentity> identitiesByKey = new HashMap<>();
     private final Map<String, RefreshTokenSession> refreshSessionsByHash = new HashMap<>();
 
-    synchronized Optional<AuthUser> findUserById(String userId) {
+    @Override
+    public synchronized Optional<AuthUser> findUserById(String userId) {
         return Optional.ofNullable(usersById.get(userId));
     }
 
-    synchronized Optional<AuthUser> findUserByEmail(String email) {
-        return Optional.ofNullable(userIdByEmail.get(normalizeEmail(email))).map(usersById::get);
+    @Override
+    public synchronized Optional<AuthUser> findUserByEmail(String email) {
+        return Optional.ofNullable(userIdByEmail.get(AuthStore.normalizeEmail(email))).map(usersById::get);
     }
 
-    synchronized Optional<AuthIdentity> findIdentity(String provider, String providerUserId) {
+    @Override
+    public synchronized Optional<AuthIdentity> findIdentity(String provider, String providerUserId) {
         return Optional.ofNullable(identitiesByKey.get(identityKey(provider, providerUserId)));
     }
 
-    synchronized AuthUser createUser(String email, String displayName, String pictureUrl, Instant now) {
+    @Override
+    public synchronized AuthUser createUser(String email, String displayName, String pictureUrl, Instant now) {
         String userId = "user-" + UUID.randomUUID();
         AuthUser user = new AuthUser(
                 userId,
-                normalizeEmail(email),
+                AuthStore.normalizeEmail(email),
                 displayName,
                 pictureUrl,
                 "active",
@@ -43,7 +49,8 @@ public class InMemoryAuthStore {
         return user;
     }
 
-    synchronized AuthUser touchLogin(AuthUser user, Instant now) {
+    @Override
+    public synchronized AuthUser touchLogin(AuthUser user, Instant now) {
         AuthUser updated = new AuthUser(
                 user.id(),
                 user.email(),
@@ -58,7 +65,8 @@ public class InMemoryAuthStore {
         return updated;
     }
 
-    synchronized AuthIdentity saveIdentity(
+    @Override
+    public synchronized AuthIdentity saveIdentity(
             String userId,
             String provider,
             String providerUserId,
@@ -78,7 +86,8 @@ public class InMemoryAuthStore {
         return identity;
     }
 
-    synchronized AuthIdentity touchIdentity(AuthIdentity identity, Instant now) {
+    @Override
+    public synchronized AuthIdentity touchIdentity(AuthIdentity identity, Instant now) {
         AuthIdentity updated = new AuthIdentity(
                 identity.id(),
                 identity.userId(),
@@ -92,7 +101,8 @@ public class InMemoryAuthStore {
         return updated;
     }
 
-    synchronized RefreshTokenSession saveRefreshSession(
+    @Override
+    public synchronized RefreshTokenSession saveRefreshSession(
             String userId,
             String refreshTokenHash,
             Instant issuedAt,
@@ -112,11 +122,13 @@ public class InMemoryAuthStore {
         return session;
     }
 
-    synchronized Optional<RefreshTokenSession> findRefreshSession(String refreshTokenHash) {
+    @Override
+    public synchronized Optional<RefreshTokenSession> findRefreshSessionForUpdate(String refreshTokenHash) {
         return Optional.ofNullable(refreshSessionsByHash.get(refreshTokenHash));
     }
 
-    synchronized void revokeRefreshSession(String refreshTokenHash, Instant revokedAt) {
+    @Override
+    public synchronized void revokeRefreshSession(String refreshTokenHash, Instant revokedAt) {
         RefreshTokenSession session = refreshSessionsByHash.get(refreshTokenHash);
         if (session == null) {
             return;
@@ -138,9 +150,5 @@ public class InMemoryAuthStore {
 
     private static String identityKey(String provider, String providerUserId) {
         return provider + ":" + providerUserId;
-    }
-
-    static String normalizeEmail(String email) {
-        return email.trim().toLowerCase();
     }
 }

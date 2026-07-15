@@ -1,19 +1,21 @@
 package com.meetingmind.demo.auth;
 
 import java.time.Instant;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
 
-    private final InMemoryAuthStore store;
+    private final AuthStore store;
     private final PasswordHasher passwordHasher;
     private final AuthTokenService tokenService;
     private final GoogleCredentialVerifier googleCredentialVerifier;
 
     public AuthService(
-            InMemoryAuthStore store,
+            AuthStore store,
             PasswordHasher passwordHasher,
             AuthTokenService tokenService,
             GoogleCredentialVerifier googleCredentialVerifier
@@ -24,8 +26,9 @@ public class AuthService {
         this.googleCredentialVerifier = googleCredentialVerifier;
     }
 
-    AuthTokenResponse signup(SignupRequest request, String userAgent) {
-        String email = InMemoryAuthStore.normalizeEmail(request.email());
+    @Transactional
+    public AuthTokenResponse signup(SignupRequest request, String userAgent) {
+        String email = AuthStore.normalizeEmail(request.email());
         if (store.findIdentity("local", email).isPresent() || store.findUserByEmail(email).isPresent()) {
             throw new AuthException(HttpStatus.CONFLICT, "EMAIL_ALREADY_REGISTERED", "이미 가입된 이메일입니다.");
         }
@@ -34,13 +37,18 @@ public class AuthService {
         }
 
         Instant now = tokenService.now();
-        AuthUser user = store.createUser(email, request.displayName().trim(), null, now);
-        store.saveIdentity(user.id(), "local", email, passwordHasher.hash(request.password()), now);
-        return issueTokenPair(user, userAgent);
+        try {
+            AuthUser user = store.createUser(email, request.displayName().trim(), null, now);
+            store.saveIdentity(user.id(), "local", email, passwordHasher.hash(request.password()), now);
+            return issueTokenPair(user, userAgent);
+        } catch (DataIntegrityViolationException exception) {
+            throw new AuthException(HttpStatus.CONFLICT, "EMAIL_ALREADY_REGISTERED", "이미 가입된 이메일입니다.");
+        }
     }
 
-    AuthTokenResponse login(LoginRequest request, String userAgent) {
-        String email = InMemoryAuthStore.normalizeEmail(request.email());
+    @Transactional
+    public AuthTokenResponse login(LoginRequest request, String userAgent) {
+        String email = AuthStore.normalizeEmail(request.email());
         AuthIdentity identity = store.findIdentity("local", email)
                 .orElseThrow(this::invalidCredentials);
         if (!passwordHasher.matches(request.password(), identity.passwordHash())) {
@@ -55,7 +63,8 @@ public class AuthService {
         return issueTokenPair(user, userAgent);
     }
 
-    AuthTokenResponse googleLogin(GoogleLoginRequest request, String userAgent) {
+    @Transactional
+    public AuthTokenResponse googleLogin(GoogleLoginRequest request, String userAgent) {
         GoogleUserInfo googleUser = googleCredentialVerifier.verify(request.credential());
         Instant now = tokenService.now();
 
@@ -80,10 +89,11 @@ public class AuthService {
         return issueTokenPair(user, userAgent);
     }
 
-    AuthTokenResponse refresh(RefreshTokenRequest request, String userAgent) {
+    @Transactional
+    public AuthTokenResponse refresh(RefreshTokenRequest request, String userAgent) {
         String refreshTokenHash = tokenService.hashRefreshToken(request.refreshToken());
         Instant now = tokenService.now();
-        RefreshTokenSession session = store.findRefreshSession(refreshTokenHash)
+        RefreshTokenSession session = store.findRefreshSessionForUpdate(refreshTokenHash)
                 .filter(found -> found.isActive(now))
                 .orElseThrow(this::invalidRefreshToken);
         store.revokeRefreshSession(refreshTokenHash, now);
@@ -94,6 +104,7 @@ public class AuthService {
         return issueTokenPair(user, userAgent);
     }
 
+    @Transactional(readOnly = true)
     public AuthUserResponse currentUser(String authorizationHeader) {
         String userId = tokenService.resolveSubject(authorizationHeader);
         return store.findUserById(userId)
@@ -101,11 +112,12 @@ public class AuthService {
                 .orElseThrow(() -> new AuthException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "사용자를 찾을 수 없습니다."));
     }
 
-    LogoutResponse logout(String authorizationHeader, LogoutRequest request) {
+    @Transactional
+    public LogoutResponse logout(String authorizationHeader, LogoutRequest request) {
         tokenService.resolveSubject(authorizationHeader);
         String refreshTokenHash = tokenService.hashRefreshToken(request.refreshToken());
         Instant now = tokenService.now();
-        RefreshTokenSession session = store.findRefreshSession(refreshTokenHash)
+        RefreshTokenSession session = store.findRefreshSessionForUpdate(refreshTokenHash)
                 .orElseThrow(this::invalidRefreshToken);
         if (!session.isActive(now)) {
             throw invalidRefreshToken();

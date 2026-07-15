@@ -12,10 +12,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class InMemoryWorkspaceStore {
+@Profile("test")
+public class InMemoryWorkspaceStore extends WorkspaceStore {
 
     private final Map<String, User> usersById = new LinkedHashMap<>();
     private final Map<String, Space> spacesById = new LinkedHashMap<>();
@@ -105,6 +107,11 @@ public class InMemoryWorkspaceStore {
                 .toList();
     }
 
+    @Override
+    synchronized void lockSpace(String spaceId) {
+        // synchronized store methods already serialize in-memory mutations.
+    }
+
     synchronized SpaceMember updateSpaceMemberRole(String memberId, SpaceRole role) {
         SpaceMember current = spaceMembersById.get(memberId);
         SpaceMember updated = new SpaceMember(
@@ -184,6 +191,27 @@ public class InMemoryWorkspaceStore {
                 .toList();
     }
 
+    @Override
+    synchronized List<Meeting> findProjectAiMeetings(String spaceId, String userId) {
+        Optional<SpaceMember> membership = findSpaceMember(spaceId, userId);
+        if (membership.isEmpty()) {
+            return List.of();
+        }
+        if (membership.get().role() == SpaceRole.OWNER || membership.get().role() == SpaceRole.ADMIN) {
+            return findMeetingsBySpaceId(spaceId);
+        }
+        return findMeetingsBySpaceId(spaceId).stream()
+                .filter(meeting -> findMeetingParticipant(meeting.id(), userId)
+                        .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE)
+                        .isPresent())
+                .toList();
+    }
+
+    @Override
+    synchronized void lockMeeting(String meetingId) {
+        // synchronized store methods already serialize in-memory mutations.
+    }
+
     synchronized MeetingJoinRequest createMeetingJoinRequest(
             String meetingId,
             String userId,
@@ -208,6 +236,11 @@ public class InMemoryWorkspaceStore {
             return Optional.empty();
         }
         return Optional.of(request);
+    }
+
+    @Override
+    synchronized Optional<MeetingJoinRequest> findMeetingJoinRequestByIdForUpdate(String meetingId, String requestId) {
+        return findMeetingJoinRequestById(meetingId, requestId);
     }
 
     synchronized List<MeetingJoinRequest> findMeetingJoinRequests(String meetingId) {
@@ -391,6 +424,11 @@ public class InMemoryWorkspaceStore {
         return Optional.ofNullable(taskCandidatesById.get(candidateId));
     }
 
+    @Override
+    synchronized Optional<TaskCandidate> findTaskCandidateByIdForUpdate(String candidateId) {
+        return findTaskCandidateById(candidateId);
+    }
+
     synchronized List<TaskCandidate> findTaskCandidates(String meetingId) {
         return taskCandidatesById.values()
                 .stream()
@@ -459,8 +497,5 @@ public class InMemoryWorkspaceStore {
 
     synchronized List<AuditEvent> findAuditEvents() {
         return List.copyOf(auditEventsById.values());
-    }
-
-    record OwnerTransferUpdate(SpaceMember newOwner, SpaceMember previousOwner) {
     }
 }

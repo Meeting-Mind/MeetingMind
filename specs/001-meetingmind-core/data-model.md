@@ -264,7 +264,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 
 ## RAG Chunk Shape
 
-실제 STT/DB/pgvector가 구현되기 전 AI prototype은 아래 논리 구조를 기준으로 mock transcript를 chunk로 변환한다. `TranscriptSegment`는 원본 저장 단위이고, `EmbeddingChunk`는 검색/임베딩 단위다.
+Backend는 아래 논리 구조의 `TranscriptSegment` 원천을 PostgreSQL에 저장한다. AI prototype은 pgvector semantic retriever가 연결되기 전까지 Backend가 권한 필터 후 전달한 source를 같은 구조의 chunk로 변환한다. `TranscriptSegment`는 원본 저장 단위이고, `EmbeddingChunk`는 검색/임베딩 단위다.
 
 ### TranscriptSegment Source
 
@@ -322,7 +322,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - 회의 중 용어 설명은 `glossary`, 현재 회의 transcript window, 현재 회의 decision/action/report chunk만 검색한다.
 - 회의별 챗봇은 단일 `meetingId`에 속한 chunk만 검색한다.
 - 프로젝트별 챗봇은 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk만 검색한다.
-- prototype 단계에서는 Backend 권한 필터가 없으므로 프론트/AI 서버가 받는 context를 already-filtered mock context로 간주한다.
+- Backend는 active SpaceMember와 MeetingParticipant를 PostgreSQL 조회에서 선필터하고 AI 서버에는 `already_filtered` context와 `allowedMeetingIds`만 전달한다.
 - 실제 pgvector 검색은 `isActive=true`이고 완료된 `EmbeddingJob`에 속한 chunk만 대상으로 한다.
 
 ## Permission Rules

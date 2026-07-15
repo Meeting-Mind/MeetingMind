@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { createMeeting as createMeetingRequest, createSpace, fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
+import { createMeeting, createSpace, fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
 import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
@@ -299,26 +299,24 @@ export function App() {
       }
     }
 
+    const owner = authSession?.user;
+    const seededMembers: TeamMember[] = owner
+      ? [
+          {
+            name: owner.displayName || owner.email,
+            email: owner.email,
+            role: "Owner",
+            spaceRole: "OWNER",
+            since: "방금 합류",
+            access: getSpaceRoleAccessLabel("OWNER"),
+            rank: "팀 리드",
+            status: "active"
+          }
+        ]
+      : [];
+
     setProjectMeetings((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
-    setProjectMembers((previous) => ({
-      ...previous,
-      [normalizedName]:
-        previous[normalizedName] ??
-        (authSession
-          ? [
-              {
-                name: authSession.user.displayName || authSession.user.email,
-                email: authSession.user.email,
-                role: "프로젝트 오너",
-                spaceRole: "OWNER",
-                since: "방금 합류",
-                access: getSpaceRoleAccessLabel("OWNER"),
-                rank: "팀 리드",
-                status: "active"
-              }
-            ]
-          : [])
-    }));
+    setProjectMembers((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? seededMembers }));
     setProjectRequests((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
     setProjectInvites((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? buildInviteMeta(normalizedName) }));
     setProjectTasks((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
@@ -328,7 +326,7 @@ export function App() {
       const nextSpace = {
         id: spaceId,
         name: normalizedName,
-        members: "멤버 0명",
+        members: seededMembers.length ? "멤버 1명" : "멤버 0명",
         meetings: "진행 회의 0건",
         updatedAt: "방금 업데이트",
         description: description.trim() || "새 프로젝트 설명이 아직 작성되지 않았습니다.",
@@ -496,14 +494,14 @@ export function App() {
     const existingMeetings = projectMeetings[projectName] ?? [];
     const nextMeeting = buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload);
 
-    if (authSession) {
+    if (authSession && payload?.title && payload?.scheduledAt) {
       try {
-        const response = await createMeetingRequest(authSession, targetSpace.id, {
-          title: nextMeeting.title,
-          scheduledAt: nextMeeting.scheduledAt ?? new Date().toISOString()
+        const created = await createMeeting(authSession, targetSpace.id, {
+          title: payload.title,
+          scheduledAt: payload.scheduledAt
           // ponytail: participantUserIds skipped, mock members have no real backend userId to map from email yet
         });
-        nextMeeting.id = response.id;
+        nextMeeting.id = created.id;
       } catch (error) {
         console.error("[App] createMeeting failed, falling back to local-only meeting", error);
       }
@@ -875,6 +873,28 @@ export function App() {
       .then((response) => {
         if (active) {
           setProjectAiSpaceIds(response.spaces.map((space) => space.id));
+          setProjectMembers((previous) => {
+            const next = { ...previous };
+            response.spaces.forEach((space) => {
+              const members = next[space.name] ?? [];
+              if (!members.some((member) => member.email === authSession.user.email)) {
+                next[space.name] = [
+                  ...members,
+                  {
+                    name: authSession.user.displayName,
+                    email: authSession.user.email,
+                    role: "Member",
+                    spaceRole: space.role,
+                    since: "이미 합류",
+                    access: getSpaceRoleAccessLabel(space.role),
+                    rank: "팀원",
+                    status: "active"
+                  }
+                ];
+              }
+            });
+            return next;
+          });
         }
       })
       .catch(() => {
