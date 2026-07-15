@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
+import { createMeeting, createSpace, fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
 import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
@@ -281,14 +281,43 @@ export function App() {
     }
   }
 
-  function handleCreateProject({ name, description }: { name: string; description: string }) {
+  async function handleCreateProject({ name, description }: { name: string; description: string }) {
     const normalizedName = name.trim();
     if (!normalizedName) {
       return;
     }
 
+    let spaceId = buildSpaceId(normalizedName);
+    if (authSession) {
+      try {
+        const created = await createSpace(authSession, {
+          name: normalizedName,
+          description: description.trim() || null
+        });
+        spaceId = created.id;
+      } catch {
+        // keep local fallback spaceId; mock state below still lets the flow continue
+      }
+    }
+
+    const owner = authSession?.user;
+    const seededMembers: TeamMember[] = owner
+      ? [
+          {
+            name: owner.displayName,
+            email: owner.email,
+            role: "Owner",
+            spaceRole: "OWNER",
+            since: "방금 합류",
+            access: getSpaceRoleAccessLabel("OWNER"),
+            rank: "팀 리드",
+            status: "active"
+          }
+        ]
+      : [];
+
     setProjectMeetings((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
-    setProjectMembers((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
+    setProjectMembers((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? seededMembers }));
     setProjectRequests((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
     setProjectInvites((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? buildInviteMeta(normalizedName) }));
     setProjectTasks((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
@@ -296,9 +325,9 @@ export function App() {
     setData((previous) => {
       const existingIndex = previous.workspaceHome.spaces.findIndex((space) => space.name === normalizedName);
       const nextSpace = {
-        id: previous.workspaceHome.spaces[existingIndex]?.id ?? buildSpaceId(normalizedName),
+        id: previous.workspaceHome.spaces[existingIndex]?.id ?? spaceId,
         name: normalizedName,
-        members: "멤버 0명",
+        members: seededMembers.length ? "멤버 1명" : "멤버 0명",
         meetings: "진행 회의 0건",
         updatedAt: "방금 업데이트",
         description: description.trim() || "새 프로젝트 설명이 아직 작성되지 않았습니다.",
@@ -457,7 +486,7 @@ export function App() {
     navigate("/spaces");
   }
 
-  function handleCreateMeeting(projectName: string, payload?: CreateMeetingPayload) {
+  async function handleCreateMeeting(projectName: string, payload?: CreateMeetingPayload) {
     const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
     if (!targetSpace) {
       return;
@@ -465,6 +494,18 @@ export function App() {
 
     const existingMeetings = projectMeetings[projectName] ?? [];
     const nextMeeting = buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload);
+
+    if (authSession && payload?.title && payload?.scheduledAt) {
+      try {
+        const created = await createMeeting(authSession, targetSpace.id, {
+          title: payload.title,
+          scheduledAt: payload.scheduledAt
+        });
+        nextMeeting.id = created.id;
+      } catch {
+        // keep local fallback meeting id; mock state below still lets the flow continue
+      }
+    }
 
     setProjectMeetings((previous) => {
       return {
@@ -832,6 +873,28 @@ export function App() {
       .then((response) => {
         if (active) {
           setProjectAiSpaceIds(response.spaces.map((space) => space.id));
+          setProjectMembers((previous) => {
+            const next = { ...previous };
+            response.spaces.forEach((space) => {
+              const members = next[space.name] ?? [];
+              if (!members.some((member) => member.email === authSession.user.email)) {
+                next[space.name] = [
+                  ...members,
+                  {
+                    name: authSession.user.displayName,
+                    email: authSession.user.email,
+                    role: "Member",
+                    spaceRole: space.role,
+                    since: "이미 합류",
+                    access: getSpaceRoleAccessLabel(space.role),
+                    rank: "팀원",
+                    status: "active"
+                  }
+                ];
+              }
+            });
+            return next;
+          });
         }
       })
       .catch(() => {
