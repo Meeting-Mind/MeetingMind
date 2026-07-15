@@ -298,8 +298,8 @@ export function ProjectOverviewPage({
   onCreateMeeting?: (
     projectName: string,
     payload?: { title?: string; scheduledAt?: string; participantEmails?: string[] }
-  ) => void;
-  onCreateProject?: (payload: { name: string; description: string }) => void;
+  ) => Promise<void>;
+  onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
   onCreateProjectTask?: (projectName: string, task: Omit<ProjectTaskState, "id" | "sourceCandidateId">) => void;
   onDeleteMeeting?: (projectName: string, meetingIndex: string) => void;
   onDeleteProjectTask?: (projectName: string, taskId: string) => void;
@@ -350,6 +350,8 @@ export function ProjectOverviewPage({
   const [selectedMemberRole, setSelectedMemberRole] = useState<MeetingParticipantState["role"]>("VIEWER");
   const [newMeetingTitle, setNewMeetingTitle] = useState("");
   const [newMeetingAt, setNewMeetingAt] = useState("2026-07-10T10:00");
+  const [meetingCreateError, setMeetingCreateError] = useState("");
+  const [meetingCreating, setMeetingCreating] = useState(false);
   const [meetingDeleteCandidate, setMeetingDeleteCandidate] = useState("");
   const [meetingDeleteConfirm, setMeetingDeleteConfirm] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
@@ -577,17 +579,25 @@ export function ProjectOverviewPage({
     setIsProjectSettingsOpen(false);
   }
 
-  function handleCreateMeeting(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt) {
+    if (!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt || !onCreateMeeting || meetingCreating) {
       return;
     }
 
-    onCreateMeeting?.(selectedProjectName, {
-      title: newMeetingTitle.trim(),
-      scheduledAt: new Date(newMeetingAt).toISOString()
-    });
-    setNewMeetingTitle("");
+    setMeetingCreateError("");
+    setMeetingCreating(true);
+    try {
+      await onCreateMeeting(selectedProjectName, {
+        title: newMeetingTitle.trim(),
+        scheduledAt: new Date(newMeetingAt).toISOString()
+      });
+      setNewMeetingTitle("");
+    } catch (error) {
+      setMeetingCreateError(error instanceof Error ? error.message : "회의를 생성하지 못했습니다.");
+    } finally {
+      setMeetingCreating(false);
+    }
   }
 
   function handleDeleteProject() {
@@ -847,7 +857,7 @@ export function ProjectOverviewPage({
                   <span>회의 제목</span>
                   <input
                     aria-label="새 회의 제목"
-                    disabled={!canCreateMeeting}
+                    disabled={!canCreateMeeting || meetingCreating}
                     onChange={(event) => setNewMeetingTitle(event.target.value)}
                     placeholder="예: 권한 정책 검토"
                     type="text"
@@ -858,14 +868,17 @@ export function ProjectOverviewPage({
                   <span>일시</span>
                   <input
                     aria-label="새 회의 일시"
-                    disabled={!canCreateMeeting}
+                    disabled={!canCreateMeeting || meetingCreating}
                     onChange={(event) => setNewMeetingAt(event.target.value)}
                     type="datetime-local"
                     value={newMeetingAt}
                   />
                 </label>
-                <button disabled={!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt} type="submit">회의 생성</button>
+                <button disabled={!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt || meetingCreating} type="submit">
+                  {meetingCreating ? "생성 중..." : "회의 생성"}
+                </button>
               </form>
+              {meetingCreateError ? <p aria-live="polite" className="workspace-form-error">{meetingCreateError}</p> : null}
 
               {selectedMeeting ? (
                 <>

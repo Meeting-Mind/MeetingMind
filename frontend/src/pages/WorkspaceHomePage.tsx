@@ -4,7 +4,7 @@ import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type { WorkspaceData } from "../types";
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
-type WorkspaceDataSource = "legacy-api" | "mock-fallback";
+type WorkspaceDataSource = "workspace-api" | "workspace-api-partial" | "legacy-api" | "mock-fallback";
 type CalendarView = "month" | "week" | "day";
 type CalendarEvent = {
   id: string;
@@ -152,8 +152,8 @@ export function WorkspaceHomePage({
   actionItems: WorkspaceData["meetingAi"]["actions"];
   data: WorkspaceData["workspaceHome"];
   dataSource: WorkspaceDataSource;
-  onCreateMeeting?: (projectName: string, payload?: { title?: string; scheduledAt?: string }) => void;
-  onCreateProject?: (payload: { name: string; description: string }) => void;
+  onCreateMeeting?: (projectName: string, payload?: { title?: string; scheduledAt?: string }) => Promise<void>;
+  onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
   projectMeetings: Record<string, ProjectMeeting[]>;
 }) {
   useEffect(() => {
@@ -172,6 +172,8 @@ export function WorkspaceHomePage({
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingSpaceId, setMeetingSpaceId] = useState(data.spaces[0]?.id ?? "");
   const [meetingDateTime, setMeetingDateTime] = useState("2026-07-10T10:00");
+  const [meetingCreateError, setMeetingCreateError] = useState("");
+  const [meetingCreating, setMeetingCreating] = useState(false);
   const totalMeetings = getTotalMeetings(data.spaces);
   const totalMembers = data.spaces.reduce((total, space) => total + parseMemberCount(space.members), 0);
   const calendarEvents = useMemo(() => buildCalendarEvents(data.spaces, projectMeetings), [data.spaces, projectMeetings]);
@@ -224,19 +226,27 @@ export function WorkspaceHomePage({
   );
   const calendarDays = buildCalendarDays(calendarView, selectedDate);
 
-  function handleCreateCalendarMeeting(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateCalendarMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const targetSpace = data.spaces.find((space) => space.id === meetingSpaceId);
     const trimmedTitle = meetingTitle.trim();
-    if (!targetSpace || !trimmedTitle || !meetingDateTime) {
+    if (!targetSpace || !trimmedTitle || !meetingDateTime || !onCreateMeeting || meetingCreating) {
       return;
     }
 
-    onCreateMeeting?.(targetSpace.name, {
-      title: trimmedTitle,
-      scheduledAt: new Date(meetingDateTime).toISOString()
-    });
-    setMeetingTitle("");
+    setMeetingCreateError("");
+    setMeetingCreating(true);
+    try {
+      await onCreateMeeting(targetSpace.name, {
+        title: trimmedTitle,
+        scheduledAt: new Date(meetingDateTime).toISOString()
+      });
+      setMeetingTitle("");
+    } catch (error) {
+      setMeetingCreateError(error instanceof Error ? error.message : "회의를 생성하지 못했습니다.");
+    } finally {
+      setMeetingCreating(false);
+    }
   }
 
   return (
@@ -246,7 +256,13 @@ export function WorkspaceHomePage({
       <main className="workspace-catalog-main workspace-catalog-home-main">
         <div className="workspace-catalog-topbar">
           <div className="workspace-catalog-data-source" title="개발용 데이터 소스">
-            {dataSource === "legacy-api" ? "API snapshot" : "Mock fallback"}
+            {dataSource === "workspace-api"
+              ? "Workspace API"
+              : dataSource === "workspace-api-partial"
+                ? "Workspace API partial"
+                : dataSource === "legacy-api"
+                  ? "API snapshot"
+                  : "Mock fallback"}
           </div>
           <div className="workspace-catalog-top-actions" aria-hidden="true">
             <button className="workspace-catalog-icon-button">🔔</button>
@@ -465,6 +481,7 @@ export function WorkspaceHomePage({
               <strong>회의 일정 생성</strong>
               <select
                 aria-label="회의 생성 프로젝트"
+                disabled={meetingCreating}
                 onChange={(event) => setMeetingSpaceId(event.target.value)}
                 value={meetingSpaceId}
               >
@@ -474,6 +491,7 @@ export function WorkspaceHomePage({
               </select>
               <input
                 aria-label="회의 제목"
+                disabled={meetingCreating}
                 onChange={(event) => setMeetingTitle(event.target.value)}
                 placeholder="회의 제목"
                 type="text"
@@ -481,11 +499,15 @@ export function WorkspaceHomePage({
               />
               <input
                 aria-label="회의 시작 일시"
+                disabled={meetingCreating}
                 onChange={(event) => setMeetingDateTime(event.target.value)}
                 type="datetime-local"
                 value={meetingDateTime}
               />
-              <button disabled={!meetingTitle.trim() || !meetingSpaceId} type="submit">일정 추가</button>
+              {meetingCreateError ? <p aria-live="polite" className="workspace-form-error">{meetingCreateError}</p> : null}
+              <button disabled={!meetingTitle.trim() || !meetingSpaceId || meetingCreating} type="submit">
+                {meetingCreating ? "추가 중..." : "일정 추가"}
+              </button>
             </form>
           </div>
         </section>

@@ -3,6 +3,7 @@ package com.meetingmind.demo.domain;
 import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.authz.MeetingAccessPolicy;
 import com.meetingmind.demo.authz.MeetingRole;
+import com.meetingmind.demo.authz.MeetingStatus;
 import com.meetingmind.demo.authz.ParticipantAccessStatus;
 import com.meetingmind.demo.authz.ParticipantType;
 import com.meetingmind.demo.authz.SpaceAccessPolicy;
@@ -87,6 +88,37 @@ public class WorkspaceDomainService {
                             ));
                     return new SpaceSummary(space, member.role(), store.countMeetingsBySpaceId(space.id()));
                 })
+                .toList();
+    }
+
+    public List<MeetingSummary> listMeetings(String actorUserId, String spaceId) {
+        return listMeetings(actorUserId, spaceId, null, null, null);
+    }
+
+    public List<MeetingSummary> listMeetings(
+            String actorUserId,
+            String spaceId,
+            MeetingStatus status,
+            OffsetDateTime from,
+            OffsetDateTime to
+    ) {
+        requireUser(actorUserId);
+        spaceAccessPolicy.requireSpaceAccess(spaceAccessContext(spaceId, actorUserId));
+        if (from != null && to != null && from.isAfter(to)) {
+            throw invalidRequest("회의 조회 시작 일시는 종료 일시보다 늦을 수 없습니다.");
+        }
+        return store.findProjectAiMeetings(spaceId, actorUserId)
+                .stream()
+                .filter(meeting -> status == null || meeting.status() == status)
+                .filter(meeting -> from == null || !meeting.scheduledAt().isBefore(from))
+                .filter(meeting -> to == null || !meeting.scheduledAt().isAfter(to))
+                .map(meeting -> new MeetingSummary(
+                        meeting,
+                        store.findMeetingParticipant(meeting.id(), actorUserId)
+                                .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE)
+                                .map(MeetingParticipant::role)
+                                .orElse(null)
+                ))
                 .toList();
     }
 
@@ -849,6 +881,9 @@ public class WorkspaceDomainService {
     }
 
     public record SpaceSummary(Space space, SpaceRole role, long meetingCount) {
+    }
+
+    public record MeetingSummary(Meeting meeting, MeetingRole myRole) {
     }
 
     public record MeetingAiContext(

@@ -124,7 +124,7 @@ export interface MeetingSummary {
   title: string;
   scheduledAt: ApiDateTime;
   status: MeetingStatus;
-  myRole: MeetingRole;
+  myRole: MeetingRole | null;
 }
 
 export interface MeetingListResponse {
@@ -340,8 +340,8 @@ export interface DeleteTaskCardResponse {
 export interface SpaceMemberSummary {
   id: string;
   userId: string;
-  displayName: string;
-  email: string;
+  displayName: string | null;
+  email: string | null;
   role: SpaceRole;
   joinedAt: ApiDateTime;
 }

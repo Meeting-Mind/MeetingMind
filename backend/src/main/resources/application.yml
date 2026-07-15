@@ -9,6 +9,10 @@ spring:
   flyway:
     enabled: false
 
+meetingmind:
+  ai:
+    service-token: ${AI_INTERNAL_SERVICE_TOKEN:}
+
 ---
 spring:
   config:

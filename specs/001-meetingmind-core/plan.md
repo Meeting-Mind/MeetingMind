@@ -7,7 +7,7 @@
 - Frontend는 React/Vite/TypeScript로 워크스페이스, 회의 대기, 라이브룸, Meeting AI, 프로젝트 개요, 팀원, Report Agent 화면을 제공한다.
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
-- Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용하며 legacy STT streaming session/file prototype과 pgvector semantic 검색은 아직 별도 경계다.
+- Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용한다. V11 기반 embedding worker와 pgvector semantic 검색은 연결됐고 legacy STT streaming session/file만 `MeetingTranscript` 생명주기와 아직 분리되어 있다.
 - 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Target Architecture
@@ -27,6 +27,10 @@
 | AI service | FastAPI | AI API 연동과 Python RAG 생태계 확장에 적합하다. | Spring 내장 AI 호출 |
 | Realtime meeting | LiveKit | 현재 토큰 발급 코드와 `livekit-client` 의존성이 존재한다. | WebRTC 직접 구현 |
 | Vector search | PostgreSQL + pgvector | 기획서와 일치하고 관계형 권한 모델과 같이 운용하기 좋다. | Pinecone, OpenSearch |
+| Embedding | `text-embedding-3-small`, 1536 dimensions | MVP 비용과 다국어 검색 품질을 균형 있게 시작하고 generation metadata로 교체 가능하게 한다. | `text-embedding-3-large`, local embedding model |
+| Retrieval | 권한 선필터 후 cosine exact search + `pg_trgm` + RRF | 후보 5,000개 이하에서는 recall 손실 없이 의미 검색과 한국어 고유명사 검색을 결합한다. | vector-only, HNSW, IVFFlat |
+| Grounding | 관련도 gate + structured citation validation | 근거가 없거나 검증되지 않은 답변과 저장성 산출물을 LLM 호출 전후에서 차단한다. | prompt-only grounding, per-request second verifier |
+| Embedding jobs | PostgreSQL durable job + generation swap | 별도 broker 없이 source 저장 transaction과 연결하고 실패 시 기존 active generation을 유지한다. | Kafka, Redis queue, synchronous embedding |
 | File storage | S3 | STT 원문/보고서/첨부 파일 분리에 적합하다. | DB BLOB |
 | DB migration | Flyway SQL migration | Spring Boot 통합이 단순하고 PostgreSQL/pgvector extension, index, partial unique 제약을 SQL로 명확히 리뷰할 수 있다. | Liquibase, 수동 SQL 적용 |
 
@@ -34,7 +38,7 @@
 
 - 2026-07-14 기준 backend에는 Flyway core, PostgreSQL Flyway module, PostgreSQL driver, Spring Boot JDBC starter가 있다. `local` profile이 기본 profile이며 Compose 기본값으로 DataSource와 Flyway를 활성화하고 `db` profile은 환경변수 기반 DataSource를 사용한다. M032에서 Auth/Workspace JDBC repository 계층을 연결했으며 Docker PostgreSQL이 기본 실행 전제다.
 - migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
-- 원격에 공유된 migration은 수정하지 않는다. `V1`~`V9` 이후 최신 MeetingJoinRequest 보강은 `V10` forward migration으로 추가한다.
+- 원격에 공유된 `V1`~`V10` migration은 수정하지 않는다. vector/job/search 보강은 `V11` forward migration으로 추가한다.
 - 로컬 DB는 PostgreSQL 16 + pgvector를 다른 프로젝트 DB와 격리된 컨테이너로 실행하고 host `5434`를 기본값으로 사용한다.
 - Backend 기본 `local` profile은 `localhost:5434/meetingmind` 기본값으로 DataSource와 Flyway를 실행한다. `db` profile은 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`를 필수로 사용한다.
 
@@ -45,7 +49,19 @@
 3. `V7`~`V9`로 인증 세션, Space 초대, 전사 상태·보존, 용어사전·감사 로그, embedding job/generation을 보강하고, 최신 회의 참가 신청은 공유 migration을 수정하지 않고 `V10`으로 추가한다.
 4. 빈 로컬 DB에 Flyway를 처음부터 적용하고 schema/constraint/index를 검증한다.
 5. Backend in-memory store를 repository로 전환한 뒤 AI retriever를 pgvector로 교체한다.
-6. embedding model/차원과 vector index는 `Q-010` 결정 후 별도 migration으로 고정한다.
+6. `Q-010` 결정에 따라 별도 forward migration에서 `vector(1536)`을 고정한다. MVP는 exact cosine search로 시작하고 측정 기준을 넘을 때 HNSW를 추가한다.
+7. V11에서 `pg_trgm`, source generation/XOR, retry/lease와 source 변경 EmbeddingJob trigger를 적용한다.
+
+### AI RAG Production Baseline
+
+1. Backend application service가 사용자 권한을 평가해 Meeting AI의 단일 meeting scope 또는 Project AI의 `spaceId + allowedMeetingIds`를 만든다.
+2. AI는 역할을 재평가하지 않고 전달받은 범위를 SQL `WHERE`에 강제한 뒤 active/completed generation만 검색한다.
+3. meeting-owned chunk와 project-owned chunk는 중복 임베딩하지 않는다. Project AI는 허용된 meeting chunk와 ProjectKnowledge chunk를 하나의 query mode에서 검색한다.
+4. vector 후보 20개와 `pg_trgm` 후보 20개를 RRF로 결합하고 Meeting AI 5개, Project AI 8개 근거를 기본 context로 사용한다.
+5. 관련도 gate를 통과하지 못하면 LLM을 호출하지 않는다. 호출 결과는 valid source citation이 있어야 public 답변이나 candidate로 사용할 수 있다.
+6. Backend는 source 변경과 embedding job 생성을 transaction으로 연결하고, AI worker는 새 generation을 준비한 뒤 최신 generation일 때만 원자적으로 active 전환한다.
+7. grounding 구현은 Backend persistence와 병렬 진행할 수 있다. vector migration, worker, retriever는 shared contract 이후 Data -> Backend -> AI 순서로 통합한다.
+8. 회의 채팅 첨부파일은 별도 도메인 계약 이후 텍스트 추출 결과만 같은 1536차원 공간에 저장한다. 이미지와 image-only PDF를 위한 visual embedding 또는 Vision 처리는 MVP schema와 M033 범위에 포함하지 않는다.
 
 ## API Contracts
 
@@ -55,6 +71,11 @@
 - `GET /api/workspace`
   - 현재: 전체 데모 화면 데이터를 한 번에 반환
   - 목표: Space/Meeting/Report API로 분리
+- `GET /api/v1/spaces`
+  - 현재: PostgreSQL에 저장된 active Space membership 목록과 회의 수를 반환
+- `GET /api/v1/spaces/{spaceId}/meetings`
+  - 현재: Space 권한과 Meeting ACL을 통과한 영속 회의 목록을 반환
+  - active MeetingParticipant가 없는 OWNER/ADMIN override 조회는 `myRole=null`
 - `POST /api/livekit/token`
   - request: `roomName`, `identity`, `name`
   - response: `serverUrl`, `token`, `roomName`, `identity`, `name`

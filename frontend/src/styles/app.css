@@ -4569,6 +4569,14 @@ body.app-theme.meeting-access-body {
   gap: 18px;
 }
 
+.workspace-form-error {
+  margin: 0;
+  color: #c83f36;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .workspace-project-field {
   display: grid;
   gap: 10px;

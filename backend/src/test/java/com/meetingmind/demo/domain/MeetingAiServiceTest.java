@@ -16,6 +16,7 @@ import com.meetingmind.demo.dto.ai.AiSource;
 import com.meetingmind.demo.dto.ai.BackendMeetingAiChatRequest;
 import com.meetingmind.demo.dto.ai.MeetingAiGatewayChatRequest;
 import com.meetingmind.demo.service.AiGatewayException;
+import com.meetingmind.demo.service.AiSearchScopeResolver;
 import com.meetingmind.demo.service.MeetingAiGatewayClient;
 import com.meetingmind.demo.service.MeetingAiService;
 import java.time.Clock;
@@ -32,7 +33,7 @@ class MeetingAiServiceTest {
     private static final OffsetDateTime SCHEDULED_AT = OffsetDateTime.parse("2026-07-10T10:00:00+09:00");
 
     @Test
-    void chatChecksMeetingAccessAndSendsBackendFilteredContextToAiGateway() {
+    void chatChecksMeetingAccessAndSendsScopeToAiGateway() {
         TestContext context = newContext("user-member", "팀원");
         User owner = context.user("user-owner");
         User member = context.user("user-member");
@@ -83,37 +84,7 @@ class MeetingAiServiceTest {
         assertThat(response.answer()).isEqualTo("응답");
         assertThat(context.gateway.captured.projectId()).isEqualTo(space.space().id());
         assertThat(context.gateway.captured.meetingId()).isEqualTo(meeting.meeting().id());
-        assertThat(context.gateway.captured.meetingTitle()).isEqualTo("Sprint Planning #12");
         assertThat(context.gateway.captured.question()).isEqualTo("후속 작업이 뭐야?");
-        assertThat(context.gateway.captured.transcript()).singleElement()
-                .satisfies(row -> {
-                    assertThat(row.time()).isEqualTo("01:05");
-                    assertThat(row.speaker()).isEqualTo("김진수");
-                    assertThat(row.text()).isEqualTo("ERD 수정안 문서화가 필요합니다.");
-                });
-        assertThat(context.gateway.captured.decisions()).singleElement()
-                .satisfies(item -> {
-                    assertThat(item.title()).isEqualTo("ERD 수정");
-                    assertThat(item.meta()).isEqualTo("회의별 ACL을 분리한다.");
-                });
-        assertThat(context.gateway.captured.actions()).singleElement()
-                .satisfies(item -> {
-                    assertThat(item.title()).isEqualTo("ERD 수정안 문서화");
-                    assertThat(item.meta()).isEqualTo(member.id());
-                });
-        assertThat(context.gateway.captured.sources())
-                .extracting(MeetingAiGatewayChatRequest.SourceContext::type)
-                .contains("transcript", "report", "decision", "actionItem");
-        assertThat(context.gateway.captured.sources())
-                .allSatisfy(source -> assertThat(source.meetingId()).isEqualTo(meeting.meeting().id()));
-        assertThat(context.gateway.captured.sources())
-                .filteredOn(source -> source.type().equals("report"))
-                .singleElement()
-                .satisfies(source -> {
-                    assertThat(source.sourceId()).isEqualTo("report-1");
-                    assertThat(source.title()).isEqualTo("Sprint Planning #12 회의록");
-                    assertThat(source.text()).isEqualTo("회의 요약");
-                });
     }
 
     @Test
@@ -173,8 +144,10 @@ class MeetingAiServiceTest {
         FakeMeetingAiGateway gateway = new FakeMeetingAiGateway();
         MeetingAiService service = new MeetingAiService(
                 authService,
-                workspace,
-                new MeetingAccessPolicy(new SpaceAccessPolicy()),
+                new AiSearchScopeResolver(
+                        workspace,
+                        new MeetingAccessPolicy(new SpaceAccessPolicy())
+                ),
                 gateway
         );
         return new TestContext(store, workspace, gateway, service);

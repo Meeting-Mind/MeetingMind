@@ -453,12 +453,15 @@ def score_chunk(chunk: RagChunk, query_tokens: tuple[str, ...]) -> float:
 
     if score <= 0:
         return 0
-    if chunk.sourceType == "projectKnowledge":
-        score += 0.2
-    if chunk.sourceType == "glossary":
-        score += 0.3
 
-    return score
+    max_score = (len(query_tokens) * 2.0) + 3.0
+    normalized_score = score / max_score
+    if chunk.sourceType == "projectKnowledge":
+        normalized_score += 0.02
+    if chunk.sourceType == "glossary":
+        normalized_score += 0.03
+
+    return min(normalized_score, 1.0)
 
 
 def searchable_text(chunk: RagChunk) -> str:

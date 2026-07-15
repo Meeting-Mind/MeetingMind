@@ -17,6 +17,8 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 - Project AI는 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk만 검색한다.
 - 근거가 없으면 `unsupported: true`를 반환하고 추정하지 않는다.
 - 근거 0건이면 LLM을 호출하지 않는다.
+- Target RAG는 관련도 gate를 통과하지 못한 경우에도 LLM을 호출하지 않는다.
+- Target supported 응답은 검색 결과에 존재하는 source ID를 최소 1개 인용하고, public `sources[]`에는 실제 인용한 source만 포함한다.
 - 저장성 결과는 `candidate` 상태로만 반환한다. 실제 저장/확정은 Backend API가 담당한다.
 - 응답에는 가능한 한 `sources[]`를 포함한다.
 
@@ -30,6 +32,55 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 | Error shape | public/internal 경로 모두 provider 설정·호출·응답 실패를 raw provider detail 없는 `503 AI_PROVIDER_UNAVAILABLE`로 반환한다. 응답 body는 공통 `{code, message, fieldErrors, traceId}` shape를 사용한다. | Backend는 같은 code를 public 응답으로 전달한다. |
 | Audit | AI 서버 observability log만 남기며 persistent audit event는 없다. | Backend가 권한 확인 후 `AI_REQUESTED` audit event를 기록한다. |
 | Report context in chat | Meeting chat request는 transcript/decision/action 중심이다. | Backend context assembly 이후 report chunk도 source metadata와 함께 포함할 수 있다. |
+
+## Target Retrieval and Grounding Policy
+
+Meeting/Project chat의 Backend-to-AI 통합은 Backend가 확정한 scope envelope를 받고 AI가 PostgreSQL에서 source를 검색한다. `sources[]` 원문 입력은 전환 호환용으로만 유지한다. Backend가 권한의 단일 판단 주체다.
+
+- `/api/internal/*`은 Backend service credential을 검증한 호출만 허용한다. 사용자 access token이나 인증 없는 직접 호출은 scope envelope의 신뢰 근거가 될 수 없다.
+
+| Query Mode | Backend Scope | AI Enforcement |
+| --- | --- | --- |
+| Meeting AI | `spaceId`, 단일 `meetingId` | 같은 Space와 Meeting의 meeting-owned active chunk만 검색 |
+| Project AI | `spaceId`, `allowedMeetingIds` | ProjectKnowledge와 허용된 meeting-owned active chunk만 검색 |
+
+- `allowedMeetingIds=[]`는 모든 회의 허용이 아니라 meeting source 0건을 의미한다.
+- Meeting AI 검색 대상은 `transcript`, `meetingSummary`, `report`, `decision`, `actionItem`이다.
+- Project AI 검색 대상은 `projectKnowledge`와 권한을 통과한 회의의 `transcript`, `meetingSummary`, `report`, `decision`, `actionItem`이다.
+- ProjectKnowledge는 `PUBLISHED`, 미삭제이며 active/completed embedding generation인 경우만 검색한다.
+- provider에는 `supported`, `answer`, `sourceIds` 구조를 요구한다. Responses API 호출은 `text.format.type=json_schema`, `strict=true`, `additionalProperties=false`인 schema로 이 구조를 강제한다. `supported=true`인데 citation이 없거나 허용 목록 밖 source ID가 있으면 답변을 폐기한다.
+- report decision/action item과 task candidate는 valid source ID가 없는 항목을 제거하고, 유효한 항목이 하나도 없으면 전체 응답을 unsupported로 처리한다.
+- context 내부 텍스트는 신뢰하지 않는 data로 취급하며 prompt instruction으로 실행하지 않는다. provider에는 source를 임의 문자열 연결이 아닌 JSON 배열로 전달하고 developer instruction에서 source 필드 안의 명령과 역할 변경 요청을 무시하도록 고정한다.
+- pgvector cosine과 `pg_trgm` 후보의 관련도를 `0.0~1.0`으로 정규화하고 현재 `0.30` 미만을 `LOW_RELEVANCE`로 처리한다. 이 값은 초기 안전 기준이며 T263 한국어 평가 질의로 다시 보정한다.
+- Backend가 보고서/태스크 생성을 위해 직접 전달하는 already-filtered source에는 검색 점수가 없으므로 evidence 존재 여부만 적용한다.
+
+### Meeting Attachment Indexing Boundary
+
+- M033의 RAG 구현은 첨부파일 도메인에 의존하지 않는다. 회의 채팅과 파일 저장 API가 확정된 뒤 별도 milestone에서 `meetingAttachment` source를 추가한다.
+- MVP 검색 대상은 TXT, Markdown, 텍스트 추출에 성공한 PDF다. 추출 텍스트를 정규화하고 기존 `text-embedding-3-small` 1536차원 embedding을 사용한다.
+- 이미지 파일과 이미지 전용 PDF는 MVP 검색 대상에서 제외한다. visual embedding, OCR/Vision 설명, 원본 이미지를 포함한 멀티모달 답변은 확장 계약 없이 수행하지 않는다.
+- 첨부파일 source는 Backend가 확인한 `meetingId`와 `allowedMeetingIds` 범위를 그대로 적용하고, 삭제·보존 만료·권한 회수된 파일은 즉시 검색에서 제외한다.
+- 첨부파일 API와 citation shape, 페이지 anchor, 허용 MIME/용량/보존 정책은 M034 contract task에서 API·ERD·data model과 함께 확정한다.
+
+public/internal AI 응답은 아래 nullable 필드를 사용한다. `unsupported=false`이면 `unsupportedReason`은 `null`이다.
+
+```json
+{
+  "unsupported": true,
+  "unsupportedReason": "LOW_RELEVANCE"
+}
+```
+
+`unsupportedReason` 값:
+
+- `NO_EVIDENCE`: 권한과 상태 필터 이후 검색 결과 없음
+- `LOW_RELEVANCE`: 검색 결과는 있으나 model별 관련도 threshold 미달
+- `MODEL_UNSUPPORTED`: provider가 제공된 근거만으로 답변할 수 없다고 판단
+- `UNVERIFIED_OUTPUT`: 응답은 파싱됐지만 citation 또는 저장성 항목 근거 검증 실패
+
+근거 부족은 `200 OK + unsupported=true`인 정상 결과다. provider timeout, 연결 실패, malformed structured output은 `503 AI_PROVIDER_UNAVAILABLE`로 구분한다.
+
+Backend는 AI 내부 요청에 `X-Request-ID`를 전달하고 AI는 같은 값을 응답 헤더와 구조 로그의 `traceId`로 유지한다. API 처리, 검색, embedding job/queue 로그는 endpoint, 처리 시간, source 수, unsupported reason, citation failure, queue 수치와 오류 종류만 기록한다. 질문, STT, 답변, API key와 service token 원문은 기록하지 않는다.
 
 ## POST /api/meeting-ai/explain-term
 
@@ -217,10 +268,11 @@ Target Backend-to-AI는 아래 `POST /api/internal/meeting-ai/chat`을 사용한
 ### Notes
 
 - 검색 결과가 없으면 LLM을 호출하지 않고 `unsupported: true`를 반환한다.
+- internal 경로는 `sources[]` 원문 대신 Backend가 확정한 `spaceId`, `meetingId` scope를 받고 AI가 active/completed meeting chunk를 검색한다.
 
 ## POST /api/internal/meeting-ai/chat
 
-Backend가 인증/권한 필터와 context 조립을 끝낸 뒤 호출하는 target internal Meeting AI endpoint다.
+Backend가 인증과 단일 회의 검색 범위를 확정한 뒤 호출하는 internal Meeting AI endpoint다.
 
 ### Status
 
@@ -229,51 +281,30 @@ Backend가 인증/권한 필터와 context 조립을 끝낸 뒤 호출하는 tar
 ### Auth and Permissions
 
 - AI 서버는 사용자 인증을 직접 처리하지 않는다.
-- Backend가 meeting 접근 권한을 확인하고 already-filtered context만 전달한다.
+- `X-MeetingMind-Service-Token` service credential이 일치하는 Backend 호출만 허용한다.
+- Backend가 meeting 접근 권한을 확인하고 `projectId`, 단일 `meetingId` scope를 전달한다.
 
 ### Data Scope
 
 - Meeting scope
-- `request.meetingId` 하나에 속한 `sources[]`만 사용한다.
-- 검색 대상 source type은 `transcript`, `decision`, `actionItem`, `report`다.
+- AI는 `request.projectId`와 단일 `request.meetingId`를 PostgreSQL `WHERE`에 강제한다.
+- 검색 대상 source type은 `transcript`, `meetingSummary`, `decision`, `actionItem`, `report`다.
 
 ### Request
 
 ```json
 {
-  "projectId": "project-001",
+  "projectId": "space-001",
   "meetingId": "meeting-001",
-  "meetingTitle": "Sprint Planning #12",
-  "question": "김진수가 맡은 후속 작업이 뭐야?",
-  "sources": [
-    {
-      "sourceId": "segment-001",
-      "type": "transcript",
-      "meetingId": "meeting-001",
-      "title": "Sprint Planning #12",
-      "speaker": "김진수",
-      "time": "00:01:05-00:01:10",
-      "startMs": 65000,
-      "endMs": 70000,
-      "text": "ERD 수정안 문서화가 필요합니다."
-    },
-    {
-      "sourceId": "report-001",
-      "type": "report",
-      "meetingId": "meeting-001",
-      "title": "Sprint Planning #12 회의록",
-      "text": "회의별 ACL 분리와 ERD 수정 필요성이 논의되었습니다."
-    }
-  ]
+  "question": "김진수가 맡은 후속 작업이 뭐야?"
 }
 ```
 
 ### Validation
 
-- `meetingId`, `question`: required
-- `sources[].sourceId`, `sources[].type`, `sources[].meetingId`, `sources[].text`: required
-- 모든 source의 `meetingId`는 request `meetingId`와 같아야 한다.
-- source type은 `transcript`, `decision`, `actionItem`, `report`, `meetingSummary`, `projectKnowledge`, `glossary` enum을 따르되, Meeting chat 검색은 `transcript`, `decision`, `actionItem`, `report`만 대상으로 한다.
+- `projectId`, `meetingId`, `question`: required, blank 금지
+- AI는 active chunk와 `COMPLETED` EmbeddingJob만 검색한다.
+- legacy `sources[]`는 전환 호환 기간에만 허용하고, 값이 있으면 모든 source의 project/meeting allowlist를 검증한다.
 
 ### Response
 
@@ -295,9 +326,10 @@ Backend가 인증/권한 필터와 context 조립을 끝낸 뒤 호출하는 tar
 
 ### Errors
 
+- `401 AI_INTERNAL_UNAUTHORIZED`: service credential 누락 또는 불일치
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: 다른 회의 source 포함
-- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, timeout, HTTP/connection 오류, 응답 형식 오류
+- `503 AI_PROVIDER_UNAVAILABLE`: 검색 저장소/provider 설정 누락, timeout, HTTP/connection 오류, 응답 형식 오류
 
 ### Audit
 
@@ -419,15 +451,16 @@ Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 stri
 ### Auth and Permissions
 
 - AI 서버는 사용자 인증을 직접 처리하지 않는다.
+- `X-MeetingMind-Service-Token` service credential이 일치하는 Backend 호출만 허용한다.
 - Backend가 active SpaceMember를 확인하고 meeting별 read 권한을 적용한다.
 - meeting guest는 Project AI 호출 대상이 아니다.
 
 ### Data Scope
 
 - Project scope
-- `projectKnowledge`: 해당 Space의 `PUBLISHED`, `embeddingStatus=COMPLETED` 공식 지식
-- `meetingSummary`: `allowedMeetingIds`에 포함된 회의의 current/confirmed report summary
-- Backend는 PostgreSQL의 official knowledge와 권한을 통과한 current/confirmed report summary를 전달한다. transcript embedding과 pgvector semantic 검색은 별도 AI/RAG 담당 후속 범위다.
+- 같은 Space의 `PUBLISHED` ProjectKnowledge active chunk를 검색한다.
+- `allowedMeetingIds`에 포함된 meeting-owned transcript, current confirmed report, decision, action item chunk만 검색한다.
+- `allowedMeetingIds=[]`이면 meeting source는 0건이고 ProjectKnowledge만 검색한다.
 
 ### Request
 
@@ -435,36 +468,16 @@ Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 stri
 {
   "projectId": "space-001",
   "question": "권한 관련 남은 리스크가 뭐야?",
-  "allowedMeetingIds": ["meeting-001"],
-  "sources": [
-    {
-      "sourceId": "knowledge-001",
-      "type": "projectKnowledge",
-      "projectId": "space-001",
-      "meetingId": null,
-      "title": "권한 설계 메모",
-      "text": "Project AI는 접근 가능한 회의만 검색한다."
-    },
-    {
-      "sourceId": "report-001",
-      "type": "meetingSummary",
-      "projectId": "space-001",
-      "meetingId": "meeting-001",
-      "title": "Sprint Planning #12 회의록",
-      "text": "회의 ACL과 Project AI 권한 선필터를 논의했다."
-    }
-  ]
+  "allowedMeetingIds": ["meeting-001"]
 }
 ```
 
 ### Validation
 
 - `projectId`, `question`: required, blank 금지
-- `sources[].sourceId`, `sources[].type`, `sources[].projectId`, `sources[].text`: required
-- 모든 source의 `projectId`는 request `projectId`와 같아야 한다.
-- source type은 `projectKnowledge`, `meetingSummary`만 허용한다.
-- `meetingSummary.meetingId`는 required이며 `allowedMeetingIds`에 포함되어야 한다.
-- `projectKnowledge.meetingId`는 null이어야 한다.
+- `allowedMeetingIds`: required array, 빈 배열 허용
+- AI는 active chunk와 `COMPLETED` EmbeddingJob만 검색한다.
+- legacy `sources[]`는 전환 호환 기간에만 허용하고, 값이 있으면 모든 meeting source가 `allowedMeetingIds`에 포함되어야 한다.
 
 ### Response
 
@@ -486,9 +499,10 @@ Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 stri
 
 ### Errors
 
+- `401 AI_INTERNAL_UNAUTHORIZED`: service credential 누락 또는 불일치
 - `400 INVALID_REQUEST`: schema validation 실패
 - `403 AI_CONTEXT_FORBIDDEN`: project 불일치, 허용되지 않은 meeting source, 잘못된 source type
-- `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, timeout, HTTP/connection 오류, 응답 형식 오류
+- `503 AI_PROVIDER_UNAVAILABLE`: 검색 저장소/provider 설정 누락, timeout, HTTP/connection 오류, 응답 형식 오류
 
 ### Audit
 
@@ -508,6 +522,7 @@ Backend가 Space 접근과 meeting ACL 선필터를 끝낸 뒤 호출하는 stri
 ### Notes
 
 - 검색 결과가 없으면 LLM을 호출하지 않고 `unsupported: true`, `model: context-only`를 반환한다.
+- internal 경로는 Backend가 확정한 `projectId`, `allowedMeetingIds`만으로 AI retriever가 active/completed chunk를 검색한다. legacy `sources[]`는 전환 호환 기간 뒤 제거한다.
 
 ## POST /api/meeting-ai/generate-report
 
@@ -610,6 +625,7 @@ Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호�
 ### Auth and Permissions
 
 - 외부 사용자 직접 호출 금지
+- `X-MeetingMind-Service-Token` service credential이 일치하는 Backend 호출만 허용한다.
 - Backend는 `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR` 권한을 먼저 확인한다.
 
 ### Data Scope
@@ -654,6 +670,7 @@ Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호�
 
 ### Errors
 
+- `401 AI_INTERNAL_UNAUTHORIZED`: service credential 누락 또는 불일치
 - `400 INVALID_REQUEST`: 필수값 또는 format 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: source scope/type 검증 실패
 - `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, timeout, HTTP/connection 오류, 응답 형식 오류
@@ -680,6 +697,7 @@ Backend가 권한 선필터 후 조립한 단일 회의 source에서 태스크 �
 ### Auth and Permissions
 
 - 외부 사용자에게 직접 노출하지 않는다.
+- `X-MeetingMind-Service-Token` service credential이 일치하는 Backend 호출만 허용한다.
 - Backend가 public route에서 회의 편집 권한을 먼저 검증한다.
 
 ### Data Scope
@@ -724,6 +742,7 @@ Backend가 권한 선필터 후 조립한 단일 회의 source에서 태스크 �
 
 ### Errors
 
+- `401 AI_INTERNAL_UNAUTHORIZED`: service credential 누락 또는 불일치
 - `400 INVALID_REQUEST`: 필수값 또는 format 검증 실패
 - `403 AI_CONTEXT_FORBIDDEN`: source scope/type 검증 실패
 - `503 AI_PROVIDER_UNAVAILABLE`: provider 설정 누락, timeout, HTTP/connection 오류, 응답 형식 오류

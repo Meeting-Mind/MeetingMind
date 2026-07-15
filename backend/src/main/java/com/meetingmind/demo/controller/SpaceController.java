@@ -2,11 +2,14 @@ package com.meetingmind.demo.controller;
 
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
+import com.meetingmind.demo.authz.AuthorizationException;
+import com.meetingmind.demo.authz.MeetingStatus;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.CreateMeetingRequest;
 import com.meetingmind.demo.dto.CreateMeetingResponse;
 import com.meetingmind.demo.dto.CreateSpaceRequest;
 import com.meetingmind.demo.dto.CreateSpaceResponse;
+import com.meetingmind.demo.dto.MeetingListResponse;
 import com.meetingmind.demo.dto.ProjectAiContextCandidatesResponse;
 import com.meetingmind.demo.dto.RemoveSpaceMemberResponse;
 import com.meetingmind.demo.dto.SpaceListResponse;
@@ -17,7 +20,10 @@ import com.meetingmind.demo.dto.UpdateSpaceMemberRequest;
 import com.meetingmind.demo.dto.UpdateSpaceMemberResponse;
 import com.meetingmind.demo.domain.User;
 import jakarta.validation.Valid;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -26,6 +32,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -99,6 +106,50 @@ public class SpaceController {
                 result.meeting().joinCode(),
                 "/meetings/" + result.meeting().id() + "?joinCode=" + result.meeting().joinCode()
         );
+    }
+
+    @GetMapping("/{spaceId}/meetings")
+    public MeetingListResponse listMeetings(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        List<MeetingListResponse.MeetingSummary> meetings = workspaceDomainService.listMeetings(
+                        user.id(),
+                        spaceId,
+                        status == null ? null : MeetingStatus.parse(status),
+                        parseDateTime(from, "from"),
+                        parseDateTime(to, "to")
+                )
+                .stream()
+                .map(summary -> new MeetingListResponse.MeetingSummary(
+                        summary.meeting().id(),
+                        summary.meeting().spaceId(),
+                        summary.meeting().title(),
+                        summary.meeting().scheduledAt().toString(),
+                        summary.meeting().status().name(),
+                        summary.myRole() == null ? null : summary.myRole().name()
+                ))
+                .toList();
+        return new MeetingListResponse(meetings);
+    }
+
+    private OffsetDateTime parseDateTime(String value, String field) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new AuthorizationException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_REQUEST",
+                    field + "은 ISO-8601 날짜시간이어야 합니다."
+            );
+        }
     }
 
     @GetMapping("/{spaceId}/members")

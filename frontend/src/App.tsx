@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { createMeeting, createSpace, fetchLegacyWorkspaceSnapshot, fetchSpaces } from "./api/workspace";
+import {
+  createMeeting,
+  createSpace,
+  fetchLegacyWorkspaceSnapshot,
+  fetchMeetings,
+  fetchSpaceMembers,
+  fetchSpaces
+} from "./api/workspace";
 import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
@@ -13,10 +20,10 @@ import { ReportAgentPage } from "./pages/ReportAgentPage";
 import { TeamMembersPage } from "./pages/TeamMembersPage";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { mockData } from "./data/mockData";
-import type { WorkspaceData } from "./types";
+import type { MeetingStatus, MeetingSummary, SpaceMemberSummary, SpaceSummary, WorkspaceData } from "./types";
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
-type WorkspaceDataSource = "legacy-api" | "mock-fallback";
+type WorkspaceDataSource = "workspace-api" | "workspace-api-partial" | "legacy-api" | "mock-fallback";
 type CreateMeetingPayload = {
   title?: string;
   scheduledAt?: string;
@@ -230,6 +237,68 @@ function buildMeeting(projectName: string, description: string, count: number, p
   };
 }
 
+function formatDateLabel(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "업데이트 정보 없음";
+  }
+  return `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} 업데이트`;
+}
+
+function getMeetingState(status: MeetingStatus): ProjectMeeting["state"] {
+  if (status === "IN_PROGRESS") {
+    return "진행 중";
+  }
+  if (status === "ENDED") {
+    return "완료";
+  }
+  if (status === "CANCELED") {
+    return "취소";
+  }
+  return "예정";
+}
+
+function mapMeetingSummary(meeting: MeetingSummary, index: number): ProjectMeeting {
+  const scheduledAt = new Date(meeting.scheduledAt);
+  return {
+    id: meeting.id,
+    index: `#${String(index + 1).padStart(2, "0")}`,
+    title: meeting.title,
+    date: Number.isNaN(scheduledAt.getTime())
+      ? "일정 미정"
+      : `${String(scheduledAt.getMonth() + 1).padStart(2, "0")}.${String(scheduledAt.getDate()).padStart(2, "0")}`,
+    state: getMeetingState(meeting.status),
+    scheduledAt: meeting.scheduledAt,
+    durationMinutes: 60
+  };
+}
+
+function mapSpaceMember(member: SpaceMemberSummary): TeamMember {
+  const displayName = member.displayName?.trim() || member.email?.trim() || "이름 미등록 멤버";
+  return {
+    name: displayName,
+    email: member.email?.trim() || `unknown-${member.userId}@meetingmind.local`,
+    role: member.role === "OWNER" ? "Owner" : member.role === "ADMIN" ? "Admin" : "Member",
+    spaceRole: member.role,
+    since: formatDateLabel(member.joinedAt),
+    access: getSpaceRoleAccessLabel(member.role),
+    rank: member.role === "OWNER" ? "팀 리드" : member.role === "ADMIN" ? "관리자" : "팀원",
+    status: "active"
+  };
+}
+
+function mapWorkspaceSpace(space: SpaceSummary, meetingCount: number, memberCount: number) {
+  return {
+    id: space.id,
+    name: space.name,
+    members: `멤버 ${memberCount}명`,
+    meetings: `진행 회의 ${meetingCount}건`,
+    updatedAt: formatDateLabel(space.updatedAt),
+    description: space.description?.trim() || "프로젝트 설명이 아직 작성되지 않았습니다.",
+    href: "/project-overview"
+  };
+}
+
 function ProtectedRoute({
   children,
   onRequestLogin,
@@ -286,19 +355,18 @@ export function App() {
     if (!normalizedName) {
       return;
     }
-
-    let spaceId = buildSpaceId(normalizedName);
-    if (authSession) {
-      try {
-        const created = await createSpace(authSession, {
-          name: normalizedName,
-          description: description.trim() || null
-        });
-        spaceId = created.id;
-      } catch {
-        // keep local fallback spaceId; mock state below still lets the flow continue
-      }
+    if (!authSession) {
+      throw new Error("로그인이 필요합니다.");
     }
+    if (data.workspaceHome.spaces.some((space) => space.name.trim().toLocaleLowerCase() === normalizedName.toLocaleLowerCase())) {
+      throw new Error("같은 이름의 프로젝트가 이미 있습니다.");
+    }
+
+    const created = await createSpace(authSession, {
+      name: normalizedName,
+      description: description.trim() || null
+    });
+    const spaceId = created.id;
 
     const owner = authSession?.user;
     const seededMembers: TeamMember[] = owner
@@ -321,29 +389,24 @@ export function App() {
     setProjectRequests((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
     setProjectInvites((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? buildInviteMeta(normalizedName) }));
     setProjectTasks((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
+    setProjectAiSpaceIds((previous) => (previous.includes(spaceId) ? previous : [...previous, spaceId]));
 
     setData((previous) => {
-      const existingIndex = previous.workspaceHome.spaces.findIndex((space) => space.name === normalizedName);
       const nextSpace = {
-        id: previous.workspaceHome.spaces[existingIndex]?.id ?? spaceId,
-        name: normalizedName,
+        id: spaceId,
+        name: created.name,
         members: seededMembers.length ? "멤버 1명" : "멤버 0명",
         meetings: "진행 회의 0건",
         updatedAt: "방금 업데이트",
-        description: description.trim() || "새 프로젝트 설명이 아직 작성되지 않았습니다.",
+        description: created.description?.trim() || "새 프로젝트 설명이 아직 작성되지 않았습니다.",
         href: "/project-overview"
       };
-
-      const nextSpaces =
-        existingIndex >= 0
-          ? previous.workspaceHome.spaces.map((space, index) => (index === existingIndex ? nextSpace : space))
-          : [nextSpace, ...previous.workspaceHome.spaces];
 
       return {
         ...previous,
         workspaceHome: {
           ...previous.workspaceHome,
-          spaces: nextSpaces,
+          spaces: [nextSpace, ...previous.workspaceHome.spaces],
           recent: [{ title: `${normalizedName} · 프로젝트 생성`, meta: "방금 전" }, ...previous.workspaceHome.recent].slice(0, 6)
         }
       };
@@ -489,23 +552,23 @@ export function App() {
   async function handleCreateMeeting(projectName: string, payload?: CreateMeetingPayload) {
     const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
     if (!targetSpace) {
-      return;
+      throw new Error("프로젝트를 찾을 수 없습니다.");
+    }
+    if (!authSession) {
+      throw new Error("로그인이 필요합니다.");
+    }
+    if (!payload?.title?.trim() || !payload.scheduledAt) {
+      throw new Error("회의 제목과 예정 일시는 필수입니다.");
     }
 
     const existingMeetings = projectMeetings[projectName] ?? [];
     const nextMeeting = buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload);
-
-    if (authSession && payload?.title && payload?.scheduledAt) {
-      try {
-        const created = await createMeeting(authSession, targetSpace.id, {
-          title: payload.title,
-          scheduledAt: payload.scheduledAt
-        });
-        nextMeeting.id = created.id;
-      } catch {
-        // keep local fallback meeting id; mock state below still lets the flow continue
-      }
-    }
+    const created = await createMeeting(authSession, targetSpace.id, {
+      title: payload.title.trim(),
+      scheduledAt: payload.scheduledAt
+    });
+    nextMeeting.id = created.id;
+    nextMeeting.state = getMeetingState(created.status);
 
     setProjectMeetings((previous) => {
       return {
@@ -847,61 +910,97 @@ export function App() {
       return;
     }
 
+    const session = authSession;
     let active = true;
 
-    fetchLegacyWorkspaceSnapshot(authSession)
-      .then((nextData) => {
-        if (active) {
-          setData({
-            workspaceHome: nextData.workspaceHome ?? mockData.workspaceHome,
-            liveMeeting: nextData.liveMeeting ?? mockData.liveMeeting,
-            meetingAi: nextData.meetingAi ?? mockData.meetingAi,
-            projectOverview: nextData.projectOverview ?? mockData.projectOverview,
-            reportAgent: nextData.reportAgent ?? mockData.reportAgent
-          });
-          setWorkspaceDataSource("legacy-api");
-        }
-      })
-      .catch(() => {
-        // Keep the local mock data when the API is not running yet.
-        if (active) {
-          setWorkspaceDataSource("mock-fallback");
+    async function loadWorkspace() {
+      const [legacyResult, spacesResult] = await Promise.allSettled([
+        fetchLegacyWorkspaceSnapshot(session),
+        fetchSpaces(session)
+      ]);
+      if (!active) {
+        return;
+      }
+
+      const legacyData = legacyResult.status === "fulfilled" ? legacyResult.value : null;
+      const baseData: WorkspaceData = {
+        workspaceHome: legacyData?.workspaceHome ?? mockData.workspaceHome,
+        liveMeeting: legacyData?.liveMeeting ?? mockData.liveMeeting,
+        meetingAi: legacyData?.meetingAi ?? mockData.meetingAi,
+        projectOverview: legacyData?.projectOverview ?? mockData.projectOverview,
+        reportAgent: legacyData?.reportAgent ?? mockData.reportAgent
+      };
+
+      if (spacesResult.status === "rejected") {
+        setData(baseData);
+        setProjectAiSpaceIds([]);
+        setWorkspaceDataSource(legacyData ? "legacy-api" : "mock-fallback");
+        return;
+      }
+
+      const resources = await Promise.all(
+        spacesResult.value.spaces.map(async (space) => {
+          const [meetingsResult, membersResult] = await Promise.allSettled([
+            fetchMeetings(session, space.id),
+            fetchSpaceMembers(session, space.id)
+          ]);
+          return { space, meetingsResult, membersResult };
+        })
+      );
+      if (!active) {
+        return;
+      }
+
+      const hasPartialFailure = resources.some(
+        ({ meetingsResult, membersResult }) => meetingsResult.status === "rejected" || membersResult.status === "rejected"
+      );
+      setData({
+        ...baseData,
+        workspaceHome: {
+          ...baseData.workspaceHome,
+          spaces: resources.map(({ space, meetingsResult, membersResult }) =>
+            mapWorkspaceSpace(
+              space,
+              meetingsResult.status === "fulfilled" ? meetingsResult.value.meetings.length : space.meetingCount,
+              membersResult.status === "fulfilled" ? membersResult.value.members.length : 1
+            )
+          )
         }
       });
-
-    fetchSpaces(authSession)
-      .then((response) => {
-        if (active) {
-          setProjectAiSpaceIds(response.spaces.map((space) => space.id));
-          setProjectMembers((previous) => {
-            const next = { ...previous };
-            response.spaces.forEach((space) => {
-              const members = next[space.name] ?? [];
-              if (!members.some((member) => member.email === authSession.user.email)) {
-                next[space.name] = [
-                  ...members,
+      setProjectMeetings((previous) => {
+        const next = { ...previous };
+        resources.forEach(({ space, meetingsResult }) => {
+          next[space.name] =
+            meetingsResult.status === "fulfilled" ? meetingsResult.value.meetings.map(mapMeetingSummary) : [];
+        });
+        return next;
+      });
+      setProjectMembers((previous) => {
+        const next = { ...previous };
+        resources.forEach(({ space, membersResult }) => {
+          next[space.name] =
+            membersResult.status === "fulfilled"
+              ? membersResult.value.members.map(mapSpaceMember)
+              : [
                   {
-                    name: authSession.user.displayName,
-                    email: authSession.user.email,
-                    role: "Member",
+                    name: session.user.displayName,
+                    email: session.user.email,
+                    role: space.role === "OWNER" ? "Owner" : space.role === "ADMIN" ? "Admin" : "Member",
                     spaceRole: space.role,
                     since: "이미 합류",
                     access: getSpaceRoleAccessLabel(space.role),
-                    rank: "팀원",
+                    rank: space.role === "OWNER" ? "팀 리드" : space.role === "ADMIN" ? "관리자" : "팀원",
                     status: "active"
                   }
                 ];
-              }
-            });
-            return next;
-          });
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setProjectAiSpaceIds([]);
-        }
+        });
+        return next;
       });
+      setProjectAiSpaceIds(spacesResult.value.spaces.map((space) => space.id));
+      setWorkspaceDataSource(hasPartialFailure ? "workspace-api-partial" : "workspace-api");
+    }
+
+    void loadWorkspace();
 
     return () => {
       active = false;

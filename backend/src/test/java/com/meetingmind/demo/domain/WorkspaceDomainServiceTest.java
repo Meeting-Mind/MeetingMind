@@ -632,6 +632,49 @@ class WorkspaceDomainServiceTest {
                 .containsExactly(accessible.meeting().id());
     }
 
+    @Test
+    void listMeetingsAppliesMeetingAclAndKeepsManagerOverrideRoleNullable() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        User admin = context.user("user-admin");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), admin.id(), SpaceRole.ADMIN, FIXED_CLOCK.instant());
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult accessible = context.service.createMeeting(
+                owner.id(),
+                space.space().id(),
+                "접근 가능한 회의",
+                SCHEDULED_AT,
+                List.of(member.id())
+        );
+        WorkspaceDomainService.MeetingCreationResult restricted = context.service.createMeeting(
+                owner.id(),
+                space.space().id(),
+                "제한된 회의",
+                SCHEDULED_AT.plusDays(1),
+                List.of()
+        );
+
+        assertThat(context.service.listMeetings(member.id(), space.space().id()))
+                .extracting(summary -> summary.meeting().id())
+                .containsExactly(accessible.meeting().id());
+        assertThat(context.service.listMeetings(admin.id(), space.space().id()))
+                .extracting(summary -> summary.meeting().id())
+                .containsExactly(accessible.meeting().id(), restricted.meeting().id());
+        assertThat(context.service.listMeetings(admin.id(), space.space().id()))
+                .allSatisfy(summary -> assertThat(summary.myRole()).isNull());
+        assertThat(context.service.listMeetings(
+                admin.id(),
+                space.space().id(),
+                com.meetingmind.demo.authz.MeetingStatus.SCHEDULED,
+                SCHEDULED_AT.plusHours(1),
+                SCHEDULED_AT.plusDays(2)
+        ))
+                .extracting(summary -> summary.meeting().id())
+                .containsExactly(restricted.meeting().id());
+    }
+
     private TestContext newContext() {
         InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
         WorkspaceDomainService service = new WorkspaceDomainService(

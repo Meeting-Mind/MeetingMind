@@ -60,7 +60,7 @@ export function TeamMembersPage({
     memberEmail: string,
     role: Exclude<TeamMember["spaceRole"], "OWNER">
   ) => void;
-  onCreateProject?: (payload: { name: string; description: string }) => void;
+  onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
 }) {
   useEffect(() => {
     document.body.className = "app-theme";

@@ -54,7 +54,7 @@ export function WorkspaceSidebar({
   disableMembers?: boolean;
   mode?: "catalog" | "project";
   contextOverride?: string;
-  onCreateProject?: (payload: CreateProjectPayload) => void;
+  onCreateProject?: (payload: CreateProjectPayload) => Promise<void>;
 }) {
   const projectHref = buildProjectOverviewHref(projectName, spaceId);
   const teamMembersHref = buildTeamMembersHref(projectName, spaceId);
@@ -63,20 +63,30 @@ export function WorkspaceSidebar({
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [projectTitle, setProjectTitle] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
 
-  function handleCreateProject(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!projectTitle.trim()) {
+    if (!projectTitle.trim() || !onCreateProject || isCreating) {
       return;
     }
 
-    onCreateProject?.({
-      name: projectTitle.trim(),
-      description: projectDescription.trim()
-    });
-    setIsProjectModalOpen(false);
-    setProjectTitle("");
-    setProjectDescription("");
+    setCreateError("");
+    setIsCreating(true);
+    try {
+      await onCreateProject({
+        name: projectTitle.trim(),
+        description: projectDescription.trim()
+      });
+      setIsProjectModalOpen(false);
+      setProjectTitle("");
+      setProjectDescription("");
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "프로젝트를 생성하지 못했습니다.");
+    } finally {
+      setIsCreating(false);
+    }
   }
 
   return (
@@ -87,7 +97,14 @@ export function WorkspaceSidebar({
           <span className="workspace-catalog-logo-accent">mind</span>
         </Link>
 
-        <button className="workspace-catalog-create" onClick={() => setIsProjectModalOpen(true)} type="button">
+        <button
+          className="workspace-catalog-create"
+          onClick={() => {
+            setCreateError("");
+            setIsProjectModalOpen(true);
+          }}
+          type="button"
+        >
           + 새 프로젝트 만들기
         </button>
 
@@ -144,6 +161,7 @@ export function WorkspaceSidebar({
               <button
                 aria-label="새 프로젝트 모달 닫기"
                 className="workspace-project-modal-close"
+                disabled={isCreating}
                 onClick={() => setIsProjectModalOpen(false)}
                 type="button"
               >
@@ -155,6 +173,7 @@ export function WorkspaceSidebar({
               <label className="workspace-project-field">
                 <span>프로젝트명</span>
                 <input
+                  disabled={isCreating}
                   onChange={(event) => setProjectTitle(event.target.value)}
                   placeholder="예: FinPilot Renewal"
                   type="text"
@@ -165,18 +184,21 @@ export function WorkspaceSidebar({
               <label className="workspace-project-field">
                 <span>설명</span>
                 <textarea
+                  disabled={isCreating}
                   onChange={(event) => setProjectDescription(event.target.value)}
                   placeholder="프로젝트 목표, 범위, 현재 논의 중인 흐름을 적어주세요."
                   value={projectDescription}
                 />
               </label>
 
+              {createError ? <p aria-live="polite" className="workspace-form-error">{createError}</p> : null}
+
               <div className="workspace-project-modal-actions">
-                <button className="secondary" onClick={() => setIsProjectModalOpen(false)} type="button">
+                <button className="secondary" disabled={isCreating} onClick={() => setIsProjectModalOpen(false)} type="button">
                   취소
                 </button>
-                <button className="primary" disabled={!projectTitle.trim()} type="submit">
-                  프로젝트 생성
+                <button className="primary" disabled={!projectTitle.trim() || isCreating} type="submit">
+                  {isCreating ? "생성 중..." : "프로젝트 생성"}
                 </button>
               </div>
             </form>
