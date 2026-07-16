@@ -14,11 +14,23 @@ export function formatStartsAt(scheduledAt: string): string {
   if (Number.isNaN(date.getTime())) {
     return scheduledAt;
   }
-  return new Intl.DateTimeFormat("ko-KR", {
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
     timeZone: "Asia/Seoul"
-  }).format(date);
+  }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = parts.find((part) => part.type === "minute")?.value;
+
+  if (!Number.isInteger(hour) || !minute) {
+    return scheduledAt;
+  }
+
+  const period = hour < 12 ? "오전" : "오후";
+  const displayHour = hour % 12 || 12;
+  return `${period} ${String(displayHour).padStart(2, "0")}:${minute}`;
 }
 
 export type LiveMeetingDetailResult = {

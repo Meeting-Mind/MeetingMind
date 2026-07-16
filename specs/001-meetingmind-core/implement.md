@@ -973,6 +973,6 @@
 - Passed: `cd backend && ./gradlew test`; `PROCESSING` transcript의 target dialogue 조회와 기존 STT lifecycle/controller 회귀를 포함한다.
 - Passed: `cd backend && ./gradlew test --tests com.meetingmind.demo.MeetingMindApplicationTest`; 기본 context에는 legacy STT controller가 없고 `legacy-stt` 명시 profile에서만 등록됨을 검증했다.
 - Passed: 같은 context test에서 legacy LiveKit controller도 기본 context에 없고 `legacy-livekit` 명시 profile에서만 등록됨을 검증했다.
-- Passed: `cd frontend && TZ=UTC npm test -- --run`; 3 files, 15 tests. STT target API client의 Bearer auth와 시간대 독립 포맷을 검증했다.
+- Passed: `cd frontend && TZ=UTC npm test -- --run`; STT target API client, 시간대 독립 포맷과 CI의 축소 ICU locale에서도 일관된 한국어 오전/오후 표기를 검증했다.
 - Passed: `cd frontend && npm run build`; bundle size warning 외 성공.
 - Passed: `cd ai && python3 -m compileall app tests`, `git diff --check`, legacy frontend STT endpoint 및 `roomCode` 참조 검색.
