@@ -56,6 +56,30 @@ class SpaceControllerTest {
         assertThat(spaces.spaces().getFirst().meetingCount()).isEqualTo(1);
     }
 
+    @Test
+    void listMeetingsReturnsTargetMeetingShape() {
+        TestContext context = newContext();
+        var space = context.controller.createSpace(
+                "Bearer access-token",
+                new CreateSpaceRequest("MeetingMind", null)
+        );
+        var created = context.controller.createMeeting(
+                "Bearer access-token",
+                space.id(),
+                new CreateMeetingRequest("API 구조 논의", SCHEDULED_AT, List.of())
+        );
+
+        var meetings = context.controller.listMeetings(
+                "Bearer access-token", space.id(), "SCHEDULED", null, null
+        );
+
+        assertThat(meetings.meetings()).singleElement().satisfies(meeting -> {
+            assertThat(meeting.id()).isEqualTo(created.id());
+            assertThat(meeting.spaceId()).isEqualTo(space.id());
+            assertThat(meeting.myRole()).isEqualTo("HOST");
+        });
+    }
+
     private TestContext newContext() {
         AuthService authService = mock(AuthService.class);
         when(authService.currentUser("Bearer access-token"))

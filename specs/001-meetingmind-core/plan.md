@@ -550,6 +550,68 @@ M032는 T229를 실행 가능한 단위로 분리해 Backend runtime의 in-memor
 - Security: revoked participant, Space 비멤버, 회의 게스트가 권한 밖 AI source에 포함되지 않는 negative test를 통과한다.
 - Integrity: owner transfer, join approval, current report, task candidate confirm이 실패 시 부분 저장되지 않고 DB unique/transaction 경계를 지킨다.
 
+## M033 Meeting CRUD PostgreSQL End-to-End
+
+M033은 이미 PostgreSQL에 영속화되는 회의 생성 경로를 회의 목록·상세·수정·삭제 API와 실제 Frontend 화면까지 확장한다. CRUD 성공 여부는 화면의 local state가 아니라 Backend 재조회 결과와 PostgreSQL 상태를 기준으로 판단한다.
+
+### Scope and Ownership
+
+- Team members: Backend/Frontend 통합 담당 1명.
+- Agents: Codex 1개가 계약, migration, Backend, Frontend, 검증을 순차 처리한다. 같은 파일을 병렬 수정하지 않는다.
+- Shared contract owner: `contracts/meeting-api.md`, `data-model.md`, `erd.md`, `clarify.md`를 Backend 구현보다 먼저 확정한다.
+- Backend owner: `WorkspaceStore`, `WorkspaceDomainService`, Meeting controller/DTO, `MeetingAccessPolicy`, JDBC/in-memory adapter, Backend tests, forward-only migration.
+- Frontend owner: `frontend/src/api/workspace.ts`, `frontend/src/types.ts`, `App.tsx`, `ProjectOverviewPage.tsx`, `WorkspaceHomePage.tsx`의 target Meeting API 연결.
+- AI/RAG 코드와 embedding/vector migration은 수정하지 않는다. 삭제된 회의를 Backend 관계형 조회와 권한 필터 단계에서 제외한다.
+
+### Recommended Delete Baseline
+
+1. `SCHEDULED` 회의 삭제는 `status=CANCELED`와 soft-delete metadata를 같은 transaction에 기록한다.
+2. `IN_PROGRESS` 회의 삭제는 `409 MEETING_ALREADY_PROCESSING`으로 거부한다.
+3. `ENDED` 회의 삭제는 상태를 유지한 채 soft delete한다. 전사, 보고서, 태스크, 감사 기록은 즉시 물리 삭제하지 않는다.
+4. soft-deleted 회의는 일반 목록·상세·캘린더·Meeting AI·Project AI source에서 즉시 제외한다.
+5. 삭제 권한은 `OWNER` 또는 해당 회의의 active `HOST`만 허용한다. `ADMIN`, `EDITOR`, `VIEWER`는 기본 거부한다.
+6. hard purge, 복구 API, 유예 기간은 이번 milestone 범위 밖이며 보존 정책 작업으로 분리한다.
+
+이 기준은 데이터 손실을 최소화하는 권장안이다. 구현 전 `clarify.md`, API 계약, 데이터 모델에 결정사항으로 확정한다.
+
+### API and Domain Design
+
+1. `GET /api/v1/spaces/{spaceId}/meetings`는 `status`, `from`, `to`를 검증하고 active SpaceMember의 역할과 active MeetingParticipant ACL을 적용한다. `OWNER`/`ADMIN`은 목록 조회 override를 가지며 일반 `MEMBER`는 참여 회의만 본다.
+2. `GET /api/v1/meetings/{meetingId}`는 `OWNER`/`ADMIN` 또는 active `MeetingParticipant`에게만 상세와 `myRole`을 반환한다. 삭제된 회의는 일반 조회에서 찾을 수 없는 것으로 처리한다.
+3. `PATCH /api/v1/meetings/{meetingId}`는 `OWNER`/`ADMIN` 또는 active `HOST`만 실행한다. 제목은 blank를 거부하고, 일정 수정은 `SCHEDULED` 상태에서만 허용하며, 상태는 canonical 전이만 허용한다.
+4. canonical 상태 전이는 `SCHEDULED -> IN_PROGRESS`, `SCHEDULED -> CANCELED`, `IN_PROGRESS -> ENDED`다. 동일 값은 idempotent하게 허용하고 역전이는 `400 INVALID_REQUEST`로 거부한다.
+5. `DELETE /api/v1/meetings/{meetingId}`는 row lock과 transaction 안에서 상태·권한을 다시 확인하고 soft delete와 `MEETING_DELETED` audit를 원자적으로 저장한다.
+6. Meeting에 `deletedAt`, `deletedBy`를 추가하고 기존 V1~V10은 수정하지 않는다. 새 index와 제약은 V11 forward migration으로 추가한다.
+7. 목록 필터와 AI context 후보 조회는 `deleted_at is null`을 공통 active Meeting 조건으로 사용한다.
+
+### Frontend Integration
+
+1. target Space가 선택되면 `fetchMeetings`로 Backend 목록을 로드하고 legacy/mock 회의와 섞지 않는다.
+2. 생성·수정·삭제 UI는 `createMeeting`, `updateMeeting`, `deleteMeeting`을 호출한 뒤 Backend 목록을 재조회한다. 성공처럼 보이는 local-only mutation을 제거한다.
+3. 권한에 따라 생성, 수정, 삭제 control을 표시하되 Backend의 403 판단을 최종 기준으로 유지한다.
+4. loading, empty, 400/403/404/409 오류, 중복 제출 방지와 삭제 확인을 제공한다.
+5. demo/legacy Space는 기존 mock fallback을 유지하되 target DB 데이터와 명확히 구분한다.
+
+### Implementation Order
+
+1. 삭제 의미, 상태 전이, 권한, active Meeting 조건을 계약/결정 문서에 확정한다.
+2. `deletedAt`/`deletedBy` 모델과 V11 migration을 추가하고 ERD 영향을 맞춘다.
+3. store/domain에 ACL 목록, 상세, 수정, soft delete와 audit transaction을 구현한다.
+4. Meeting list/detail/PATCH/DELETE controller와 DTO, 오류 매핑을 구현한다.
+5. Backend unit/controller/JDBC integration test를 추가한다.
+6. Frontend target Meeting API를 실제 프로젝트 회의 화면에 연결하고 local-only success 경로를 제거한다.
+7. Frontend unit/build와 PostgreSQL real API CRUD smoke를 통과시킨다.
+8. `tasks.md`, `implement.md`, `analyze.md`에 결과와 미실행 사유를 반영한다.
+
+### Verification Plan
+
+- Backend unit/controller: 생성자 HOST 등록, ACL 목록, 상세 403, 수정 권한, 상태 전이, delete 권한, 진행 중 delete 409, audit를 검증한다.
+- PostgreSQL integration: create -> reload/list -> detail -> patch -> reload -> delete -> reload exclusion과 transaction rollback을 검증한다.
+- AI safety regression: soft-deleted meeting이 Meeting AI와 Project AI context 후보에 포함되지 않는지 검증한다.
+- Frontend: API client unit test, target/mock 경계 test, `npm run lint`, `npm run test`, `npm run build`를 실행한다.
+- Real API smoke: signup -> Space 생성 -> Meeting 생성 -> 목록/상세 -> 수정 -> 삭제 -> 목록/상세 제외를 local PostgreSQL에서 확인한다.
+- Repository: 전체 Backend test, Flyway V1~V11 migration test, `git diff --check`를 통과한다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

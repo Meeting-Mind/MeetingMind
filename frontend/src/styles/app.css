@@ -2008,6 +2008,10 @@ body.app-theme.meeting-access-body {
   gap: 24px;
 }
 
+.project-overview-center > * {
+  flex-shrink: 0;
+}
+
 .project-next-banner {
   min-height: 104px;
   display: flex;

@@ -232,7 +232,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     @Override
     Optional<Meeting> findMeetingById(String meetingId) {
         return first(jdbc.query(
-                meetingSelect() + " where id = ?",
+                meetingSelect() + " where id = ? and deleted_at is null",
                 JdbcWorkspaceStore::mapMeeting,
                 meetingId
         ));
@@ -241,7 +241,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     @Override
     Optional<Meeting> findMeetingByJoinCode(String joinCode) {
         return first(jdbc.query(
-                meetingSelect() + " where join_code_hash = ?",
+                meetingSelect() + " where join_code_hash = ? and deleted_at is null",
                 JdbcWorkspaceStore::mapMeeting,
                 hashJoinCode(joinCode)
         ));
@@ -249,14 +249,18 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
 
     @Override
     long countMeetingsBySpaceId(String spaceId) {
-        Long count = jdbc.queryForObject("select count(*) from meetings where space_id = ?", Long.class, spaceId);
+        Long count = jdbc.queryForObject(
+                "select count(*) from meetings where space_id = ? and deleted_at is null",
+                Long.class,
+                spaceId
+        );
         return count == null ? 0 : count;
     }
 
     @Override
     List<Meeting> findMeetingsBySpaceId(String spaceId) {
         return jdbc.query(
-                meetingSelect() + " where space_id = ? order by scheduled_at nulls last, id",
+                meetingSelect() + " where space_id = ? and deleted_at is null order by scheduled_at nulls last, id",
                 JdbcWorkspaceStore::mapMeeting,
                 spaceId
         );
@@ -267,6 +271,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
         return jdbc.query(
                 meetingSelect() + """
                  where space_id = ?
+                   and deleted_at is null
                    and exists (
                        select 1
                        from space_members sm
@@ -294,7 +299,48 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
 
     @Override
     void lockMeeting(String meetingId) {
-        jdbc.queryForObject("select id from meetings where id = ? for update", String.class, meetingId);
+        jdbc.queryForObject(
+                "select id from meetings where id = ? and deleted_at is null for update",
+                String.class,
+                meetingId
+        );
+    }
+
+    @Override
+    Meeting updateMeeting(
+            String meetingId,
+            String title,
+            OffsetDateTime scheduledAt,
+            OffsetDateTime startedAt,
+            OffsetDateTime endedAt,
+            MeetingStatus status
+    ) {
+        jdbc.update(
+                """
+                update meetings
+                set title = ?, scheduled_at = ?, started_at = ?, ended_at = ?, status = ?
+                where id = ? and deleted_at is null
+                """,
+                title, scheduledAt, startedAt, endedAt, status.name(), meetingId
+        );
+        return findMeetingById(meetingId).orElseThrow();
+    }
+
+    @Override
+    Meeting softDeleteMeeting(String meetingId, MeetingStatus status, String deletedBy, Instant deletedAt) {
+        jdbc.update(
+                """
+                update meetings
+                set status = ?, deleted_by = ?, deleted_at = ?
+                where id = ? and deleted_at is null
+                """,
+                status.name(), deletedBy, timestamp(deletedAt), meetingId
+        );
+        return first(jdbc.query(
+                meetingSelect() + " where id = ?",
+                JdbcWorkspaceStore::mapMeeting,
+                meetingId
+        )).orElseThrow();
     }
 
     @Override
@@ -913,7 +959,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     private static String meetingSelect() {
         return """
                 select id, space_id, title, scheduled_at, started_at, ended_at,
-                       status, failure_reason, retention_policy
+                       status, failure_reason, retention_policy, deleted_at, deleted_by
                 from meetings
                 """;
     }
@@ -962,7 +1008,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
                 nullableOffsetDateTime(rs, "scheduled_at"), null,
                 nullableOffsetDateTime(rs, "started_at"), nullableOffsetDateTime(rs, "ended_at"),
                 MeetingStatus.valueOf(rs.getString("status")), rs.getString("failure_reason"),
-                rs.getString("retention_policy")
+                rs.getString("retention_policy"), nullableInstant(rs, "deleted_at"), rs.getString("deleted_by")
         );
     }
 
@@ -1037,6 +1083,9 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
         }
         if (action.startsWith("MEETING_PARTICIPANT")) {
             return "MEETING_PARTICIPANT";
+        }
+        if (action.startsWith("MEETING_")) {
+            return "MEETING";
         }
         return "RESOURCE";
     }

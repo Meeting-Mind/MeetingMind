@@ -431,6 +431,24 @@ M032는 T229의 실제 구현 milestone이다. Backend는 관계형 원천 데�
 | T251 | M032 | [x] | backend/profile-ai-context | 사용자(Backend 담당) | Codex | T250 | `backend/src/main/java/**`, `backend/src/main/resources/**`, `backend/src/test/**` | test in-memory/local·db JDBC bean을 분리하고 DB 기반 Meeting/Project AI context 선필터를 검증한다. | local/db는 JDBC, test는 in-memory이며 권한 밖 source가 AI request에서 제외된다. |
 | T252 | M032 | [x] | backend/integration-test | 사용자(Backend 담당) | Codex | T251 | `backend/src/test/**`, `compose.local.yml` | PostgreSQL repository, 재시작 유지, transaction, migration 회귀 통합 테스트를 실행한다. | JDBC 통합 test, 전체 Backend test, Flyway V1~V10 검증이 통과한다. |
 | T253 | M032 | [x] | docs/closeout | 사용자(Backend 담당) | Codex | T252 | `specs/001-meetingmind-core/{tasks,implement,analyze}.md`, `.specify/memory/session-handoff.md` | 실제 변경, 검증, 남은 AI/RAG 경계와 미실행 사유를 기록한다. | T229/M032 상태와 구현 기록이 실제 결과에 맞고 vector 담당 후속 작업이 보존된다. |
+
+### M033: Meeting CRUD PostgreSQL End-to-End
+
+M033은 FR-MREG-01/04/05/06/07과 FR-ACL-07을 기준으로 회의 CRUD를 Backend PostgreSQL API와 실제 Frontend 화면까지 연결한다. 한 명의 통합 owner가 shared contract부터 순차 처리하며 AI/RAG 파일은 수정하지 않는다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T254 | M033 | [x] | contracts/decision | 사용자(Backend 담당) | Codex | T253 | `requirements/{functional-requirements-detail,permissions,status-values,policies}.md`, `specs/001-meetingmind-core/{clarify,plan,data-model,erd}.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/test-matrix.md` | 회의 CRUD 권한, 상태 전이, 삭제 의미와 active Meeting 조회 조건을 확정한다. | OWNER/HOST 삭제, ADMIN 기본 거부, SCHEDULED cancel+soft delete, IN_PROGRESS 409, ENDED soft delete, AI/목록 제외 기준이 문서에서 일치한다. |
+| T255 | M033 | [x] | data/migration | 사용자(Backend 담당) | Codex | T254 | `specs/001-meetingmind-core/{data-model,erd}.md`, `backend/src/main/resources/db/migration/V11__*.sql`, `backend/src/test/**` | Meeting soft-delete metadata와 active 조회 index를 forward migration으로 추가한다. | V1~V10 checksum을 유지하고 `deleted_at`, `deleted_by`, FK/index가 빈 DB와 V10 upgrade DB에서 검증된다. |
+| T256 | M033 | [x] | backend/domain-store | 사용자(Backend 담당) | Codex | T255 | `backend/src/main/java/com/meetingmind/demo/{authz,domain}/**`, `backend/src/test/java/com/meetingmind/demo/**` | ACL-filtered 목록/상세, canonical update, row-locked soft delete와 audit transaction을 store/domain에 구현한다. | 권한 밖·삭제된 회의가 조회/AI 후보에서 제외되고 잘못된 상태 전이와 진행 중 삭제가 mutation 전에 거부되며 실패 시 부분 저장이 없다. |
+| T257 | M033 | [x] | backend/read-api | 사용자(Backend 담당) | Codex | T256 | `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/main/java/com/meetingmind/demo/dto/**`, `backend/src/test/java/com/meetingmind/demo/controller/**` | 회의 목록과 상세 target API를 구현한다. | `GET /spaces/{spaceId}/meetings`의 status/from/to와 `GET /meetings/{meetingId}`의 myRole/ACL/400/403/404 응답이 계약과 일치한다. |
+| T258 | M033 | [x] | backend/mutation-api | 사용자(Backend 담당) | Codex | T256 | `backend/src/main/java/com/meetingmind/demo/controller/**`, `backend/src/main/java/com/meetingmind/demo/dto/**`, `backend/src/test/java/com/meetingmind/demo/controller/**` | 회의 PATCH와 DELETE target API를 구현한다. | title/schedule/status validation, OWNER/ADMIN/HOST 수정, OWNER/HOST 삭제, ADMIN/EDITOR/VIEWER 삭제 거부, delete audit와 400/403/404/409가 검증된다. |
+| T259 | M033 | [x] | backend/verification | 사용자(Backend 담당) | Codex | T257, T258 | `backend/src/test/**`, `specs/001-meetingmind-core/test-matrix.md` | 도메인, controller, JDBC 회귀 테스트를 완성한다. | create/list/detail/update/delete round-trip, ACL negative case, transaction rollback, soft-deleted AI source 제외와 전체 Backend test가 통과한다. |
+| T260 | M033 | [x] | frontend/integration | 사용자(Frontend 담당) | Codex | T257, T258 | `frontend/src/{api/workspace.ts,types.ts,App.tsx}`, `frontend/src/pages/{ProjectOverviewPage,WorkspaceHomePage}.tsx`, `frontend/src/styles/app.css` | target Space 회의 화면을 실제 Backend CRUD API에 연결한다. | target 데이터는 mock과 섞이지 않고 생성/수정/삭제 후 Backend 재조회 결과가 표시되며 local-only 성공 경로가 없다. |
+| T261 | M033 | [x] | frontend/verification | 사용자(Frontend 담당) | Codex | T260 | `frontend/src/**/*.test.*`, `frontend/e2e/**`, `frontend/package.json` | CRUD loading/error/권한/target-mock 경계와 사용자 흐름을 검증한다. | unit test, lint, build와 생성->수정->삭제 UI E2E가 통과하고 API 실패가 성공으로 표시되지 않는다. |
+| T262 | M033 | [x] | verification/postgresql-e2e | 사용자(Backend 담당) | Codex | T259, T261 | `backend/**`, `frontend/**`, `compose.local.yml`, `specs/001-meetingmind-core/implement.md` | local PostgreSQL에서 인증부터 회의 CRUD까지 real API smoke와 Flyway 회귀를 수행한다. | signup -> Space -> create -> list/detail -> patch -> delete -> 목록/상세/AI 제외가 통과하고 V1~V11 migration 및 재조회 영속성이 확인된다. |
+| T263 | M033 | [x] | docs/closeout | 사용자(Backend 담당) | Codex | T262 | `specs/001-meetingmind-core/{tasks,implement,analyze,feature-implementation-comparison}.md`, `.specify/memory/session-handoff.md` | 실제 변경, 검증 결과, hard purge/복구/유예 기간 후속 경계를 정리한다. | 완료 상태와 검증 명령이 실제 결과와 일치하고 남은 삭제 보존 작업 또는 미실행 사유가 기록된다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -467,6 +485,7 @@ M032는 T229의 실제 구현 milestone이다. Backend는 관계형 원천 데�
 - [x] V031 PR #29 원격 GitHub Actions 전체 job과 `CI Gate`/Summary 성공 검증
 - [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증; private repository 현재 요금제 API 403으로 차단
 - [x] V033 Backend PostgreSQL runtime 검증: Auth/Workspace JDBC integration, joinCode hash, ACL 선필터, Transcript/Report/Task/Knowledge/Audit JSONB round-trip, 재시작 후 로그인, 전체 Backend test/bootJar, 빈 pgvector DB Flyway V1~V10
+- [x] V034 Meeting CRUD PostgreSQL E2E 검증: Flyway V1~V11 빈 DB/upgrade, Backend 전체/JDBC test, Frontend unit 9건·lint 오류 0건·build, Playwright 3건, local PostgreSQL 재시작 영속성 및 create/list/detail/update/delete/목록·상세·Meeting AI 제외 smoke
 
 ## Notes
 

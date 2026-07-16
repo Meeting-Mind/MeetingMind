@@ -2,6 +2,11 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 const password = "CiPass123!";
 const sessionStorageKey = "meetingmind.auth.session";
+const backendBaseURL = `http://127.0.0.1:${process.env.PLAYWRIGHT_BACKEND_PORT ?? "8080"}`;
+
+function apiPath(path: string) {
+  return `${backendBaseURL}${path}`;
+}
 
 type AuthSession = {
   accessToken: string;
@@ -18,7 +23,7 @@ type AuthSession = {
 };
 
 async function signup(request: APIRequestContext, label: string): Promise<AuthSession> {
-  const response = await request.post("/api/v1/auth/signup", {
+  const response = await request.post(apiPath("/api/v1/auth/signup"), {
     data: {
       displayName: `CI ${label}`,
       email: `${label}-${Date.now()}@example.com`,
@@ -59,14 +64,14 @@ test("meeting prejoin allows an active HOST and denies an unknown meeting", asyn
   const session = await signup(request, "meeting-access");
   const authorization = { Authorization: `Bearer ${session.accessToken}` };
 
-  const spaceResponse = await request.post("/api/v1/spaces", {
+  const spaceResponse = await request.post(apiPath("/api/v1/spaces"), {
     data: { name: "CI access space", description: "Playwright meeting access verification" },
     headers: authorization
   });
   expect(spaceResponse.ok()).toBeTruthy();
   const space = (await spaceResponse.json()) as { id: string };
 
-  const meetingResponse = await request.post(`/api/v1/spaces/${space.id}/meetings`, {
+  const meetingResponse = await request.post(apiPath(`/api/v1/spaces/${space.id}/meetings`), {
     data: {
       title: "CI permission meeting",
       scheduledAt: "2030-01-01T09:00:00+09:00",
@@ -85,4 +90,42 @@ test("meeting prejoin allows an active HOST and denies an unknown meeting", asyn
   await page.goto("/live-meeting?meetingId=missing-meeting");
   await expect(page.getByRole("heading", { name: "회의에 접근할 수 없습니다" })).toBeVisible();
   await expect(page.getByText("default-deny")).toBeVisible();
+});
+
+test("meeting CRUD is persisted through the project UI", async ({ page, request }) => {
+  const session = await signup(request, "meeting-crud");
+  const authorization = { Authorization: `Bearer ${session.accessToken}` };
+  const spaceName = `CI CRUD space ${Date.now()}`;
+
+  const spaceResponse = await request.post(apiPath("/api/v1/spaces"), {
+    data: { name: spaceName, description: "Playwright meeting CRUD verification" },
+    headers: authorization
+  });
+  expect(spaceResponse.ok()).toBeTruthy();
+  const space = (await spaceResponse.json()) as { id: string };
+
+  await storeSession(page, session);
+  await page.goto(`/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`);
+  await expect(page.getByRole("heading", { name: `${spaceName} 프로젝트` })).toBeVisible();
+  await expect(page.getByText("PostgreSQL target API")).toBeVisible();
+
+  await page.getByLabel("새 회의 제목").fill("CI CRUD 회의");
+  await page.getByLabel("새 회의 일시").fill("2030-03-01T10:00");
+  await page.getByRole("button", { name: "회의 생성", exact: true }).click();
+  await expect(page.getByRole("link", { name: /CI CRUD 회의/ })).toBeVisible();
+
+  await page.getByLabel("회의 제목 수정").fill("CI CRUD 회의 수정");
+  await page.getByLabel("예정 일시 수정").fill("2030-03-02T11:30");
+  await page.getByRole("button", { name: "회의 정보 저장" }).click();
+  await expect(page.getByRole("link", { name: /CI CRUD 회의 수정/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "회의 삭제", exact: true }).click();
+  const deleteConfirmation = page.getByLabel("회의 삭제 확인값");
+  await deleteConfirmation.fill((await deleteConfirmation.getAttribute("placeholder")) ?? "");
+  await page.getByRole("button", { name: "삭제 확정" }).click();
+  await expect(page.getByRole("link", { name: /CI CRUD 회의 수정/ })).toHaveCount(0);
+
+  const meetingsResponse = await request.get(apiPath(`/api/v1/spaces/${space.id}/meetings`), { headers: authorization });
+  expect(meetingsResponse.ok()).toBeTruthy();
+  expect(((await meetingsResponse.json()) as { meetings: unknown[] }).meetings).toHaveLength(0);
 });

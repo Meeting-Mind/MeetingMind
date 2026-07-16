@@ -24,7 +24,7 @@ class MigrationIntegrationTest {
                 .load()
                 .migrate();
 
-        assertThat(result.migrationsExecuted).isEqualTo(10);
+        assertThat(result.migrationsExecuted).isEqualTo(11);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -38,7 +38,7 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"
             );
 
             try (var statement = connection.createStatement();

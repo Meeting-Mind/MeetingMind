@@ -699,3 +699,42 @@
 - legacy `/api/stt` streaming session과 transcript file prototype은 실제 STT pipeline 계약이 Future Draft라 이번 관계형 artifact persistence에서 제외했다.
 - T230 embedding worker, model/dimension/index, pgvector similarity query와 semantic retriever는 별도 AI/RAG 담당 범위다.
 - `Q-008`, `Q-009` candidate TTL과 report history/export는 여전히 후속 결정이 필요하다.
+
+## M033 Meeting CRUD PostgreSQL End-to-End
+
+### Design and Contract
+
+- FR-MREG-01/04/05/06/07, FR-ACL-07을 기준으로 목록·상세·수정·삭제 권한과 canonical 상태 전이를 확정했다.
+- 수정은 OWNER/ADMIN/active HOST, 삭제는 OWNER/active HOST만 허용한다. ADMIN 단독 삭제는 기본 거부한다.
+- `SCHEDULED` 삭제는 `CANCELED` 전환과 soft-delete metadata를 같은 transaction에 기록하고, `IN_PROGRESS` 삭제는 `409 MEETING_ALREADY_PROCESSING`, `ENDED` 삭제는 상태를 유지한 soft delete로 결정했다.
+- hard purge, restore, grace period는 보존·감사 정책이 추가로 필요하므로 후속 범위로 남겼다.
+
+### Changes
+
+- V11 forward migration에 `meetings.deleted_at`, `deleted_by` FK/check와 active 조회 partial index를 추가했다. 공유 V1~V10은 수정하지 않았다.
+- `WorkspaceStore`의 in-memory/JDBC adapter에 meeting update/soft delete를 추가하고, 목록·상세·Project AI 후보·Meeting AI source 조회에서 삭제 row를 제외했다.
+- `WorkspaceDomainService`에 ACL-filtered list/detail, title/schedule/status update, row-locked delete/audit transaction을 구현했다.
+- `GET /api/v1/spaces/{spaceId}/meetings`, `GET/PATCH/DELETE /api/v1/meetings/{meetingId}`와 DTO를 구현했다.
+- Frontend target Space는 Backend 회의 목록으로 legacy meeting을 교체하며 생성·수정·삭제 뒤 반드시 재조회한다. API 실패 시 local-only 성공 mutation을 수행하지 않는다.
+- ProjectOverview의 loading/error/권한 control과 상태 표기, 삭제 확인을 연결하고, 고정 높이 flex에서 운영 카드와 칸반이 겹치던 레이아웃을 수정했다.
+- Playwright Backend/Frontend port와 Backend API base URL을 환경변수로 분리해 기존 개발 서버를 중단하지 않고 격리 E2E를 실행할 수 있게 했다. cross-origin target 실행에 필요한 CORS `PATCH`도 허용했다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`
+- Passed: local PostgreSQL `5434`에서 `JdbcWorkspaceStoreIntegrationTest`; update round-trip, deleted metadata, 목록/Project AI/Meeting AI 제외
+- Passed: 임시 빈 PostgreSQL `55432`에서 `MigrationIntegrationTest`; Flyway V1~V11 전체 적용. 기존 local V10 schema의 V11 forward upgrade와 재검증도 통과했다.
+- Passed: `cd frontend && npm run test`; 2 files, 9 tests
+- Passed: `cd frontend && npm run lint`; 오류 0건, 기존 경고 8건
+- Passed: `cd frontend && npm run build`; bundle size 경고 외 성공
+- Passed: `PLAYWRIGHT_BACKEND_PORT=18081 npm run test:e2e`; 로그인, HOST prejoin/default-deny, 회의 생성→수정→삭제와 서버 목록 0건, 총 3건
+- Passed: local profile Backend `18082` + PostgreSQL real API smoke; signup→Space→create→list/detail→patch 후 Backend 재시작, login→수정값 재조회→delete→목록 0건→상세 404→Meeting AI 404
+- Cleanup: real API smoke에서 생성한 고유 account/session/Space/Meeting/audit row만 검증 후 transaction으로 제거했다.
+- Passed: `git diff --check`
+- Recovered validation input error: 첫 JDBC 재실행은 수동으로 잘못 넣은 DB 비밀번호 때문에 실패했고, `compose.local.yml`의 `meetingmind_local` 기준으로 재실행해 통과했다. 코드 실패는 아니었다.
+
+### Closeout Boundary
+
+- `.specify/memory/session-handoff.md`는 병합된 팀 공통 기준만 기록한다는 규칙에 따라 아직 병합되지 않은 현재 브랜치 상태를 추가하지 않았다.
+- soft-deleted meeting의 hard purge, restore, grace period와 운영자 조회 API는 후속 milestone에서 보존·감사 요구와 함께 결정한다.
+- AI/RAG 파일과 vector migration은 수정하지 않았다. 후속 retriever도 M033의 `deleted_at is null` 관계형 선필터 결과만 사용해야 한다.
