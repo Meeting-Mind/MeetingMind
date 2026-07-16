@@ -4,7 +4,7 @@ import {
   addMeetingParticipant,
   createMeeting,
   deleteMeeting,
-  fetchMeeting,
+  fetchMeetingDetail,
   fetchMeetingParticipants,
   fetchMeetings,
   fetchSpaceMembers,
@@ -70,7 +70,7 @@ describe("meeting CRUD API client", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ members: [] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await fetchMeeting(session, "meeting-1");
+    await fetchMeetingDetail(session, "meeting-1");
     await fetchMeetingParticipants(session, "meeting-1");
     await fetchSpaceMembers(session, "space-1");
 

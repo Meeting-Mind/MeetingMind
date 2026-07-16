@@ -136,6 +136,7 @@ export interface MeetingDetailResponse {
   id: string;
   spaceId: string;
   title: string;
+  roomCode: string;
   status: MeetingStatus;
   scheduledAt: ApiDateTime;
   startedAt: ApiDateTime | null;
@@ -251,6 +252,14 @@ export interface MeetingDetail extends MeetingSummary {
   startedAt: ApiDateTime | null;
   endedAt: ApiDateTime | null;
   participants: MeetingParticipantSummary[];
+}
+
+export interface MeetingDetailResponse {
+  id: string;
+  title: string;
+  roomCode: string;
+  scheduledAt: ApiDateTime;
+  status: MeetingStatus;
 }
 
 export interface CreateMeetingRequest {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { fetchMeetingParticipants } from "../api/workspace";
 import type { AuthSession } from "../auth/session";
+import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
 import type { MeetingRole } from "../types";
 import type { WorkspaceData } from "../types";
 
@@ -105,7 +106,13 @@ function MutedBadgeGlyph() {
 
 type AccessCheckState = "checking" | "allowed" | "denied";
 
-export function LiveMeetingPage({ data, session }: { data: WorkspaceData["liveMeeting"]; session: AuthSession }) {
+export function LiveMeetingPage({
+  data: fallbackData,
+  session
+}: {
+  data: WorkspaceData["liveMeeting"];
+  session: AuthSession;
+}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -124,6 +131,7 @@ export function LiveMeetingPage({ data, session }: { data: WorkspaceData["liveMe
   const spaceId = searchParams.get("spaceId");
   const meetingId = searchParams.get("meetingId");
   const projectName = searchParams.get("project") ?? "FinPilot Renewal";
+  const { liveMeeting: data, error: liveMeetingError } = useLiveMeetingDetail(session, meetingId, fallbackData);
   const meetingTitle = searchParams.get("meeting") ?? data.overview.title;
 
   useEffect(() => {
@@ -455,6 +463,8 @@ export function LiveMeetingPage({ data, session }: { data: WorkspaceData["liveMe
         </section>
 
         <aside className="meeting-prejoin-sidebar">
+          {liveMeetingError ? <div className="live-meeting-data-warning">{liveMeetingError}</div> : null}
+
           <section className="meeting-prejoin-info-card">
             <h1>{meetingTitle}</h1>
             <p>{data.overview.subtitle.split("·")[0]?.trim() ?? data.overview.subtitle}</p>
