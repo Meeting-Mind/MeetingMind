@@ -6,7 +6,6 @@ import com.meetingmind.demo.authz.MeetingStatus;
 import com.meetingmind.demo.authz.ParticipantAccessStatus;
 import com.meetingmind.demo.authz.ParticipantType;
 import com.meetingmind.demo.authz.SpaceRole;
-import com.meetingmind.demo.persistence.entity.JpaWorkspacePersistence;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;

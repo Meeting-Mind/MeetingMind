@@ -435,7 +435,6 @@
 - API 계약, ERD, data model, 애플리케이션 코드에는 영향이 없다.
 
 ### Verification
-
 - Passed: `git check-ignore -v .specify/memory/session-handoff.local.md`
 - Passed: 공용 handoff에서 owner, branch, base commit, 과거 session heading, 커밋 전/미추적 상태 패턴이 검색되지 않음
 - Passed: ignored local handoff가 `git status --short --untracked-files=all`에 나타나지 않음
@@ -916,12 +915,14 @@
 
 ### T297-T298 Implementation
 
-- Auth의 `AuthStore`와 `JdbcAuthStore`는 변경하지 않았다. non-auth persistence는 `persistence/entity`의 JPA metadata로 분리하고 Auth FK는 `user_id` scalar 값으로 유지했다. `@ManyToOne<User>`와 cascade를 추가하지 않았다.
+- Auth의 `AuthStore`와 `JdbcAuthStore`는 변경하지 않았다. non-auth Workspace와 Backend가 저장하는 AI artifact의 domain model 자체에 JPA mapping을 두고 `JpaWorkspacePersistence`가 이를 직접 영속화한다. Auth FK는 `user_id` scalar 값으로 유지했으며 `@ManyToOne<User>`와 cascade를 추가하지 않았다.
 - `spring-boot-starter-data-jpa`를 추가하고 `open-in-view=false`, `ddl-auto=validate`, UTC JDBC time zone을 설정했다. schema 변경은 계속 Flyway만 담당한다.
-- Space, Meeting/ACL, Transcript, Report, Task, ProjectKnowledge, DomainTerm, AuditLog, EmbeddingJob/Chunk table의 entity mapping을 추가했다. `embedding_chunks.embedding vector(1536)` 및 hybrid retrieval은 D-040에 따라 JPA mapping에서 제외하고 AI native SQL/JDBC 경계를 유지한다.
+- Space, Meeting/ACL, Transcript, Report, Task, ProjectKnowledge, AuditLog table의 domain entity mapping을 추가했다. 별도 `*Entity`와 domain record 간 변환은 제거했다. `embedding_jobs` worker와 `embedding_chunks.embedding vector(1536)` hybrid retrieval은 D-040에 따라 JPA mapping에서 제외하고 AI native SQL/JDBC 경계를 유지한다.
 
 ### Verification
 
+- Passed after direct domain entity conversion: `cd backend && ./gradlew test`.
+- Passed after direct domain entity conversion: `CI_POSTGRES_URL=jdbc:postgresql://localhost:5434/meetingmind_runtime_8080 CI_POSTGRES_USER=meetingmind CI_POSTGRES_PASSWORD=meetingmind_local ./gradlew test --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest --tests com.meetingmind.demo.domain.SttTranscriptFlowIntegrationTest`; JPA reload, join-code hash, ACL, transcript completion, segment persistence, and embedding-job trigger were verified.
 - Passed: `cd backend && ./gradlew test` with the existing DataSource-free `test` profile.
 - Passed: temporary empty PostgreSQL database on the local pgvector container. `db` profile applied Flyway V1~V12, initialized Hibernate `EntityManagerFactory` with validation, and returned `GET /api/workspace` on port 18084. The temporary database and server were removed after verification.
 - Blocked (separate local integration issue): the existing `meetingmind` database has a V11 checksum mismatch (`applied -396214114`, current `-2043882333`), so its default `local` profile boot is correctly rejected by Flyway. No `repair` was run because migration history must not be rewritten without the integration owner's decision.
@@ -931,10 +932,10 @@
 - Auth는 계속 JDBC `AuthStore`를 사용한다. `WorkspaceStore`의 Space, Meeting/ACL, transcript, report/task, knowledge, audit는 `JpaWorkspaceStore`와 `JpaWorkspacePersistence`로 전환했고, vector retrieval/worker SQL은 JPA 대상이 아니다.
 - Cloud STT provider callback, target DB lifecycle, LiveKit Egress deployment E2E를 검증했다. OpenAI embedding provider의 실제 한국어 검색 품질과 외부 latency 평가는 별도 T301 잔여 작업이다.
 
-### T299 Workspace JPA Adapter
+### T299 Workspace JPA Persistence
 
 - `JdbcWorkspaceStore`는 Auth와 JDBC round-trip 검증용 helper로 남기고 Spring bean에서는 제거했다. `local`/`db` profile은 `JpaWorkspaceStore`를 주입하며, scalar user FK와 Flyway schema owner 경계를 유지한다.
-- JPA adapter는 Space, Meeting/ACL, join request, speaker, transcript segment, report/task, ProjectKnowledge, audit write/read를 담당한다. `MeetingTranscript`도 JPA entity로 저장한다.
+- `JpaWorkspacePersistence`는 Space, Meeting/ACL, join request, speaker, transcript segment, report/task, ProjectKnowledge, audit 도메인 엔티티를 직접 write/read한다. `MeetingTranscript`도 JPA entity로 저장한다. Report의 decision/action row만 별도 child entity로 유지하며 조회 시 `MeetingReport`에 조립한다.
 - PostgreSQL integration에서 Space/Meeting/ACL, join code hash, transcript/report/task/knowledge/audit reload와 Project AI ACL 선필터를 검증했다.
 
 ### T300 STT Persistence Lifecycle
