@@ -22,10 +22,20 @@ public class LiveKitEgressService {
     }
 
     private EgressServiceClient client() {
-        String host = DotenvConfig.require("LIVEKIT_WS_URL", "LIVEKIT_URL");
+        String host = egressApiUrl(DotenvConfig.require("LIVEKIT_WS_URL", "LIVEKIT_URL"));
         String apiKey = DotenvConfig.require("LIVEKIT_API_KEY");
         String apiSecret = DotenvConfig.require("LIVEKIT_API_SECRET");
         return EgressServiceClient.Companion.create(host, apiKey, apiSecret);
+    }
+
+    static String egressApiUrl(String host) {
+        if (host.startsWith("wss://")) {
+            return "https://" + host.substring("wss://".length());
+        }
+        if (host.startsWith("ws://")) {
+            return "http://" + host.substring("ws://".length());
+        }
+        return host;
     }
 
     private LivekitEgress.EgressInfo execute(Call<LivekitEgress.EgressInfo> call, String errorMessage) {

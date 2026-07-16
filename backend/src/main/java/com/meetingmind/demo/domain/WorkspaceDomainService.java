@@ -720,6 +720,129 @@ public class WorkspaceDomainService {
         );
     }
 
+    @Transactional
+    public MeetingTranscript startMeetingTranscript(String actorUserId, String meetingId, String provider) {
+        requireTranscriptManagement(actorUserId, meetingId);
+        store.lockMeeting(meetingId);
+        Meeting meeting = requireMeeting(meetingId);
+
+        MeetingTranscript existing = store.findMeetingTranscript(meetingId).orElse(null);
+        if (existing != null && existing.status() == TranscriptStatus.PROCESSING) {
+            throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_ALREADY_PROCESSING", "이미 진행 중인 전사가 있습니다.");
+        }
+        if (existing != null && existing.status() == TranscriptStatus.COMPLETED) {
+            throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_ALREADY_COMPLETED", "완료된 전사가 있습니다.");
+        }
+
+        Instant now = Instant.now(clock);
+        MeetingTranscript transcript = store.saveMeetingTranscript(new MeetingTranscript(
+                meetingId,
+                TranscriptStatus.PROCESSING,
+                provider,
+                "ko-KR",
+                now,
+                null,
+                null,
+                retentionUntil(meeting, now),
+                existing != null && existing.legalHold(),
+                existing == null ? null : existing.purgedAt(),
+                existing == null ? now : existing.createdAt(),
+                now
+        ));
+        addAudit("MEETING_TRANSCRIPTION_STARTED", actorUserId, null, meetingId, null, provider);
+        return transcript;
+    }
+
+    @Transactional
+    public TranscriptSegment appendTranscriptSegment(
+            String meetingId,
+            String speakerLabel,
+            String speakerName,
+            int startMs,
+            int endMs,
+            String text
+    ) {
+        store.lockMeeting(meetingId);
+        MeetingTranscript transcript = requireProcessingTranscript(meetingId);
+        if (text == null || text.isBlank()) {
+            throw invalidRequest("전사 내용은 비어 있을 수 없습니다.");
+        }
+        if (startMs < 0 || endMs < startMs) {
+            throw invalidRequest("전사 시간 범위가 올바르지 않습니다.");
+        }
+        MeetingSpeaker speaker = store.findMeetingSpeakers(meetingId).stream()
+                .filter(candidate -> candidate.label().equals(speakerLabel))
+                .findFirst()
+                .orElseGet(() -> store.addMeetingSpeaker(meetingId, speakerLabel, speakerName, Instant.now(clock)));
+        int sequence = store.findTranscriptSegments(meetingId).size();
+        return store.addTranscriptSegment(
+                transcript.meetingId(),
+                speaker.id(),
+                speaker.label(),
+                speaker.displayName(),
+                startMs,
+                endMs,
+                text.trim(),
+                "stt",
+                sequence
+        );
+    }
+
+    @Transactional
+    public MeetingTranscript completeMeetingTranscript(String meetingId) {
+        store.lockMeeting(meetingId);
+        MeetingTranscript transcript = requireProcessingTranscript(meetingId);
+        Instant now = Instant.now(clock);
+        return store.saveMeetingTranscript(new MeetingTranscript(
+                transcript.meetingId(),
+                TranscriptStatus.COMPLETED,
+                transcript.provider(),
+                transcript.language(),
+                transcript.startedAt(),
+                now,
+                null,
+                transcript.retentionUntil(),
+                transcript.legalHold(),
+                transcript.purgedAt(),
+                transcript.createdAt(),
+                now
+        ));
+    }
+
+    @Transactional
+    public MeetingTranscript failMeetingTranscript(String meetingId) {
+        store.lockMeeting(meetingId);
+        MeetingTranscript transcript = requireProcessingTranscript(meetingId);
+        Instant now = Instant.now(clock);
+        return store.saveMeetingTranscript(new MeetingTranscript(
+                transcript.meetingId(),
+                TranscriptStatus.FAILED,
+                transcript.provider(),
+                transcript.language(),
+                transcript.startedAt(),
+                now,
+                "STT provider 오류",
+                transcript.retentionUntil(),
+                transcript.legalHold(),
+                transcript.purgedAt(),
+                transcript.createdAt(),
+                now
+        ));
+    }
+
+    public MeetingTranscriptView meetingTranscript(String actorUserId, String meetingId) {
+        requireUser(actorUserId);
+        meetingAccessPolicy.requireReadAccess(meetingAccessContext(meetingId, actorUserId));
+        MeetingTranscript transcript = store.findMeetingTranscript(meetingId)
+                .orElseThrow(() -> new AuthorizationException(HttpStatus.NOT_FOUND, "TRANSCRIPT_NOT_FOUND", "전사를 찾을 수 없습니다."));
+        return new MeetingTranscriptView(transcript, store.findTranscriptSegments(meetingId));
+    }
+
+    public void requireTranscriptManagement(String actorUserId, String meetingId) {
+        requireUser(actorUserId);
+        meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
+    }
+
     public TaskCandidateContext taskCandidateContext(String meetingId) {
         MeetingAiContext context = meetingAiContext(meetingId);
         List<TaskParticipant> participants = store.findMeetingParticipants(meetingId).stream()
@@ -965,6 +1088,23 @@ public class WorkspaceDomainService {
                 ));
     }
 
+    private MeetingTranscript requireProcessingTranscript(String meetingId) {
+        MeetingTranscript transcript = store.findMeetingTranscript(meetingId)
+                .orElseThrow(() -> new AuthorizationException(HttpStatus.NOT_FOUND, "TRANSCRIPT_NOT_FOUND", "전사를 찾을 수 없습니다."));
+        if (transcript.status() != TranscriptStatus.PROCESSING) {
+            throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_NOT_PROCESSING", "진행 중인 전사가 아닙니다.");
+        }
+        return transcript;
+    }
+
+    private Instant retentionUntil(Meeting meeting, Instant now) {
+        return switch (meeting.retentionPolicy()) {
+            case "DAYS_7" -> now.plus(java.time.Duration.ofDays(7));
+            case "PERMANENT" -> null;
+            default -> now.plus(java.time.Duration.ofDays(30));
+        };
+    }
+
     private MeetingParticipant requireMeetingParticipantById(String meetingId, String participantId) {
         requireMeeting(meetingId);
         return store.findMeetingParticipantById(meetingId, participantId)
@@ -1051,6 +1191,12 @@ public class WorkspaceDomainService {
         public MeetingAiContext {
             transcriptSegments = transcriptSegments == null ? List.of() : List.copyOf(transcriptSegments);
             reports = reports == null ? List.of() : List.copyOf(reports);
+        }
+    }
+
+    public record MeetingTranscriptView(MeetingTranscript transcript, List<TranscriptSegment> segments) {
+        public MeetingTranscriptView {
+            segments = segments == null ? List.of() : List.copyOf(segments);
         }
     }
 

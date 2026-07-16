@@ -435,7 +435,6 @@
 - API 계약, ERD, data model, 애플리케이션 코드에는 영향이 없다.
 
 ### Verification
-
 - Passed: `git check-ignore -v .specify/memory/session-handoff.local.md`
 - Passed: 공용 handoff에서 owner, branch, base commit, 과거 session heading, 커밋 전/미추적 상태 패턴이 검색되지 않음
 - Passed: ignored local handoff가 `git status --short --untracked-files=all`에 나타나지 않음
@@ -911,3 +910,69 @@
 - 초기 참여자 선택은 조회 가능한 SpaceMember로 제한된다. 비멤버 guest 직접 검색/추가는 사용자 검색 또는 invitation 계약이 생긴 뒤 연결한다.
 - Playwright에서 기존 `WorkspaceHomePage` list key React warning이 관찰됐지만 M034 변경과 무관하고 동작/검증 실패는 아니다.
 - 공용 `.specify/memory/session-handoff.md`는 병합된 공통 기준만 기록하므로 아직 병합되지 않은 M034 상태를 추가하지 않았다.
+
+## M038 Workspace JPA Migration
+
+### T297-T298 Implementation
+
+- Auth의 `AuthStore`와 `JdbcAuthStore`는 변경하지 않았다. non-auth Workspace와 Backend가 저장하는 AI artifact의 domain model 자체에 JPA mapping을 두고 `JpaWorkspacePersistence`가 이를 직접 영속화한다. Auth FK는 `user_id` scalar 값으로 유지했으며 `@ManyToOne<User>`와 cascade를 추가하지 않았다.
+- `spring-boot-starter-data-jpa`를 추가하고 `open-in-view=false`, `ddl-auto=validate`, UTC JDBC time zone을 설정했다. schema 변경은 계속 Flyway만 담당한다.
+- Space, Meeting/ACL, Transcript, Report, Task, ProjectKnowledge, AuditLog table의 domain entity mapping을 추가했다. 별도 `*Entity`와 domain record 간 변환은 제거했다. `embedding_jobs` worker와 `embedding_chunks.embedding vector(1536)` hybrid retrieval은 D-040에 따라 JPA mapping에서 제외하고 AI native SQL/JDBC 경계를 유지한다.
+
+### Verification
+
+- Passed after direct domain entity conversion: `cd backend && ./gradlew test`.
+- Passed after direct domain entity conversion: `CI_POSTGRES_URL=jdbc:postgresql://localhost:5434/meetingmind_runtime_8080 CI_POSTGRES_USER=meetingmind CI_POSTGRES_PASSWORD=meetingmind_local ./gradlew test --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest --tests com.meetingmind.demo.domain.SttTranscriptFlowIntegrationTest`; JPA reload, join-code hash, ACL, transcript completion, segment persistence, and embedding-job trigger were verified.
+- Passed: `cd backend && ./gradlew test` with the existing DataSource-free `test` profile.
+- Passed: temporary empty PostgreSQL database on the local pgvector container. `db` profile applied Flyway V1~V12, initialized Hibernate `EntityManagerFactory` with validation, and returned `GET /api/workspace` on port 18084. The temporary database and server were removed after verification.
+- Blocked (separate local integration issue): the existing `meetingmind` database has a V11 checksum mismatch (`applied -396214114`, current `-2043882333`), so its default `local` profile boot is correctly rejected by Flyway. No `repair` was run because migration history must not be rewritten without the integration owner's decision.
+
+### Remaining Boundary
+
+- Auth는 계속 JDBC `AuthStore`를 사용한다. `WorkspaceStore`의 Space, Meeting/ACL, transcript, report/task, knowledge, audit는 `JpaWorkspaceStore`와 `JpaWorkspacePersistence`로 전환했고, vector retrieval/worker SQL은 JPA 대상이 아니다.
+- Cloud STT provider callback, target DB lifecycle, LiveKit Egress deployment E2E를 검증했다. OpenAI embedding provider의 실제 한국어 검색 품질과 외부 latency 평가는 별도 T301 잔여 작업이다.
+
+### T299 Workspace JPA Persistence
+
+- `JdbcWorkspaceStore`는 Auth와 JDBC round-trip 검증용 helper로 남기고 Spring bean에서는 제거했다. `local`/`db` profile은 `JpaWorkspaceStore`를 주입하며, scalar user FK와 Flyway schema owner 경계를 유지한다.
+- `JpaWorkspacePersistence`는 Space, Meeting/ACL, join request, speaker, transcript segment, report/task, ProjectKnowledge, audit 도메인 엔티티를 직접 write/read한다. `MeetingTranscript`도 JPA entity로 저장한다. Report의 decision/action row만 별도 child entity로 유지하며 조회 시 `MeetingReport`에 조립한다.
+- PostgreSQL integration에서 Space/Meeting/ACL, join code hash, transcript/report/task/knowledge/audit reload와 Project AI ACL 선필터를 검증했다.
+
+### T300 STT Persistence Lifecycle
+
+- target `POST /api/v1/meetings/{meetingId}/transcription/start`는 HOST 또는 Space manager 권한을 확인한 뒤 `MeetingTranscript=PROCESSING`을 저장하고 LiveKit egress STT 세션을 시작한다. `stop`은 해당 회의 세션만 종료하며 `GET /dialogue`는 현재 저장된 segment를 반환한다. legacy `/api/stt/*`는 호환용으로 유지했다.
+- provider callback의 text는 target meeting일 때 `MeetingSpeaker`와 `TranscriptSegment`로 즉시 저장한다. target session에는 파일 기반 transcript 복사본을 남기지 않아 retention/ACL 경계를 우회하지 않는다.
+- 같은 meeting의 다중 track callback은 meeting row lock 안에서 순번을 계산한다. 완료 전환은 `meeting_transcripts` trigger를 통해 `TRANSCRIPT_COMPLETED` embedding job을 하나 만든다. provider 오류는 원문을 저장하지 않고 `FAILED`와 일반화된 실패 사유만 기록한다.
+- `SttStreamClientFactory`가 Clova client 생성만 담당하도록 분리했다. production은 `ClovaNestStreamClientFactory`를 사용하고, PostgreSQL integration test는 동일 registry callback을 호출하는 fake stream client를 주입해 provider network 없이 lifecycle을 검증한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`.
+- Passed: temporary PostgreSQL database on the local pgvector container with `JdbcWorkspaceStoreIntegrationTest`; Flyway V1~V12, JPA adapter reload, ACL negative case, `PROCESSING -> COMPLETED`, segment 2건 저장, `TRANSCRIPT_COMPLETED` embedding job 1건 생성을 검증했다. Temporary database was dropped after the test.
+- Passed: 같은 Flyway V12 temporary database에서 `AI_TEST_DATABASE_URL=... python -m unittest tests.test_embedding_repository.PostgresEmbeddingRepositoryIntegrationTest`; deterministic 1536-dimension embedding worker가 transcript-completed job을 처리하고 최신 generation 교체, Meeting/Project scope, 빈 allowed meeting list, cross-space 차단, purge 후 검색 제외를 검증했다. Temporary database was dropped after the test.
+- Passed: temporary PostgreSQL database에서 `SttTranscriptFlowIntegrationTest`; fake provider callback text 2건이 실제 JPA `MeetingSpeaker`/`TranscriptSegment`로 저장되고, session close 이후 dialogue `COMPLETED` 및 `TRANSCRIPT_COMPLETED` job 1건을 검증했다.
+- Passed: 같은 Flyway V12 temporary database에서 `AI_TEST_DATABASE_URL=... python -m unittest discover -s tests`; 63 tests 통과. `test_stt_rag_performance`는 200개 STT segment -> worker -> Meeting scope retrieval 100회를 실행했고 deterministic provider 기준 local p95 `8.85 ms`를 기록했다.
+- Passed: `CLOVA_SPEECH_SECRET`로 Cloud STT gRPC 설정 handshake와 실제 Korean PCM 전사를 확인했다. 48 kHz WebSocket 입력을 server resampler가 16 kHz PCM으로 전달한 legacy smoke에서 65개의 `transcription` callback이 반환됐다. provider `responseType=["config"]` ACK는 전사 text가 아니므로 저장하지 않고, 마지막 PCM frame을 `epFlag=true`로 전송한 뒤 stream 종료를 기다리도록 client를 보정했다.
+- Passed: `RUN_CLOVA_STT_SMOKE=true` opt-in integration test에서 실제 16 kHz PCM을 Cloud STT client로 실시간 전송했다. 실제 callback이 JPA `TranscriptSegment`에 저장되고 target dialogue가 `COMPLETED`, `TRANSCRIPT_COMPLETED` embedding job이 정확히 1건인 것을 검증했다. 기본 `./gradlew test`에서는 비용과 secret 노출 방지를 위해 이 test가 skip된다.
+- Passed: `git diff --check`.
+- Passed: actual LiveKit egress smoke. valid LiveKit Cloud credential과 임시 ngrok `PUBLIC_WS_BASE_URL` 환경에서 Chromium client가 audio track을 publish했고, target start가 Egress를 생성한 뒤 Cloud STT callback transcript 60건을 저장했다. Egress SDK에는 signalling용 `ws(s)` URL이 아닌 API용 `http(s)` URL이 필요하므로 `LiveKitEgressService`에서 이를 정규화하고 unit test로 고정했다.
+- Hardened: target Egress WebSocket 종료는 마지막 audio flush 후 `MeetingTranscript=COMPLETED`로 종결하고, legacy STT session은 수동 조회 호환을 위해 유지한다. Egress stop 실패는 `FAILED`로 종결한 뒤 `503 STT_PROVIDER_UNAVAILABLE`를 반환해 재시작을 막는 무한 `PROCESSING` 상태를 남기지 않는다. transcription 시작 시 `MEETING_TRANSCRIPTION_STARTED` audit event를 기록한다.
+- Not run: OpenAI embedding provider의 실제 한국어 retrieval quality 및 p95 latency. `T275`의 API key 기반 평가와 성능 측정이 선행되어야 T301을 완료할 수 있다.
+
+### T302 Live STT Target API Integration
+
+- LiveRoom의 STT 시작, 종료, 자막 polling을 legacy `/api/stt/*`에서 인증·Meeting ACL이 적용되는 `/api/v1/meetings/{meetingId}/transcription/*`와 `/dialogue`로 전환했다.
+- `GET /dialogue`는 `PROCESSING` 중에도 즉시 저장된 `TranscriptSegment`를 반환한다. 이는 실시간 자막 표시와 저장 모델을 같은 Meeting scope/ACL 경계에 둔다.
+- legacy `/api/stt/*` controller는 기본 runtime에서 제외하고, 수동 smoke가 필요한 경우에만 `legacy-stt` profile을 명시적으로 활성화한다. target STT의 LiveKit Egress WebSocket 경로는 이 profile과 무관하게 유지한다.
+- legacy `/api/livekit/token` controller도 기본 runtime에서 제외하고, request body를 신뢰하는 기존 token 발급을 확인해야 하는 경우에만 `legacy-livekit` profile을 명시적으로 활성화한다.
+- 회의 상세 응답에서 영속화 후 복원할 수 없고 생성 시에만 전달해야 하는 `joinCode`/`roomCode`를 제거했다. 생성 응답의 `joinCode`/`joinUrl` 계약은 유지한다.
+- Frontend는 제품 시간대 `Asia/Seoul`을 명시하고 중복된 `MeetingDetailResponse` 선언을 제거했다. 데이터 모델과 ERD의 관계/필드 변경은 없으므로 갱신하지 않았다.
+
+### T302 Verification
+
+- Passed: `cd backend && ./gradlew test`; `PROCESSING` transcript의 target dialogue 조회와 기존 STT lifecycle/controller 회귀를 포함한다.
+- Passed: `cd backend && ./gradlew test --tests com.meetingmind.demo.MeetingMindApplicationTest`; 기본 context에는 legacy STT controller가 없고 `legacy-stt` 명시 profile에서만 등록됨을 검증했다.
+- Passed: 같은 context test에서 legacy LiveKit controller도 기본 context에 없고 `legacy-livekit` 명시 profile에서만 등록됨을 검증했다.
+- Passed: `cd frontend && TZ=UTC npm test -- --run`; STT target API client, 시간대 독립 포맷과 CI의 축소 ICU locale에서도 일관된 한국어 오전/오후 표기를 검증했다.
+- Passed: `cd frontend && npm run build`; bundle size warning 외 성공.
+- Passed: `cd ai && python3 -m compileall app tests`, `git diff --check`, legacy frontend STT endpoint 및 `roomCode` 참조 검색.

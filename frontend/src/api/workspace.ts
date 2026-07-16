@@ -22,7 +22,10 @@ import type {
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
   MeetingDetailResponse,
+  MeetingDialogueResponse,
   MeetingListResponse,
+  MeetingTranscriptionStartResponse,
+  MeetingTranscriptStatusResponse,
   MeetingParticipantsResponse,
   MeetingJoinRequestsResponse,
   OwnerTransferRequest,
@@ -37,6 +40,7 @@ import type {
   SpaceDetail,
   SpaceListResponse,
   SpaceMembersResponse,
+  StartMeetingTranscriptionRequest,
   TaskCandidatesResponse,
   TaskCandidateGenerationResponse,
   TaskListResponse,
@@ -165,6 +169,41 @@ export async function deleteMeeting(session: AuthSession, meetingId: string): Pr
 
 export async function fetchMeetingDetail(session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
   return requestJson<MeetingDetailResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
+    headers: buildAuthHeaders(session)
+  });
+}
+
+export async function startMeetingTranscription(
+  session: AuthSession,
+  meetingId: string,
+  request: StartMeetingTranscriptionRequest
+): Promise<MeetingTranscriptionStartResponse> {
+  return requestJson<MeetingTranscriptionStartResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/transcription/start`,
+    {
+      method: "POST",
+      headers: jsonHeaders(session),
+      body: JSON.stringify(request)
+    }
+  );
+}
+
+export async function stopMeetingTranscription(
+  session: AuthSession,
+  meetingId: string,
+  sessionId: string
+): Promise<MeetingTranscriptStatusResponse> {
+  return requestJson<MeetingTranscriptStatusResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/transcription/${encodeURIComponent(sessionId)}/stop`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(session)
+    }
+  );
+}
+
+export async function fetchMeetingDialogue(session: AuthSession, meetingId: string): Promise<MeetingDialogueResponse> {
+  return requestJson<MeetingDialogueResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/dialogue`, {
     headers: buildAuthHeaders(session)
   });
 }

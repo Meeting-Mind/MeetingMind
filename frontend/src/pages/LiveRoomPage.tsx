@@ -8,6 +8,11 @@ import {
 } from "livekit-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import {
+  fetchMeetingDialogue,
+  startMeetingTranscription,
+  stopMeetingTranscription
+} from "../api/workspace";
 import { buildAuthHeaders, type AuthSession } from "../auth/session";
 import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
 import type { WorkspaceData } from "../types";
@@ -23,16 +28,19 @@ type RoomTokenResponse = {
   name: string;
 };
 
-type SttStreamStartResponse = {
-  sessionId: string;
-  egressId: string;
-};
-
 type SttTranscriptEntry = {
   time: string;
   displayName: string;
   text: string;
 };
+
+function formatTranscriptTime(startMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(startMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
 
 // ponytail: 실제 도메인 사전/키워드 추출 API 붙기 전까지 하드코딩된 목록으로 간단히 하이라이트.
 const STT_KEYWORDS = ["RAG", "Vector DB", "Embedding", "pgvector", "Chunking", "LiveKit", "gRPC", "STT"];
@@ -369,19 +377,23 @@ export function LiveRoomPage({
       return;
     }
 
-    const roomName = meetingId;
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/stt/room/${encodeURIComponent(roomName)}/transcript`);
-        if (!response.ok || cancelled) {
+        const dialogue = await fetchMeetingDialogue(session, meetingId);
+        if (cancelled) {
           return;
         }
-        const entries = (await response.json()) as SttTranscriptEntry[];
-        if (!cancelled) {
-          setLiveTranscriptRows([...entries].reverse());
-        }
+        setLiveTranscriptRows(
+          [...dialogue.rows]
+            .sort((left, right) => right.startMs - left.startMs)
+            .map((row) => ({
+              time: formatTranscriptTime(row.startMs),
+              displayName: row.speakerName || row.speakerLabel,
+              text: row.text
+            }))
+        );
       } catch {
         // ponytail: 폴링 실패는 조용히 무시하고 다음 주기에 재시도.
       }
@@ -394,24 +406,14 @@ export function LiveRoomPage({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [roomReady, meetingId]);
+  }, [roomReady, meetingId, session]);
 
-  async function startSttStream(roomName: string, trackId: string) {
+  async function startSttStream(targetMeetingId: string, trackId: string) {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/stt/stream/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...buildAuthHeaders(session)
-        },
-        body: JSON.stringify({ roomName, trackId })
+      const data = await startMeetingTranscription(session, targetMeetingId, {
+        mode: "realtime",
+        trackId
       });
-
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-
-      const data = (await response.json()) as SttStreamStartResponse;
       sttSessionIdRef.current = data.sessionId;
     } catch (error) {
       console.warn("[LiveRoomPage] STT stream start failed", error);
@@ -422,11 +424,11 @@ export function LiveRoomPage({
     const sessionId = sttSessionIdRef.current;
     sttSessionIdRef.current = null;
 
-    if (!sessionId) {
+    if (!sessionId || !meetingId) {
       return;
     }
 
-    void fetch(`${API_BASE_URL}/api/stt/stream/${sessionId}/stop`, { method: "POST" }).catch(() => {});
+    void stopMeetingTranscription(session, meetingId, sessionId).catch(() => {});
   }
 
   function toggleBookmark(key: string) {

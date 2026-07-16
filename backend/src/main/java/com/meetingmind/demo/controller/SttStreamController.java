@@ -11,6 +11,7 @@ import com.meetingmind.demo.service.SttSessionRegistry;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.NoSuchElementException;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
+@Profile("legacy-stt")
 @RequestMapping("/api/stt")
 public class SttStreamController {
 

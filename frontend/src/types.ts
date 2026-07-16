@@ -136,7 +136,6 @@ export interface MeetingDetailResponse {
   id: string;
   spaceId: string;
   title: string;
-  roomCode: string;
   status: MeetingStatus;
   scheduledAt: ApiDateTime;
   startedAt: ApiDateTime | null;
@@ -254,14 +253,6 @@ export interface MeetingDetail extends MeetingSummary {
   participants: MeetingParticipantSummary[];
 }
 
-export interface MeetingDetailResponse {
-  id: string;
-  title: string;
-  roomCode: string;
-  scheduledAt: ApiDateTime;
-  status: MeetingStatus;
-}
-
 export interface CreateMeetingRequest {
   title: string;
   scheduledAt: ApiDateTime;
@@ -287,6 +278,37 @@ export interface TranscriptSegmentSummary {
   startMs: number;
   endMs: number;
   text: string;
+}
+
+export interface StartMeetingTranscriptionRequest {
+  mode: "realtime";
+  trackId: string;
+}
+
+export interface MeetingTranscriptionStartResponse {
+  meetingId: string;
+  transcriptStatus: "PROCESSING";
+  sessionId: string;
+  egressId: string;
+}
+
+export interface MeetingTranscriptStatusResponse {
+  meetingId: string;
+  transcriptStatus: "COMPLETED" | "FAILED";
+}
+
+export interface MeetingDialogueResponse {
+  meetingId: string;
+  status: "PROCESSING" | "COMPLETED" | "FAILED";
+  rows: Array<{
+    segmentId: string;
+    speakerId: string;
+    speakerLabel: string;
+    speakerName: string | null;
+    startMs: number;
+    endMs: number;
+    text: string;
+  }>;
 }
 
 export interface TranscriptResponse {

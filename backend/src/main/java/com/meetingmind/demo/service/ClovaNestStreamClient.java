@@ -1,8 +1,8 @@
 package com.meetingmind.demo.service;
 
+import com.google.protobuf.ByteString;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
 import com.meetingmind.demo.clova.grpc.NestConfig;
 import com.meetingmind.demo.clova.grpc.NestData;
 import com.meetingmind.demo.clova.grpc.NestRequest;
@@ -16,13 +16,14 @@ import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-public class ClovaNestStreamClient implements AutoCloseable {
+public class ClovaNestStreamClient implements SttStreamClient {
 
     private static final String HOST = "clovaspeech-gw.ncloud.com";
     private static final int PORT = 50051;
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     // ponytail: diarization 옵션이 gRPC config JSON에서도 먹는지 문서에 명시 안 됨.
     // 트랙 단위로 이미 화자가 분리되므로 없어도 되지만, 실측 후 필요하면 이 JSON에 추가.
@@ -31,8 +32,14 @@ public class ClovaNestStreamClient implements AutoCloseable {
     private final ManagedChannel channel;
     private final StreamObserver<NestRequest> requestObserver;
     private final AtomicInteger seqId = new AtomicInteger(0);
+    private byte[] pendingAudio;
 
     public ClovaNestStreamClient(Consumer<String> onTranscript) {
+        this(onTranscript, ignored -> {
+        });
+    }
+
+    public ClovaNestStreamClient(Consumer<String> onTranscript, Consumer<Throwable> onError) {
         String secretKey = DotenvConfig.require("CLOVA_SPEECH_SECRET");
 
         this.channel = NettyChannelBuilder.forAddress(HOST, PORT)
@@ -48,15 +55,18 @@ public class ClovaNestStreamClient implements AutoCloseable {
         this.requestObserver = stub.recognize(new StreamObserver<NestResponse>() {
             @Override
             public void onNext(NestResponse response) {
-                String text = extractTranscriptText(response.getContents());
-                if (text != null && !text.isBlank()) {
-                    onTranscript.accept(text);
+                String contents = response.getContents();
+                String transcription = extractTranscription(contents);
+                if (transcription != null) {
+                    onTranscript.accept(transcription);
+                } else if (isRecognitionFailure(contents)) {
+                    onError.accept(new IllegalStateException("CLOVA recognition request failed"));
                 }
             }
 
             @Override
             public void onError(Throwable throwable) {
-                onTranscript.accept("[error] " + throwable.getMessage());
+                onError.accept(throwable);
             }
 
             @Override
@@ -70,19 +80,26 @@ public class ClovaNestStreamClient implements AutoCloseable {
                 .build());
     }
 
-    // ponytail: config ack 등 다른 responseType은 transcription.text가 없어 자연히 걸러짐.
-    // 중간(interim) 결과까지 다 넘어오므로 문장 확정(epFlag) 기준 필터링이 필요해지면 여기에 추가.
-    private static String extractTranscriptText(String contents) {
-        try {
-            JsonNode text = JSON.readTree(contents).path("transcription").path("text");
-            return text.isTextual() ? text.asText() : null;
-        } catch (Exception exception) {
-            return null;
+    public synchronized void sendAudio(byte[] pcm16leMono16k) {
+        if (pcm16leMono16k == null || pcm16leMono16k.length == 0) {
+            return;
+        }
+        if (pendingAudio != null) {
+            sendData(pendingAudio, false);
+        }
+        pendingAudio = pcm16leMono16k;
+    }
+
+    @Override
+    public synchronized void finishAudio() {
+        if (pendingAudio != null) {
+            sendData(pendingAudio, true);
+            pendingAudio = null;
         }
     }
 
-    public void sendAudio(byte[] pcm16leMono16k) {
-        String extraContents = "{\"seqId\":" + seqId.getAndIncrement() + ",\"epFlag\":false}";
+    private void sendData(byte[] pcm16leMono16k, boolean endOfPhrase) {
+        String extraContents = "{\"seqId\":" + seqId.getAndIncrement() + ",\"epFlag\":" + endOfPhrase + "}";
 
         requestObserver.onNext(NestRequest.newBuilder()
                 .setType(RequestType.DATA)
@@ -94,7 +111,43 @@ public class ClovaNestStreamClient implements AutoCloseable {
 
     @Override
     public void close() {
+        finishAudio();
         requestObserver.onCompleted();
         channel.shutdown();
+        try {
+            channel.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    static String extractTranscription(String contents) {
+        try {
+            JsonNode response = OBJECT_MAPPER.readTree(contents);
+            if (!hasResponseType(response, "transcription")) {
+                return null;
+            }
+            String text = response.path("transcription").path("text").asText("").trim();
+            return text.isEmpty() ? null : text;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    static boolean isRecognitionFailure(String contents) {
+        try {
+            return hasResponseType(OBJECT_MAPPER.readTree(contents), "recognize");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean hasResponseType(JsonNode response, String expectedType) {
+        for (JsonNode type : response.path("responseType")) {
+            if (expectedType.equals(type.asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

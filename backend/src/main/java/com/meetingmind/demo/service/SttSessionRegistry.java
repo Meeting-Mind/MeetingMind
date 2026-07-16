@@ -1,12 +1,15 @@
 package com.meetingmind.demo.service;
 
 import com.meetingmind.demo.dto.TranscriptEntryResponse;
+import com.meetingmind.demo.domain.WorkspaceDomainService;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalTime;
+import java.time.Instant;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,17 +31,52 @@ public class SttSessionRegistry {
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
     // ponytail: 데모 규모 동시 회의 수 가정, 방 하나당 파일 락 하나. 방 수가 많아지면 락 맵을 정리(evict)하는 로직 추가.
     private final Map<String, Object> roomFileLocks = new ConcurrentHashMap<>();
+    private final WorkspaceDomainService workspaceDomainService;
+    private final SttStreamClientFactory streamClientFactory;
+
+    public SttSessionRegistry(
+            WorkspaceDomainService workspaceDomainService,
+            SttStreamClientFactory streamClientFactory
+    ) {
+        this.workspaceDomainService = workspaceDomainService;
+        this.streamClientFactory = streamClientFactory;
+    }
 
     public String create(String roomName, String displayName) {
+        return create(roomName, displayName, null);
+    }
+
+    public String createMeetingSession(String meetingId, String roomName, String displayName) {
+        return create(roomName, displayName, meetingId);
+    }
+
+    private String create(String roomName, String displayName, String meetingId) {
         String sessionId = UUID.randomUUID().toString();
         List<TranscriptEntryResponse> transcript = Collections.synchronizedList(new ArrayList<>());
+        AtomicReference<Boolean> failed = new AtomicReference<>(false);
+        Instant startedAt = Instant.now();
+        String speakerLabel = "stt-" + sessionId;
 
-        ClovaNestStreamClient client = new ClovaNestStreamClient(text -> {
+        SttStreamClient client = streamClientFactory.create(text -> {
             transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), displayName, text));
-            appendToTranscriptFile(roomName, displayName, text);
+            if (meetingId != null) {
+                int endMs = (int) Duration.between(startedAt, Instant.now()).toMillis();
+                int startMs = Math.max(0, endMs - 1_000);
+                workspaceDomainService.appendTranscriptSegment(
+                        meetingId, speakerLabel, displayName, startMs, Math.max(startMs, endMs), text
+                );
+            } else {
+                appendToTranscriptFile(roomName, displayName, text);
+            }
+        }, ignored -> {
+            if (meetingId != null && failed.compareAndSet(false, true)) {
+                workspaceDomainService.failMeetingTranscript(meetingId);
+            }
         });
 
-        sessions.put(sessionId, new SessionState(roomName, client, transcript, new AtomicReference<>()));
+        sessions.put(sessionId, new SessionState(
+                meetingId, roomName, client, transcript, new AtomicReference<>(), failed
+        ));
         return sessionId;
     }
 
@@ -62,7 +100,7 @@ public class SttSessionRegistry {
         return roomName.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
-    public ClovaNestStreamClient getStreamClient(String sessionId) {
+    public SttStreamClient getStreamClient(String sessionId) {
         SessionState state = sessions.get(sessionId);
         return state == null ? null : state.client();
     }
@@ -100,10 +138,40 @@ public class SttSessionRegistry {
         return merged;
     }
 
+    public boolean belongsToMeeting(String sessionId, String meetingId) {
+        SessionState state = sessions.get(sessionId);
+        return state != null && meetingId.equals(state.meetingId());
+    }
+
+    public void onEgressClosed(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return;
+        }
+
+        state.client().finishAudio();
+        if (state.meetingId() != null) {
+            close(sessionId);
+        }
+    }
+
     public void close(String sessionId) {
         SessionState state = sessions.remove(sessionId);
         if (state != null) {
             state.client().close();
+            if (state.meetingId() != null && !state.failed().get()) {
+                workspaceDomainService.completeMeetingTranscript(state.meetingId());
+            }
+        }
+    }
+
+    public void failAndClose(String sessionId) {
+        SessionState state = sessions.remove(sessionId);
+        if (state != null) {
+            state.client().close();
+            if (state.meetingId() != null && state.failed().compareAndSet(false, true)) {
+                workspaceDomainService.failMeetingTranscript(state.meetingId());
+            }
         }
     }
 
@@ -116,10 +184,12 @@ public class SttSessionRegistry {
     }
 
     private record SessionState(
+            String meetingId,
             String roomName,
-            ClovaNestStreamClient client,
+            SttStreamClient client,
             List<TranscriptEntryResponse> transcript,
-            AtomicReference<String> egressId
+            AtomicReference<String> egressId,
+            AtomicReference<Boolean> failed
     ) {
     }
 }

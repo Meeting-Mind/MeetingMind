@@ -113,6 +113,10 @@ public abstract class WorkspaceStore {
 
     abstract List<MeetingSpeaker> findMeetingSpeakers(String meetingId);
 
+    abstract MeetingTranscript saveMeetingTranscript(MeetingTranscript transcript);
+
+    abstract Optional<MeetingTranscript> findMeetingTranscript(String meetingId);
+
     abstract TranscriptSegment addTranscriptSegment(
             String meetingId,
             String speakerId,

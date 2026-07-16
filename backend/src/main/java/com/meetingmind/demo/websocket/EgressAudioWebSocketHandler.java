@@ -1,8 +1,8 @@
 package com.meetingmind.demo.websocket;
 
-import com.meetingmind.demo.service.ClovaNestStreamClient;
 import com.meetingmind.demo.service.PcmResampler;
 import com.meetingmind.demo.service.SttSessionRegistry;
+import com.meetingmind.demo.service.SttStreamClient;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -19,7 +19,7 @@ public class EgressAudioWebSocketHandler extends BinaryWebSocketHandler {
 
     @Override
     protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
-        ClovaNestStreamClient client = sessionRegistry.getStreamClient(extractSessionId(session));
+        SttStreamClient client = sessionRegistry.getStreamClient(extractSessionId(session));
         if (client == null) {
             return;
         }
@@ -27,6 +27,11 @@ public class EgressAudioWebSocketHandler extends BinaryWebSocketHandler {
         byte[] pcm48k = new byte[message.getPayloadLength()];
         message.getPayload().get(pcm48k);
         client.sendAudio(PcmResampler.downsample48kTo16kMono(pcm48k));
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, org.springframework.web.socket.CloseStatus status) {
+        sessionRegistry.onEgressClosed(extractSessionId(session));
     }
 
     private String extractSessionId(WebSocketSession session) {

@@ -19,6 +19,8 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -42,6 +44,9 @@ class JdbcWorkspaceStoreIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> System.getenv("CI_POSTGRES_URL"));
@@ -51,7 +56,7 @@ class JdbcWorkspaceStoreIntegrationTest {
 
     @Test
     void persistsWorkspaceArtifactsAndUsesHashedJoinCode() {
-        assertThat(store).isInstanceOf(JdbcWorkspaceStore.class);
+        assertThat(store).isInstanceOf(JpaWorkspaceStore.class);
 
         String suffix = UUID.randomUUID().toString();
         Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
@@ -146,6 +151,9 @@ class JdbcWorkspaceStoreIntegrationTest {
                 null
         ));
 
+        entityManager.flush();
+        entityManager.clear();
+
         JdbcWorkspaceStore reloaded = new JdbcWorkspaceStore(jdbc, objectMapper);
         assertThat(reloaded.findSpaceById(space.space().id())).contains(space.space());
         assertThat(reloaded.findMeetingByJoinCode(meeting.meeting().joinCode()))
@@ -230,6 +238,66 @@ class JdbcWorkspaceStoreIntegrationTest {
         assertThat(reloadedService.projectAiContextCandidates(owner.id(), space.space().id()).meetings())
                 .extracting(Meeting::id)
                 .containsExactly(meeting.meeting().id());
+    }
+
+    @Test
+    void completesTranscriptAndEnqueuesOneEmbeddingJob() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("transcript-owner-" + suffix, now));
+        User viewer = store.saveUser(user("transcript-viewer-" + suffix, now));
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(
+                owner.id(), "Transcript Space", "STT lifecycle persistence"
+        );
+        WorkspaceDomainService.MeetingCreationResult meeting = service.createMeeting(
+                owner.id(),
+                space.space().id(),
+                "Transcript Meeting",
+                OffsetDateTime.of(2026, 7, 16, 10, 0, 0, 0, ZoneOffset.UTC),
+                List.of()
+        );
+        store.addSpaceMember(space.space().id(), viewer.id(), com.meetingmind.demo.authz.SpaceRole.MEMBER, now);
+        service.addMeetingParticipant(owner.id(), meeting.meeting().id(), viewer.id(), "VIEWER", "member");
+
+        MeetingTranscript processing = service.startMeetingTranscript(owner.id(), meeting.meeting().id(), "clova-nest");
+        assertThat(processing.status()).isEqualTo(TranscriptStatus.PROCESSING);
+        assertThat(processing.retentionUntil()).isNotNull();
+        assertThatThrownBy(() -> service.startMeetingTranscript(viewer.id(), meeting.meeting().id(), "clova-nest"))
+                .isInstanceOf(AuthorizationException.class)
+                .extracting("code")
+                .isEqualTo("MEETING_ACCESS_DENIED");
+
+        TranscriptSegment first = service.appendTranscriptSegment(
+                meeting.meeting().id(), "speaker-1", "김진수", 0, 1_200, "JPA 영속화를 시작합니다."
+        );
+        TranscriptSegment second = service.appendTranscriptSegment(
+                meeting.meeting().id(), "speaker-1", "김진수", 1_200, 2_400, "완료되면 RAG 재색인을 요청합니다."
+        );
+        MeetingTranscript completed = service.completeMeetingTranscript(meeting.meeting().id());
+        assertThat(completed.status()).isEqualTo(TranscriptStatus.COMPLETED);
+        assertThat(completed.completedAt()).isNotNull();
+
+        entityManager.flush();
+        entityManager.clear();
+
+        JdbcWorkspaceStore reloaded = new JdbcWorkspaceStore(jdbc, objectMapper);
+        assertThat(reloaded.findMeetingTranscript(meeting.meeting().id()))
+                .get()
+                .satisfies(transcript -> {
+                    assertThat(transcript.status()).isEqualTo(TranscriptStatus.COMPLETED);
+                    assertThat(transcript.provider()).isEqualTo("clova-nest");
+                });
+        assertThat(reloaded.findTranscriptSegments(meeting.meeting().id()))
+                .extracting(TranscriptSegment::id)
+                .containsExactly(first.id(), second.id());
+        assertThat(jdbc.queryForObject(
+                """
+                select count(*) from embedding_jobs
+                where meeting_id = ? and trigger_reason = 'TRANSCRIPT_COMPLETED'
+                """,
+                Integer.class,
+                meeting.meeting().id()
+        )).isEqualTo(1);
     }
 
     private User user(String id, Instant now) {

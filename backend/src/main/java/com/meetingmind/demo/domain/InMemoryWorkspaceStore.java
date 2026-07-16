@@ -25,6 +25,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     private final Map<String, Meeting> meetingsById = new LinkedHashMap<>();
     private final Map<String, MeetingParticipant> meetingParticipantsById = new LinkedHashMap<>();
     private final Map<String, MeetingSpeaker> meetingSpeakersById = new LinkedHashMap<>();
+    private final Map<String, MeetingTranscript> meetingTranscriptsByMeetingId = new LinkedHashMap<>();
     private final Map<String, TranscriptSegment> transcriptSegmentsById = new LinkedHashMap<>();
     private final Map<String, MeetingReport> meetingReportsById = new LinkedHashMap<>();
     private final Map<String, TaskCandidate> taskCandidatesById = new LinkedHashMap<>();
@@ -400,6 +401,17 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
                 .stream()
                 .filter(speaker -> speaker.meetingId().equals(meetingId))
                 .toList();
+    }
+
+    @Override
+    synchronized MeetingTranscript saveMeetingTranscript(MeetingTranscript transcript) {
+        meetingTranscriptsByMeetingId.put(transcript.meetingId(), transcript);
+        return transcript;
+    }
+
+    @Override
+    synchronized Optional<MeetingTranscript> findMeetingTranscript(String meetingId) {
+        return Optional.ofNullable(meetingTranscriptsByMeetingId.get(meetingId));
     }
 
     synchronized TranscriptSegment addTranscriptSegment(
