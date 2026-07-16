@@ -633,6 +633,39 @@ M033은 이미 PostgreSQL에 영속화되는 회의 생성 경로를 회의 목�
 - Real API smoke: signup -> Space 생성 -> Meeting 생성 -> 목록/상세 -> 수정 -> 삭제 -> 목록/상세 제외를 local PostgreSQL에서 확인한다.
 - Repository: 전체 Backend test, Flyway V1~V11 migration test, `git diff --check`를 통과한다.
 
+## M037 Meeting CRUD Frontend Target Completion
+
+M037은 M033에서 연결한 회의 목록·생성·수정·삭제에 상세 조회, 초기 참여자 지정, MeetingParticipant ACL mutation, 캘린더 오류 상태를 보강한다. target Space의 성공 상태는 Backend 응답과 재조회 결과만 사용하고 demo/legacy Space의 local state는 별도 경계로 유지한다.
+
+### Scope and Decisions
+
+- Frontend 통합 담당 1명과 Codex 1개가 문서, Frontend, 검증을 순차 처리한다. Backend와 AI/RAG 파일은 수정하지 않는다.
+- `GET /api/v1/meetings/{meetingId}`를 선택된 target 회의의 상세·`myRole`·참여자 기준으로 사용한다.
+- 초기 참여자 지정은 `GET /api/v1/spaces/{spaceId}/members`의 stable `userId`를 `participantUserIds`로 변환한다. 사용자-facing 신규 참여는 기존 URL/코드 참가 신청 흐름을 유지한다.
+- 생성 응답의 `joinCode`/`joinUrl`은 생성 권한자에게 현재 Frontend 메모리 범위에서만 표시하고 영속 저장하지 않는다.
+- 참여자 role/access 변경은 `POST/PATCH /api/v1/meetings/{meetingId}/participants`를 사용한다. `REVOKED`를 권한 회수로 사용하고 마지막 active HOST 보호와 403/409는 Backend 판단을 최종 기준으로 표시한다.
+- canonical 상태 전이만 UI 선택지로 제공한다. 제목·예정 일시 수정은 `SCHEDULED`에서만 허용한다.
+- `GET /api/v1/calendar/events`는 아직 Backend runtime이 없으므로 이번 Frontend 범위에서는 이미 ACL-filtered된 Space별 meeting 목록을 캘린더 read model로 재사용한다. 별도 endpoint 연결은 Backend 구현 후 교체한다.
+- FR-MREG-01의 description과 FR-CAL-04의 종료 일시는 현재 Meeting API/data model 계약에 없으므로 M034에서 임의 추가하지 않고 계약 변경 milestone로 남긴다.
+
+### Implementation Order
+
+1. target Space 멤버를 Backend에서 조회해 `userId`가 있는 Frontend 상태로 분리한다.
+2. 선택된 target meeting 상세를 조회하고 participant state를 `meetingId` 기준으로 저장한다.
+3. 생성 시 선택한 초기 참여자를 `participantUserIds`로 전달하고 성공한 경우에만 입력을 초기화하며 참가 코드/URL을 표시한다.
+4. participant 추가·role 변경·회수를 Backend API에 연결하고 mutation 뒤 상세를 재조회한다.
+5. 상태별 허용 전이, 권한별 control, 상세/ACL loading·400/403/404/409 오류를 화면에 반영한다.
+6. 캘린더 생성에 참여자 선택, mutation loading/error, 성공 후 목록·캘린더 동시 갱신을 연결한다.
+7. API unit test와 실제 Backend를 사용한 Playwright 상세/ACL/캘린더 흐름을 추가한다.
+8. `tasks.md`, `implement.md`, `analyze.md`, 기능 비교 문서를 실제 결과에 맞게 갱신한다.
+
+### Verification Plan
+
+- Frontend unit: meeting detail/participant client의 route, auth header, request body와 오류 전파를 검증한다.
+- Frontend E2E: target Space에서 초기 참여자 지정 생성, 상세/ACL 재조회, role 변경·회수, canonical 상태 전이, 삭제, 캘린더 생성·오류 표시를 검증한다.
+- Regression: 기존 login, prejoin default-deny, mock/target 경계와 M033 CRUD E2E를 유지한다.
+- Commands: `cd frontend && npm run test`, `npm run lint`, `npm run build`, 격리 Backend를 사용한 `npm run test:e2e`, `git diff --check`를 실행한다.
+
 ## Test Plan
 
 - Frontend: `cd frontend && npm run build`

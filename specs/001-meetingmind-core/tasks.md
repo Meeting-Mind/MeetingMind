@@ -64,6 +64,11 @@
 | M030 | 로컬 PostgreSQL/pgvector 영속화 기준선 | 문서와 migration이 일치하고 격리된 로컬 DB에 V1 이후 schema가 재현 가능하게 적용된다. | T222-T231 |
 | M031 | CI 품질·공급망 검증 강화 | `dev`/PR 변경이 애플리케이션 빌드, V1~V10 migration, 핵심 테스트, 컨테이너·secret 검사를 통과하고 `main`은 필수 check 없는 직접 변경이 차단된다. | T232-T245 |
 | M032 | Backend PostgreSQL runtime 영속화 | Auth/Workspace/회의 산출물이 PostgreSQL에 유지되고 권한·확정 mutation 및 AI context 선필터가 DB transaction으로 검증된다. | T246-T253 |
+| M033 | 회의 CRUD PostgreSQL end-to-end | 회의 CRUD와 soft delete가 실제 PostgreSQL API 및 Frontend target 화면에 ACL과 canonical 상태 전이 기준으로 연결된다. | T254-T263 |
+| M034 | Grounded PostgreSQL RAG 통합 | 권한 scope가 강제된 pgvector retrieval, grounding, internal auth, embedding generation과 관측성을 구현한다. | T264-T276 |
+| M035 | 회의 채팅 텍스트 첨부파일 RAG | 텍스트 추출 가능한 회의 첨부파일을 권한·보존·출처 기준으로 RAG에 연결하고 이미지 처리는 후속으로 둔다. | T277-T284 |
+| M036 | Frontend Workspace 영속 데이터 복원 | 로그인 후 Space/Meeting/SpaceMember를 API에서 복원하고 API 실패가 mock 성공으로 보이지 않게 한다. | T285-T287 |
+| M037 | 회의 CRUD 프론트엔드 target 완성 | target Space의 회의 상세·초기 참여자·ACL·캘린더 mutation이 Backend 응답과 재조회 결과로 동작하고 mock/local state와 섞이지 않는다. | T288-T296 |
 
 ## Foundation
 
@@ -493,6 +498,22 @@ M033은 FR-MREG-01/04/05/06/07과 FR-ACL-07을 기준으로 회의 CRUD를 Backe
 | T262 | M033 | [x] | verification/postgresql-e2e | 사용자(Backend 담당) | Codex | T259, T261 | `backend/**`, `frontend/**`, `compose.local.yml`, `specs/001-meetingmind-core/implement.md` | local PostgreSQL에서 인증부터 회의 CRUD까지 real API smoke와 Flyway 회귀를 수행한다. | signup -> Space -> create -> list/detail -> patch -> delete -> 목록/상세/AI 제외가 통과하고 V1~V11 migration 및 재조회 영속성이 확인된다. |
 | T263 | M033 | [x] | docs/closeout | 사용자(Backend 담당) | Codex | T262 | `specs/001-meetingmind-core/{tasks,implement,analyze,feature-implementation-comparison}.md`, `.specify/memory/session-handoff.md` | 실제 변경, 검증 결과, hard purge/복구/유예 기간 후속 경계를 정리한다. | 완료 상태와 검증 명령이 실제 결과와 일치하고 남은 삭제 보존 작업 또는 미실행 사유가 기록된다. |
 
+### M037: Meeting CRUD Frontend Target Completion
+
+M037은 M033의 Backend CRUD를 선택 회의 상세, 초기 참여자, participant ACL, 캘린더 사용자 흐름까지 연결한다. Frontend 단일 owner가 target API와 demo fallback 경계를 순차 처리하며 Backend·AI 파일은 수정하지 않는다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T288 | M037 | [x] | docs/design | 사용자(Frontend 담당) | Codex | T263 | `requirements/{functional-requirements-detail,permissions,status-values}.md`, `specs/001-meetingmind-core/{plan,tasks}.md`, `specs/001-meetingmind-core/contracts/{meeting-api,space-api}.md` | M033 이후 상세·ACL·캘린더 gap과 target/mock 경계, 계약 밖 필드를 확정한다. | plan에 상세/participant/canonical status/calendar 데이터 소스와 description/endAt 후속 경계가 기록된다. |
+| T289 | M037 | [x] | frontend/member-detail-state | 사용자(Frontend 담당) | Codex | T288 | `frontend/src/{App.tsx,types.ts,api/workspace.ts}`, `frontend/src/pages/ProjectOverviewPage.tsx` | target Space member의 userId와 선택 meeting 상세/participant를 Backend에서 조회한다. | target participant state가 meetingId 기준으로 저장되고 상세 선택 시 title/status/schedule/myRole/participant가 재조회된다. |
+| T290 | M037 | [x] | frontend/create-update | 사용자(Frontend 담당) | Codex | T289 | `frontend/src/App.tsx`, `frontend/src/pages/{ProjectOverviewPage,WorkspaceHomePage}.tsx` | 초기 참여자 지정 생성, canonical 상태 전이, 참가 코드/URL 표시, 성공 후 입력 초기화와 재조회를 구현한다. | participantUserIds가 전달되고 허용되지 않은 전이를 UI가 제안하지 않으며 실패한 mutation이 성공처럼 보이지 않는다. |
+| T291 | M037 | [x] | frontend/participant-acl | 사용자(Frontend 담당) | Codex | T289 | `frontend/src/App.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/styles/app.css` | participant 조회·추가·role 변경·REVOKED 회수를 target API에 연결한다. | mutation 뒤 상세가 재조회되고 403/409와 마지막 HOST 보호가 Backend 결과 기준으로 표시된다. |
+| T292 | M037 | [x] | frontend/detail-permission | 사용자(Frontend 담당) | Codex | T289-T291 | `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/styles/app.css` | 상세 loading/error와 myRole/SpaceRole 기반 control, 삭제 확인 상태를 정리한다. | 400/403/404/409가 구분되고 OWNER/HOST 삭제, OWNER/ADMIN/HOST 수정, default-deny가 화면/API에서 일치한다. |
+| T293 | M037 | [x] | frontend/calendar | 사용자(Frontend 담당) | Codex | T290 | `frontend/src/App.tsx`, `frontend/src/pages/WorkspaceHomePage.tsx`, `frontend/src/styles/app.css` | ACL-filtered meeting 목록 기반 캘린더 생성·갱신·오류·라우팅을 보강한다. | 생성 성공 후 목록/캘린더가 함께 갱신되고 실패 시 입력과 오류가 유지되며 target meetingId route가 보존된다. |
+| T294 | M037 | [x] | frontend/unit | 사용자(Frontend 담당) | Codex | T291-T293 | `frontend/src/**/*.test.*` | detail/member/participant API와 request/error 회귀 단위 테스트를 추가한다. | target route, bearer auth, participantUserIds, participant PATCH와 오류 전파가 검증된다. |
+| T295 | M037 | [x] | frontend/e2e-verification | 사용자(Frontend 담당) | Codex | T294 | `frontend/e2e/**`, `frontend/package.json` | 실제 Backend로 상세·초기 참여자·ACL·캘린더와 기존 CRUD 회귀를 검증한다. | unit, lint, build, Playwright가 통과하고 prejoin default-deny, CRUD/ACL mutation과 기존 409 client 오류 전파가 검증된다. |
+| T296 | M037 | [x] | docs/closeout | 사용자(Frontend 담당) | Codex | T295 | `specs/001-meetingmind-core/{tasks,implement,analyze,feature-implementation-comparison}.md`, `.specify/memory/session-handoff.md` | 구현·검증 결과와 calendar endpoint/description/endAt 후속 경계를 정리한다. | 완료 task만 체크되고 실제 검증 명령, 남은 Backend 계약 의존성이 문서에 일치한다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -529,12 +550,13 @@ M033은 FR-MREG-01/04/05/06/07과 FR-ACL-07을 기준으로 회의 CRUD를 Backe
 - [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증; private repository 현재 요금제 API 403으로 차단
 - [x] V033 Backend PostgreSQL runtime 검증: Auth/Workspace JDBC integration, joinCode hash, ACL 선필터, Transcript/Report/Task/Knowledge/Audit JSONB round-trip, 재시작 후 로그인, 전체 Backend test/bootJar, 빈 pgvector DB Flyway V1~V10
 - [x] V034 Meeting CRUD PostgreSQL E2E 검증: Flyway V1~V11 빈 DB/upgrade, Backend 전체/JDBC test, Frontend unit 9건·lint 오류 0건·build, Playwright 3건, local PostgreSQL 재시작 영속성 및 create/list/detail/update/delete/목록·상세·Meeting AI 제외 smoke
-- [x] V035 AI grounding 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v` 43건, `cd ai && ./.venv/bin/python -m compileall app tests`, `git diff --check`
-- [x] V036 기존 AI RAG safety 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests`
-- [x] V037 AI Structured Outputs 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v` 48건, `cd ai && ./.venv/bin/python -m compileall app tests`, `git diff --check`
-- [x] V038 PostgreSQL RAG 통합 검증: PostgreSQL 16 임시 DB V1~V11→V12 migration/trigger/vector/trigram, AI worker generation swap와 Meeting/Project scope DB 통합, AI 60건, Backend 전체 test, Compose 기본/AI profile, `git diff --check`
-- [x] V039 Workspace 영속 데이터 복원 검증: Backend 전체 test, PostgreSQL `JdbcWorkspaceStoreIntegrationTest`, Frontend lint 오류 0건/unit 6건/build, Playwright Space/Meeting reload 및 생성 실패 2건, `git diff --check`
-- [x] V040 AI RAG 관측성 검증: AI compile 및 PostgreSQL 포함 62 tests, Backend 전체 test와 RequestTrace/gateway header, PostgreSQL migration/workspace integration, Compose 기본/AI profile, Frontend lint 오류 0건/unit 6건/build, Playwright 4건, `git diff --check`
+- [x] V035 Meeting CRUD Frontend target 완성 검증: Frontend unit 11건, lint 오류 0건(기존 경고 8건), build, 격리 Backend `18083` Playwright 4건; 생성/참가 코드, 상세 participant, role 변경·REVOKED 회수, 캘린더 생성, CRUD와 prejoin default-deny 통과
+- [x] V036 AI grounding 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v` 43건, `cd ai && ./.venv/bin/python -m compileall app tests`, `git diff --check`
+- [x] V037 기존 AI RAG safety 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests`
+- [x] V038 AI Structured Outputs 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v` 48건, `cd ai && ./.venv/bin/python -m compileall app tests`, `git diff --check`
+- [x] V039 PostgreSQL RAG 통합 검증: PostgreSQL 16 임시 DB V1~V11→V12 migration/trigger/vector/trigram, AI worker generation swap와 Meeting/Project scope DB 통합, AI 60건, Backend 전체 test, Compose 기본/AI profile, `git diff --check`
+- [x] V040 Workspace 영속 데이터 복원 검증: Backend 전체 test, PostgreSQL `JdbcWorkspaceStoreIntegrationTest`, Frontend lint 오류 0건/unit 6건/build, Playwright Space/Meeting reload 및 생성 실패 2건, `git diff --check`
+- [x] V041 AI RAG 관측성 검증: AI compile 및 PostgreSQL 포함 62 tests, Backend 전체 test와 RequestTrace/gateway header, PostgreSQL migration/workspace integration, Compose 기본/AI profile, Frontend lint 오류 0건/unit 6건/build, Playwright 4건, `git diff --check`
 
 ## Notes
 
