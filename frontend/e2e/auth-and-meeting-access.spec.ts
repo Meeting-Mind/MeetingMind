@@ -108,11 +108,13 @@ test("meeting CRUD is persisted through the project UI", async ({ page, request 
   await page.goto(`/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`);
   await expect(page.getByRole("heading", { name: `${spaceName} 프로젝트` })).toBeVisible();
   await expect(page.getByText("PostgreSQL target API")).toBeVisible();
+  await expect(page.getByLabel("새 회의 제목")).toBeEnabled();
 
   await page.getByLabel("새 회의 제목").fill("CI CRUD 회의");
   await page.getByLabel("새 회의 일시").fill("2030-03-01T10:00");
   await page.getByRole("button", { name: "회의 생성", exact: true }).click();
   await expect(page.getByRole("link", { name: /CI CRUD 회의/ })).toBeVisible();
+  await expect(page.getByLabel("회의 참가 코드")).not.toHaveValue("");
 
   await page.getByLabel("회의 제목 수정").fill("CI CRUD 회의 수정");
   await page.getByLabel("예정 일시 수정").fill("2030-03-02T11:30");
@@ -128,4 +130,76 @@ test("meeting CRUD is persisted through the project UI", async ({ page, request 
   const meetingsResponse = await request.get(apiPath(`/api/v1/spaces/${space.id}/meetings`), { headers: authorization });
   expect(meetingsResponse.ok()).toBeTruthy();
   expect(((await meetingsResponse.json()) as { meetings: unknown[] }).meetings).toHaveLength(0);
+
+  await page.goto("/spaces");
+  await page.getByLabel("회의 생성 프로젝트").selectOption(space.id);
+  await page.getByLabel("회의 제목", { exact: true }).fill("CI 캘린더 회의");
+  await page.getByLabel("회의 시작 일시").fill("2030-04-03T14:00");
+  await page.getByRole("button", { name: "일정 추가" }).click();
+  await expect(page.getByLabel("캘린더 회의 참가 코드")).not.toHaveValue("");
+  await page.getByLabel("캘린더 기준 날짜").fill("2030-04-03");
+  await page.getByRole("button", { name: "일", exact: true }).click();
+  await expect(page.getByRole("link", { name: /CI 캘린더 회의/ })).toBeVisible();
+});
+
+test("meeting detail participant ACL is loaded and mutated through the project UI", async ({ page, request }) => {
+  const owner = await signup(request, "meeting-acl-owner");
+  const guest = await signup(request, "meeting-acl-guest");
+  const authorization = { Authorization: `Bearer ${owner.accessToken}` };
+  const spaceName = `CI ACL space ${Date.now()}`;
+
+  const guestWorkspaceResponse = await request.get(apiPath("/api/v1/spaces"), {
+    headers: { Authorization: `Bearer ${guest.accessToken}` }
+  });
+  expect(guestWorkspaceResponse.ok()).toBeTruthy();
+
+  const spaceResponse = await request.post(apiPath("/api/v1/spaces"), {
+    data: { name: spaceName, description: "Playwright meeting participant ACL verification" },
+    headers: authorization
+  });
+  expect(spaceResponse.ok()).toBeTruthy();
+  const space = (await spaceResponse.json()) as { id: string };
+
+  const meetingResponse = await request.post(apiPath(`/api/v1/spaces/${space.id}/meetings`), {
+    data: {
+      title: "CI ACL 회의",
+      scheduledAt: "2030-05-01T09:00:00+09:00",
+      participantUserIds: [guest.user.id]
+    },
+    headers: authorization
+  });
+  expect(meetingResponse.ok()).toBeTruthy();
+  const meeting = (await meetingResponse.json()) as { id: string };
+
+  await storeSession(page, owner);
+  await page.goto(`/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`);
+  const guestRow = page.locator(".project-acl-row").filter({ hasText: guest.user.displayName });
+  await expect(guestRow).toBeVisible();
+  await expect(guestRow.getByRole("combobox")).toHaveValue("VIEWER");
+
+  const roleUpdateResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && response.url().includes(`/participants/`)
+  );
+  await guestRow.getByRole("combobox").selectOption("EDITOR");
+  const roleUpdateResponse = await roleUpdateResponsePromise;
+  expect(roleUpdateResponse.ok(), await roleUpdateResponse.text()).toBeTruthy();
+  await expect(guestRow.getByRole("combobox")).toHaveValue("EDITOR");
+  const revokeResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && response.url().includes(`/participants/`)
+  );
+  await guestRow.getByRole("button", { name: "회수" }).click();
+  const revokeResponse = await revokeResponsePromise;
+  expect(revokeResponse.ok(), await revokeResponse.text()).toBeTruthy();
+  await expect(guestRow.getByRole("button", { name: "복구" })).toBeVisible();
+
+  const detailResponse = await request.get(apiPath(`/api/v1/meetings/${meeting.id}`), { headers: authorization });
+  expect(detailResponse.ok()).toBeTruthy();
+  const detail = (await detailResponse.json()) as {
+    participants: Array<{ userId: string; role: string; accessStatus: string }>;
+  };
+  expect(detail.participants).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ userId: guest.user.id, role: "EDITOR", accessStatus: "REVOKED" })
+    ])
+  );
 });

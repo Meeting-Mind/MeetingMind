@@ -63,6 +63,7 @@
 | M029 | Frontend 회의 접근·권한 화면 | 사용자가 참가 신청, 승인 상태, Space role과 meeting ACL, default-deny prejoin을 화면에서 확인한다. | T216-T221 |
 | M030 | 로컬 PostgreSQL/pgvector 영속화 기준선 | 문서와 migration이 일치하고 격리된 로컬 DB에 V1 이후 schema가 재현 가능하게 적용된다. | T222-T231 |
 | M031 | CI 품질·공급망 검증 강화 | `dev`/PR 변경이 애플리케이션 빌드, V1~V10 migration, 핵심 테스트, 컨테이너·secret 검사를 통과하고 `main`은 필수 check 없는 직접 변경이 차단된다. | T232-T245 |
+| M034 | 회의 CRUD 프론트엔드 target 완성 | target Space의 회의 상세·초기 참여자·ACL·캘린더 mutation이 Backend 응답과 재조회 결과로 동작하고 mock/local state와 섞이지 않는다. | T264-T272 |
 | M032 | Backend PostgreSQL runtime 영속화 | Auth/Workspace/회의 산출물이 PostgreSQL에 유지되고 권한·확정 mutation 및 AI context 선필터가 DB transaction으로 검증된다. | T246-T253 |
 
 ## Foundation
@@ -449,6 +450,22 @@ M033은 FR-MREG-01/04/05/06/07과 FR-ACL-07을 기준으로 회의 CRUD를 Backe
 | T262 | M033 | [x] | verification/postgresql-e2e | 사용자(Backend 담당) | Codex | T259, T261 | `backend/**`, `frontend/**`, `compose.local.yml`, `specs/001-meetingmind-core/implement.md` | local PostgreSQL에서 인증부터 회의 CRUD까지 real API smoke와 Flyway 회귀를 수행한다. | signup -> Space -> create -> list/detail -> patch -> delete -> 목록/상세/AI 제외가 통과하고 V1~V11 migration 및 재조회 영속성이 확인된다. |
 | T263 | M033 | [x] | docs/closeout | 사용자(Backend 담당) | Codex | T262 | `specs/001-meetingmind-core/{tasks,implement,analyze,feature-implementation-comparison}.md`, `.specify/memory/session-handoff.md` | 실제 변경, 검증 결과, hard purge/복구/유예 기간 후속 경계를 정리한다. | 완료 상태와 검증 명령이 실제 결과와 일치하고 남은 삭제 보존 작업 또는 미실행 사유가 기록된다. |
 
+### M034: Meeting CRUD Frontend Target Completion
+
+M034는 M033의 Backend CRUD를 선택 회의 상세, 초기 참여자, participant ACL, 캘린더 사용자 흐름까지 연결한다. Frontend 단일 owner가 target API와 demo fallback 경계를 순차 처리하며 Backend·AI 파일은 수정하지 않는다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T264 | M034 | [x] | docs/design | 사용자(Frontend 담당) | Codex | T263 | `requirements/{functional-requirements-detail,permissions,status-values}.md`, `specs/001-meetingmind-core/{plan,tasks}.md`, `specs/001-meetingmind-core/contracts/{meeting-api,space-api}.md` | M033 이후 상세·ACL·캘린더 gap과 target/mock 경계, 계약 밖 필드를 확정한다. | plan에 상세/participant/canonical status/calendar 데이터 소스와 description/endAt 후속 경계가 기록된다. |
+| T265 | M034 | [x] | frontend/member-detail-state | 사용자(Frontend 담당) | Codex | T264 | `frontend/src/{App.tsx,types.ts,api/workspace.ts}`, `frontend/src/pages/ProjectOverviewPage.tsx` | target Space member의 userId와 선택 meeting 상세/participant를 Backend에서 조회한다. | target participant state가 meetingId 기준으로 저장되고 상세 선택 시 title/status/schedule/myRole/participant가 재조회된다. |
+| T266 | M034 | [x] | frontend/create-update | 사용자(Frontend 담당) | Codex | T265 | `frontend/src/App.tsx`, `frontend/src/pages/{ProjectOverviewPage,WorkspaceHomePage}.tsx` | 초기 참여자 지정 생성, canonical 상태 전이, 참가 코드/URL 표시, 성공 후 입력 초기화와 재조회를 구현한다. | participantUserIds가 전달되고 허용되지 않은 전이를 UI가 제안하지 않으며 실패한 mutation이 성공처럼 보이지 않는다. |
+| T267 | M034 | [x] | frontend/participant-acl | 사용자(Frontend 담당) | Codex | T265 | `frontend/src/App.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/styles/app.css` | participant 조회·추가·role 변경·REVOKED 회수를 target API에 연결한다. | mutation 뒤 상세가 재조회되고 403/409와 마지막 HOST 보호가 Backend 결과 기준으로 표시된다. |
+| T268 | M034 | [x] | frontend/detail-permission | 사용자(Frontend 담당) | Codex | T265-T267 | `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/styles/app.css` | 상세 loading/error와 myRole/SpaceRole 기반 control, 삭제 확인 상태를 정리한다. | 400/403/404/409가 구분되고 OWNER/HOST 삭제, OWNER/ADMIN/HOST 수정, default-deny가 화면/API에서 일치한다. |
+| T269 | M034 | [x] | frontend/calendar | 사용자(Frontend 담당) | Codex | T266 | `frontend/src/App.tsx`, `frontend/src/pages/WorkspaceHomePage.tsx`, `frontend/src/styles/app.css` | ACL-filtered meeting 목록 기반 캘린더 생성·갱신·오류·라우팅을 보강한다. | 생성 성공 후 목록/캘린더가 함께 갱신되고 실패 시 입력과 오류가 유지되며 target meetingId route가 보존된다. |
+| T270 | M034 | [x] | frontend/unit | 사용자(Frontend 담당) | Codex | T267-T269 | `frontend/src/**/*.test.*` | detail/member/participant API와 request/error 회귀 단위 테스트를 추가한다. | target route, bearer auth, participantUserIds, participant PATCH와 오류 전파가 검증된다. |
+| T271 | M034 | [x] | frontend/e2e-verification | 사용자(Frontend 담당) | Codex | T270 | `frontend/e2e/**`, `frontend/package.json` | 실제 Backend로 상세·초기 참여자·ACL·캘린더와 기존 CRUD 회귀를 검증한다. | unit, lint, build, Playwright가 통과하고 prejoin default-deny, CRUD/ACL mutation과 기존 409 client 오류 전파가 검증된다. |
+| T272 | M034 | [x] | docs/closeout | 사용자(Frontend 담당) | Codex | T271 | `specs/001-meetingmind-core/{tasks,implement,analyze,feature-implementation-comparison}.md`, `.specify/memory/session-handoff.md` | 구현·검증 결과와 calendar endpoint/description/endAt 후속 경계를 정리한다. | 완료 task만 체크되고 실제 검증 명령, 남은 Backend 계약 의존성이 문서에 일치한다. |
+
 ## Verification
 
 - [x] V001 이전 구현 검증: `cd frontend && npm run build`
@@ -486,6 +503,7 @@ M033은 FR-MREG-01/04/05/06/07과 FR-ACL-07을 기준으로 회의 CRUD를 Backe
 - [ ] V032 `main` required `CI Gate`, PR-only, force-push/삭제 금지 검증; private repository 현재 요금제 API 403으로 차단
 - [x] V033 Backend PostgreSQL runtime 검증: Auth/Workspace JDBC integration, joinCode hash, ACL 선필터, Transcript/Report/Task/Knowledge/Audit JSONB round-trip, 재시작 후 로그인, 전체 Backend test/bootJar, 빈 pgvector DB Flyway V1~V10
 - [x] V034 Meeting CRUD PostgreSQL E2E 검증: Flyway V1~V11 빈 DB/upgrade, Backend 전체/JDBC test, Frontend unit 9건·lint 오류 0건·build, Playwright 3건, local PostgreSQL 재시작 영속성 및 create/list/detail/update/delete/목록·상세·Meeting AI 제외 smoke
+- [x] V035 Meeting CRUD Frontend target 완성 검증: Frontend unit 11건, lint 오류 0건(기존 경고 8건), build, 격리 Backend `18083` Playwright 4건; 생성/참가 코드, 상세 participant, role 변경·REVOKED 회수, 캘린더 생성, CRUD와 prejoin default-deny 통과
 
 ## Notes
 

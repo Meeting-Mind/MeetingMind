@@ -738,3 +738,34 @@
 - `.specify/memory/session-handoff.md`는 병합된 팀 공통 기준만 기록한다는 규칙에 따라 아직 병합되지 않은 현재 브랜치 상태를 추가하지 않았다.
 - soft-deleted meeting의 hard purge, restore, grace period와 운영자 조회 API는 후속 milestone에서 보존·감사 요구와 함께 결정한다.
 - AI/RAG 파일과 vector migration은 수정하지 않았다. 후속 retriever도 M033의 `deleted_at is null` 관계형 선필터 결과만 사용해야 한다.
+
+## M034 Meeting CRUD Frontend Target Completion
+
+### Design and Changes
+
+- M033 완료 범위와 FR-MREG/FR-ACL/FR-CAL 요구를 대조해 M034를 별도 Frontend milestone로 추가했다. Backend·AI·migration은 수정하지 않았다.
+- target Space는 `GET /spaces/{spaceId}/members`로 stable userId를 조회하고, 회의 생성 시 선택한 Space member를 `participantUserIds`로 전달한다. 사용자-facing 신규 참여는 URL/코드 참가 신청 흐름과 분리했다.
+- target 회의 목록을 읽은 뒤 `GET /meetings/{meetingId}`와 `GET /meetings/{meetingId}/participants`를 함께 조회한다. 상세 응답의 title/status/schedule/myRole과 participant 목록의 stable participant id를 meetingId 기반 state에 저장한다.
+- 실제 Backend 상세 DTO가 participant id를 계약의 `id`가 아닌 `participantId`로 반환하는 차이를 E2E에서 발견했다. Frontend는 mutation ID가 계약과 일치하는 participant 목록 endpoint를 사용해 우회했으며 Backend DTO/계약 정규화는 후속이다.
+- participant 추가, role 변경, `ACTIVE`/`REVOKED` 변경은 target POST/PATCH API를 호출하고 성공 뒤 목록·상세를 재조회한다. 마지막 active HOST는 UI에서 예방하고 Backend 409 정책을 최종 기준으로 유지한다.
+- 회의 상태 control은 `SCHEDULED -> IN_PROGRESS/CANCELED`, `IN_PROGRESS -> ENDED`와 현재 상태만 제공한다. 제목·예정 일시는 `SCHEDULED`에서만 수정한다.
+- 생성 응답의 joinCode/joinUrl은 생성 권한자에게 현재 Frontend 메모리에서만 표시하며 새 인증 성공과 프로젝트 삭제 시 제거한다.
+- 캘린더는 이미 ACL-filtered된 target Space meeting 목록을 사용한다. 생성 권한, 초기 참여자, loading/error, 성공 후 목록·캘린더 동시 갱신과 meetingId route를 연결했다.
+
+### Verification
+
+- Passed: `cd frontend && npm run test`; 2 files, 11 tests
+- Passed: `cd frontend && npm run lint`; 오류 0건, 기존 경고 8건
+- Passed: `cd frontend && npm run build`; bundle size 경고 외 성공
+- Passed: `PLAYWRIGHT_BACKEND_PORT=18083 npm run test:e2e`; 로그인, HOST prejoin/default-deny, 회의 생성→참가 코드 표시→수정→삭제, 캘린더 생성/이동, guest participant 상세→EDITOR 변경→REVOKED 회수, 총 4건
+- Passed: `git diff --check`
+- Recovered: 첫 격리 E2E는 Backend CORS 허용 범위 밖 Frontend port `15174` 때문에 실패했다. 사용자 서버가 없는 것을 확인하고 허용된 Frontend `5173`과 격리 Backend `18083` 조합으로 재실행했다.
+- Recovered: guest 사용자를 workspace domain에 동기화하지 않은 초기 fixture와 상세 DTO의 participant id 필드 차이를 확인해 fixture와 participant 목록 조회 경계를 교정했다.
+
+### Remaining Boundary
+
+- `GET /api/v1/calendar/events` Backend runtime과 알림은 아직 없으며 캘린더는 Space별 ACL-filtered meeting 목록을 read model로 사용한다.
+- FR-MREG-01 description과 FR-CAL-04 종료 일시는 현재 Meeting API/data model에 없어 임의 추가하지 않았다.
+- 초기 참여자 선택은 조회 가능한 SpaceMember로 제한된다. 비멤버 guest 직접 검색/추가는 사용자 검색 또는 invitation 계약이 생긴 뒤 연결한다.
+- Playwright에서 기존 `WorkspaceHomePage` list key React warning이 관찰됐지만 M034 변경과 무관하고 동작/검증 실패는 아니다.
+- 공용 `.specify/memory/session-handoff.md`는 병합된 공통 기준만 기록하므로 아직 병합되지 않은 M034 상태를 추가하지 않았다.

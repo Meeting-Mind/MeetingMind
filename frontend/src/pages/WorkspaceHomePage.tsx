@@ -16,6 +16,18 @@ type CalendarEvent = {
   startsAt: Date;
   state: string;
 };
+type ProjectMemberOption = {
+  email: string;
+  name: string;
+  spaceRole: "OWNER" | "ADMIN" | "MEMBER";
+  status: "active" | "away";
+};
+type MeetingInviteMeta = {
+  meetingId: string;
+  title: string;
+  joinCode: string;
+  joinUrl: string;
+};
 
 const REFERENCE_DATE = new Date(2026, 6, 10);
 const dashboardFilters = ["전체", "활성 프로젝트", "최근 업데이트"] as const;
@@ -143,17 +155,30 @@ function buildCalendarEvents(
 
 export function WorkspaceHomePage({
   actionItems,
+  currentUserEmail,
   data,
   dataSource,
+  latestMeetingInvites,
+  meetingMutationError,
+  meetingMutationLoading = false,
   onCreateMeeting,
   onCreateProject,
+  projectMembers,
   projectMeetings
 }: {
   actionItems: WorkspaceData["meetingAi"]["actions"];
+  currentUserEmail: string;
   data: WorkspaceData["workspaceHome"];
   dataSource: WorkspaceDataSource;
-  onCreateMeeting?: (projectName: string, payload?: { title?: string; scheduledAt?: string }) => void;
+  latestMeetingInvites: Record<string, MeetingInviteMeta>;
+  meetingMutationError?: string;
+  meetingMutationLoading?: boolean;
+  onCreateMeeting?: (
+    projectName: string,
+    payload?: { title?: string; scheduledAt?: string; participantEmails?: string[] }
+  ) => Promise<boolean>;
   onCreateProject?: (payload: { name: string; description: string }) => void;
+  projectMembers: Record<string, ProjectMemberOption[]>;
   projectMeetings: Record<string, ProjectMeeting[]>;
 }) {
   useEffect(() => {
@@ -172,6 +197,7 @@ export function WorkspaceHomePage({
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingSpaceId, setMeetingSpaceId] = useState(data.spaces[0]?.id ?? "");
   const [meetingDateTime, setMeetingDateTime] = useState("2026-07-10T10:00");
+  const [meetingParticipantEmails, setMeetingParticipantEmails] = useState<string[]>([]);
   const totalMeetings = getTotalMeetings(data.spaces);
   const totalMembers = data.spaces.reduce((total, space) => total + parseMemberCount(space.members), 0);
   const calendarEvents = useMemo(() => buildCalendarEvents(data.spaces, projectMeetings), [data.spaces, projectMeetings]);
@@ -181,6 +207,10 @@ export function WorkspaceHomePage({
       setMeetingSpaceId(data.spaces[0].id);
     }
   }, [data.spaces, meetingSpaceId]);
+
+  useEffect(() => {
+    setMeetingParticipantEmails([]);
+  }, [meetingSpaceId]);
 
   const filteredSpaces = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -224,7 +254,7 @@ export function WorkspaceHomePage({
   );
   const calendarDays = buildCalendarDays(calendarView, selectedDate);
 
-  function handleCreateCalendarMeeting(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateCalendarMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const targetSpace = data.spaces.find((space) => space.id === meetingSpaceId);
     const trimmedTitle = meetingTitle.trim();
@@ -232,12 +262,31 @@ export function WorkspaceHomePage({
       return;
     }
 
-    onCreateMeeting?.(targetSpace.name, {
+    const created = await onCreateMeeting?.(targetSpace.name, {
       title: trimmedTitle,
-      scheduledAt: new Date(meetingDateTime).toISOString()
+      scheduledAt: new Date(meetingDateTime).toISOString(),
+      participantEmails: meetingParticipantEmails
     });
-    setMeetingTitle("");
+    if (created) {
+      setMeetingTitle("");
+      setMeetingParticipantEmails([]);
+    }
   }
+
+  const calendarMeetingSpace = data.spaces.find((space) => space.id === meetingSpaceId) ?? null;
+  const calendarMeetingCandidates = calendarMeetingSpace
+    ? (projectMembers[calendarMeetingSpace.name] ?? []).filter(
+        (member) => member.email !== currentUserEmail && member.status === "active"
+      )
+    : [];
+  const calendarCurrentMember = calendarMeetingSpace
+    ? (projectMembers[calendarMeetingSpace.name] ?? []).find((member) => member.email === currentUserEmail)
+    : null;
+  const canCreateCalendarMeeting =
+    calendarCurrentMember?.spaceRole === "OWNER" || calendarCurrentMember?.spaceRole === "ADMIN";
+  const latestMeetingInvite = calendarMeetingSpace
+    ? latestMeetingInvites[calendarMeetingSpace.name] ?? null
+    : null;
 
   return (
     <div className="workspace-catalog-shell workspace-catalog-home-shell">
@@ -465,6 +514,7 @@ export function WorkspaceHomePage({
               <strong>회의 일정 생성</strong>
               <select
                 aria-label="회의 생성 프로젝트"
+                disabled={meetingMutationLoading}
                 onChange={(event) => setMeetingSpaceId(event.target.value)}
                 value={meetingSpaceId}
               >
@@ -474,6 +524,7 @@ export function WorkspaceHomePage({
               </select>
               <input
                 aria-label="회의 제목"
+                disabled={!canCreateCalendarMeeting || meetingMutationLoading}
                 onChange={(event) => setMeetingTitle(event.target.value)}
                 placeholder="회의 제목"
                 type="text"
@@ -481,11 +532,45 @@ export function WorkspaceHomePage({
               />
               <input
                 aria-label="회의 시작 일시"
+                disabled={!canCreateCalendarMeeting || meetingMutationLoading}
                 onChange={(event) => setMeetingDateTime(event.target.value)}
                 type="datetime-local"
                 value={meetingDateTime}
               />
-              <button disabled={!meetingTitle.trim() || !meetingSpaceId} type="submit">일정 추가</button>
+              <select
+                aria-label="회의 초기 참여자"
+                disabled={!canCreateCalendarMeeting || meetingMutationLoading}
+                multiple
+                onChange={(event) =>
+                  setMeetingParticipantEmails(
+                    Array.from(event.currentTarget.selectedOptions, (option) => option.value)
+                  )
+                }
+                value={meetingParticipantEmails}
+              >
+                {calendarMeetingCandidates.map((member) => (
+                  <option key={`calendar-member-${member.email}`} value={member.email}>{member.name}</option>
+                ))}
+              </select>
+              <button disabled={!canCreateCalendarMeeting || meetingMutationLoading || !meetingTitle.trim() || !meetingSpaceId || !meetingDateTime} type="submit">
+                {meetingMutationLoading ? "저장 중" : "일정 추가"}
+              </button>
+              {meetingMutationError ? <div className="meeting-ai-error">{meetingMutationError}</div> : null}
+              {canCreateCalendarMeeting && latestMeetingInvite ? (
+                <div className="workspace-calendar-invite-result">
+                  <strong>{latestMeetingInvite.title} 참가 정보</strong>
+                  <label>
+                    <span>회의 참가 코드</span>
+                    <input aria-label="캘린더 회의 참가 코드" readOnly value={latestMeetingInvite.joinCode} />
+                  </label>
+                  <button
+                    onClick={() => void navigator.clipboard.writeText(latestMeetingInvite.joinCode)}
+                    type="button"
+                  >
+                    코드 복사
+                  </button>
+                </div>
+              ) : null}
             </form>
           </div>
         </section>

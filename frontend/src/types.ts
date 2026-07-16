@@ -54,6 +54,7 @@ export interface ProjectOverviewMeeting {
   state: string;
   scheduledAt?: ApiDateTime;
   durationMinutes?: number;
+  myRole?: MeetingRole | null;
 }
 
 export type ApiDateTime = string;
