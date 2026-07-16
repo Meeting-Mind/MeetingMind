@@ -22,14 +22,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.context.annotation.Profile;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
 
-@Repository
-@Profile({"local", "db"})
 public class JdbcWorkspaceStore extends WorkspaceStore {
 
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
@@ -517,6 +513,47 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
                 JdbcWorkspaceStore::mapMeetingSpeaker,
                 meetingId
         );
+    }
+
+    @Override
+    MeetingTranscript saveMeetingTranscript(MeetingTranscript transcript) {
+        jdbc.update(
+                """
+                insert into meeting_transcripts (
+                    meeting_id, status, provider, language, started_at, completed_at,
+                    failure_reason, retention_until, legal_hold, purged_at, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict (meeting_id) do update set
+                    status = excluded.status,
+                    provider = excluded.provider,
+                    language = excluded.language,
+                    started_at = excluded.started_at,
+                    completed_at = excluded.completed_at,
+                    failure_reason = excluded.failure_reason,
+                    retention_until = excluded.retention_until,
+                    legal_hold = excluded.legal_hold,
+                    purged_at = excluded.purged_at,
+                    updated_at = excluded.updated_at
+                """,
+                transcript.meetingId(), transcript.status().name(), transcript.provider(), transcript.language(),
+                timestamp(transcript.startedAt()), timestamp(transcript.completedAt()), transcript.failureReason(),
+                timestamp(transcript.retentionUntil()), transcript.legalHold(), timestamp(transcript.purgedAt()),
+                timestamp(transcript.createdAt()), timestamp(transcript.updatedAt())
+        );
+        return transcript;
+    }
+
+    @Override
+    Optional<MeetingTranscript> findMeetingTranscript(String meetingId) {
+        return first(jdbc.query(
+                """
+                select meeting_id, status, provider, language, started_at, completed_at,
+                       failure_reason, retention_until, legal_hold, purged_at, created_at, updated_at
+                from meeting_transcripts where meeting_id = ?
+                """,
+                JdbcWorkspaceStore::mapMeetingTranscript,
+                meetingId
+        ));
     }
 
     @Override
@@ -1041,6 +1078,23 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
                 rs.getString("id"), rs.getString("meeting_id"), rs.getString("speaker_id"),
                 rs.getString("speaker_label"), rs.getString("speaker_name"), rs.getInt("start_ms"),
                 rs.getInt("end_ms"), rs.getString("text"), rs.getString("source"), rs.getInt("sequence")
+        );
+    }
+
+    private static MeetingTranscript mapMeetingTranscript(ResultSet rs, int rowNum) throws SQLException {
+        return new MeetingTranscript(
+                rs.getString("meeting_id"),
+                TranscriptStatus.valueOf(rs.getString("status")),
+                rs.getString("provider"),
+                rs.getString("language"),
+                nullableInstant(rs, "started_at"),
+                nullableInstant(rs, "completed_at"),
+                rs.getString("failure_reason"),
+                nullableInstant(rs, "retention_until"),
+                rs.getBoolean("legal_hold"),
+                nullableInstant(rs, "purged_at"),
+                instant(rs, "created_at"),
+                instant(rs, "updated_at")
         );
     }
 

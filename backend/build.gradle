@@ -30,6 +30,7 @@ dependencies {
     implementation "org.apache.tomcat.embed:tomcat-embed-websocket:${tomcatVersion}"
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.4'
 
     implementation 'io.livekit:livekit-server:0.13.0'

@@ -247,7 +247,7 @@ None.
 
 ### Status
 
-- Future Draft
+- Target Backend
 
 ### Auth and Permissions
 
@@ -262,21 +262,25 @@ None.
 
 ```json
 {
-  "mode": "realtime"
+  "mode": "realtime",
+  "trackId": "livekit-audio-track-id"
 }
 ```
 
 ### Validation
 
-- `mode`: `realtime`, `postprocess`
-- 실제 provider, 오디오 업로드 방식, async 처리 방식은 후속 결정 대상이다.
+- `mode`: 현재 `realtime`만 지원한다. `postprocess`는 오디오 업로드 결정(T027) 이후 추가한다.
+- `trackId`: `realtime`일 때 required. LiveKit track egress 대상이다.
+- 대상 회의에 대해 동시에 `PROCESSING` 상태인 전사 작업이 있으면 시작을 거부한다.
 
 ### Response
 
 ```json
 {
   "meetingId": "meeting-001",
-  "transcriptStatus": "PROCESSING"
+  "transcriptStatus": "PROCESSING",
+  "sessionId": "stt-session-id",
+  "egressId": "livekit-egress-id"
 }
 ```
 
@@ -300,6 +304,42 @@ None.
 ### Notes
 
 - `Transcript.status`는 `PENDING` -> `PROCESSING` -> `COMPLETED` 또는 `FAILED`로 전이한다.
+- `PROCESSING` 시작 시 `meeting_transcripts`를 저장한다. provider callback의 segment는 즉시 저장하고, stop/provider complete 시 `COMPLETED`로 전환한다.
+- LiveKit Egress WebSocket이 정상 종료되면 마지막 audio를 provider에 flush한 뒤 target STT 세션을 종료해 `COMPLETED`로 전환한다. legacy `/api/stt/*` 세션은 기존 수동 transcript 조회 호환을 위해 registry에서 제거하지 않는다.
+- `COMPLETED` 전환은 DB trigger로 `TRANSCRIPT_COMPLETED` embedding job을 하나 생성한다. segment마다 job을 생성하지 않는다.
+
+## POST /api/v1/meetings/{meetingId}/transcription/{sessionId}/stop
+
+실시간 STT 세션을 종료하고 저장된 transcript를 `COMPLETED`로 전환한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 회의 `HOST`
+
+### Validation
+
+- `sessionId`는 `meetingId`로 시작된 활성 STT 세션이어야 한다.
+
+### Response
+
+```json
+{
+  "meetingId": "meeting-001",
+  "transcriptStatus": "COMPLETED"
+}
+```
+
+### Errors
+
+- `403 MEETING_ACCESS_DENIED`: 종료 권한 없음
+- `404 STT_SESSION_NOT_FOUND`: 세션이 없거나 다른 회의 세션
+- `409 TRANSCRIPTION_NOT_PROCESSING`: 이미 완료되었거나 실패한 전사
+- `503 STT_PROVIDER_UNAVAILABLE`: LiveKit Egress 종료 실패. session은 `FAILED`로 전환해 무한 `PROCESSING` 상태를 남기지 않는다.
 
 ## GET /api/v1/meetings/{meetingId}/dialogue
 

@@ -207,6 +207,28 @@
 - soft-deleted meeting은 관계형 조회와 AI context 선필터 단계에서 제외한다.
 - hard purge, restore, grace period는 M033 성공으로 간주하지 않고 후속 운영 정책으로 남긴다.
 
+## M038 STT-to-RAG PostgreSQL Flow
+
+| ID | Scenario | Given | Action | Expected | Source |
+| --- | --- | --- | --- | --- | --- |
+| SR-001 | STT callback dialogue 저장 | active HOST와 `PROCESSING` MeetingTranscript | provider callback text 2건 수신 후 session close | MeetingSpeaker/TranscriptSegment 2건, status `COMPLETED` | FR-STT-01, FR-STT-02, FR-STT-05 |
+| SR-002 | 완료 전사 job 생성 | `PROCESSING` transcript와 저장된 segment | `COMPLETED` 전환 | `TRANSCRIPT_COMPLETED` embedding job 정확히 1건 | D-037, V12 trigger |
+| SR-003 | 전사 입력 RAG 정합성 | 200개 completed transcript segment | deterministic worker 실행 후 Meeting search 100회 | Meeting/Space scope가 일치하는 결과만 반환 | FR-MBOT-01~04, NFR-DATA-01~02 |
+| SR-004 | 로컬 검색 성능 | SR-003과 동일 데이터 | 100회 retrieval latency 측정 | deterministic provider 기준 p95 < 1초 | PERF-RAG-01 |
+| SR-005 | 외부 provider smoke | 실제 Clova secret, LiveKit egress, public callback URL | target transcription start -> audio -> stop -> dialogue | 실시간 provider callback, egress, target API를 포함한 실제 흐름 성공 | FR-CALL-01, FR-STT-01~05 |
+
+### Pass Criteria
+
+- target meeting session은 provider callback text를 보존 정책 밖 파일에 복사하지 않는다.
+- segment마다 embedding job을 만들지 않고 transcript 완료 transaction에서 하나만 만든다.
+- local deterministic p95는 DB/retriever 경계만 측정한다. OpenAI provider 품질·외부 latency와 LiveKit egress는 SR-005 별도 환경에서 측정한다.
+
+### Execution Status
+
+- SR-001~SR-004: local PostgreSQL integration과 deterministic embedding provider로 통과했다. 200개 segment, 100회 Meeting retrieval에서 local p95는 `8.85 ms`였다.
+- SR-005: 48 kHz WebSocket -> resampler -> Cloud STT 경로에서 Korean PCM 전사 callback 65건을 확인했다. 별도 opt-in target smoke는 실제 Cloud callback -> JPA dialogue `COMPLETED` -> `TRANSCRIPT_COMPLETED` job 1건을 검증했다. valid LiveKit Cloud credential, 임시 ngrok callback, browser LiveKit client에서 published audio track의 Egress를 시작해 callback transcript 60건을 확인했다. Egress API는 `ws(s)` signalling URL을 `http(s)` API URL로 정규화한다.
+- SR-006: 기본 단위 test에서 target Egress WebSocket 종료가 `MeetingTranscript=COMPLETED`로 종결되는지, legacy 세션은 유지되는지, Egress stop 실패가 `FAILED` 종결과 `503 STT_PROVIDER_UNAVAILABLE`로 변환되는지 검증한다.
+
 ## Minimum Implementation Order
 
 1. T039 Space access policy를 pure unit test로 먼저 고정한다.

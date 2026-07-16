@@ -911,3 +911,49 @@
 - 초기 참여자 선택은 조회 가능한 SpaceMember로 제한된다. 비멤버 guest 직접 검색/추가는 사용자 검색 또는 invitation 계약이 생긴 뒤 연결한다.
 - Playwright에서 기존 `WorkspaceHomePage` list key React warning이 관찰됐지만 M034 변경과 무관하고 동작/검증 실패는 아니다.
 - 공용 `.specify/memory/session-handoff.md`는 병합된 공통 기준만 기록하므로 아직 병합되지 않은 M034 상태를 추가하지 않았다.
+
+## M038 Workspace JPA Migration
+
+### T297-T298 Implementation
+
+- Auth의 `AuthStore`와 `JdbcAuthStore`는 변경하지 않았다. non-auth persistence는 `persistence/entity`의 JPA metadata로 분리하고 Auth FK는 `user_id` scalar 값으로 유지했다. `@ManyToOne<User>`와 cascade를 추가하지 않았다.
+- `spring-boot-starter-data-jpa`를 추가하고 `open-in-view=false`, `ddl-auto=validate`, UTC JDBC time zone을 설정했다. schema 변경은 계속 Flyway만 담당한다.
+- Space, Meeting/ACL, Transcript, Report, Task, ProjectKnowledge, DomainTerm, AuditLog, EmbeddingJob/Chunk table의 entity mapping을 추가했다. `embedding_chunks.embedding vector(1536)` 및 hybrid retrieval은 D-040에 따라 JPA mapping에서 제외하고 AI native SQL/JDBC 경계를 유지한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test` with the existing DataSource-free `test` profile.
+- Passed: temporary empty PostgreSQL database on the local pgvector container. `db` profile applied Flyway V1~V12, initialized Hibernate `EntityManagerFactory` with validation, and returned `GET /api/workspace` on port 18084. The temporary database and server were removed after verification.
+- Blocked (separate local integration issue): the existing `meetingmind` database has a V11 checksum mismatch (`applied -396214114`, current `-2043882333`), so its default `local` profile boot is correctly rejected by Flyway. No `repair` was run because migration history must not be rewritten without the integration owner's decision.
+
+### Remaining Boundary
+
+- Auth는 계속 JDBC `AuthStore`를 사용한다. `WorkspaceStore`의 Space, Meeting/ACL, transcript, report/task, knowledge, audit는 `JpaWorkspaceStore`와 `JpaWorkspacePersistence`로 전환했고, vector retrieval/worker SQL은 JPA 대상이 아니다.
+- Cloud STT provider callback, target DB lifecycle, LiveKit Egress deployment E2E를 검증했다. OpenAI embedding provider의 실제 한국어 검색 품질과 외부 latency 평가는 별도 T301 잔여 작업이다.
+
+### T299 Workspace JPA Adapter
+
+- `JdbcWorkspaceStore`는 Auth와 JDBC round-trip 검증용 helper로 남기고 Spring bean에서는 제거했다. `local`/`db` profile은 `JpaWorkspaceStore`를 주입하며, scalar user FK와 Flyway schema owner 경계를 유지한다.
+- JPA adapter는 Space, Meeting/ACL, join request, speaker, transcript segment, report/task, ProjectKnowledge, audit write/read를 담당한다. `MeetingTranscript`도 JPA entity로 저장한다.
+- PostgreSQL integration에서 Space/Meeting/ACL, join code hash, transcript/report/task/knowledge/audit reload와 Project AI ACL 선필터를 검증했다.
+
+### T300 STT Persistence Lifecycle
+
+- target `POST /api/v1/meetings/{meetingId}/transcription/start`는 HOST 또는 Space manager 권한을 확인한 뒤 `MeetingTranscript=PROCESSING`을 저장하고 LiveKit egress STT 세션을 시작한다. `stop`은 해당 회의 세션만 종료하며 `GET /dialogue`는 완료된 전사만 반환한다. legacy `/api/stt/*`는 호환용으로 유지했다.
+- provider callback의 text는 target meeting일 때 `MeetingSpeaker`와 `TranscriptSegment`로 즉시 저장한다. target session에는 파일 기반 transcript 복사본을 남기지 않아 retention/ACL 경계를 우회하지 않는다.
+- 같은 meeting의 다중 track callback은 meeting row lock 안에서 순번을 계산한다. 완료 전환은 `meeting_transcripts` trigger를 통해 `TRANSCRIPT_COMPLETED` embedding job을 하나 만든다. provider 오류는 원문을 저장하지 않고 `FAILED`와 일반화된 실패 사유만 기록한다.
+- `SttStreamClientFactory`가 Clova client 생성만 담당하도록 분리했다. production은 `ClovaNestStreamClientFactory`를 사용하고, PostgreSQL integration test는 동일 registry callback을 호출하는 fake stream client를 주입해 provider network 없이 lifecycle을 검증한다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`.
+- Passed: temporary PostgreSQL database on the local pgvector container with `JdbcWorkspaceStoreIntegrationTest`; Flyway V1~V12, JPA adapter reload, ACL negative case, `PROCESSING -> COMPLETED`, segment 2건 저장, `TRANSCRIPT_COMPLETED` embedding job 1건 생성을 검증했다. Temporary database was dropped after the test.
+- Passed: 같은 Flyway V12 temporary database에서 `AI_TEST_DATABASE_URL=... python -m unittest tests.test_embedding_repository.PostgresEmbeddingRepositoryIntegrationTest`; deterministic 1536-dimension embedding worker가 transcript-completed job을 처리하고 최신 generation 교체, Meeting/Project scope, 빈 allowed meeting list, cross-space 차단, purge 후 검색 제외를 검증했다. Temporary database was dropped after the test.
+- Passed: temporary PostgreSQL database에서 `SttTranscriptFlowIntegrationTest`; fake provider callback text 2건이 실제 JPA `MeetingSpeaker`/`TranscriptSegment`로 저장되고, session close 이후 dialogue `COMPLETED` 및 `TRANSCRIPT_COMPLETED` job 1건을 검증했다.
+- Passed: 같은 Flyway V12 temporary database에서 `AI_TEST_DATABASE_URL=... python -m unittest discover -s tests`; 63 tests 통과. `test_stt_rag_performance`는 200개 STT segment -> worker -> Meeting scope retrieval 100회를 실행했고 deterministic provider 기준 local p95 `8.85 ms`를 기록했다.
+- Passed: `CLOVA_SPEECH_SECRET`로 Cloud STT gRPC 설정 handshake와 실제 Korean PCM 전사를 확인했다. 48 kHz WebSocket 입력을 server resampler가 16 kHz PCM으로 전달한 legacy smoke에서 65개의 `transcription` callback이 반환됐다. provider `responseType=["config"]` ACK는 전사 text가 아니므로 저장하지 않고, 마지막 PCM frame을 `epFlag=true`로 전송한 뒤 stream 종료를 기다리도록 client를 보정했다.
+- Passed: `RUN_CLOVA_STT_SMOKE=true` opt-in integration test에서 실제 16 kHz PCM을 Cloud STT client로 실시간 전송했다. 실제 callback이 JPA `TranscriptSegment`에 저장되고 target dialogue가 `COMPLETED`, `TRANSCRIPT_COMPLETED` embedding job이 정확히 1건인 것을 검증했다. 기본 `./gradlew test`에서는 비용과 secret 노출 방지를 위해 이 test가 skip된다.
+- Passed: `git diff --check`.
+- Passed: actual LiveKit egress smoke. valid LiveKit Cloud credential과 임시 ngrok `PUBLIC_WS_BASE_URL` 환경에서 Chromium client가 audio track을 publish했고, target start가 Egress를 생성한 뒤 Cloud STT callback transcript 60건을 저장했다. Egress SDK에는 signalling용 `ws(s)` URL이 아닌 API용 `http(s)` URL이 필요하므로 `LiveKitEgressService`에서 이를 정규화하고 unit test로 고정했다.
+- Hardened: target Egress WebSocket 종료는 마지막 audio flush 후 `MeetingTranscript=COMPLETED`로 종결하고, legacy STT session은 수동 조회 호환을 위해 유지한다. Egress stop 실패는 `FAILED`로 종결한 뒤 `503 STT_PROVIDER_UNAVAILABLE`를 반환해 재시작을 막는 무한 `PROCESSING` 상태를 남기지 않는다. transcription 시작 시 `MEETING_TRANSCRIPTION_STARTED` audit event를 기록한다.
+- Not run: OpenAI embedding provider의 실제 한국어 retrieval quality 및 p95 latency. `T275`의 API key 기반 평가와 성능 측정이 선행되어야 T301을 완료할 수 있다.

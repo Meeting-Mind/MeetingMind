@@ -69,6 +69,7 @@
 | M035 | 회의 채팅 텍스트 첨부파일 RAG | 텍스트 추출 가능한 회의 첨부파일을 권한·보존·출처 기준으로 RAG에 연결하고 이미지 처리는 후속으로 둔다. | T277-T284 |
 | M036 | Frontend Workspace 영속 데이터 복원 | 로그인 후 Space/Meeting/SpaceMember를 API에서 복원하고 API 실패가 mock 성공으로 보이지 않게 한다. | T285-T287 |
 | M037 | 회의 CRUD 프론트엔드 target 완성 | target Space의 회의 상세·초기 참여자·ACL·캘린더 mutation이 Backend 응답과 재조회 결과로 동작하고 mock/local state와 섞이지 않는다. | T288-T296 |
+| M038 | Workspace JPA 전환 | Auth JDBC 경계를 유지하면서 Workspace/AI artifact entity와 repository adapter를 JPA로 전환하고 PostgreSQL/Flyway 통합 검증을 통과한다. | T297-T301 |
 
 ## Foundation
 
@@ -513,6 +514,18 @@ M037은 M033의 Backend CRUD를 선택 회의 상세, 초기 참여자, particip
 | T294 | M037 | [x] | frontend/unit | 사용자(Frontend 담당) | Codex | T291-T293 | `frontend/src/**/*.test.*` | detail/member/participant API와 request/error 회귀 단위 테스트를 추가한다. | target route, bearer auth, participantUserIds, participant PATCH와 오류 전파가 검증된다. |
 | T295 | M037 | [x] | frontend/e2e-verification | 사용자(Frontend 담당) | Codex | T294 | `frontend/e2e/**`, `frontend/package.json` | 실제 Backend로 상세·초기 참여자·ACL·캘린더와 기존 CRUD 회귀를 검증한다. | unit, lint, build, Playwright가 통과하고 prejoin default-deny, CRUD/ACL mutation과 기존 409 client 오류 전파가 검증된다. |
 | T296 | M037 | [x] | docs/closeout | 사용자(Frontend 담당) | Codex | T295 | `specs/001-meetingmind-core/{tasks,implement,analyze,feature-implementation-comparison}.md`, `.specify/memory/session-handoff.md` | 구현·검증 결과와 calendar endpoint/description/endAt 후속 경계를 정리한다. | 완료 task만 체크되고 실제 검증 명령, 남은 Backend 계약 의존성이 문서에 일치한다. |
+
+### M038: Workspace JPA Migration
+
+M038은 Auth JDBC를 변경하지 않고 Workspace와 AI artifact의 storage adapter만 JPA로 전환한다. schema owner는 Flyway이며 `embedding_chunks`의 vector retrieval/worker SQL은 AI owner가 유지한다. shared `WorkspaceStore` adapter를 교체하는 T299는 entity mapping과 repository contract가 확정된 뒤 integration owner가 순차 처리한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T297 | M038 | [x] | docs/jpa-boundary | Backend owner | Codex | T253, T267 | `clarify.md`, `plan.md`, `tasks.md`, `backend/build.gradle`, `backend/src/main/resources/application.yml` | Auth 제외, Flyway validate, scalar user FK, vector native SQL 경계를 확정하고 JPA bootstrap을 추가한다. | `local`/`db` profile에서 Hibernate validate가 Flyway V12 schema로 기동하고 `test` profile은 DataSource 없이 기존 in-memory test를 유지한다. |
+| T298 | M038 | [x] | backend/jpa-entities | Backend owner | Codex | T297 | `backend/src/main/java/com/meetingmind/demo/persistence/entity/**` | Space/Meeting/ACL/Transcript/Report/Task/Knowledge/Audit/EmbeddingJob entity를 schema와 일치하게 추가한다. | Auth entity 연관관계나 cascade 없이 non-auth table mapping이 Hibernate validation을 통과한다. |
+| T299 | M038 | [x] | backend/jpa-store | Backend owner | Codex | T298 | `backend/src/main/java/com/meetingmind/demo/{domain,persistence}/**`, `backend/src/test/**` | JDBC WorkspaceStore를 JPA repository adapter로 도메인별 순차 교체한다. | 기존 API, ACL, join code hash, report/task 확정과 audit transaction이 JPA adapter에서 동등하게 동작한다. |
+| T300 | M038 | [x] | backend/stt-persistence | STT owner, Backend owner | Codex | T299 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/test/**` | STT session을 MeetingTranscript/TranscriptSegment persistence와 COMPLETED lifecycle에 연결한다. | JPA callback, ACL, speaker/segment 저장, Egress 자연 종료/중지 실패 lifecycle, 완료 transaction의 V12 embedding job과 실제 LiveKit-Cloud STT 전사 smoke를 검증했다. |
+| T301 | M038 | [~] | verification/jpa-rag | Integration owner | Codex | T299, T300, T275 | `backend/**`, `ai/**`, `specs/001-meetingmind-core/{test-matrix,implement}.md` | JPA persistence 이후 STT-to-RAG 및 권한·성능 회귀를 실행한다. | real PostgreSQL에서 restart/ACL/embedding/Meeting RAG와 deterministic local p95, LiveKit-Cloud STT E2E는 검증됐다. OpenAI 한국어 품질과 외부 provider latency 평가는 남아 있다. |
 
 ## Verification
 

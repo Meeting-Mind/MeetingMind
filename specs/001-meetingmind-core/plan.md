@@ -52,6 +52,15 @@
 6. `Q-010` 결정에 따라 별도 forward migration에서 `vector(1536)`을 고정한다. MVP는 exact cosine search로 시작하고 측정 기준을 넘을 때 HNSW를 추가한다.
 7. V12에서 `pg_trgm`, source generation/XOR, retry/lease와 source 변경 EmbeddingJob trigger를 적용한다.
 
+### JPA Migration Boundary
+
+- Auth의 `AuthStore`, `JdbcAuthStore`, `users` lifecycle은 이번 전환에서 제외한다.
+- Workspace의 domain record는 application service의 immutable 모델로 유지하고, JPA entity는 `persistence/entity`에 분리한다. adapter가 entity와 domain record를 변환한다.
+- JPA dependency, Flyway schema validation, Space/Meeting/ACL/Transcript/Report/Task/Knowledge entity mapping과 `JpaWorkspaceStore` adapter를 적용한다. JDBC `WorkspaceStore`는 Auth 및 PostgreSQL round-trip 검증 helper로만 유지한다.
+- `embedding_chunks.embedding vector(1536)`의 hybrid retrieval과 worker claim query는 Hibernate generic mapping으로 옮기지 않고 native SQL/JDBC로 유지한다.
+- Auth와 JPA domain은 동일 DataSource를 사용하되 FK는 `user_id` scalar로 보존한다. cross-domain cascade와 JPA schema 생성은 금지한다.
+- 실시간 STT는 회의 ACL 확인 후 `MeetingTranscript=PROCESSING`을 만들고 provider callback마다 speaker/segment를 저장한다. 완료 전환은 V12 trigger로 단 하나의 `TRANSCRIPT_COMPLETED` job을 만든다. target session은 파일 transcript를 남기지 않는다.
+
 ### AI RAG Production Baseline
 
 1. Backend application service가 사용자 권한을 평가해 Meeting AI의 단일 meeting scope 또는 Project AI의 `spaceId + allowedMeetingIds`를 만든다.
