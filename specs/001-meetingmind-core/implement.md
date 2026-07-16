@@ -940,7 +940,7 @@
 
 ### T300 STT Persistence Lifecycle
 
-- target `POST /api/v1/meetings/{meetingId}/transcription/start`는 HOST 또는 Space manager 권한을 확인한 뒤 `MeetingTranscript=PROCESSING`을 저장하고 LiveKit egress STT 세션을 시작한다. `stop`은 해당 회의 세션만 종료하며 `GET /dialogue`는 완료된 전사만 반환한다. legacy `/api/stt/*`는 호환용으로 유지했다.
+- target `POST /api/v1/meetings/{meetingId}/transcription/start`는 HOST 또는 Space manager 권한을 확인한 뒤 `MeetingTranscript=PROCESSING`을 저장하고 LiveKit egress STT 세션을 시작한다. `stop`은 해당 회의 세션만 종료하며 `GET /dialogue`는 현재 저장된 segment를 반환한다. legacy `/api/stt/*`는 호환용으로 유지했다.
 - provider callback의 text는 target meeting일 때 `MeetingSpeaker`와 `TranscriptSegment`로 즉시 저장한다. target session에는 파일 기반 transcript 복사본을 남기지 않아 retention/ACL 경계를 우회하지 않는다.
 - 같은 meeting의 다중 track callback은 meeting row lock 안에서 순번을 계산한다. 완료 전환은 `meeting_transcripts` trigger를 통해 `TRANSCRIPT_COMPLETED` embedding job을 하나 만든다. provider 오류는 원문을 저장하지 않고 `FAILED`와 일반화된 실패 사유만 기록한다.
 - `SttStreamClientFactory`가 Clova client 생성만 담당하도록 분리했다. production은 `ClovaNestStreamClientFactory`를 사용하고, PostgreSQL integration test는 동일 registry callback을 호출하는 fake stream client를 주입해 provider network 없이 lifecycle을 검증한다.
@@ -958,3 +958,21 @@
 - Passed: actual LiveKit egress smoke. valid LiveKit Cloud credential과 임시 ngrok `PUBLIC_WS_BASE_URL` 환경에서 Chromium client가 audio track을 publish했고, target start가 Egress를 생성한 뒤 Cloud STT callback transcript 60건을 저장했다. Egress SDK에는 signalling용 `ws(s)` URL이 아닌 API용 `http(s)` URL이 필요하므로 `LiveKitEgressService`에서 이를 정규화하고 unit test로 고정했다.
 - Hardened: target Egress WebSocket 종료는 마지막 audio flush 후 `MeetingTranscript=COMPLETED`로 종결하고, legacy STT session은 수동 조회 호환을 위해 유지한다. Egress stop 실패는 `FAILED`로 종결한 뒤 `503 STT_PROVIDER_UNAVAILABLE`를 반환해 재시작을 막는 무한 `PROCESSING` 상태를 남기지 않는다. transcription 시작 시 `MEETING_TRANSCRIPTION_STARTED` audit event를 기록한다.
 - Not run: OpenAI embedding provider의 실제 한국어 retrieval quality 및 p95 latency. `T275`의 API key 기반 평가와 성능 측정이 선행되어야 T301을 완료할 수 있다.
+
+### T302 Live STT Target API Integration
+
+- LiveRoom의 STT 시작, 종료, 자막 polling을 legacy `/api/stt/*`에서 인증·Meeting ACL이 적용되는 `/api/v1/meetings/{meetingId}/transcription/*`와 `/dialogue`로 전환했다.
+- `GET /dialogue`는 `PROCESSING` 중에도 즉시 저장된 `TranscriptSegment`를 반환한다. 이는 실시간 자막 표시와 저장 모델을 같은 Meeting scope/ACL 경계에 둔다.
+- legacy `/api/stt/*` controller는 기본 runtime에서 제외하고, 수동 smoke가 필요한 경우에만 `legacy-stt` profile을 명시적으로 활성화한다. target STT의 LiveKit Egress WebSocket 경로는 이 profile과 무관하게 유지한다.
+- legacy `/api/livekit/token` controller도 기본 runtime에서 제외하고, request body를 신뢰하는 기존 token 발급을 확인해야 하는 경우에만 `legacy-livekit` profile을 명시적으로 활성화한다.
+- 회의 상세 응답에서 영속화 후 복원할 수 없고 생성 시에만 전달해야 하는 `joinCode`/`roomCode`를 제거했다. 생성 응답의 `joinCode`/`joinUrl` 계약은 유지한다.
+- Frontend는 제품 시간대 `Asia/Seoul`을 명시하고 중복된 `MeetingDetailResponse` 선언을 제거했다. 데이터 모델과 ERD의 관계/필드 변경은 없으므로 갱신하지 않았다.
+
+### T302 Verification
+
+- Passed: `cd backend && ./gradlew test`; `PROCESSING` transcript의 target dialogue 조회와 기존 STT lifecycle/controller 회귀를 포함한다.
+- Passed: `cd backend && ./gradlew test --tests com.meetingmind.demo.MeetingMindApplicationTest`; 기본 context에는 legacy STT controller가 없고 `legacy-stt` 명시 profile에서만 등록됨을 검증했다.
+- Passed: 같은 context test에서 legacy LiveKit controller도 기본 context에 없고 `legacy-livekit` 명시 profile에서만 등록됨을 검증했다.
+- Passed: `cd frontend && TZ=UTC npm test -- --run`; 3 files, 15 tests. STT target API client의 Bearer auth와 시간대 독립 포맷을 검증했다.
+- Passed: `cd frontend && npm run build`; bundle size warning 외 성공.
+- Passed: `cd ai && python3 -m compileall app tests`, `git diff --check`, legacy frontend STT endpoint 및 `roomCode` 참조 검색.

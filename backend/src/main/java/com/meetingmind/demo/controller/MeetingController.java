@@ -54,7 +54,6 @@ public class MeetingController {
                 view.meeting().id(),
                 view.meeting().spaceId(),
                 view.meeting().title(),
-                view.meeting().joinCode(),
                 view.meeting().status().name(),
                 view.meeting().scheduledAt().toString(),
                 view.meeting().startedAt() == null ? null : view.meeting().startedAt().toString(),

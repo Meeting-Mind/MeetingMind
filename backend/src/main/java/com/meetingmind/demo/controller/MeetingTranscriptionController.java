@@ -112,9 +112,6 @@ public class MeetingTranscriptionController {
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
         WorkspaceDomainService.MeetingTranscriptView view = workspaceDomainService.meetingTranscript(user.id(), meetingId);
-        if (view.transcript().status() != TranscriptStatus.COMPLETED) {
-            throw new AuthorizationException(HttpStatus.CONFLICT, "MEETING_NOT_COMPLETED", "전사가 아직 완료되지 않았습니다.");
-        }
         return new MeetingDialogueResponse(
                 meetingId,
                 view.transcript().status().name(),

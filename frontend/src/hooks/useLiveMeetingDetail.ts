@@ -14,7 +14,11 @@ export function formatStartsAt(scheduledAt: string): string {
   if (Number.isNaN(date.getTime())) {
     return scheduledAt;
   }
-  return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Seoul"
+  }).format(date);
 }
 
 export type LiveMeetingDetailResult = {
@@ -56,7 +60,6 @@ export function useLiveMeetingDetail(
 
         setLiveMeeting((previous) => ({
           ...previous,
-          roomCode: detail.roomCode,
           startsAt: formatStartsAt(detail.scheduledAt),
           overview: { ...previous.overview, title: detail.title },
           accessMembers,

@@ -5,9 +5,12 @@ import {
   createMeeting,
   deleteMeeting,
   fetchMeetingDetail,
+  fetchMeetingDialogue,
   fetchMeetingParticipants,
   fetchMeetings,
   fetchSpaceMembers,
+  startMeetingTranscription,
+  stopMeetingTranscription,
   updateMeeting,
   updateMeetingParticipant
 } from "./workspace";
@@ -152,5 +155,39 @@ describe("meeting CRUD API client", () => {
     );
 
     await expect(deleteMeeting(session, "meeting-1")).rejects.toThrow("진행 중인 회의는 삭제할 수 없습니다.");
+  });
+
+  it("uses authenticated target routes for live transcription", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ meetingId: "meeting-1", transcriptStatus: "PROCESSING", sessionId: "session-1" }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ meetingId: "meeting-1", status: "PROCESSING", rows: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ meetingId: "meeting-1", transcriptStatus: "COMPLETED" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startMeetingTranscription(session, "meeting-1", { mode: "realtime", trackId: "track-1" });
+    await fetchMeetingDialogue(session, "meeting-1");
+    await stopMeetingTranscription(session, "meeting-1", "session-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/meetings/meeting-1/transcription/start",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer access-token" },
+        body: JSON.stringify({ mode: "realtime", trackId: "track-1" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/meetings/meeting-1/dialogue", {
+      headers: { Authorization: "Bearer access-token" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/meetings/meeting-1/transcription/session-1/stop", {
+      method: "POST",
+      headers: { Authorization: "Bearer access-token" }
+    });
   });
 });

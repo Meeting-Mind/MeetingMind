@@ -80,7 +80,6 @@ class MeetingControllerTest {
 
         assertThat(detail.id()).isEqualTo(meeting.meeting().id());
         assertThat(detail.title()).isEqualTo("CRUD 회의");
-        assertThat(detail.roomCode()).isEqualTo(meeting.meeting().joinCode());
         assertThat(detail.scheduledAt()).isEqualTo(SCHEDULED_AT.toString());
         assertThat(detail.status()).isEqualTo("SCHEDULED");
         assertThat(detail.myRole()).isEqualTo("HOST");
