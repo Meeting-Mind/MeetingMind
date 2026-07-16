@@ -10,13 +10,13 @@ import com.meetingmind.demo.domain.WorkspaceDomainService.MeetingParticipantWith
 import com.meetingmind.demo.dto.CreateMeetingJoinRequestRequest;
 import com.meetingmind.demo.dto.CreateMeetingJoinRequestResponse;
 import com.meetingmind.demo.dto.AddMeetingParticipantRequest;
+import com.meetingmind.demo.dto.DeleteMeetingResponse;
+import com.meetingmind.demo.dto.MeetingDetailResponse;
 import com.meetingmind.demo.dto.MeetingJoinRequestSummaryResponse;
 import com.meetingmind.demo.dto.MeetingParticipantMutationResponse;
 import com.meetingmind.demo.dto.MeetingParticipantsResponse;
 import com.meetingmind.demo.dto.ReviewMeetingJoinRequestResponse;
 import com.meetingmind.demo.dto.UpdateMeetingParticipantRequest;
-import com.meetingmind.demo.dto.DeleteMeetingResponse;
-import com.meetingmind.demo.dto.MeetingDetailResponse;
 import com.meetingmind.demo.dto.UpdateMeetingRequest;
 import com.meetingmind.demo.dto.UpdateMeetingResponse;
 import jakarta.validation.Valid;
@@ -54,6 +54,7 @@ public class MeetingController {
                 view.meeting().id(),
                 view.meeting().spaceId(),
                 view.meeting().title(),
+                view.meeting().joinCode(),
                 view.meeting().status().name(),
                 view.meeting().scheduledAt().toString(),
                 view.meeting().startedAt() == null ? null : view.meeting().startedAt().toString(),

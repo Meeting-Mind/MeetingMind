@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { buildAuthHeaders, type AuthSession } from "../auth/session";
+import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
 import type { WorkspaceData } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
@@ -310,7 +311,7 @@ function ParticipantTile({
 }
 
 export function LiveRoomPage({
-  liveMeeting,
+  liveMeeting: fallbackLiveMeeting,
   meetingAi,
   session
 }: {
@@ -321,6 +322,7 @@ export function LiveRoomPage({
   const navigate = useNavigate();
   const location = useLocation();
   const meetingId = new URLSearchParams(location.search).get("meetingId");
+  const { liveMeeting, error: liveMeetingError } = useLiveMeetingDetail(session, meetingId, fallbackLiveMeeting);
   const roomRef = useRef<Room | null>(null);
   const [roomReady, setRoomReady] = useState(false);
   const [connectionStateLabel, setConnectionStateLabel] = useState("연결 중");
@@ -363,11 +365,11 @@ export function LiveRoomPage({
   }, []);
 
   useEffect(() => {
-    if (!roomReady) {
+    if (!roomReady || !meetingId) {
       return;
     }
 
-    const roomName = liveMeeting.roomCode.toLowerCase();
+    const roomName = meetingId;
     let cancelled = false;
 
     const poll = async () => {
@@ -392,7 +394,7 @@ export function LiveRoomPage({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [roomReady, liveMeeting.roomCode]);
+  }, [roomReady, meetingId]);
 
   async function startSttStream(roomName: string, trackId: string) {
     try {
@@ -515,7 +517,7 @@ export function LiveRoomPage({
             syncSnapshot(room);
             if (!sttStartedRef.current && publication.source === Track.Source.Microphone && publication.trackSid) {
               sttStartedRef.current = true;
-              void startSttStream(liveMeeting.roomCode.toLowerCase(), publication.trackSid);
+              void startSttStream(meetingId, publication.trackSid);
             }
           })
           .on(RoomEvent.LocalTrackUnpublished, () => syncSnapshot(room))
@@ -643,6 +645,11 @@ export function LiveRoomPage({
             <span>실시간 카메라 화면과 발표 화면, STT 요약을 한 번에 확인하는 회의실입니다.</span>
           </div>
           <div className="lk-live-room-status">
+            {liveMeetingError ? (
+              <span className="live-meeting-data-warning" title={liveMeetingError}>
+                임시 데이터 표시 중
+              </span>
+            ) : null}
             <button className="lk-live-room-top-leave" onClick={() => handleLeave("/spaces")} type="button">
               나가기
             </button>

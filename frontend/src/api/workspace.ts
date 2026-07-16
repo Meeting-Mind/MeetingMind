@@ -21,8 +21,8 @@ import type {
   DeleteMeetingResponse,
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
-  MeetingListResponse,
   MeetingDetailResponse,
+  MeetingListResponse,
   MeetingParticipantsResponse,
   MeetingJoinRequestsResponse,
   OwnerTransferRequest,
@@ -132,12 +132,6 @@ export async function fetchMeetings(session: AuthSession, spaceId: string): Prom
   });
 }
 
-export async function fetchMeeting(session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
-  return requestJson<MeetingDetailResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
-    headers: buildAuthHeaders(session)
-  });
-}
-
 export async function createMeeting(
   session: AuthSession,
   spaceId: string,
@@ -165,6 +159,12 @@ export async function updateMeeting(
 export async function deleteMeeting(session: AuthSession, meetingId: string): Promise<DeleteMeetingResponse> {
   return requestJson<DeleteMeetingResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     method: "DELETE",
+    headers: buildAuthHeaders(session)
+  });
+}
+
+export async function fetchMeetingDetail(session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
+  return requestJson<MeetingDetailResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     headers: buildAuthHeaders(session)
   });
 }

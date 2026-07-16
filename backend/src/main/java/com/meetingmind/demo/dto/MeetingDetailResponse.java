@@ -6,6 +6,7 @@ public record MeetingDetailResponse(
         String id,
         String spaceId,
         String title,
+        String roomCode,
         String status,
         String scheduledAt,
         String startedAt,

@@ -5,7 +5,7 @@ import {
   createMeeting,
   createSpace,
   deleteMeeting,
-  fetchMeeting,
+  fetchMeetingDetail,
   fetchMeetingParticipants,
   fetchLegacyWorkspaceSnapshot,
   fetchMeetings,
@@ -409,7 +409,7 @@ export function App() {
     const detailResults = await Promise.allSettled(
       response.meetings.map(async (meeting) => {
         const [detail, participantsResponse] = await Promise.all([
-          fetchMeeting(session, meeting.id),
+          fetchMeetingDetail(session, meeting.id),
           fetchMeetingParticipants(session, meeting.id)
         ]);
         return { detail, participants: participantsResponse.participants };

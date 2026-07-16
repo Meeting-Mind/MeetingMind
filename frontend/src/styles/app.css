@@ -3508,6 +3508,18 @@ body.app-theme.meeting-access-body {
   font-weight: 900;
 }
 
+.live-meeting-data-warning {
+  display: inline-flex;
+  align-items: center;
+  min-height: 62px;
+  padding: 0 16px;
+  border-radius: 14px;
+  background: rgba(108, 81, 53, 0.92);
+  color: #ffdca3;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .meeting-prejoin-status-banner {
   position: absolute;
   top: 22px;
@@ -5849,7 +5861,8 @@ body.app-theme.meeting-access-body {
 
   .workspace-catalog-main,
   .project-overview-shell .workspace-catalog-main,
-  .project-detail-main {
+  .project-detail-main,
+  .meeting-prejoin-main {
     height: auto;
     overflow: visible;
   }
