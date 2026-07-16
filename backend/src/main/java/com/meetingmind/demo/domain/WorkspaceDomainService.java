@@ -92,6 +92,37 @@ public class WorkspaceDomainService {
                 .toList();
     }
 
+    public List<MeetingSummary> listMeetings(String actorUserId, String spaceId) {
+        return listMeetings(actorUserId, spaceId, (MeetingStatus) null, (OffsetDateTime) null, (OffsetDateTime) null);
+    }
+
+    public List<MeetingSummary> listMeetings(
+            String actorUserId,
+            String spaceId,
+            MeetingStatus status,
+            OffsetDateTime from,
+            OffsetDateTime to
+    ) {
+        requireUser(actorUserId);
+        spaceAccessPolicy.requireSpaceAccess(spaceAccessContext(spaceId, actorUserId));
+        if (from != null && to != null && from.isAfter(to)) {
+            throw invalidRequest("회의 조회 시작 일시는 종료 일시보다 늦을 수 없습니다.");
+        }
+        return store.findProjectAiMeetings(spaceId, actorUserId)
+                .stream()
+                .filter(meeting -> status == null || meeting.status() == status)
+                .filter(meeting -> from == null || !meeting.scheduledAt().isBefore(from))
+                .filter(meeting -> to == null || !meeting.scheduledAt().isAfter(to))
+                .map(meeting -> new MeetingSummary(
+                        meeting,
+                        store.findMeetingParticipant(meeting.id(), actorUserId)
+                                .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE)
+                                .map(MeetingParticipant::role)
+                                .orElse(null)
+                ))
+                .toList();
+    }
+
     @Transactional
     public SpaceCreationResult createSpace(String actorUserId, String name, String description) {
         requireUser(actorUserId);
@@ -1007,6 +1038,9 @@ public class WorkspaceDomainService {
     }
 
     public record SpaceSummary(Space space, SpaceRole role, long meetingCount) {
+    }
+
+    public record MeetingSummary(Meeting meeting, MeetingRole myRole) {
     }
 
     public record MeetingAiContext(

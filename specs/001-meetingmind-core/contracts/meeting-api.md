@@ -76,6 +76,7 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 ### Notes
 
 - Project owner/admin override 범위는 `requirements/permissions.md`를 따른다.
+- `myRole`은 사용자의 active `MeetingParticipant` role이다. active participant 없이 `OWNER`/`ADMIN` override로 조회한 회의는 `null`이다.
 - soft-deleted Meeting은 모든 목록 조건에서 제외한다. `status=CANCELED` query는 삭제되지 않고 취소된 회의만 반환한다.
 
 ## POST /api/v1/spaces/{spaceId}/meetings

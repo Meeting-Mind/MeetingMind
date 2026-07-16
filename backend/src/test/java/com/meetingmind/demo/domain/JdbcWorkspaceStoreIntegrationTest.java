@@ -205,6 +205,15 @@ class JdbcWorkspaceStoreIntegrationTest {
         assertThat(memberCandidates.meetings())
                 .extracting(Meeting::id)
                 .containsExactly(meeting.meeting().id());
+        assertThat(reloadedService.listMeetings(owner.id(), space.space().id()))
+                .extracting(summary -> summary.meeting().id())
+                .containsExactly(meeting.meeting().id(), inaccessibleMeeting.meeting().id());
+        assertThat(reloadedService.listMeetings(member.id(), space.space().id()))
+                .singleElement()
+                .satisfies(summary -> {
+                    assertThat(summary.meeting().id()).isEqualTo(meeting.meeting().id());
+                    assertThat(summary.myRole()).isEqualTo(com.meetingmind.demo.authz.MeetingRole.VIEWER);
+                });
         assertThatThrownBy(() -> reloadedService.projectAiContextCandidates(guest.id(), space.space().id()))
                 .isInstanceOf(AuthorizationException.class)
                 .extracting("code")

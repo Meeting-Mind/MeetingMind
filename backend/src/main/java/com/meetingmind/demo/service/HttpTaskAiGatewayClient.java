@@ -22,30 +22,39 @@ public class HttpTaskAiGatewayClient implements TaskAiGatewayClient {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final URI extractUri;
+    private final String serviceToken;
 
     @Autowired
     public HttpTaskAiGatewayClient(
             ObjectMapper objectMapper,
-            @Value("${meetingmind.ai.base-url:http://localhost:8000}") String aiBaseUrl
+            @Value("${meetingmind.ai.base-url:http://localhost:8000}") String aiBaseUrl,
+            @Value("${meetingmind.ai.service-token:}") String serviceToken
     ) {
-        this(HttpClient.newHttpClient(), objectMapper, aiBaseUrl);
+        this(HttpClient.newHttpClient(), objectMapper, aiBaseUrl, serviceToken);
     }
 
-    HttpTaskAiGatewayClient(HttpClient httpClient, ObjectMapper objectMapper, String aiBaseUrl) {
+    HttpTaskAiGatewayClient(
+            HttpClient httpClient,
+            ObjectMapper objectMapper,
+            String aiBaseUrl,
+            String serviceToken
+    ) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.extractUri = URI.create(stripTrailingSlash(aiBaseUrl) + "/api/internal/meeting-ai/extract-tasks");
+        this.serviceToken = serviceToken == null ? "" : serviceToken;
     }
 
     @Override
     public TaskAiGatewayResponse extract(TaskAiGatewayRequest request) {
         try {
-            HttpRequest httpRequest = HttpRequest.newBuilder(extractUri)
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(extractUri)
                     .version(HttpClient.Version.HTTP_1_1)
                     .timeout(REQUEST_TIMEOUT)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)))
-                    .build();
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)));
+            AiGatewayRequestHeaders.applyServiceToken(requestBuilder, serviceToken);
+            HttpRequest httpRequest = requestBuilder.build();
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new AiGatewayException("AI provider returned " + response.statusCode());

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
+import com.meetingmind.demo.authz.MeetingAccessPolicy;
 import com.meetingmind.demo.authz.MeetingRole;
 import com.meetingmind.demo.authz.ParticipantType;
 import com.meetingmind.demo.authz.SpaceAccessPolicy;
@@ -17,6 +18,7 @@ import com.meetingmind.demo.dto.ai.AiSource;
 import com.meetingmind.demo.dto.ai.BackendProjectAiChatRequest;
 import com.meetingmind.demo.dto.ai.ProjectAiGatewayChatRequest;
 import com.meetingmind.demo.service.AiGatewayException;
+import com.meetingmind.demo.service.AiSearchScopeResolver;
 import com.meetingmind.demo.service.ProjectAiGatewayClient;
 import com.meetingmind.demo.service.ProjectAiService;
 import java.time.Clock;
@@ -33,7 +35,7 @@ class ProjectAiServiceTest {
     private static final OffsetDateTime SCHEDULED_AT = OffsetDateTime.parse("2026-07-14T10:00:00+09:00");
 
     @Test
-    void chatIncludesOfficialKnowledgeAndOnlyReadableMeetingSummaries() {
+    void chatSendsOnlyReadableMeetingScope() {
         TestContext context = newContext("user-member");
         User owner = context.user("user-owner");
         User member = context.user("user-member");
@@ -68,15 +70,6 @@ class ProjectAiServiceTest {
         assertThat(context.gateway.captured.projectId()).isEqualTo(space.space().id());
         assertThat(context.gateway.captured.question()).isEqualTo("권한 정책은?");
         assertThat(context.gateway.captured.allowedMeetingIds()).containsExactly(allowedMeeting.meeting().id());
-        assertThat(context.gateway.captured.sources())
-                .extracting(ProjectAiGatewayChatRequest.SourceContext::sourceId)
-                .containsExactlyInAnyOrder("knowledge-1", "report-allowed");
-        assertThat(context.gateway.captured.sources())
-                .extracting(ProjectAiGatewayChatRequest.SourceContext::sourceId)
-                .doesNotContain("knowledge-archived", "report-denied");
-        assertThat(context.gateway.captured.sources())
-                .extracting(ProjectAiGatewayChatRequest.SourceContext::type)
-                .containsExactlyInAnyOrder("projectKnowledge", "meetingSummary");
     }
 
     @Test
@@ -131,7 +124,10 @@ class ProjectAiServiceTest {
         FakeProjectAiGateway gateway = new FakeProjectAiGateway();
         ProjectAiService service = new ProjectAiService(
                 authService,
-                workspace,
+                new AiSearchScopeResolver(
+                        workspace,
+                        new MeetingAccessPolicy(spaceAccessPolicy)
+                ),
                 gateway
         );
         return new TestContext(store, workspace, gateway, service);

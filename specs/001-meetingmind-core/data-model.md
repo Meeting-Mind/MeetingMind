@@ -206,6 +206,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `id`
 - `spaceId`
 - `meetingId`
+- `scope`: source 소유 범위. meeting 산출물은 `meeting`, ProjectKnowledge는 `project`
 - `sourceType`
 - `sourceId`
 - `content`
@@ -213,7 +214,7 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `generation`
 - `isActive`
 - `replacedAt`
-- `embedding`
+- `embedding`: target은 `vector(1536)`
 - `createdAt`
 
 ### EmbeddingJob
@@ -227,6 +228,10 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `dimension`: 생성 vector 차원
 - `generation`: 동일 source의 교체 세대
 - `attemptCount`
+- `triggerReason`: KNOWLEDGE_CHANGED, TRANSCRIPT_COMPLETED, SPEAKER_UPDATED, REPORT_CONFIRMED, FULL_REINDEX
+- `contentHash`: 같은 source 내용의 중복 작업 회피와 stale generation 확인용 hash
+- `nextAttemptAt`: retry 가능한 다음 시각
+- `leaseExpiresAt`: worker 장애 시 작업을 다시 선점하기 위한 lease 만료 시각
 - `failureCode`: provider 원문 대신 내부 정규화 코드
 - `createdAt`
 - `startedAt`
@@ -262,13 +267,14 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - TaskCandidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
-- `EmbeddingJob`은 `projectKnowledgeId`와 `meetingId` 중 최소 하나를 참조해야 한다.
+- `EmbeddingJob`은 `projectKnowledgeId`와 `meetingId` 중 정확히 하나만 참조해야 한다.
+- `EmbeddingJob(projectKnowledgeId, generation)`과 `EmbeddingJob(meetingId, generation)`은 source별 unique다.
 - 동일 source의 active `EmbeddingChunk`는 최신 완료 generation만 사용한다. 새 generation 완료 전에는 기존 active chunk를 유지한다.
-- embedding model과 vector 차원/index 방식은 `Q-010` 결정 후 고정한다.
+- embedding model은 `text-embedding-3-small`, 차원은 1536, 거리는 cosine으로 고정한다. MVP는 exact search를 사용하고 후보 5,000개 초과 또는 검색 p95 1초 지속 초과 시 HNSW를 검토한다.
 
 ## RAG Chunk Shape
 
-Backend는 아래 논리 구조의 `TranscriptSegment` 원천을 PostgreSQL에 저장한다. AI prototype은 pgvector semantic retriever가 연결되기 전까지 Backend가 권한 필터 후 전달한 source를 같은 구조의 chunk로 변환한다. `TranscriptSegment`는 원본 저장 단위이고, `EmbeddingChunk`는 검색/임베딩 단위다.
+Backend는 아래 논리 구조의 `TranscriptSegment` 원천을 PostgreSQL에 저장한다. internal Meeting/Project AI는 Backend가 확정한 scope envelope를 받아 active/completed `EmbeddingChunk`를 pgvector에서 검색한다. legacy source 전달 경로는 전환 호환용으로만 유지한다. `TranscriptSegment`는 원본 저장 단위이고, `EmbeddingChunk`는 검색/임베딩 단위다.
 
 ### TranscriptSegment Source
 
@@ -290,7 +296,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - `spaceId`
 - `projectId`: prototype에서는 `spaceId`와 같은 프로젝트 식별자로 취급 가능
 - `meetingId`: ProjectKnowledge-only chunk면 null 가능
-- `scope`: `meeting` 또는 `project`
+- `scope`: AI query mode가 아닌 source 소유 범위. `transcript`, `meetingSummary`, `decision`, `actionItem`, `report`는 `meeting`, `projectKnowledge`는 `project`
 - `sourceType`: `transcript`, `meetingSummary`, `decision`, `actionItem`, `report`, `projectKnowledge`, `glossary`
 - `sourceId`: 원본 segment/report/knowledge id
 - `sourceSegmentIds`: transcript window chunk가 포함한 segment id 목록
@@ -327,7 +333,29 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - 회의별 챗봇은 단일 `meetingId`에 속한 chunk만 검색한다.
 - 프로젝트별 챗봇은 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk만 검색한다.
 - Backend는 active SpaceMember와 MeetingParticipant를 PostgreSQL 조회에서 선필터하고 AI 서버에는 `already_filtered` context와 `allowedMeetingIds`만 전달한다.
+- Meeting AI query mode는 `spaceId`, 단일 `meetingId`, `scope=meeting`을 모두 만족하는 chunk만 검색한다.
+- Project AI query mode는 같은 `spaceId`의 `scope=project/sourceType=projectKnowledge` chunk와 `allowedMeetingIds`에 포함된 `scope=meeting` chunk를 함께 검색한다.
+- `allowedMeetingIds=[]`는 모든 회의를 의미하지 않는다. ProjectKnowledge만 검색하고 meeting chunk는 모두 제외한다.
 - 실제 pgvector 검색은 `isActive=true`이고 완료된 `EmbeddingJob`에 속한 chunk만 대상으로 한다.
+
+### Retrieval and Grounding Rules
+
+- Backend가 권한을 평가하고 AI는 전달받은 검색 범위를 SQL에서 강제한다. AI는 SpaceRole 또는 MeetingParticipant를 재평가하지 않는다.
+- vector cosine 후보와 `pg_trgm` 후보는 각각 원점수를 보존하고 RRF로 순위를 결합한다.
+- 관련도 threshold는 embedding model별 설정으로 관리하고 한국어 근거 있음/없음 평가 질의 30-50건으로 보정한다.
+- 근거 0건 또는 관련도 미달이면 LLM을 호출하지 않고 `unsupported=true`를 반환한다.
+- supported 답변은 검색 결과에 존재하는 `sourceIds`를 최소 1개 포함해야 한다. public `sources`에는 실제 인용된 source만 반환한다.
+- report decision/action item과 task candidate는 valid source ID가 없는 항목을 저장하지 않는다. 모두 제거되면 전체 결과를 unsupported로 처리한다.
+
+### Reindex Trigger Rules
+
+- ProjectKnowledge 생성/수정/복원은 knowledge generation을 만든다. archive/delete는 기존 chunk를 즉시 비활성화한다.
+- transcript segment마다 job을 만들지 않는다. `MeetingTranscript.status=COMPLETED`일 때 최초 meeting generation을 만든다.
+- 발화자명 또는 meeting title처럼 `embeddingText`에 포함되는 값이 바뀌면 meeting generation을 만든다. 일정, 권한, 참여자 변경은 재임베딩하지 않는다.
+- report candidate/draft 편집 중에는 job을 만들지 않고 current confirmed report가 바뀔 때 meeting generation을 만든다.
+- transcript 보존 만료와 meeting 삭제는 관련 transcript chunk와 source 연결을 즉시 제거한다.
+- worker는 `PENDING` job을 `FOR UPDATE SKIP LOCKED`로 선점하고 lease 만료 작업을 재처리한다. retry는 최대 3회, 1분/5분/15분 간격을 기본값으로 둔다.
+- 새 generation 전환 transaction은 요청된 최신 generation인지 확인한 뒤 기존 active chunk를 replaced 처리하고 새 chunk만 active로 만든다.
 
 ## Permission Rules
 

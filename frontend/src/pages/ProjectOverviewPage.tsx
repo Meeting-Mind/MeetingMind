@@ -354,7 +354,7 @@ export function ProjectOverviewPage({
     projectName: string,
     payload?: { title?: string; scheduledAt?: string; participantEmails?: string[] }
   ) => Promise<boolean>;
-  onCreateProject?: (payload: { name: string; description: string }) => void;
+  onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
   onCreateProjectTask?: (projectName: string, task: Omit<ProjectTaskState, "id" | "sourceCandidateId">) => void;
   onDeleteMeeting?: (projectName: string, meetingIndex: string) => Promise<boolean>;
   onDeleteProjectTask?: (projectName: string, taskId: string) => void;
@@ -670,7 +670,7 @@ export function ProjectOverviewPage({
 
   async function handleCreateMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt) {
+    if (!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt || !onCreateMeeting || meetingOperationLoading) {
       return;
     }
 
@@ -959,7 +959,7 @@ export function ProjectOverviewPage({
                   <span>회의 제목</span>
                   <input
                     aria-label="새 회의 제목"
-                    disabled={!canCreateMeeting}
+                    disabled={!canCreateMeeting || meetingOperationLoading}
                     onChange={(event) => setNewMeetingTitle(event.target.value)}
                     placeholder="예: 권한 정책 검토"
                     type="text"
@@ -970,7 +970,7 @@ export function ProjectOverviewPage({
                   <span>일시</span>
                   <input
                     aria-label="새 회의 일시"
-                    disabled={!canCreateMeeting}
+                    disabled={!canCreateMeeting || meetingOperationLoading}
                     onChange={(event) => setNewMeetingAt(event.target.value)}
                     type="datetime-local"
                     value={newMeetingAt}
