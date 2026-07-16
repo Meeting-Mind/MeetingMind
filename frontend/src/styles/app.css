@@ -1459,6 +1459,50 @@ body.app-theme.meeting-access-body {
   padding: 0 12px;
 }
 
+.workspace-calendar-create select[multiple] {
+  min-height: 84px;
+  padding: 8px 12px;
+}
+
+.workspace-calendar-invite-result,
+.project-meeting-invite-result {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dcd5ef;
+  border-radius: 16px;
+  background: #f8f6ff;
+}
+
+.workspace-calendar-invite-result label,
+.project-meeting-invite-result label {
+  display: grid;
+  gap: 6px;
+}
+
+.project-meeting-invite-result {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 0.8fr) minmax(240px, 1.2fr) auto;
+  align-items: end;
+}
+
+.project-meeting-invite-result > div {
+  display: grid;
+  gap: 5px;
+  color: #625d77;
+  font-size: 12px;
+}
+
+.project-meeting-invite-result input,
+.project-meeting-invite-result button {
+  min-height: 42px;
+  border: 1px solid #dcd5ef;
+  border-radius: 12px;
+  padding: 0 11px;
+  background: #fff;
+  color: #34375b;
+  font: inherit;
+}
+
 .workspace-calendar-create button {
   background: #303455;
   color: #fff;
@@ -2008,6 +2052,10 @@ body.app-theme.meeting-access-body {
   gap: 24px;
 }
 
+.project-overview-center > * {
+  flex-shrink: 0;
+}
+
 .project-next-banner {
   min-height: 104px;
   display: flex;
@@ -2346,6 +2394,15 @@ body.app-theme.meeting-access-body {
 .project-meeting-create-form select[multiple] {
   min-height: 92px;
   padding: 8px 10px;
+}
+
+.project-operation-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f4f2fb;
+  color: #68637c;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .project-delete-confirm,
@@ -4579,6 +4636,14 @@ body.app-theme.meeting-access-body {
 .workspace-project-modal-form {
   display: grid;
   gap: 18px;
+}
+
+.workspace-form-error {
+  margin: 0;
+  color: #c83f36;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .workspace-project-field {

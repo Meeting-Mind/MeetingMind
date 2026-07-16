@@ -1,8 +1,8 @@
 package com.meetingmind.demo.auth;
 
 import com.meetingmind.demo.authz.AuthorizationException;
+import com.meetingmind.demo.observability.RequestTrace;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -16,14 +16,14 @@ public class AuthExceptionHandler {
     public ResponseEntity<AuthErrorResponse> handleAuthException(AuthException exception) {
         return ResponseEntity
                 .status(exception.status())
-                .body(new AuthErrorResponse(exception.code(), exception.getMessage(), List.of(), UUID.randomUUID().toString()));
+                .body(new AuthErrorResponse(exception.code(), exception.getMessage(), List.of(), RequestTrace.currentOrCreate()));
     }
 
     @ExceptionHandler(AuthorizationException.class)
     public ResponseEntity<AuthErrorResponse> handleAuthorizationException(AuthorizationException exception) {
         return ResponseEntity
                 .status(exception.status())
-                .body(new AuthErrorResponse(exception.code(), exception.getMessage(), List.of(), UUID.randomUUID().toString()));
+                .body(new AuthErrorResponse(exception.code(), exception.getMessage(), List.of(), RequestTrace.currentOrCreate()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -36,6 +36,6 @@ public class AuthExceptionHandler {
 
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
-                .body(new AuthErrorResponse("INVALID_REQUEST", "요청값이 잘못되었습니다.", fieldErrors, UUID.randomUUID().toString()));
+                .body(new AuthErrorResponse("INVALID_REQUEST", "요청값이 잘못되었습니다.", fieldErrors, RequestTrace.currentOrCreate()));
     }
 }

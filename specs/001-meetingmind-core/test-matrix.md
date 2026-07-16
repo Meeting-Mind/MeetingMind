@@ -183,6 +183,30 @@
 - 승인 시 기본 role은 `VIEWER`이며 Space membership 여부는 participant type만 결정한다.
 - 검토 권한과 상태 전이는 Backend domain 경계에서 강제한다.
 
+## M033 Meeting CRUD PostgreSQL End-to-End
+
+| ID | Scenario | Given | Action | Expected | Source |
+| --- | --- | --- | --- | --- | --- |
+| C-001 | Space 회의 목록 ACL | OWNER와 active participant, 권한 없는 member가 같은 Space 회의를 조회 | `GET /spaces/{spaceId}/meetings` | actor가 읽을 수 있는 active meeting만 반환 | FR-MREG-05, FR-MREG-07 |
+| C-002 | 목록 filter 검증 | valid/invalid status와 from/to | status/date filter 조회 | valid 범위만 반환, invalid 또는 from>to는 `REJECT_400` | FR-MREG-05 |
+| C-003 | 상세 조회 | OWNER/ADMIN 또는 active participant | `GET /meetings/{meetingId}` | meeting과 participant, nullable `myRole` 반환 | FR-MREG-06, FR-MREG-07 |
+| C-004 | 제목·일정 수정 | meeting `SCHEDULED`, actor OWNER/ADMIN/HOST | PATCH title/scheduledAt | PostgreSQL 갱신 후 재조회 값 일치 | FR-MREG-04 |
+| C-005 | 진행 시작·종료 | `SCHEDULED` 또는 `IN_PROGRESS` | PATCH status | `SCHEDULED -> IN_PROGRESS -> ENDED`, startedAt/endedAt 기록 | Status values, D-033 |
+| C-006 | 역방향 상태 전이 차단 | `ENDED`, `CANCELED` 또는 canonical 역방향 | PATCH status | `REJECT_400`, 기존 row 불변 | D-033 |
+| C-007 | SCHEDULED 삭제 | actor OWNER/HOST, meeting `SCHEDULED` | DELETE | `CANCELED`과 deleted metadata가 같은 transaction에 기록 | FR-MREG-04, D-032 |
+| C-008 | 진행 중 삭제 차단 | meeting `IN_PROGRESS` | DELETE | `REJECT_409`, deleted metadata 없음 | D-032 |
+| C-009 | ADMIN 삭제 차단 | actor Space ADMIN, not HOST | DELETE | `DENY_403_MEETING` | FR-ACL-07, D-020 |
+| C-010 | 삭제 회의 제외 | soft-deleted meeting | list/detail/calendar/Meeting AI/Project AI 조회 | 목록·후보 제외, direct detail/Meeting AI `NOT_FOUND_404` | D-032 |
+| C-011 | 재시작 영속성 | meeting create/update 후 Backend restart | login 후 list/detail | 수정 값과 ACL이 PostgreSQL에서 유지 | M032 runtime boundary |
+| C-012 | Frontend target 경계 | target Space와 legacy mock Space 존재 | UI create/update/delete | target은 API 재조회만 반영, mock과 혼합 없음 | M033 plan |
+
+### Pass Criteria
+
+- Meeting mutation은 row lock과 audit를 포함한 transaction으로 처리한다.
+- `deleted_at`, `deleted_by`는 둘 다 null이거나 둘 다 기록된다.
+- soft-deleted meeting은 관계형 조회와 AI context 선필터 단계에서 제외한다.
+- hard purge, restore, grace period는 M033 성공으로 간주하지 않고 후속 운영 정책으로 남긴다.
+
 ## Minimum Implementation Order
 
 1. T039 Space access policy를 pure unit test로 먼저 고정한다.

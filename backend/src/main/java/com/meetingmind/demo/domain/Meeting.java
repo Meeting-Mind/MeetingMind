@@ -1,6 +1,7 @@
 package com.meetingmind.demo.domain;
 
 import com.meetingmind.demo.authz.MeetingStatus;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -14,7 +15,9 @@ public record Meeting(
         OffsetDateTime endedAt,
         MeetingStatus status,
         String failureReason,
-        String retentionPolicy
+        String retentionPolicy,
+        Instant deletedAt,
+        String deletedBy
 ) {
     static Meeting scheduled(String id, String spaceId, String title, OffsetDateTime scheduledAt) {
         return new Meeting(
@@ -27,7 +30,13 @@ public record Meeting(
                 null,
                 MeetingStatus.SCHEDULED,
                 null,
-                "DAYS_30"
+                "DAYS_30",
+                null,
+                null
         );
+    }
+
+    boolean deleted() {
+        return deletedAt != null;
     }
 }

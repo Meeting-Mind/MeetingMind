@@ -39,10 +39,14 @@
 | Medium | M027 권한 mutation과 audit가 M032 PostgreSQL runtime에 연결됐다. | SpaceMember 제거, participant revoke, owner transfer, join approval과 audit가 같은 transaction 경계에서 저장된다. | 권한 mutation 추가 시 같은 Space/Meeting row lock 순서와 persistent audit를 유지한다. | `backend/src/main/java/com/meetingmind/demo/authz/**`, `backend/src/main/java/com/meetingmind/demo/domain/**`, `contracts/space-api.md`, `contracts/meeting-api.md`, `tasks.md`, `plan.md`, `implement.md` | M032 Verified |
 | Medium | URL/코드 기반 회의 참가 신청과 HOST 승인 runtime이 PostgreSQL에 연결됐다. | join code 원문은 생성 응답에서만 반환되고 DB에는 SHA-256 hash만 저장한다. pending request와 승인 participant/audit는 transaction과 partial unique 제약을 사용한다. | 실제 계정 applicant→HOST approval→prejoin→LiveKit E2E를 후속 통합 검증한다. | `requirements/*`, `backend/src/main/java/com/meetingmind/demo/**`, `contracts/meeting-api.md`, `data-model.md`, `tasks.md`, `implement.md` | M032 Verified |
 | Medium | M029에서 Frontend URL/code 신청, 권한 확인, HOST 승인, prejoin/LiveKit default-deny gate를 구현했다. | 사용자는 SpaceRole과 meeting ACL을 분리해 확인하고, 승인 전에는 회의 media/room 진입을 시도할 수 없다. local 승인과 SpaceMember 제거 semantics도 Backend 정책과 일치한다. | Backend와 유효한 실제 계정/meeting을 함께 실행해 applicant→HOST approval→prejoin→LiveKit E2E와 desktop/mobile visual smoke를 추가 검증한다. | `frontend/src/pages/MeetingAccessPage.tsx`, `LiveMeetingPage.tsx`, `LiveRoomPage.tsx`, `TeamMembersPage.tsx`, `App.tsx`, `tasks.md`, `implement.md` | M029 Build Verified |
+| Medium | M033 Meeting CRUD가 PostgreSQL과 Frontend target 화면에 연결됐다. | 회의 목록·상세·수정·soft delete가 ACL과 canonical 상태 전이를 따르고, 삭제된 회의는 일반 조회와 Meeting/Project AI 후보에서 제외된다. | hard purge·복구·유예 기간은 보존 정책을 먼저 결정한 뒤 별도 milestone로 구현하고, M033의 active 조회 조건을 유지한다. | `requirements/functional-requirements-detail.md`, `clarify.md`, `contracts/meeting-api.md`, `data-model.md`, `erd.md`, `backend/**`, `frontend/**`, `tasks.md`, `implement.md` | M033 Verified |
+| Medium | M037에서 target 회의 상세·participant ACL·캘린더 생성 화면을 Backend 응답 기준으로 완성했다. | Space member userId와 meetingId 기반 participant state를 사용하고, role/access mutation 뒤 상세를 재조회하며 생성 코드/URL은 Frontend 메모리에만 유지한다. | `GET /calendar/events` runtime, Meeting description/endAt 계약과 Space member 초대/search API는 별도 Backend milestone로 구현한다. | `requirements/functional-requirements-detail.md`, `permissions.md`, `contracts/meeting-api.md`, `contracts/space-api.md`, `frontend/**`, `tasks.md`, `implement.md` | M037 Verified |
 
 ## Recommendation
 
-1. 통합된 M027~M029 권한·참가 신청 흐름을 실제 계정과 meeting으로 E2E 검증한다.
-2. internal API 서비스 인증 header를 Backend와 shared contract로 확정한다.
-3. `Q-008`, `Q-009` candidate TTL을 결정한 뒤 만료 검증과 정리 작업을 추가한다.
-4. 별도 AI/RAG 담당자는 M032가 제공하는 `allowedMeetingIds`와 source metadata를 유지하면서 T230 pgvector retriever와 embedding worker를 구현한다.
+1. Meeting hard purge·복구·삭제 유예 기간을 보존 정책과 함께 결정한다.
+2. 통합된 M027~M029 권한·참가 신청 흐름을 실제 applicant/HOST 계정으로 E2E 검증한다.
+3. internal API 서비스 인증 header를 Backend와 shared contract로 확정한다.
+4. `Q-008`, `Q-009` candidate TTL을 결정한 뒤 만료 검증과 정리 작업을 추가한다.
+5. 별도 AI/RAG 담당자는 M032/M033의 `allowedMeetingIds`와 active meeting 조건을 유지하면서 T230 pgvector retriever와 embedding worker를 구현한다.
+6. 캘린더 전용 조회 endpoint와 Meeting description/endAt 계약을 확정해 현재 ACL-filtered Space meeting read model을 교체한다.

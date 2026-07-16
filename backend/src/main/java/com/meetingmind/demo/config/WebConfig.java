@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "https://*.ngrok.io",
                         "https://*.ngrok.app",
                         "https://*.ngrok.dev")
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("Authorization", "Content-Type");
     }
 }

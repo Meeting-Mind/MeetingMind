@@ -15,7 +15,8 @@
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
 | Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
 | Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
-| Q-010 | High | pgvector embedding model과 차원 수는 무엇으로 고정할까? | `vector(n)` 타입과 HNSW/IVFFlat index는 차원 수가 확정되어야 안전하게 생성할 수 있다. | Open | |
+| Q-010 | High | pgvector embedding model과 차원 수는 무엇으로 고정할까? | `vector(n)` 타입과 HNSW/IVFFlat index는 차원 수가 확정되어야 안전하게 생성할 수 있다. | Decided | MVP는 `text-embedding-3-small`, 1536차원, cosine exact search를 사용한다. 권한 선필터 후 후보가 5,000개를 넘거나 검색 p95가 1초를 지속적으로 초과하면 HNSW를 검토하고 IVFFlat은 기본 선택에서 제외한다. |
+| Q-011 | Medium | 회의 채팅 첨부파일을 어떤 방식으로 검색할까? | 텍스트·PDF·이미지를 같은 vector schema에 섞으면 추출 방식과 모델 차원이 불명확해진다. | Decided | MVP는 TXT, Markdown, 텍스트 추출 가능한 PDF만 추출 텍스트를 `text-embedding-3-small`로 임베딩한다. 이미지 파일, 이미지 전용 PDF, visual embedding과 Vision 기반 답변은 확장 범위로 둔다. |
 
 ## Blocking Decisions
 
@@ -23,7 +24,8 @@
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
 - Q-008은 candidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태·권한·current 전이는 먼저 구현할 수 있다.
 - Q-009는 TaskCandidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태 전이와 중복 확정 방지는 먼저 구현할 수 있다.
-- Q-010은 실제 embedding 생성과 vector index migration 전에 결정해야 한다. 관계형 metadata, embedding job, generation 교체 모델은 먼저 구현할 수 있다.
+- Q-010은 D-032로 결정했다. 실제 embedding 생성 전 `vector(1536)` forward migration과 한국어 검색 평가 기준을 적용한다.
+- Q-011은 D-037로 결정했다. 첨부파일 데이터/API 계약 전까지 이미지 처리와 visual vector schema를 추가하지 않는다.
 
 ## Q-001 Authentication Options
 
@@ -84,3 +86,11 @@
 - D-029: embedding 재생성은 `EmbeddingJob`과 generation으로 추적한다. 새 generation이 완료되기 전까지 기존 active chunk를 유지하고, 완료 시 새 generation을 active로 전환한다.
 - D-030: `Meeting.retentionPolicy` DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`를 사용하고 기본값은 `DAYS_30`으로 한다. `retentionUntil`은 기간 보존일 때 계산하며 영구 보존이면 null이다.
 - D-031: Backend PostgreSQL 전환은 Auth/User, Space/Meeting ACL, Transcript/Report/Task, ProjectKnowledge 원문·상태, AuditLog와 권한 선필터된 AI context 조립까지 담당한다. embedding provider/model, vector 차원/index, `EmbeddingJob`/`EmbeddingChunk` runtime, pgvector similarity query와 AI semantic retriever는 별도 AI/RAG 담당자가 구현한다. Backend 작업은 기존 embedding/vector migration과 `ai/app/rag.py`를 수정하지 않는다.
+- D-032: 회의 삭제는 물리 cascade 대신 soft delete를 사용한다. `SCHEDULED` 회의는 `CANCELED`와 `deletedAt`/`deletedBy`를 함께 기록하고, `IN_PROGRESS` 회의는 `409 MEETING_ALREADY_PROCESSING`으로 거부하며, `ENDED` 회의는 상태를 유지한 채 soft delete한다. 삭제 권한은 프로젝트 `OWNER` 또는 해당 회의 active `HOST`만 가지며 `ADMIN`은 기본 거부한다. soft-deleted 회의는 일반 목록/상세/캘린더와 Meeting/Project AI context에서 즉시 제외하고 hard purge, 복구, 유예 기간은 후속 보존 정책으로 둔다.
+- D-033: Meeting 수정 상태 전이는 `SCHEDULED -> IN_PROGRESS`, `SCHEDULED -> CANCELED`, `IN_PROGRESS -> ENDED`만 허용한다. 동일 상태 요청은 idempotent하게 처리하고 역전이는 거부한다. 제목과 예정 일시 수정은 `SCHEDULED`에서만 허용하며 수정 권한은 프로젝트 `OWNER`/`ADMIN` 또는 해당 회의 active `HOST`가 가진다.
+- D-034: MVP RAG는 `text-embedding-3-small` 1536차원, cosine exact search와 `pg_trgm` 문자열 검색을 RRF로 결합한다. Meeting AI는 상위 근거 5개, Project AI는 상위 근거 8개를 기본값으로 사용한다. HNSW는 권한 선필터 후 후보 5,000개 초과 또는 검색 p95 1초 지속 초과가 측정될 때 도입하고 IVFFlat은 기본 선택에서 제외한다.
+- D-035: 검색 권한은 Backend가 요청마다 결정한다. Backend는 Meeting AI의 단일 `meetingId`, Project AI의 `spaceId`와 `allowedMeetingIds`를 만들고, AI는 역할이나 멤버십을 재판단하지 않고 전달받은 범위를 RAG 쿼리에 강제한다. `EmbeddingChunk.scope`는 AI 종류가 아니라 source 소유 범위이며, meeting 산출물은 `meeting`, ProjectKnowledge는 `project`로 저장한다.
+- D-036: Target AI 응답은 검색 관련도 gate와 구조화된 `supported`, `answer`, `sourceIds` 결과를 사용한다. 근거 0건 또는 관련도 미달이면 LLM을 호출하지 않고, 존재하지 않는 source ID, 빈 citation, 검증되지 않은 저장성 산출물은 폐기한다. public 응답은 `unsupportedReason`을 `NO_EVIDENCE`, `LOW_RELEVANCE`, `MODEL_UNSUPPORTED`, `UNVERIFIED_OUTPUT` 중 하나로 반환할 수 있다.
+- D-037: 문서와 회의 기록의 "재학습"은 모델 fine-tuning이 아니라 검색 인덱스 갱신이다. ProjectKnowledge 생성/수정/복원, transcript 완료, 발화자명 변경, current confirmed report 변경 시 비동기 generation을 만들고, 연속 STT segment마다 작업을 만들지 않는다. 삭제, 보관, 보존 만료는 새 generation을 기다리지 않고 관련 chunk를 즉시 검색에서 제외한다.
+- D-038: AI 운영 기준은 원문을 남기지 않는 구조화 로그와 요청 수, p95 지연, unsupported 사유, citation 검증 실패, embedding job 적체/실패 지표를 우선한다. 초기 알림은 provider 오류율 5%, 검색 p95 1초 지속 초과, `UNVERIFIED_OUTPUT` 1%, 최종 job 실패 1건, 가장 오래된 pending job 5분 초과를 기준으로 시작하고 실제 트래픽 기준선에 따라 조정한다.
+- D-039: 회의 채팅 첨부파일 RAG의 MVP는 텍스트 검색으로 제한한다. TXT, Markdown, 텍스트 추출 가능한 PDF는 정규화된 추출 텍스트를 기존 `text-embedding-3-small` 1536차원 공간에 저장한다. 이미지 파일과 이미지 전용 PDF는 검색 대상에서 제외하고 visual embedding, OCR/Vision 설명 생성, 원본 기반 멀티모달 답변은 별도 확장 milestone에서 결정한다.

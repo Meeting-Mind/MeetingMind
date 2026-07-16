@@ -50,10 +50,44 @@ class SpaceControllerTest {
                 new CreateMeetingRequest("API 구조 논의", SCHEDULED_AT, List.of())
         );
         var spaces = context.controller.listSpaces("Bearer access-token");
+        var meetings = context.controller.listMeetings(
+                "Bearer access-token",
+                space.id(),
+                "SCHEDULED",
+                "2026-07-10T00:00:00+09:00",
+                "2026-07-10T23:59:59+09:00"
+        );
 
         assertThat(meeting.status()).isEqualTo("SCHEDULED");
         assertThat(meeting.joinCode()).matches("[0-9a-f]{32}");
         assertThat(spaces.spaces().getFirst().meetingCount()).isEqualTo(1);
+        assertThat(meetings.meetings()).hasSize(1);
+        assertThat(meetings.meetings().getFirst().id()).isEqualTo(meeting.id());
+        assertThat(meetings.meetings().getFirst().myRole()).isEqualTo("HOST");
+    }
+
+    @Test
+    void listMeetingsReturnsTargetMeetingShape() {
+        TestContext context = newContext();
+        var space = context.controller.createSpace(
+                "Bearer access-token",
+                new CreateSpaceRequest("MeetingMind", null)
+        );
+        var created = context.controller.createMeeting(
+                "Bearer access-token",
+                space.id(),
+                new CreateMeetingRequest("API 구조 논의", SCHEDULED_AT, List.of())
+        );
+
+        var meetings = context.controller.listMeetings(
+                "Bearer access-token", space.id(), "SCHEDULED", null, null
+        );
+
+        assertThat(meetings.meetings()).singleElement().satisfies(meeting -> {
+            assertThat(meeting.id()).isEqualTo(created.id());
+            assertThat(meeting.spaceId()).isEqualTo(space.id());
+            assertThat(meeting.myRole()).isEqualTo("HOST");
+        });
     }
 
     private TestContext newContext() {

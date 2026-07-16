@@ -7,6 +7,7 @@ import com.meetingmind.demo.dto.CreateMeetingRequest;
 import com.meetingmind.demo.dto.CreateMeetingResponse;
 import com.meetingmind.demo.dto.CreateSpaceRequest;
 import com.meetingmind.demo.dto.CreateSpaceResponse;
+import com.meetingmind.demo.dto.MeetingListResponse;
 import com.meetingmind.demo.dto.ProjectAiContextCandidatesResponse;
 import com.meetingmind.demo.dto.RemoveSpaceMemberResponse;
 import com.meetingmind.demo.dto.SpaceListResponse;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -99,6 +101,27 @@ public class SpaceController {
                 result.meeting().joinCode(),
                 "/meetings/" + result.meeting().id() + "?joinCode=" + result.meeting().joinCode()
         );
+    }
+
+    @GetMapping("/{spaceId}/meetings")
+    public MeetingListResponse listMeetings(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new MeetingListResponse(workspaceDomainService.listMeetings(user.id(), spaceId, status, from, to).stream()
+                .map(view -> new MeetingListResponse.MeetingSummary(
+                        view.meeting().id(),
+                        view.meeting().spaceId(),
+                        view.meeting().title(),
+                        view.meeting().scheduledAt().toString(),
+                        view.meeting().status().name(),
+                        view.myRole() == null ? null : view.myRole().name()
+                ))
+                .toList());
     }
 
     @GetMapping("/{spaceId}/members")

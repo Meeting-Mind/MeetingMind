@@ -117,6 +117,8 @@ erDiagram
     string failureReason
     string retentionPolicy
     string joinCodeHash
+    datetime deletedAt
+    string deletedBy FK
   }
 
   MEETING_PARTICIPANT {
@@ -297,7 +299,11 @@ erDiagram
     int dimension
     int generation
     int attemptCount
+    string triggerReason
+    string contentHash
     string failureCode
+    datetime nextAttemptAt
+    datetime leaseExpiresAt
     datetime createdAt
     datetime startedAt
     datetime completedAt
@@ -362,6 +368,7 @@ erDiagram
 
 - `MEETING(spaceId, scheduledAt)` index를 둔다.
 - `MEETING.status`는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED` 중 하나다.
+- `MEETING.deletedAt`과 `deletedBy`는 함께 null이거나 함께 값이 있는 soft-delete metadata다. active Meeting 조회와 AI context는 `deletedAt is null`을 적용한다.
 - `MEETING_PARTICIPANT(meetingId, userId)`는 active participant 기준 unique다.
 - `MEETING_PARTICIPANT.role`은 `HOST`, `EDITOR`, `VIEWER` 중 하나다.
 - `MEETING_PARTICIPANT.participantType`은 `member`, `guest` 중 하나다.
@@ -406,10 +413,13 @@ erDiagram
 - `EMBEDDING_CHUNK(spaceId, scope, sourceType, sourceId)` index를 둔다.
 - `EMBEDDING_CHUNK.meetingId`는 meeting-scoped chunk일 때 required이고 ProjectKnowledge-only chunk에서는 null일 수 있다.
 - `CHUNK_SOURCE_SEGMENT(chunkId, segmentId)`는 unique다.
-- `EMBEDDING_JOB`은 ProjectKnowledge 또는 Meeting 중 최소 하나를 source로 가져야 한다.
+- `EMBEDDING_JOB`은 ProjectKnowledge 또는 Meeting 중 정확히 하나만 source로 가져야 한다.
+- source별 `(projectKnowledgeId, generation)` 또는 `(meetingId, generation)`은 unique다.
 - 새 generation의 job이 `COMPLETED`되기 전까지 기존 `EMBEDDING_CHUNK.isActive=true` 행을 유지한다.
 - 완료 시 같은 source의 이전 generation은 inactive/replaced 처리하고 최신 generation만 검색한다.
-- `EMBEDDING_CHUNK.embedding`의 고정 차원과 vector index는 `Q-010` 결정 후 migration으로 추가한다.
+- `EMBEDDING_CHUNK.embedding`은 target forward migration에서 `vector(1536)`으로 고정하고 cosine exact search를 사용한다.
+- `EMBEDDING_CHUNK.scope`는 query mode가 아니라 source 소유 범위다. meeting 산출물은 `meeting`, ProjectKnowledge는 `project`로 저장한다.
+- Project AI는 권한 필터를 통과한 meeting-owned chunk와 ProjectKnowledge chunk를 함께 검색하며 동일 source를 project scope로 중복 임베딩하지 않는다.
 
 ### Audit
 
@@ -421,4 +431,4 @@ erDiagram
 
 - `MeetingSchedule`은 현재 `Meeting.scheduledAt` 중심으로 표현했다. 별도 일정 엔티티가 필요하면 `MEETING_SCHEDULE`로 분리한다.
 - `RetentionPolicy`는 현재 `Meeting.retentionPolicy` 필드 중심이다. Space별 정책 관리가 필요하면 별도 테이블로 분리한다.
-- embedding provider/model, vector 차원, HNSW/IVFFlat index는 `Q-010` 결정 전까지 열어 둔다.
+- HNSW는 권한 선필터 후 후보가 5,000개를 넘거나 검색 p95가 1초를 지속적으로 초과할 때 도입을 검토한다. IVFFlat은 현재 기본 선택에서 제외한다.

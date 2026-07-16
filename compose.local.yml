@@ -16,6 +16,20 @@ services:
       timeout: 3s
       retries: 10
 
+  meetingmind-ai-worker:
+    profiles: ["ai"]
+    build:
+      context: ./ai
+    command: ["python", "-m", "app.embedding_worker"]
+    environment:
+      AI_DATABASE_URL: postgresql://${MEETINGMIND_DB_USER:-meetingmind}:${MEETINGMIND_DB_PASSWORD:-meetingmind_local}@meetingmind-db:5432/${MEETINGMIND_DB_NAME:-meetingmind}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_EMBEDDING_DIMENSION: ${OPENAI_EMBEDDING_DIMENSION:-1536}
+    depends_on:
+      meetingmind-db:
+        condition: service_healthy
+
 volumes:
   meetingmind-postgres-data:
 

@@ -592,7 +592,7 @@
 - 회의당 `MeetingTranscript` 하나가 `PENDING/PROCESSING/COMPLETED/FAILED`, `retentionUntil`, `legalHold`, `purgedAt`을 관리하고 segment는 기존 `meetingId` FK를 유지한다.
 - `SourceReference`는 DB table이 아닌 API 논리 모델로 결정했다. report/task는 `sourceIds`, transcript chunk는 `chunk_source_segments`로 근거를 보존한다.
 - `requirements/glossary.md`의 물리 이름도 `response.sources`, `source_ids`, `chunk_source_segments`로 맞췄으며 `requirements/INDEX.md` 라우팅 변경은 필요하지 않다.
-- 비동기 재색인은 `EmbeddingJob`, `generation`, `isActive`, `replacedAt`으로 추적한다. embedding model/차원/vector index는 `Q-010` 결정 전까지 강제하지 않는다.
+- M030 시점의 비동기 재색인은 `EmbeddingJob`, `generation`, `isActive`, `replacedAt`으로 추적했고 embedding model/차원/vector index는 열어 두었다. 해당 Q-010은 아래 M033 준비에서 결정했다.
 
 ### Changes
 
@@ -631,7 +631,6 @@
 ### Remaining Boundary
 
 - T229: Auth/Workspace/STT in-memory/file 저장소의 PostgreSQL repository 및 transaction 전환
-- Q-010: embedding model과 vector 차원 확정 후 `vector(n)` 및 HNSW/IVFFlat index migration
 - T230: embedding worker와 권한 필터된 pgvector retriever 연결
 - 보존 만료 정리 scheduler와 `legalHold` 운영 API
 
@@ -699,3 +698,216 @@
 - legacy `/api/stt` streaming session과 transcript file prototype은 실제 STT pipeline 계약이 Future Draft라 이번 관계형 artifact persistence에서 제외했다.
 - T230 embedding worker, model/dimension/index, pgvector similarity query와 semantic retriever는 별도 AI/RAG 담당 범위다.
 - `Q-008`, `Q-009` candidate TTL과 report history/export는 여전히 후속 결정이 필요하다.
+## M034 Grounded PostgreSQL RAG Preparation
+
+### Decisions
+
+- Q-010을 `text-embedding-3-small`, 1536차원, cosine exact search로 닫았다. 권한 선필터 후 후보 5,000개 초과 또는 검색 p95 1초 지속 초과 전에는 approximate index를 추가하지 않는다.
+- vector cosine 후보와 `pg_trgm` 후보를 RRF로 결합한다. Meeting AI는 5개, Project AI는 8개 근거를 기본값으로 사용한다.
+- Backend는 권한을 평가해 Meeting 단일 scope 또는 Project allowed meeting scope를 만들고, AI는 역할을 재판단하지 않고 DB query에서 범위를 강제한다.
+- `EmbeddingChunk.scope`는 query mode가 아니라 source 소유 범위다. meeting artifact와 ProjectKnowledge를 중복 임베딩하지 않는다.
+- Target AI는 관련도 gate와 structured citation 검증을 사용한다. 근거 없는 chat/report/task 결과는 public 응답 또는 candidate 저장에 사용하지 않는다.
+- 인덱스 갱신은 fine-tuning이 아니라 source별 비동기 재임베딩이다. ProjectKnowledge 변경, transcript 완료, 발화자명 변경, current confirmed report 변경이 trigger이며 삭제/보관/보존 만료는 즉시 제외한다.
+- PostgreSQL `embedding_jobs`를 durable queue로 사용하고 별도 broker는 도입하지 않는다. grounding은 완료된 T253 Backend persistence 위에서 먼저 진행하고 worker/retriever는 V12 migration 이후 통합한다.
+- 운영 baseline은 원문 비노출 로그, p95 검색/응답 지연, unsupported reason, citation 검증 실패, embedding queue age와 final failure다.
+
+### Document Impact
+
+- Updated: `clarify.md`, `plan.md`, `contracts/ai-api.md`, `data-model.md`, `erd.md`, `tasks.md`, shared handoff.
+- Requirements impact: 기존 FR-MBOT/FR-PBOT, NFR-AI, NFR-AZ, NFR-DATA, 성능 기준을 구체화했으며 `requirements/*` 기준선 자체는 변경하지 않았다.
+- ERD/data-model impact: target `vector(1536)`, EmbeddingJob source XOR/generation unique와 retry/lease metadata를 문서화했다. 실제 V1-V10 migration은 수정하지 않고 T267의 V12 forward migration으로 분리했다.
+- API impact: T264 문서 준비 시 Target 응답에 nullable `unsupportedReason`과 citation 검증 규칙을 추가했고, 당시 Current Prototype 구현은 유지했다. 실제 응답 구현은 아래 T265에서 반영했다.
+
+### Verification
+
+- Passed: 관련 requirements, AI contract, data model, ERD, existing V9 job schema 영향 비교.
+- Passed: `git diff --check`, stale Q-010/scope 표현 검색, T264-T276 task ID 중복 검사.
+- Not run: code tests. 이번 작업은 구현 변경 없는 shared contract/task 준비다.
+
+### T265 Grounding Implementation
+
+- `ai/app/grounding.py`에 공통 evidence gate와 `NO_EVIDENCE`, `LOW_RELEVANCE`, `MODEL_UNSUPPORTED`, `UNVERIFIED_OUTPUT` 판정을 추가했다.
+- in-memory lexical 검색 점수를 `0.0~1.0`으로 정규화하고 prototype threshold `0.30` 미만이면 provider를 호출하지 않는다.
+- 용어 설명, Meeting AI, Project AI provider 응답을 `supported`, `answer`, `sourceIds` 구조로 검증한다. citation 누락이나 allowlist 밖 ID가 있으면 답변과 source를 폐기한다.
+- 보고서 decision/action item과 task candidate는 유효한 source ID가 있는 항목만 유지한다. 검증 가능한 저장성 항목이 없으면 candidate를 만들지 않고 `UNVERIFIED_OUTPUT`으로 반환한다.
+- public/internal 응답에 nullable `unsupportedReason`을 추가하고 supported 응답의 `sources[]`는 실제 citation만 반환한다.
+- API request, ERD, 관계형 data model은 바꾸지 않았다. 현재 Backend가 직접 전달하는 report/task source는 검색 점수가 없어 evidence 존재 gate만 적용하고, model별 semantic threshold는 T260에서 보정한다.
+
+### T265 Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 43 tests.
+- Passed: 근거 0건/낮은 관련도 provider 미호출, missing/forged citation 차단, provider unsupported, report/task 무근거 항목 제거.
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`.
+- Passed: `git diff --check`.
+
+### T266 Structured Outputs And Untrusted Context
+
+- Responses API request가 선택적으로 `text.format`을 받도록 확장하고, grounded answer, report, task candidate에 strict JSON Schema를 연결했다.
+- 모든 object schema는 `additionalProperties=false`이고 모든 property를 required로 선언했다. nullable report/task 필드는 `string|null`, 저장성 상태는 `candidate` enum으로 제한한다.
+- 용어 설명, Meeting AI, Project AI, report, task provider 경로는 strict schema를 사용한다. 기존 `/api/meeting-ai/ask` plain-text 호출에는 format을 추가하지 않았다.
+- source context는 `AiSource` JSON 배열로 직렬화한다. developer instruction은 source의 text/title/speaker 안에 포함된 명령이나 역할 변경 요청을 실행하지 않고 사실 데이터로만 사용하도록 명시한다.
+- API public response, ERD, 관계형 data model과 Backend request 계약은 변경하지 않았다.
+
+### T266 Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 48 tests.
+- Passed: strict/closed/required schema 재귀 검증, Responses API request body의 `text.format`, 5개 provider call site format 전달, legacy plain-text 비영향.
+- Passed: source 내 지시문과 JSON 경계 이탈 문자열이 원문 보존된 JSON data로 직렬화되고 internal relevance score는 provider context에서 제외됨을 검증.
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`.
+- Passed: `git diff --check`.
+
+### T267-T272, T268 PostgreSQL RAG Integration
+
+- V12 forward migration은 기존 V1~V10 checksum을 유지하면서 `pg_trgm`, `vector(1536)`, source XOR/generation unique, retry/lease 필드와 exact/trigram index를 추가했다. 후보 임계값을 넘기 전까지 HNSW는 만들지 않는다.
+- ProjectKnowledge 생성·수정·복원, MeetingTranscript 완료, 발화자/회의명 변경, current confirmed report 전환은 source row 변경과 같은 transaction에서 다음 EmbeddingJob generation을 만든다. segment insert와 candidate/draft report 편집은 job을 만들지 않는다. ProjectKnowledge archive와 전사 purge는 기존 chunk를 즉시 비활성화하고 purge된 transcript source link도 제거한다.
+- AI worker는 `FOR UPDATE SKIP LOCKED`와 lease로 작업을 선점하고 1분/5분/15분 retry 뒤 final failure를 기록한다. 최신 generation만 기존 active chunk와 원자적으로 교체하며 stale generation과 실패 generation은 이전 active chunk를 유지한다.
+- Meeting worker snapshot은 최신 `meeting_speakers` 이름, transcript window, current confirmed report/decision/action을 사용한다. ProjectKnowledge는 `PUBLISHED`이고 미삭제인 원천만 chunk로 만든다.
+- Meeting/Project chat Backend service는 raw source 조립 대신 `AiSearchScopeResolver`가 만든 `spaceId + meetingId` 또는 `spaceId + allowedMeetingIds`만 AI gateway에 전달한다. 권한 거부는 gateway 호출 전에 끝난다.
+- AI SQL은 active chunk와 `COMPLETED` job만 대상으로 exact cosine 20개와 `pg_trgm` 20개를 RRF로 결합한다. ProjectKnowledge publish/delete와 MeetingTranscript purge 상태도 방어적으로 다시 확인한다. Meeting 단일 범위, ProjectKnowledge와 허용 회의 union, 빈 allowed list와 cross-space/meeting 차단을 DB 통합 테스트로 검증했다.
+- 모든 `/api/internal/*`는 `X-MeetingMind-Service-Token`을 검증한다. Backend의 네 AI gateway client는 같은 환경변수에서 헤더를 추가하고 빈 credential은 전송하지 않는다.
+
+### T267-T272, T268 Verification
+
+- Passed: 임시 PostgreSQL 16 DB에서 Flyway V1~V10 적용, legacy V10 job 삽입, V11 soft-delete 적용 후 V12 upgrade와 version 1~12 history 확인.
+- Passed: `vector(1536)`, `vector`/`pg_trgm`, exact cosine/trigram query, source trigger generation과 non-trigger negative case.
+- Passed: 별도 V1~V12 DB에서 deterministic 1536차원 provider로 worker generation 1→2→3/4 stale swap, source segment link, Meeting/Project scope와 cross-scope 차단 통합 테스트.
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`.
+- Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 60 tests 중 DB 환경변수 기반 1건은 기본 실행에서 skip; 같은 테스트를 별도 PostgreSQL DSN으로 실행해 통과했다.
+- Passed: `cd backend && ./gradlew test`와 PostgreSQL `MigrationIntegrationTest --rerun-tasks`.
+- Migration reconciliation: Meeting soft delete를 `V11`로 유지하고 vector/job migration을 `V12`로 승격했다. 기존 branch-local `V11 finalize vector search jobs` history가 있는 DB는 Flyway repair 대상이 아니며, data dump 후 새 DB에서 V1~V12를 다시 적용해야 한다.
+- Passed: `docker compose -f compose.local.yml config`, `docker compose -f compose.local.yml --profile ai config`, `git diff --check`.
+- Not run: 실제 OpenAI embedding/chat credential을 사용한 과금 발생 E2E와 한국어 30~50개 평가/검색 p95 측정. T275에서 수행한다.
+
+### Remaining Boundary
+
+- legacy STT streaming session/file은 아직 `meeting_transcripts.status=COMPLETED`를 JDBC로 기록하지 않는다. DB trigger/worker는 준비됐지만 실제 회의 종료 이벤트 연결은 STT owner와 통합해야 한다.
+- T274 Frontend `unsupportedReason`, T263 실제 provider 기반 정확도·성능·Backend-to-AI HTTP 검증이 남아 있다.
+- M034 attachment RAG는 MeetingMessage/Attachment 계약과 Backend 저장이 완료된 뒤 진행한다.
+
+### T273 AI Observability
+
+- Backend 요청의 안전한 `X-Request-ID`를 응답과 네 AI gateway 호출에 전파하고 오류 응답 `traceId`와 연결했다.
+- AI API, PostgreSQL 검색, embedding job/queue에 JSON 구조 로그를 적용했다. 질문, STT, 답변과 credential은 허용 필드에 포함하지 않는다.
+- 검색 지연/결과 수/검색 범위, source·unsupported·citation failure, job 처리 시간/실패 코드, queue pending/processing/failed/oldest age를 기록한다.
+- 초기 알림 기준은 검색 p95 1초, unsupported 30%, citation failure 5%, pending age 300초 또는 failed 1건, gateway/provider 실패율 5%다. 실제 threshold 조정은 T275 측정 이후 수행한다.
+
+### T273 Verification
+
+- Passed: `cd ai && ./.venv/bin/python -m compileall app tests`와 Docker PostgreSQL DSN을 사용한 AI 62 tests. 질문·검색 결과·provider 상세 비노출, 검색/queue 구조 로그와 generation 교체를 검증했다.
+- Passed: `cd backend && ./gradlew test`, PostgreSQL `MigrationIntegrationTest`와 `JdbcWorkspaceStoreIntegrationTest`; RequestTrace 정규화와 네 AI gateway의 `X-Request-ID` 전달을 검증했다.
+- Passed: Compose 기본/AI profile config, Frontend lint 오류 0건/unit 6건/build, Playwright 4건, `git diff --check`.
+- Not run: 실제 OpenAI credential을 사용하는 과금 E2E, 한국어 평가 질의와 검색 p95 측정, 운영 모니터링 시스템의 실제 alert 발화. T275에서 수행한다.
+
+## M035 Meeting Chat Text Attachment RAG Preparation
+
+### Decision
+
+- 회의 채팅 첨부파일은 MVP에서 텍스트 임베딩만 사용한다. TXT, Markdown, 텍스트 추출 가능한 PDF는 기존 `text-embedding-3-small` 1536차원 공간에 저장한다.
+- 이미지 파일과 이미지 전용 PDF는 현재 검색 대상에서 제외한다. visual embedding, OCR/Vision 설명과 원본 기반 멀티모달 답변은 별도 확장 milestone에서 결정한다.
+- 현재 실시간 회의 화면에는 영속 채팅/첨부파일 도메인과 업로드 API가 없다. AI extractor보다 MeetingMessage/Attachment 계약 및 Backend 저장이 선행되어야 한다.
+
+### Document Impact
+
+- Updated: `clarify.md`, `plan.md`, `contracts/ai-api.md`, `tasks.md`, shared handoff.
+- Deferred: Attachment API, ERD, data model과 requirements 변경은 T266 shared contract에서 함께 처리한다.
+- M034 impact: 기존 grounding과 pgvector 기반 구현은 그대로 진행할 수 있으며 이미지 vector 컬럼이나 모델은 V12에 추가하지 않는다.
+
+### Verification
+
+- Passed: 현재 LiveRoom, embedding chunk/job schema, 업로드 요구사항과 권한 문서의 선행 경계 비교.
+- Passed: `git diff --check`, Q-011/D-039 반영 검색, T277-T284 task ID 중복 검사.
+- Not run: code tests. 이번 변경은 첨부파일 검색 정책과 후속 task 준비만 포함한다.
+
+## M036 Frontend Workspace Persistence Hydration
+
+### Implementation
+
+- Backend에 `GET /api/v1/spaces/{spaceId}/meetings`를 추가하고 기존 Space membership 및 Meeting ACL 필터를 적용했다. `status/from/to` query는 enum·ISO-8601·범위 순서를 서버에서 검증하며, 실제 active participant가 없는 OWNER/ADMIN override 결과는 권한 role을 가장하지 않고 `myRole=null`로 반환한다.
+- 로그인 후 레거시 화면 snapshot과 별도로 Space, 접근 가능한 Meeting, SpaceMember를 target API에서 읽어 workspace catalog와 프로젝트 상태를 복원한다. 일부 하위 조회가 실패하면 `Workspace API partial`로 표시하고 mock 회의를 영속 Space에 섞지 않는다.
+- Space/Meeting 생성 API 실패 시 local fallback ID로 phantom 항목을 만들지 않는다. 생성 폼은 요청 중 중복 제출을 막고 성공한 경우에만 닫거나 입력값을 초기화하며 실패 메시지를 유지한다.
+- 이름 기반 local state의 현재 경계를 보호하기 위해 UI에서는 같은 이름의 Space 중복 생성을 거부한다. 전체 상태 key를 `spaceId`로 전환하는 작업은 별도 구조 변경으로 남긴다.
+
+### Document Impact
+
+- Updated: `plan.md`, `contracts/meeting-api.md`, `tasks.md`, `implement.md`.
+- `myRole` nullable은 MeetingParticipant/SpaceRole 관계를 바꾸지 않는 조회 projection 계약이므로 `data-model.md`와 `erd.md` 변경은 없다.
+- requirements 기준의 Space membership, Meeting ACL, OWNER/ADMIN override 규칙은 변경하지 않았다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`.
+- Passed: Docker PostgreSQL 16.14 + pgvector 0.8.5에서 `JdbcWorkspaceStoreIntegrationTest`; 재조회된 Meeting 목록과 member ACL을 검증했다.
+- Passed: `cd frontend && npm run lint`, 오류 0건과 기존 경고 8건.
+- Passed: `cd frontend && npm run test`, 6 tests.
+- Passed: `cd frontend && npm run build`; 기존 500 kB 초과 bundle warning만 유지됐다.
+- Passed: Playwright Space/Meeting 새로고침 복원 및 프로젝트 생성 500 실패 시 phantom 미생성 2 tests.
+- Passed: `git diff --check`.
+## M033 Meeting CRUD PostgreSQL End-to-End
+
+### Design and Contract
+
+- FR-MREG-01/04/05/06/07, FR-ACL-07을 기준으로 목록·상세·수정·삭제 권한과 canonical 상태 전이를 확정했다.
+- 수정은 OWNER/ADMIN/active HOST, 삭제는 OWNER/active HOST만 허용한다. ADMIN 단독 삭제는 기본 거부한다.
+- `SCHEDULED` 삭제는 `CANCELED` 전환과 soft-delete metadata를 같은 transaction에 기록하고, `IN_PROGRESS` 삭제는 `409 MEETING_ALREADY_PROCESSING`, `ENDED` 삭제는 상태를 유지한 soft delete로 결정했다.
+- hard purge, restore, grace period는 보존·감사 정책이 추가로 필요하므로 후속 범위로 남겼다.
+
+### Changes
+
+- V11 forward migration에 `meetings.deleted_at`, `deleted_by` FK/check와 active 조회 partial index를 추가했다. 공유 V1~V10은 수정하지 않았다.
+- `WorkspaceStore`의 in-memory/JDBC adapter에 meeting update/soft delete를 추가하고, 목록·상세·Project AI 후보·Meeting AI source 조회에서 삭제 row를 제외했다.
+- `WorkspaceDomainService`에 ACL-filtered list/detail, title/schedule/status update, row-locked delete/audit transaction을 구현했다.
+- `GET /api/v1/spaces/{spaceId}/meetings`, `GET/PATCH/DELETE /api/v1/meetings/{meetingId}`와 DTO를 구현했다.
+- Frontend target Space는 Backend 회의 목록으로 legacy meeting을 교체하며 생성·수정·삭제 뒤 반드시 재조회한다. API 실패 시 local-only 성공 mutation을 수행하지 않는다.
+- ProjectOverview의 loading/error/권한 control과 상태 표기, 삭제 확인을 연결하고, 고정 높이 flex에서 운영 카드와 칸반이 겹치던 레이아웃을 수정했다.
+- Playwright Backend/Frontend port와 Backend API base URL을 환경변수로 분리해 기존 개발 서버를 중단하지 않고 격리 E2E를 실행할 수 있게 했다. cross-origin target 실행에 필요한 CORS `PATCH`도 허용했다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`
+- Passed: local PostgreSQL `5434`에서 `JdbcWorkspaceStoreIntegrationTest`; update round-trip, deleted metadata, 목록/Project AI/Meeting AI 제외
+- Passed: 임시 빈 PostgreSQL `55432`에서 `MigrationIntegrationTest`; Flyway V1~V11 전체 적용. 기존 local V10 schema의 V11 forward upgrade와 재검증도 통과했다.
+- Passed: `cd frontend && npm run test`; 2 files, 9 tests
+- Passed: `cd frontend && npm run lint`; 오류 0건, 기존 경고 8건
+- Passed: `cd frontend && npm run build`; bundle size 경고 외 성공
+- Passed: `PLAYWRIGHT_BACKEND_PORT=18081 npm run test:e2e`; 로그인, HOST prejoin/default-deny, 회의 생성→수정→삭제와 서버 목록 0건, 총 3건
+- Passed: local profile Backend `18082` + PostgreSQL real API smoke; signup→Space→create→list/detail→patch 후 Backend 재시작, login→수정값 재조회→delete→목록 0건→상세 404→Meeting AI 404
+- Cleanup: real API smoke에서 생성한 고유 account/session/Space/Meeting/audit row만 검증 후 transaction으로 제거했다.
+- Passed: `git diff --check`
+- Recovered validation input error: 첫 JDBC 재실행은 수동으로 잘못 넣은 DB 비밀번호 때문에 실패했고, `compose.local.yml`의 `meetingmind_local` 기준으로 재실행해 통과했다. 코드 실패는 아니었다.
+
+### Closeout Boundary
+
+- `.specify/memory/session-handoff.md`는 병합된 팀 공통 기준만 기록한다는 규칙에 따라 아직 병합되지 않은 현재 브랜치 상태를 추가하지 않았다.
+- soft-deleted meeting의 hard purge, restore, grace period와 운영자 조회 API는 후속 milestone에서 보존·감사 요구와 함께 결정한다.
+- AI/RAG 파일과 vector migration은 수정하지 않았다. 후속 retriever도 M033의 `deleted_at is null` 관계형 선필터 결과만 사용해야 한다.
+
+## M037 Meeting CRUD Frontend Target Completion
+
+### Design and Changes
+
+- M033 완료 범위와 FR-MREG/FR-ACL/FR-CAL 요구를 대조해 M037을 별도 Frontend milestone로 추가했다. Backend·AI·migration은 수정하지 않았다.
+- target Space는 `GET /spaces/{spaceId}/members`로 stable userId를 조회하고, 회의 생성 시 선택한 Space member를 `participantUserIds`로 전달한다. 사용자-facing 신규 참여는 URL/코드 참가 신청 흐름과 분리했다.
+- target 회의 목록을 읽은 뒤 `GET /meetings/{meetingId}`와 `GET /meetings/{meetingId}/participants`를 함께 조회한다. 상세 응답의 title/status/schedule/myRole과 participant 목록의 stable participant id를 meetingId 기반 state에 저장한다.
+- 실제 Backend 상세 DTO가 participant id를 계약의 `id`가 아닌 `participantId`로 반환하는 차이를 E2E에서 발견했다. Frontend는 mutation ID가 계약과 일치하는 participant 목록 endpoint를 사용해 우회했으며 Backend DTO/계약 정규화는 후속이다.
+- participant 추가, role 변경, `ACTIVE`/`REVOKED` 변경은 target POST/PATCH API를 호출하고 성공 뒤 목록·상세를 재조회한다. 마지막 active HOST는 UI에서 예방하고 Backend 409 정책을 최종 기준으로 유지한다.
+- 회의 상태 control은 `SCHEDULED -> IN_PROGRESS/CANCELED`, `IN_PROGRESS -> ENDED`와 현재 상태만 제공한다. 제목·예정 일시는 `SCHEDULED`에서만 수정한다.
+- 생성 응답의 joinCode/joinUrl은 생성 권한자에게 현재 Frontend 메모리에서만 표시하며 새 인증 성공과 프로젝트 삭제 시 제거한다.
+- 캘린더는 이미 ACL-filtered된 target Space meeting 목록을 사용한다. 생성 권한, 초기 참여자, loading/error, 성공 후 목록·캘린더 동시 갱신과 meetingId route를 연결했다.
+
+### Verification
+
+- Passed: `cd frontend && npm run test`; 2 files, 11 tests
+- Passed: `cd frontend && npm run lint`; 오류 0건, 기존 경고 8건
+- Passed: `cd frontend && npm run build`; bundle size 경고 외 성공
+- Passed: `PLAYWRIGHT_BACKEND_PORT=18083 npm run test:e2e`; 로그인, HOST prejoin/default-deny, 회의 생성→참가 코드 표시→수정→삭제, 캘린더 생성/이동, guest participant 상세→EDITOR 변경→REVOKED 회수, 총 4건
+- Passed: `git diff --check`
+- Recovered: 첫 격리 E2E는 Backend CORS 허용 범위 밖 Frontend port `15174` 때문에 실패했다. 사용자 서버가 없는 것을 확인하고 허용된 Frontend `5173`과 격리 Backend `18083` 조합으로 재실행했다.
+- Recovered: guest 사용자를 workspace domain에 동기화하지 않은 초기 fixture와 상세 DTO의 participant id 필드 차이를 확인해 fixture와 participant 목록 조회 경계를 교정했다.
+
+### Remaining Boundary
+
+- `GET /api/v1/calendar/events` Backend runtime과 알림은 아직 없으며 캘린더는 Space별 ACL-filtered meeting 목록을 read model로 사용한다.
+- FR-MREG-01 description과 FR-CAL-04 종료 일시는 현재 Meeting API/data model에 없어 임의 추가하지 않았다.
+- 초기 참여자 선택은 조회 가능한 SpaceMember로 제한된다. 비멤버 guest 직접 검색/추가는 사용자 검색 또는 invitation 계약이 생긴 뒤 연결한다.
+- Playwright에서 기존 `WorkspaceHomePage` list key React warning이 관찰됐지만 M034 변경과 무관하고 동작/검증 실패는 아니다.
+- 공용 `.specify/memory/session-handoff.md`는 병합된 공통 기준만 기록하므로 아직 병합되지 않은 M034 상태를 추가하지 않았다.

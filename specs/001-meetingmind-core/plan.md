@@ -7,7 +7,7 @@
 - Frontend는 React/Vite/TypeScript로 워크스페이스, 회의 대기, 라이브룸, Meeting AI, 프로젝트 개요, 팀원, Report Agent 화면을 제공한다.
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
-- Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용하며 legacy STT streaming session/file prototype과 pgvector semantic 검색은 아직 별도 경계다.
+- Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용한다. V12 기반 embedding worker와 pgvector semantic 검색은 연결됐고 legacy STT streaming session/file만 `MeetingTranscript` 생명주기와 아직 분리되어 있다.
 - 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Target Architecture
@@ -27,6 +27,10 @@
 | AI service | FastAPI | AI API 연동과 Python RAG 생태계 확장에 적합하다. | Spring 내장 AI 호출 |
 | Realtime meeting | LiveKit | 현재 토큰 발급 코드와 `livekit-client` 의존성이 존재한다. | WebRTC 직접 구현 |
 | Vector search | PostgreSQL + pgvector | 기획서와 일치하고 관계형 권한 모델과 같이 운용하기 좋다. | Pinecone, OpenSearch |
+| Embedding | `text-embedding-3-small`, 1536 dimensions | MVP 비용과 다국어 검색 품질을 균형 있게 시작하고 generation metadata로 교체 가능하게 한다. | `text-embedding-3-large`, local embedding model |
+| Retrieval | 권한 선필터 후 cosine exact search + `pg_trgm` + RRF | 후보 5,000개 이하에서는 recall 손실 없이 의미 검색과 한국어 고유명사 검색을 결합한다. | vector-only, HNSW, IVFFlat |
+| Grounding | 관련도 gate + structured citation validation | 근거가 없거나 검증되지 않은 답변과 저장성 산출물을 LLM 호출 전후에서 차단한다. | prompt-only grounding, per-request second verifier |
+| Embedding jobs | PostgreSQL durable job + generation swap | 별도 broker 없이 source 저장 transaction과 연결하고 실패 시 기존 active generation을 유지한다. | Kafka, Redis queue, synchronous embedding |
 | File storage | S3 | STT 원문/보고서/첨부 파일 분리에 적합하다. | DB BLOB |
 | DB migration | Flyway SQL migration | Spring Boot 통합이 단순하고 PostgreSQL/pgvector extension, index, partial unique 제약을 SQL로 명확히 리뷰할 수 있다. | Liquibase, 수동 SQL 적용 |
 
@@ -34,7 +38,7 @@
 
 - 2026-07-14 기준 backend에는 Flyway core, PostgreSQL Flyway module, PostgreSQL driver, Spring Boot JDBC starter가 있다. `local` profile이 기본 profile이며 Compose 기본값으로 DataSource와 Flyway를 활성화하고 `db` profile은 환경변수 기반 DataSource를 사용한다. M032에서 Auth/Workspace JDBC repository 계층을 연결했으며 Docker PostgreSQL이 기본 실행 전제다.
 - migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
-- 원격에 공유된 migration은 수정하지 않는다. `V1`~`V9` 이후 최신 MeetingJoinRequest 보강은 `V10` forward migration으로 추가한다.
+- 원격에 공유된 `V1`~`V10` migration은 수정하지 않는다. vector/job/search 보강은 `V12` forward migration으로 추가한다.
 - 로컬 DB는 PostgreSQL 16 + pgvector를 다른 프로젝트 DB와 격리된 컨테이너로 실행하고 host `5434`를 기본값으로 사용한다.
 - Backend 기본 `local` profile은 `localhost:5434/meetingmind` 기본값으로 DataSource와 Flyway를 실행한다. `db` profile은 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`를 필수로 사용한다.
 
@@ -45,7 +49,19 @@
 3. `V7`~`V9`로 인증 세션, Space 초대, 전사 상태·보존, 용어사전·감사 로그, embedding job/generation을 보강하고, 최신 회의 참가 신청은 공유 migration을 수정하지 않고 `V10`으로 추가한다.
 4. 빈 로컬 DB에 Flyway를 처음부터 적용하고 schema/constraint/index를 검증한다.
 5. Backend in-memory store를 repository로 전환한 뒤 AI retriever를 pgvector로 교체한다.
-6. embedding model/차원과 vector index는 `Q-010` 결정 후 별도 migration으로 고정한다.
+6. `Q-010` 결정에 따라 별도 forward migration에서 `vector(1536)`을 고정한다. MVP는 exact cosine search로 시작하고 측정 기준을 넘을 때 HNSW를 추가한다.
+7. V12에서 `pg_trgm`, source generation/XOR, retry/lease와 source 변경 EmbeddingJob trigger를 적용한다.
+
+### AI RAG Production Baseline
+
+1. Backend application service가 사용자 권한을 평가해 Meeting AI의 단일 meeting scope 또는 Project AI의 `spaceId + allowedMeetingIds`를 만든다.
+2. AI는 역할을 재평가하지 않고 전달받은 범위를 SQL `WHERE`에 강제한 뒤 active/completed generation만 검색한다.
+3. meeting-owned chunk와 project-owned chunk는 중복 임베딩하지 않는다. Project AI는 허용된 meeting chunk와 ProjectKnowledge chunk를 하나의 query mode에서 검색한다.
+4. vector 후보 20개와 `pg_trgm` 후보 20개를 RRF로 결합하고 Meeting AI 5개, Project AI 8개 근거를 기본 context로 사용한다.
+5. 관련도 gate를 통과하지 못하면 LLM을 호출하지 않는다. 호출 결과는 valid source citation이 있어야 public 답변이나 candidate로 사용할 수 있다.
+6. Backend는 source 변경과 embedding job 생성을 transaction으로 연결하고, AI worker는 새 generation을 준비한 뒤 최신 generation일 때만 원자적으로 active 전환한다.
+7. grounding 구현은 Backend persistence와 병렬 진행할 수 있다. vector migration, worker, retriever는 shared contract 이후 Data -> Backend -> AI 순서로 통합한다.
+8. 회의 채팅 첨부파일은 별도 도메인 계약 이후 텍스트 추출 결과만 같은 1536차원 공간에 저장한다. 이미지와 image-only PDF를 위한 visual embedding 또는 Vision 처리는 MVP schema와 M033 범위에 포함하지 않는다.
 
 ## API Contracts
 
@@ -55,6 +71,11 @@
 - `GET /api/workspace`
   - 현재: 전체 데모 화면 데이터를 한 번에 반환
   - 목표: Space/Meeting/Report API로 분리
+- `GET /api/v1/spaces`
+  - 현재: PostgreSQL에 저장된 active Space membership 목록과 회의 수를 반환
+- `GET /api/v1/spaces/{spaceId}/meetings`
+  - 현재: Space 권한과 Meeting ACL을 통과한 영속 회의 목록을 반환
+  - active MeetingParticipant가 없는 OWNER/ADMIN override 조회는 `myRole=null`
 - `POST /api/livekit/token`
   - request: `roomName`, `identity`, `name`
   - response: `serverUrl`, `token`, `roomName`, `identity`, `name`
@@ -549,6 +570,101 @@ M032는 T229를 실행 가능한 단위로 분리해 Backend runtime의 in-memor
 - Runtime: 기본 `local` profile Backend를 재기동한 뒤 생성 데이터가 유지되고 Hikari/Flyway가 정상 연결되는지 확인한다.
 - Security: revoked participant, Space 비멤버, 회의 게스트가 권한 밖 AI source에 포함되지 않는 negative test를 통과한다.
 - Integrity: owner transfer, join approval, current report, task candidate confirm이 실패 시 부분 저장되지 않고 DB unique/transaction 경계를 지킨다.
+
+## M033 Meeting CRUD PostgreSQL End-to-End
+
+M033은 이미 PostgreSQL에 영속화되는 회의 생성 경로를 회의 목록·상세·수정·삭제 API와 실제 Frontend 화면까지 확장한다. CRUD 성공 여부는 화면의 local state가 아니라 Backend 재조회 결과와 PostgreSQL 상태를 기준으로 판단한다.
+
+### Scope and Ownership
+
+- Team members: Backend/Frontend 통합 담당 1명.
+- Agents: Codex 1개가 계약, migration, Backend, Frontend, 검증을 순차 처리한다. 같은 파일을 병렬 수정하지 않는다.
+- Shared contract owner: `contracts/meeting-api.md`, `data-model.md`, `erd.md`, `clarify.md`를 Backend 구현보다 먼저 확정한다.
+- Backend owner: `WorkspaceStore`, `WorkspaceDomainService`, Meeting controller/DTO, `MeetingAccessPolicy`, JDBC/in-memory adapter, Backend tests, forward-only migration.
+- Frontend owner: `frontend/src/api/workspace.ts`, `frontend/src/types.ts`, `App.tsx`, `ProjectOverviewPage.tsx`, `WorkspaceHomePage.tsx`의 target Meeting API 연결.
+- AI/RAG 코드와 embedding/vector migration은 수정하지 않는다. 삭제된 회의를 Backend 관계형 조회와 권한 필터 단계에서 제외한다.
+
+### Recommended Delete Baseline
+
+1. `SCHEDULED` 회의 삭제는 `status=CANCELED`와 soft-delete metadata를 같은 transaction에 기록한다.
+2. `IN_PROGRESS` 회의 삭제는 `409 MEETING_ALREADY_PROCESSING`으로 거부한다.
+3. `ENDED` 회의 삭제는 상태를 유지한 채 soft delete한다. 전사, 보고서, 태스크, 감사 기록은 즉시 물리 삭제하지 않는다.
+4. soft-deleted 회의는 일반 목록·상세·캘린더·Meeting AI·Project AI source에서 즉시 제외한다.
+5. 삭제 권한은 `OWNER` 또는 해당 회의의 active `HOST`만 허용한다. `ADMIN`, `EDITOR`, `VIEWER`는 기본 거부한다.
+6. hard purge, 복구 API, 유예 기간은 이번 milestone 범위 밖이며 보존 정책 작업으로 분리한다.
+
+이 기준은 데이터 손실을 최소화하는 권장안이다. 구현 전 `clarify.md`, API 계약, 데이터 모델에 결정사항으로 확정한다.
+
+### API and Domain Design
+
+1. `GET /api/v1/spaces/{spaceId}/meetings`는 `status`, `from`, `to`를 검증하고 active SpaceMember의 역할과 active MeetingParticipant ACL을 적용한다. `OWNER`/`ADMIN`은 목록 조회 override를 가지며 일반 `MEMBER`는 참여 회의만 본다.
+2. `GET /api/v1/meetings/{meetingId}`는 `OWNER`/`ADMIN` 또는 active `MeetingParticipant`에게만 상세와 `myRole`을 반환한다. 삭제된 회의는 일반 조회에서 찾을 수 없는 것으로 처리한다.
+3. `PATCH /api/v1/meetings/{meetingId}`는 `OWNER`/`ADMIN` 또는 active `HOST`만 실행한다. 제목은 blank를 거부하고, 일정 수정은 `SCHEDULED` 상태에서만 허용하며, 상태는 canonical 전이만 허용한다.
+4. canonical 상태 전이는 `SCHEDULED -> IN_PROGRESS`, `SCHEDULED -> CANCELED`, `IN_PROGRESS -> ENDED`다. 동일 값은 idempotent하게 허용하고 역전이는 `400 INVALID_REQUEST`로 거부한다.
+5. `DELETE /api/v1/meetings/{meetingId}`는 row lock과 transaction 안에서 상태·권한을 다시 확인하고 soft delete와 `MEETING_DELETED` audit를 원자적으로 저장한다.
+6. Meeting에 `deletedAt`, `deletedBy`를 추가하고 기존 V1~V10은 수정하지 않는다. 새 index와 제약은 V11 forward migration으로 추가한다.
+7. 목록 필터와 AI context 후보 조회는 `deleted_at is null`을 공통 active Meeting 조건으로 사용한다.
+
+### Frontend Integration
+
+1. target Space가 선택되면 `fetchMeetings`로 Backend 목록을 로드하고 legacy/mock 회의와 섞지 않는다.
+2. 생성·수정·삭제 UI는 `createMeeting`, `updateMeeting`, `deleteMeeting`을 호출한 뒤 Backend 목록을 재조회한다. 성공처럼 보이는 local-only mutation을 제거한다.
+3. 권한에 따라 생성, 수정, 삭제 control을 표시하되 Backend의 403 판단을 최종 기준으로 유지한다.
+4. loading, empty, 400/403/404/409 오류, 중복 제출 방지와 삭제 확인을 제공한다.
+5. demo/legacy Space는 기존 mock fallback을 유지하되 target DB 데이터와 명확히 구분한다.
+
+### Implementation Order
+
+1. 삭제 의미, 상태 전이, 권한, active Meeting 조건을 계약/결정 문서에 확정한다.
+2. `deletedAt`/`deletedBy` 모델과 V11 migration을 추가하고 ERD 영향을 맞춘다.
+3. store/domain에 ACL 목록, 상세, 수정, soft delete와 audit transaction을 구현한다.
+4. Meeting list/detail/PATCH/DELETE controller와 DTO, 오류 매핑을 구현한다.
+5. Backend unit/controller/JDBC integration test를 추가한다.
+6. Frontend target Meeting API를 실제 프로젝트 회의 화면에 연결하고 local-only success 경로를 제거한다.
+7. Frontend unit/build와 PostgreSQL real API CRUD smoke를 통과시킨다.
+8. `tasks.md`, `implement.md`, `analyze.md`에 결과와 미실행 사유를 반영한다.
+
+### Verification Plan
+
+- Backend unit/controller: 생성자 HOST 등록, ACL 목록, 상세 403, 수정 권한, 상태 전이, delete 권한, 진행 중 delete 409, audit를 검증한다.
+- PostgreSQL integration: create -> reload/list -> detail -> patch -> reload -> delete -> reload exclusion과 transaction rollback을 검증한다.
+- AI safety regression: soft-deleted meeting이 Meeting AI와 Project AI context 후보에 포함되지 않는지 검증한다.
+- Frontend: API client unit test, target/mock 경계 test, `npm run lint`, `npm run test`, `npm run build`를 실행한다.
+- Real API smoke: signup -> Space 생성 -> Meeting 생성 -> 목록/상세 -> 수정 -> 삭제 -> 목록/상세 제외를 local PostgreSQL에서 확인한다.
+- Repository: 전체 Backend test, Flyway V1~V11 migration test, `git diff --check`를 통과한다.
+
+## M037 Meeting CRUD Frontend Target Completion
+
+M037은 M033에서 연결한 회의 목록·생성·수정·삭제에 상세 조회, 초기 참여자 지정, MeetingParticipant ACL mutation, 캘린더 오류 상태를 보강한다. target Space의 성공 상태는 Backend 응답과 재조회 결과만 사용하고 demo/legacy Space의 local state는 별도 경계로 유지한다.
+
+### Scope and Decisions
+
+- Frontend 통합 담당 1명과 Codex 1개가 문서, Frontend, 검증을 순차 처리한다. Backend와 AI/RAG 파일은 수정하지 않는다.
+- `GET /api/v1/meetings/{meetingId}`를 선택된 target 회의의 상세·`myRole`·참여자 기준으로 사용한다.
+- 초기 참여자 지정은 `GET /api/v1/spaces/{spaceId}/members`의 stable `userId`를 `participantUserIds`로 변환한다. 사용자-facing 신규 참여는 기존 URL/코드 참가 신청 흐름을 유지한다.
+- 생성 응답의 `joinCode`/`joinUrl`은 생성 권한자에게 현재 Frontend 메모리 범위에서만 표시하고 영속 저장하지 않는다.
+- 참여자 role/access 변경은 `POST/PATCH /api/v1/meetings/{meetingId}/participants`를 사용한다. `REVOKED`를 권한 회수로 사용하고 마지막 active HOST 보호와 403/409는 Backend 판단을 최종 기준으로 표시한다.
+- canonical 상태 전이만 UI 선택지로 제공한다. 제목·예정 일시 수정은 `SCHEDULED`에서만 허용한다.
+- `GET /api/v1/calendar/events`는 아직 Backend runtime이 없으므로 이번 Frontend 범위에서는 이미 ACL-filtered된 Space별 meeting 목록을 캘린더 read model로 재사용한다. 별도 endpoint 연결은 Backend 구현 후 교체한다.
+- FR-MREG-01의 description과 FR-CAL-04의 종료 일시는 현재 Meeting API/data model 계약에 없으므로 M034에서 임의 추가하지 않고 계약 변경 milestone로 남긴다.
+
+### Implementation Order
+
+1. target Space 멤버를 Backend에서 조회해 `userId`가 있는 Frontend 상태로 분리한다.
+2. 선택된 target meeting 상세를 조회하고 participant state를 `meetingId` 기준으로 저장한다.
+3. 생성 시 선택한 초기 참여자를 `participantUserIds`로 전달하고 성공한 경우에만 입력을 초기화하며 참가 코드/URL을 표시한다.
+4. participant 추가·role 변경·회수를 Backend API에 연결하고 mutation 뒤 상세를 재조회한다.
+5. 상태별 허용 전이, 권한별 control, 상세/ACL loading·400/403/404/409 오류를 화면에 반영한다.
+6. 캘린더 생성에 참여자 선택, mutation loading/error, 성공 후 목록·캘린더 동시 갱신을 연결한다.
+7. API unit test와 실제 Backend를 사용한 Playwright 상세/ACL/캘린더 흐름을 추가한다.
+8. `tasks.md`, `implement.md`, `analyze.md`, 기능 비교 문서를 실제 결과에 맞게 갱신한다.
+
+### Verification Plan
+
+- Frontend unit: meeting detail/participant client의 route, auth header, request body와 오류 전파를 검증한다.
+- Frontend E2E: target Space에서 초기 참여자 지정 생성, 상세/ACL 재조회, role 변경·회수, canonical 상태 전이, 삭제, 캘린더 생성·오류 표시를 검증한다.
+- Regression: 기존 login, prejoin default-deny, mock/target 경계와 M033 CRUD E2E를 유지한다.
+- Commands: `cd frontend && npm run test`, `npm run lint`, `npm run build`, 격리 Backend를 사용한 `npm run test:e2e`, `git diff --check`를 실행한다.
 
 ## Test Plan
 

@@ -14,6 +14,7 @@ type ProjectChatMessage = {
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
 type MeetingParticipantState = {
   id: string;
+  userId?: string;
   meetingKey: string;
   name: string;
   email: string;
@@ -32,6 +33,7 @@ type ProjectTaskState = {
   sourceCandidateId: string | null;
 };
 type TeamMemberState = {
+  userId?: string;
   name: string;
   email: string;
   role: string;
@@ -45,6 +47,12 @@ type MeetingSort = "recent" | "oldest" | "state";
 type TaskStatus = ProjectTaskState["status"];
 type TaskStatusFilter = TaskStatus | "ALL";
 type TaskEditDraft = Pick<ProjectTaskState, "assignee" | "description" | "dueDate" | "status" | "title">;
+type MeetingInviteMeta = {
+  meetingId: string;
+  title: string;
+  joinCode: string;
+  joinUrl: string;
+};
 
 type ProjectKnowledge = {
   finalDecision: string;
@@ -149,6 +157,15 @@ function getProjectKnowledge(projectName: string, description: string): ProjectK
   return knowledgeMap[projectName] ?? buildGeneratedProjectKnowledge(projectName, description);
 }
 
+function toDateTimeLocal(value?: string) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 function getMeetingDescription(meeting: ProjectMeeting) {
   if (meeting.state === "완료") {
     return "데이터셋 구조 확인 및 결정사항 정리";
@@ -158,15 +175,32 @@ function getMeetingDescription(meeting: ProjectMeeting) {
     return "STT 보관 정책 및 관리자 권한 최종 확정";
   }
 
+  if (meeting.state === "진행 중") {
+    return "현재 진행 중인 회의입니다.";
+  }
+
+  if (meeting.state === "취소") {
+    return "취소된 회의입니다.";
+  }
+
   return "권한 기반 RAG 검색 구조 설계 결정";
 }
 
 function getMeetingStateLabel(meeting: ProjectMeeting) {
-  return meeting.state === "완료" ? "완료" : meeting.state === "예정" ? "예정" : "보고서 생성됨";
+  return meeting.state;
 }
 
 function getMeetingStateTone(meeting: ProjectMeeting) {
-  return meeting.state === "완료" ? "green" : meeting.state === "예정" ? "orange" : "violet";
+  if (meeting.state === "완료") {
+    return "green";
+  }
+  if (meeting.state === "예정") {
+    return "orange";
+  }
+  if (meeting.state === "취소") {
+    return "gray";
+  }
+  return "violet";
 }
 
 function parseMeetingDateLabel(date: string) {
@@ -188,6 +222,16 @@ function getMeetingStateOrder(state: ProjectMeeting["state"]) {
   }
 
   return 2;
+}
+
+function getAllowedMeetingStates(state: ProjectMeeting["state"]): ProjectMeeting["state"][] {
+  if (state === "예정") {
+    return ["예정", "진행 중", "취소"];
+  }
+  if (state === "진행 중") {
+    return ["진행 중", "완료"];
+  }
+  return [state];
 }
 
 function buildProjectView(
@@ -258,10 +302,15 @@ function getMeetingDestinationForSpace(space: WorkspaceData["workspaceHome"]["sp
 }
 
 export function ProjectOverviewPage({
+  currentUserId,
   currentUserEmail,
   data,
   session,
   projectAiSpaceIds,
+  meetingMutationError,
+  meetingMutationLoading = false,
+  meetingReadLoading = false,
+  latestMeetingInvites,
   onDeleteProject,
   meetingParticipants,
   onAddMeetingParticipant,
@@ -277,20 +326,26 @@ export function ProjectOverviewPage({
   onMoveProjectTask,
   onUpdateProjectTask,
   onUpdateMeetingParticipant,
+  onUpdateMeeting,
   onUpdateMeetingStatus,
   onUpdateProject
 }: {
+  currentUserId: string;
   currentUserEmail: string;
   data: WorkspaceData["projectOverview"];
   session: AuthSession | null;
   projectAiSpaceIds: string[];
+  meetingMutationError?: string;
+  meetingMutationLoading?: boolean;
+  meetingReadLoading?: boolean;
+  latestMeetingInvites: Record<string, MeetingInviteMeta>;
   onDeleteProject?: (spaceId: string) => void;
   meetingParticipants: Record<string, MeetingParticipantState[]>;
   onAddMeetingParticipant?: (
     projectName: string,
     meetingIndex: string,
-    participant: Pick<MeetingParticipantState, "email" | "name" | "role" | "participantType">
-  ) => void;
+    participant: Pick<MeetingParticipantState, "email" | "name" | "role" | "participantType" | "userId">
+  ) => Promise<boolean>;
   projectMeetings: Record<string, ProjectMeeting[]>;
   projectMembers: Record<string, TeamMemberState[]>;
   projectTasks: Record<string, ProjectTaskState[]>;
@@ -298,10 +353,10 @@ export function ProjectOverviewPage({
   onCreateMeeting?: (
     projectName: string,
     payload?: { title?: string; scheduledAt?: string; participantEmails?: string[] }
-  ) => void;
-  onCreateProject?: (payload: { name: string; description: string }) => void;
+  ) => Promise<boolean>;
+  onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
   onCreateProjectTask?: (projectName: string, task: Omit<ProjectTaskState, "id" | "sourceCandidateId">) => void;
-  onDeleteMeeting?: (projectName: string, meetingIndex: string) => void;
+  onDeleteMeeting?: (projectName: string, meetingIndex: string) => Promise<boolean>;
   onDeleteProjectTask?: (projectName: string, taskId: string) => void;
   onMoveProjectTask?: (projectName: string, taskId: string, status: TaskStatus) => void;
   onUpdateProjectTask?: (projectName: string, taskId: string, updates: TaskEditDraft) => void;
@@ -310,8 +365,17 @@ export function ProjectOverviewPage({
     meetingIndex: string,
     participantId: string,
     updates: Pick<MeetingParticipantState, "accessStatus" | "role">
-  ) => void;
-  onUpdateMeetingStatus?: (projectName: string, meetingIndex: string, state: ProjectMeeting["state"]) => void;
+  ) => Promise<boolean>;
+  onUpdateMeeting?: (
+    projectName: string,
+    meetingIndex: string,
+    updates: { title?: string; scheduledAt?: string }
+  ) => Promise<boolean>;
+  onUpdateMeetingStatus?: (
+    projectName: string,
+    meetingIndex: string,
+    state: ProjectMeeting["state"]
+  ) => Promise<boolean>;
   onUpdateProject?: (spaceId: string, payload: { name: string; description: string }) => void;
 }) {
   useEffect(() => {
@@ -350,6 +414,7 @@ export function ProjectOverviewPage({
   const [selectedMemberRole, setSelectedMemberRole] = useState<MeetingParticipantState["role"]>("VIEWER");
   const [newMeetingTitle, setNewMeetingTitle] = useState("");
   const [newMeetingAt, setNewMeetingAt] = useState("2026-07-10T10:00");
+  const [newMeetingParticipantEmails, setNewMeetingParticipantEmails] = useState<string[]>([]);
   const [meetingDeleteCandidate, setMeetingDeleteCandidate] = useState("");
   const [meetingDeleteConfirm, setMeetingDeleteConfirm] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
@@ -390,6 +455,7 @@ export function ProjectOverviewPage({
     setTaskMeetingIndex(viewData.meetings[0]?.index ?? "");
     setSelectedMemberEmail("");
     setNewMeetingTitle("");
+    setNewMeetingParticipantEmails([]);
     setMeetingDeleteCandidate("");
     setMeetingDeleteConfirm("");
     setTaskAssignee("");
@@ -418,10 +484,14 @@ export function ProjectOverviewPage({
   const projectAiAvailable = projectAiSpaceIds.includes(selectedSpaceId);
   const canSubmit = input.trim().length > 0 && !loading && Boolean(session) && projectAiAvailable;
   const selectedProjectName = viewData.selectedSpace.name;
+  const latestMeetingInvite = latestMeetingInvites[selectedProjectName] ?? null;
   const members = projectMembers[selectedProjectName] ?? [];
   const currentSpaceMember = members.find((member) => member.email === currentUserEmail) ?? null;
   const hasManagerOverride = currentSpaceMember?.spaceRole === "OWNER" || currentSpaceMember?.spaceRole === "ADMIN";
   const accessibleMeetings = viewData.meetings.filter((meeting) => {
+    if (projectAiAvailable) {
+      return true;
+    }
     if (hasManagerOverride) {
       return true;
     }
@@ -434,14 +504,31 @@ export function ProjectOverviewPage({
   const nextMeeting = accessibleMeetings.find((meeting) => meeting.state !== "완료") ?? accessibleMeetings[0] ?? null;
   const contextMeeting = accessibleMeetings.find((meeting) => meeting.state === "보고서 생성됨") ?? accessibleMeetings[0] ?? null;
   const selectedMeeting = accessibleMeetings.find((meeting) => meeting.index === selectedMeetingIndex) ?? contextMeeting;
-  const selectedMeetingKey = selectedMeeting ? buildMeetingKey(selectedProjectName, selectedMeeting.index) : "";
-  const defaultParticipants = selectedMeetingKey ? buildDefaultMeetingParticipants(members, selectedMeetingKey) : [];
+  const selectedMeetingKey = selectedMeeting
+    ? projectAiAvailable && selectedMeeting.id
+      ? `target:${selectedSpaceId}:${selectedMeeting.id}`
+      : buildMeetingKey(selectedProjectName, selectedMeeting.index)
+    : "";
+  const defaultParticipants = selectedMeetingKey && !projectAiAvailable
+    ? buildDefaultMeetingParticipants(members, selectedMeetingKey)
+    : [];
   const visibleParticipants = selectedMeetingKey
     ? meetingParticipants[selectedMeetingKey] ?? defaultParticipants
     : [];
-  const hasStoredParticipants = selectedMeetingKey ? Boolean(meetingParticipants[selectedMeetingKey]) : false;
+  const hasStoredParticipants = selectedMeetingKey
+    ? projectAiAvailable || Boolean(meetingParticipants[selectedMeetingKey])
+    : false;
   const selectedProjectTasks = projectTasks[selectedProjectName] ?? [];
-  const availableMember = members.find((member) => member.email === selectedMemberEmail) ?? members[0] ?? null;
+  const aclGrantCandidates = members.filter(
+    (member) =>
+      !visibleParticipants.some(
+        (participant) => participant.userId === member.userId || participant.email === member.email
+      )
+  );
+  const availableMember = aclGrantCandidates.find((member) => member.email === selectedMemberEmail) ?? null;
+  const meetingInviteCandidates = members.filter(
+    (member) => member.email !== currentUserEmail && member.status === "active"
+  );
   const overrideMembers = members.filter((member) => member.spaceRole === "OWNER" || member.spaceRole === "ADMIN");
   const defaultDeniedMembers = selectedMeeting
     ? members.filter(
@@ -480,11 +567,15 @@ export function ProjectOverviewPage({
     (participant) => participant.role === "HOST" && participant.accessStatus === "ACTIVE"
   ).length;
   const currentMeetingParticipant = visibleParticipants.find(
-    (participant) => participant.email === currentUserEmail && participant.accessStatus === "ACTIVE"
+    (participant) =>
+      participant.accessStatus === "ACTIVE" &&
+      (participant.userId === currentUserId || participant.email === currentUserEmail)
   );
   const canCreateMeeting = hasManagerOverride;
-  const canManageMeetingAccess = hasManagerOverride || currentMeetingParticipant?.role === "HOST";
-  const canDeleteMeeting = currentSpaceMember?.spaceRole === "OWNER" || currentMeetingParticipant?.role === "HOST";
+  const currentMeetingRole = selectedMeeting?.myRole ?? currentMeetingParticipant?.role ?? null;
+  const canManageMeetingAccess = hasManagerOverride || currentMeetingRole === "HOST";
+  const canDeleteMeeting = currentSpaceMember?.spaceRole === "OWNER" || currentMeetingRole === "HOST";
+  const meetingOperationLoading = meetingMutationLoading || meetingReadLoading;
   const meetingDeleteToken = selectedMeeting?.index ?? "";
   const canConfirmMeetingDelete =
     canDeleteMeeting && Boolean(selectedMeeting) && meetingDeleteCandidate === selectedMeeting?.index && meetingDeleteConfirm === meetingDeleteToken;
@@ -577,17 +668,21 @@ export function ProjectOverviewPage({
     setIsProjectSettingsOpen(false);
   }
 
-  function handleCreateMeeting(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt) {
+    if (!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt || !onCreateMeeting || meetingOperationLoading) {
       return;
     }
 
-    onCreateMeeting?.(selectedProjectName, {
+    const created = await onCreateMeeting?.(selectedProjectName, {
       title: newMeetingTitle.trim(),
-      scheduledAt: new Date(newMeetingAt).toISOString()
+      scheduledAt: new Date(newMeetingAt).toISOString(),
+      participantEmails: newMeetingParticipantEmails
     });
-    setNewMeetingTitle("");
+    if (created) {
+      setNewMeetingTitle("");
+      setNewMeetingParticipantEmails([]);
+    }
   }
 
   function handleDeleteProject() {
@@ -602,6 +697,23 @@ export function ProjectOverviewPage({
     onDeleteProject?.(viewData.selectedSpace.id);
   }
 
+  async function handleMeetingDetailsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMeeting || !canManageMeetingAccess || selectedMeeting.state !== "예정") {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const title = String(form.get("meetingTitle") ?? "").trim();
+    const scheduledAtValue = String(form.get("meetingScheduledAt") ?? "");
+    if (!title || !scheduledAtValue) {
+      return;
+    }
+    await onUpdateMeeting?.(selectedProjectName, selectedMeeting.index, {
+      title,
+      scheduledAt: new Date(scheduledAtValue).toISOString()
+    });
+  }
+
   function handleStartMeetingDelete(meetingIndex: string) {
     if (!canDeleteMeeting) {
       return;
@@ -610,30 +722,35 @@ export function ProjectOverviewPage({
     setMeetingDeleteConfirm("");
   }
 
-  function handleConfirmMeetingDelete() {
+  async function handleConfirmMeetingDelete() {
     if (!selectedMeeting || !canConfirmMeetingDelete) {
       return;
     }
 
-    onDeleteMeeting?.(selectedProjectName, selectedMeeting.index);
-    setMeetingDeleteCandidate("");
-    setMeetingDeleteConfirm("");
+    const deleted = await onDeleteMeeting?.(selectedProjectName, selectedMeeting.index);
+    if (deleted) {
+      setMeetingDeleteCandidate("");
+      setMeetingDeleteConfirm("");
+    }
   }
 
-  function handleAddParticipant(event: FormEvent<HTMLFormElement>) {
+  async function handleAddParticipant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canManageMeetingAccess || !selectedMeeting || !availableMember) {
       return;
     }
 
-    onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+    const added = await onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+      userId: availableMember.userId,
       email: availableMember.email,
       name: availableMember.name,
       role: selectedMemberRole,
       participantType: "member"
     });
-    setSelectedMemberEmail("");
-    setSelectedMemberRole("VIEWER");
+    if (added) {
+      setSelectedMemberEmail("");
+      setSelectedMemberRole("VIEWER");
+    }
   }
 
   function handleParticipantRoleChange(participant: MeetingParticipantState, role: MeetingParticipantState["role"]) {
@@ -647,7 +764,8 @@ export function ProjectOverviewPage({
 
     if (!hasStoredParticipants) {
       defaultParticipants.forEach((defaultParticipant) => {
-        onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+        void onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+          userId: defaultParticipant.userId,
           email: defaultParticipant.email,
           name: defaultParticipant.name,
           role: defaultParticipant.id === participant.id ? role : defaultParticipant.role,
@@ -657,7 +775,7 @@ export function ProjectOverviewPage({
       return;
     }
 
-    onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
+    void onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
       accessStatus: participant.accessStatus,
       role
     });
@@ -674,22 +792,16 @@ export function ProjectOverviewPage({
 
     if (!hasStoredParticipants) {
       defaultParticipants.forEach((defaultParticipant) => {
-        onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+        void onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
+          userId: defaultParticipant.userId,
           email: defaultParticipant.email,
           name: defaultParticipant.name,
           role: defaultParticipant.role,
           participantType: defaultParticipant.participantType
         });
       });
-    } else {
-      onAddMeetingParticipant?.(selectedProjectName, selectedMeeting.index, {
-        email: participant.email,
-        name: participant.name,
-        role: participant.role,
-        participantType: participant.participantType
-      });
     }
-    onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
+    void onUpdateMeetingParticipant?.(selectedProjectName, selectedMeeting.index, participant.id, {
       accessStatus,
       role: participant.role
     });
@@ -839,7 +951,7 @@ export function ProjectOverviewPage({
             <section className="project-list-section project-operations-section">
               <div className="project-list-head">
                 <strong>회의 운영 / 접근 제어</strong>
-                <span>local state · target API 대기</span>
+                <span>{projectAiAvailable ? "PostgreSQL target API" : "데모 local state"}</span>
               </div>
 
               <form className="project-meeting-create-form" onSubmit={handleCreateMeeting}>
@@ -847,7 +959,7 @@ export function ProjectOverviewPage({
                   <span>회의 제목</span>
                   <input
                     aria-label="새 회의 제목"
-                    disabled={!canCreateMeeting}
+                    disabled={!canCreateMeeting || meetingOperationLoading}
                     onChange={(event) => setNewMeetingTitle(event.target.value)}
                     placeholder="예: 권한 정책 검토"
                     type="text"
@@ -858,14 +970,59 @@ export function ProjectOverviewPage({
                   <span>일시</span>
                   <input
                     aria-label="새 회의 일시"
-                    disabled={!canCreateMeeting}
+                    disabled={!canCreateMeeting || meetingOperationLoading}
                     onChange={(event) => setNewMeetingAt(event.target.value)}
                     type="datetime-local"
                     value={newMeetingAt}
                   />
                 </label>
-                <button disabled={!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt} type="submit">회의 생성</button>
+                <label>
+                  <span>초기 참여자</span>
+                  <select
+                    aria-label="새 회의 초기 참여자"
+                    disabled={!canCreateMeeting || meetingOperationLoading}
+                    multiple
+                    onChange={(event) =>
+                      setNewMeetingParticipantEmails(
+                        Array.from(event.currentTarget.selectedOptions, (option) => option.value)
+                      )
+                    }
+                    value={newMeetingParticipantEmails}
+                  >
+                    {meetingInviteCandidates.map((member) => (
+                      <option key={`meeting-create-member-${member.email}`} value={member.email}>
+                        {member.name} · {member.spaceRole}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button disabled={meetingOperationLoading || !canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt} type="submit">회의 생성</button>
               </form>
+
+              {meetingReadLoading ? <div className="project-operation-note">회의 상세와 참여자 정보를 불러오는 중입니다.</div> : null}
+              {meetingMutationError ? <div className="meeting-ai-error">{meetingMutationError}</div> : null}
+              {canCreateMeeting && latestMeetingInvite ? (
+                <div className="project-meeting-invite-result">
+                  <div>
+                    <strong>{latestMeetingInvite.title} 참가 정보</strong>
+                    <span>참가 코드는 생성 응답 직후 이 브라우저 메모리에서만 표시됩니다.</span>
+                  </div>
+                  <label>
+                    <span>회의 참가 코드</span>
+                    <input aria-label="회의 참가 코드" readOnly value={latestMeetingInvite.joinCode} />
+                  </label>
+                  <label>
+                    <span>회의 참가 링크</span>
+                    <input aria-label="회의 참가 링크" readOnly value={latestMeetingInvite.joinUrl} />
+                  </label>
+                  <button
+                    onClick={() => void navigator.clipboard.writeText(latestMeetingInvite.joinCode)}
+                    type="button"
+                  >
+                    코드 복사
+                  </button>
+                </div>
+              ) : null}
 
               {selectedMeeting ? (
                 <>
@@ -887,7 +1044,7 @@ export function ProjectOverviewPage({
                     <label>
                       <span>회의 상태</span>
                       <select
-                        disabled={!canManageMeetingAccess}
+                        disabled={meetingOperationLoading || !canManageMeetingAccess}
                         onChange={(event) =>
                           onUpdateMeetingStatus?.(
                             viewData.selectedSpace.name,
@@ -897,21 +1054,52 @@ export function ProjectOverviewPage({
                         }
                         value={selectedMeeting.state}
                       >
-                        <option value="예정">예정</option>
-                        <option value="완료">완료</option>
-                        <option value="보고서 생성됨">보고서 생성됨</option>
+                        {getAllowedMeetingStates(selectedMeeting.state).map((state) => (
+                          <option key={`meeting-state-${state}`} value={state}>{state}</option>
+                        ))}
                       </select>
                     </label>
 
                     <button
                       className="project-operation-danger"
-                      disabled={!canDeleteMeeting}
+                      disabled={meetingOperationLoading || !canDeleteMeeting}
                       onClick={() => handleStartMeetingDelete(selectedMeeting.index)}
                       type="button"
                     >
                       회의 삭제
                     </button>
                   </div>
+
+                  <form
+                    className="project-meeting-create-form"
+                    key={`meeting-edit-${selectedMeeting.id ?? selectedMeeting.index}`}
+                    onSubmit={handleMeetingDetailsSubmit}
+                  >
+                    <label>
+                      <span>회의 제목 수정</span>
+                      <input
+                        defaultValue={selectedMeeting.title}
+                        disabled={meetingOperationLoading || !canManageMeetingAccess || selectedMeeting.state !== "예정"}
+                        name="meetingTitle"
+                        type="text"
+                      />
+                    </label>
+                    <label>
+                      <span>예정 일시 수정</span>
+                      <input
+                        defaultValue={toDateTimeLocal(selectedMeeting.scheduledAt)}
+                        disabled={meetingOperationLoading || !canManageMeetingAccess || selectedMeeting.state !== "예정"}
+                        name="meetingScheduledAt"
+                        type="datetime-local"
+                      />
+                    </label>
+                    <button
+                      disabled={meetingOperationLoading || !canManageMeetingAccess || selectedMeeting.state !== "예정"}
+                      type="submit"
+                    >
+                      회의 정보 저장
+                    </button>
+                  </form>
 
                   {meetingDeleteCandidate === selectedMeeting.index ? (
                     <div className="project-delete-confirm">
@@ -926,7 +1114,7 @@ export function ProjectOverviewPage({
                         type="text"
                         value={meetingDeleteConfirm}
                       />
-                      <button disabled={!canConfirmMeetingDelete} onClick={handleConfirmMeetingDelete} type="button">
+                      <button disabled={meetingOperationLoading || !canConfirmMeetingDelete} onClick={handleConfirmMeetingDelete} type="button">
                         삭제 확정
                       </button>
                     </div>
@@ -935,7 +1123,7 @@ export function ProjectOverviewPage({
                   <div className="project-acl-note">
                     default-deny 기준 운영 ACL 조정 화면입니다. 일반 신규 참여는 URL/코드 참가 신청과 HOST 승인을 사용합니다.
                     명시 참여자만 회의 접근 대상으로 보이고, OWNER/ADMIN은 ACL 없이 override 접근으로 표시합니다.
-                    마지막 active HOST의 강등과 회수는 UI와 local handler에서 모두 차단합니다.
+                    마지막 active HOST의 강등과 회수는 UI에서 예방하고 Backend 정책으로 최종 차단합니다.
                   </div>
 
                   <div className="project-acl-overrides">
@@ -960,12 +1148,12 @@ export function ProjectOverviewPage({
                     <label>
                       <span>멤버</span>
                       <select
-                        disabled={!canManageMeetingAccess}
+                        disabled={!canManageMeetingAccess || meetingOperationLoading}
                         onChange={(event) => setSelectedMemberEmail(event.target.value)}
                         value={selectedMemberEmail}
                       >
                         <option value="">멤버 선택</option>
-                        {members.map((member) => (
+                        {aclGrantCandidates.map((member) => (
                           <option key={`member-option-${member.email}`} value={member.email}>
                             {member.name} · {member.role}
                           </option>
@@ -975,7 +1163,7 @@ export function ProjectOverviewPage({
                     <label>
                       <span>회의 role</span>
                       <select
-                        disabled={!canManageMeetingAccess}
+                        disabled={!canManageMeetingAccess || meetingOperationLoading}
                         onChange={(event) => setSelectedMemberRole(event.target.value as MeetingParticipantState["role"])}
                         value={selectedMemberRole}
                       >
@@ -984,7 +1172,7 @@ export function ProjectOverviewPage({
                         <option value="HOST">HOST</option>
                       </select>
                     </label>
-                    <button disabled={!canManageMeetingAccess || !selectedMemberEmail} type="submit">운영 ACL 부여</button>
+                    <button disabled={!canManageMeetingAccess || meetingOperationLoading || !selectedMemberEmail} type="submit">운영 ACL 부여</button>
                   </form>
 
                   <div className="project-acl-list">
@@ -999,7 +1187,7 @@ export function ProjectOverviewPage({
                         </div>
                         <select
                           aria-label={`${participant.name} 회의 role`}
-                          disabled={!canManageMeetingAccess || isLastActiveHost(participant)}
+                          disabled={!canManageMeetingAccess || meetingOperationLoading || isLastActiveHost(participant)}
                           onChange={(event) =>
                             handleParticipantRoleChange(participant, event.target.value as MeetingParticipantState["role"])
                           }
@@ -1011,7 +1199,7 @@ export function ProjectOverviewPage({
                         </select>
                         <button
                           className={participant.accessStatus === "ACTIVE" ? "secondary" : "project-acl-restore"}
-                          disabled={!canManageMeetingAccess || isLastActiveHost(participant)}
+                          disabled={!canManageMeetingAccess || meetingOperationLoading || isLastActiveHost(participant)}
                           onClick={() =>
                             handleParticipantAccessChange(
                               participant,
