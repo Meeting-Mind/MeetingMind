@@ -698,7 +698,7 @@
 - legacy `/api/stt` streaming session과 transcript file prototype은 실제 STT pipeline 계약이 Future Draft라 이번 관계형 artifact persistence에서 제외했다.
 - T230 embedding worker, model/dimension/index, pgvector similarity query와 semantic retriever는 별도 AI/RAG 담당 범위다.
 - `Q-008`, `Q-009` candidate TTL과 report history/export는 여전히 후속 결정이 필요하다.
-## M033 Grounded PostgreSQL RAG Preparation
+## M034 Grounded PostgreSQL RAG Preparation
 
 ### Decisions
 
@@ -708,23 +708,23 @@
 - `EmbeddingChunk.scope`는 query mode가 아니라 source 소유 범위다. meeting artifact와 ProjectKnowledge를 중복 임베딩하지 않는다.
 - Target AI는 관련도 gate와 structured citation 검증을 사용한다. 근거 없는 chat/report/task 결과는 public 응답 또는 candidate 저장에 사용하지 않는다.
 - 인덱스 갱신은 fine-tuning이 아니라 source별 비동기 재임베딩이다. ProjectKnowledge 변경, transcript 완료, 발화자명 변경, current confirmed report 변경이 trigger이며 삭제/보관/보존 만료는 즉시 제외한다.
-- PostgreSQL `embedding_jobs`를 durable queue로 사용하고 별도 broker는 도입하지 않는다. grounding은 완료된 T253 Backend persistence 위에서 먼저 진행하고 worker/retriever는 V11 migration 이후 통합한다.
+- PostgreSQL `embedding_jobs`를 durable queue로 사용하고 별도 broker는 도입하지 않는다. grounding은 완료된 T253 Backend persistence 위에서 먼저 진행하고 worker/retriever는 V12 migration 이후 통합한다.
 - 운영 baseline은 원문 비노출 로그, p95 검색/응답 지연, unsupported reason, citation 검증 실패, embedding queue age와 final failure다.
 
 ### Document Impact
 
 - Updated: `clarify.md`, `plan.md`, `contracts/ai-api.md`, `data-model.md`, `erd.md`, `tasks.md`, shared handoff.
 - Requirements impact: 기존 FR-MBOT/FR-PBOT, NFR-AI, NFR-AZ, NFR-DATA, 성능 기준을 구체화했으며 `requirements/*` 기준선 자체는 변경하지 않았다.
-- ERD/data-model impact: target `vector(1536)`, EmbeddingJob source XOR/generation unique와 retry/lease metadata를 문서화했다. 실제 V1-V10 migration은 수정하지 않고 T256의 V11 forward migration으로 분리했다.
-- API impact: T254 문서 준비 시 Target 응답에 nullable `unsupportedReason`과 citation 검증 규칙을 추가했고, 당시 Current Prototype 구현은 유지했다. 실제 응답 구현은 아래 T255에서 반영했다.
+- ERD/data-model impact: target `vector(1536)`, EmbeddingJob source XOR/generation unique와 retry/lease metadata를 문서화했다. 실제 V1-V10 migration은 수정하지 않고 T267의 V12 forward migration으로 분리했다.
+- API impact: T264 문서 준비 시 Target 응답에 nullable `unsupportedReason`과 citation 검증 규칙을 추가했고, 당시 Current Prototype 구현은 유지했다. 실제 응답 구현은 아래 T265에서 반영했다.
 
 ### Verification
 
 - Passed: 관련 requirements, AI contract, data model, ERD, existing V9 job schema 영향 비교.
-- Passed: `git diff --check`, stale Q-010/scope 표현 검색, T254-T264 task ID 중복 검사.
+- Passed: `git diff --check`, stale Q-010/scope 표현 검색, T264-T276 task ID 중복 검사.
 - Not run: code tests. 이번 작업은 구현 변경 없는 shared contract/task 준비다.
 
-### T255 Grounding Implementation
+### T265 Grounding Implementation
 
 - `ai/app/grounding.py`에 공통 evidence gate와 `NO_EVIDENCE`, `LOW_RELEVANCE`, `MODEL_UNSUPPORTED`, `UNVERIFIED_OUTPUT` 판정을 추가했다.
 - in-memory lexical 검색 점수를 `0.0~1.0`으로 정규화하고 prototype threshold `0.30` 미만이면 provider를 호출하지 않는다.
@@ -733,14 +733,14 @@
 - public/internal 응답에 nullable `unsupportedReason`을 추가하고 supported 응답의 `sources[]`는 실제 citation만 반환한다.
 - API request, ERD, 관계형 data model은 바꾸지 않았다. 현재 Backend가 직접 전달하는 report/task source는 검색 점수가 없어 evidence 존재 gate만 적용하고, model별 semantic threshold는 T260에서 보정한다.
 
-### T255 Verification
+### T265 Verification
 
 - Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 43 tests.
 - Passed: 근거 0건/낮은 관련도 provider 미호출, missing/forged citation 차단, provider unsupported, report/task 무근거 항목 제거.
 - Passed: `cd ai && ./.venv/bin/python -m compileall app tests`.
 - Passed: `git diff --check`.
 
-### T273 Structured Outputs And Untrusted Context
+### T266 Structured Outputs And Untrusted Context
 
 - Responses API request가 선택적으로 `text.format`을 받도록 확장하고, grounded answer, report, task candidate에 strict JSON Schema를 연결했다.
 - 모든 object schema는 `additionalProperties=false`이고 모든 property를 required로 선언했다. nullable report/task 필드는 `string|null`, 저장성 상태는 `candidate` enum으로 제한한다.
@@ -748,7 +748,7 @@
 - source context는 `AiSource` JSON 배열로 직렬화한다. developer instruction은 source의 text/title/speaker 안에 포함된 명령이나 역할 변경 요청을 실행하지 않고 사실 데이터로만 사용하도록 명시한다.
 - API public response, ERD, 관계형 data model과 Backend request 계약은 변경하지 않았다.
 
-### T273 Verification
+### T266 Verification
 
 - Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 48 tests.
 - Passed: strict/closed/required schema 재귀 검증, Responses API request body의 `text.format`, 5개 provider call site format 전달, legacy plain-text 비영향.
@@ -756,9 +756,9 @@
 - Passed: `cd ai && ./.venv/bin/python -m compileall app tests`.
 - Passed: `git diff --check`.
 
-### T256-T260, T274 PostgreSQL RAG Integration
+### T267-T272, T268 PostgreSQL RAG Integration
 
-- V11 forward migration은 기존 V1~V10 checksum을 유지하면서 `pg_trgm`, `vector(1536)`, source XOR/generation unique, retry/lease 필드와 exact/trigram index를 추가했다. 후보 임계값을 넘기 전까지 HNSW는 만들지 않는다.
+- V12 forward migration은 기존 V1~V10 checksum을 유지하면서 `pg_trgm`, `vector(1536)`, source XOR/generation unique, retry/lease 필드와 exact/trigram index를 추가했다. 후보 임계값을 넘기 전까지 HNSW는 만들지 않는다.
 - ProjectKnowledge 생성·수정·복원, MeetingTranscript 완료, 발화자/회의명 변경, current confirmed report 전환은 source row 변경과 같은 transaction에서 다음 EmbeddingJob generation을 만든다. segment insert와 candidate/draft report 편집은 job을 만들지 않는다. ProjectKnowledge archive와 전사 purge는 기존 chunk를 즉시 비활성화하고 purge된 transcript source link도 제거한다.
 - AI worker는 `FOR UPDATE SKIP LOCKED`와 lease로 작업을 선점하고 1분/5분/15분 retry 뒤 final failure를 기록한다. 최신 generation만 기존 active chunk와 원자적으로 교체하며 stale generation과 실패 generation은 이전 active chunk를 유지한다.
 - Meeting worker snapshot은 최신 `meeting_speakers` 이름, transcript window, current confirmed report/decision/action을 사용한다. ProjectKnowledge는 `PUBLISHED`이고 미삭제인 원천만 chunk로 만든다.
@@ -766,38 +766,39 @@
 - AI SQL은 active chunk와 `COMPLETED` job만 대상으로 exact cosine 20개와 `pg_trgm` 20개를 RRF로 결합한다. ProjectKnowledge publish/delete와 MeetingTranscript purge 상태도 방어적으로 다시 확인한다. Meeting 단일 범위, ProjectKnowledge와 허용 회의 union, 빈 allowed list와 cross-space/meeting 차단을 DB 통합 테스트로 검증했다.
 - 모든 `/api/internal/*`는 `X-MeetingMind-Service-Token`을 검증한다. Backend의 네 AI gateway client는 같은 환경변수에서 헤더를 추가하고 빈 credential은 전송하지 않는다.
 
-### T256-T260, T274 Verification
+### T267-T272, T268 Verification
 
-- Passed: 임시 PostgreSQL 16 DB에서 Flyway V1~V10 적용, legacy V10 job 삽입, V11 upgrade와 version 1~11 history 확인.
+- Passed: 임시 PostgreSQL 16 DB에서 Flyway V1~V10 적용, legacy V10 job 삽입, V11 soft-delete 적용 후 V12 upgrade와 version 1~12 history 확인.
 - Passed: `vector(1536)`, `vector`/`pg_trgm`, exact cosine/trigram query, source trigger generation과 non-trigger negative case.
-- Passed: 별도 V1~V11 DB에서 deterministic 1536차원 provider로 worker generation 1→2→3/4 stale swap, source segment link, Meeting/Project scope와 cross-scope 차단 통합 테스트.
+- Passed: 별도 V1~V12 DB에서 deterministic 1536차원 provider로 worker generation 1→2→3/4 stale swap, source segment link, Meeting/Project scope와 cross-scope 차단 통합 테스트.
 - Passed: `cd ai && ./.venv/bin/python -m compileall app tests`.
 - Passed: `cd ai && ./.venv/bin/python -m unittest discover -s tests -v`, 60 tests 중 DB 환경변수 기반 1건은 기본 실행에서 skip; 같은 테스트를 별도 PostgreSQL DSN으로 실행해 통과했다.
 - Passed: `cd backend && ./gradlew test`와 PostgreSQL `MigrationIntegrationTest --rerun-tasks`.
+- Migration reconciliation: Meeting soft delete를 `V11`로 유지하고 vector/job migration을 `V12`로 승격했다. 기존 branch-local `V11 finalize vector search jobs` history가 있는 DB는 Flyway repair 대상이 아니며, data dump 후 새 DB에서 V1~V12를 다시 적용해야 한다.
 - Passed: `docker compose -f compose.local.yml config`, `docker compose -f compose.local.yml --profile ai config`, `git diff --check`.
-- Not run: 실제 OpenAI embedding/chat credential을 사용한 과금 발생 E2E와 한국어 30~50개 평가/검색 p95 측정. T263에서 수행한다.
+- Not run: 실제 OpenAI embedding/chat credential을 사용한 과금 발생 E2E와 한국어 30~50개 평가/검색 p95 측정. T275에서 수행한다.
 
 ### Remaining Boundary
 
 - legacy STT streaming session/file은 아직 `meeting_transcripts.status=COMPLETED`를 JDBC로 기록하지 않는다. DB trigger/worker는 준비됐지만 실제 회의 종료 이벤트 연결은 STT owner와 통합해야 한다.
-- T262 Frontend `unsupportedReason`, T263 실제 provider 기반 정확도·성능·Backend-to-AI HTTP 검증이 남아 있다.
+- T274 Frontend `unsupportedReason`, T263 실제 provider 기반 정확도·성능·Backend-to-AI HTTP 검증이 남아 있다.
 - M034 attachment RAG는 MeetingMessage/Attachment 계약과 Backend 저장이 완료된 뒤 진행한다.
 
-### T261 AI Observability
+### T273 AI Observability
 
 - Backend 요청의 안전한 `X-Request-ID`를 응답과 네 AI gateway 호출에 전파하고 오류 응답 `traceId`와 연결했다.
 - AI API, PostgreSQL 검색, embedding job/queue에 JSON 구조 로그를 적용했다. 질문, STT, 답변과 credential은 허용 필드에 포함하지 않는다.
 - 검색 지연/결과 수/검색 범위, source·unsupported·citation failure, job 처리 시간/실패 코드, queue pending/processing/failed/oldest age를 기록한다.
-- 초기 알림 기준은 검색 p95 1초, unsupported 30%, citation failure 5%, pending age 300초 또는 failed 1건, gateway/provider 실패율 5%다. 실제 threshold 조정은 T263 측정 이후 수행한다.
+- 초기 알림 기준은 검색 p95 1초, unsupported 30%, citation failure 5%, pending age 300초 또는 failed 1건, gateway/provider 실패율 5%다. 실제 threshold 조정은 T275 측정 이후 수행한다.
 
-### T261 Verification
+### T273 Verification
 
 - Passed: `cd ai && ./.venv/bin/python -m compileall app tests`와 Docker PostgreSQL DSN을 사용한 AI 62 tests. 질문·검색 결과·provider 상세 비노출, 검색/queue 구조 로그와 generation 교체를 검증했다.
 - Passed: `cd backend && ./gradlew test`, PostgreSQL `MigrationIntegrationTest`와 `JdbcWorkspaceStoreIntegrationTest`; RequestTrace 정규화와 네 AI gateway의 `X-Request-ID` 전달을 검증했다.
 - Passed: Compose 기본/AI profile config, Frontend lint 오류 0건/unit 6건/build, Playwright 4건, `git diff --check`.
-- Not run: 실제 OpenAI credential을 사용하는 과금 E2E, 한국어 평가 질의와 검색 p95 측정, 운영 모니터링 시스템의 실제 alert 발화. T263에서 수행한다.
+- Not run: 실제 OpenAI credential을 사용하는 과금 E2E, 한국어 평가 질의와 검색 p95 측정, 운영 모니터링 시스템의 실제 alert 발화. T275에서 수행한다.
 
-## M034 Meeting Chat Text Attachment RAG Preparation
+## M035 Meeting Chat Text Attachment RAG Preparation
 
 ### Decision
 
@@ -809,15 +810,15 @@
 
 - Updated: `clarify.md`, `plan.md`, `contracts/ai-api.md`, `tasks.md`, shared handoff.
 - Deferred: Attachment API, ERD, data model과 requirements 변경은 T266 shared contract에서 함께 처리한다.
-- M033 impact: 기존 grounding과 pgvector 기반 구현은 그대로 진행할 수 있으며 이미지 vector 컬럼이나 모델은 V11에 추가하지 않는다.
+- M034 impact: 기존 grounding과 pgvector 기반 구현은 그대로 진행할 수 있으며 이미지 vector 컬럼이나 모델은 V12에 추가하지 않는다.
 
 ### Verification
 
 - Passed: 현재 LiveRoom, embedding chunk/job schema, 업로드 요구사항과 권한 문서의 선행 경계 비교.
-- Passed: `git diff --check`, Q-011/D-037 반영 검색, T265-T272 task ID 중복 검사.
+- Passed: `git diff --check`, Q-011/D-039 반영 검색, T277-T284 task ID 중복 검사.
 - Not run: code tests. 이번 변경은 첨부파일 검색 정책과 후속 task 준비만 포함한다.
 
-## M035 Frontend Workspace Persistence Hydration
+## M036 Frontend Workspace Persistence Hydration
 
 ### Implementation
 
@@ -841,3 +842,41 @@
 - Passed: `cd frontend && npm run build`; 기존 500 kB 초과 bundle warning만 유지됐다.
 - Passed: Playwright Space/Meeting 새로고침 복원 및 프로젝트 생성 500 실패 시 phantom 미생성 2 tests.
 - Passed: `git diff --check`.
+## M033 Meeting CRUD PostgreSQL End-to-End
+
+### Design and Contract
+
+- FR-MREG-01/04/05/06/07, FR-ACL-07을 기준으로 목록·상세·수정·삭제 권한과 canonical 상태 전이를 확정했다.
+- 수정은 OWNER/ADMIN/active HOST, 삭제는 OWNER/active HOST만 허용한다. ADMIN 단독 삭제는 기본 거부한다.
+- `SCHEDULED` 삭제는 `CANCELED` 전환과 soft-delete metadata를 같은 transaction에 기록하고, `IN_PROGRESS` 삭제는 `409 MEETING_ALREADY_PROCESSING`, `ENDED` 삭제는 상태를 유지한 soft delete로 결정했다.
+- hard purge, restore, grace period는 보존·감사 정책이 추가로 필요하므로 후속 범위로 남겼다.
+
+### Changes
+
+- V11 forward migration에 `meetings.deleted_at`, `deleted_by` FK/check와 active 조회 partial index를 추가했다. 공유 V1~V10은 수정하지 않았다.
+- `WorkspaceStore`의 in-memory/JDBC adapter에 meeting update/soft delete를 추가하고, 목록·상세·Project AI 후보·Meeting AI source 조회에서 삭제 row를 제외했다.
+- `WorkspaceDomainService`에 ACL-filtered list/detail, title/schedule/status update, row-locked delete/audit transaction을 구현했다.
+- `GET /api/v1/spaces/{spaceId}/meetings`, `GET/PATCH/DELETE /api/v1/meetings/{meetingId}`와 DTO를 구현했다.
+- Frontend target Space는 Backend 회의 목록으로 legacy meeting을 교체하며 생성·수정·삭제 뒤 반드시 재조회한다. API 실패 시 local-only 성공 mutation을 수행하지 않는다.
+- ProjectOverview의 loading/error/권한 control과 상태 표기, 삭제 확인을 연결하고, 고정 높이 flex에서 운영 카드와 칸반이 겹치던 레이아웃을 수정했다.
+- Playwright Backend/Frontend port와 Backend API base URL을 환경변수로 분리해 기존 개발 서버를 중단하지 않고 격리 E2E를 실행할 수 있게 했다. cross-origin target 실행에 필요한 CORS `PATCH`도 허용했다.
+
+### Verification
+
+- Passed: `cd backend && ./gradlew test`
+- Passed: local PostgreSQL `5434`에서 `JdbcWorkspaceStoreIntegrationTest`; update round-trip, deleted metadata, 목록/Project AI/Meeting AI 제외
+- Passed: 임시 빈 PostgreSQL `55432`에서 `MigrationIntegrationTest`; Flyway V1~V11 전체 적용. 기존 local V10 schema의 V11 forward upgrade와 재검증도 통과했다.
+- Passed: `cd frontend && npm run test`; 2 files, 9 tests
+- Passed: `cd frontend && npm run lint`; 오류 0건, 기존 경고 8건
+- Passed: `cd frontend && npm run build`; bundle size 경고 외 성공
+- Passed: `PLAYWRIGHT_BACKEND_PORT=18081 npm run test:e2e`; 로그인, HOST prejoin/default-deny, 회의 생성→수정→삭제와 서버 목록 0건, 총 3건
+- Passed: local profile Backend `18082` + PostgreSQL real API smoke; signup→Space→create→list/detail→patch 후 Backend 재시작, login→수정값 재조회→delete→목록 0건→상세 404→Meeting AI 404
+- Cleanup: real API smoke에서 생성한 고유 account/session/Space/Meeting/audit row만 검증 후 transaction으로 제거했다.
+- Passed: `git diff --check`
+- Recovered validation input error: 첫 JDBC 재실행은 수동으로 잘못 넣은 DB 비밀번호 때문에 실패했고, `compose.local.yml`의 `meetingmind_local` 기준으로 재실행해 통과했다. 코드 실패는 아니었다.
+
+### Closeout Boundary
+
+- `.specify/memory/session-handoff.md`는 병합된 팀 공통 기준만 기록한다는 규칙에 따라 아직 병합되지 않은 현재 브랜치 상태를 추가하지 않았다.
+- soft-deleted meeting의 hard purge, restore, grace period와 운영자 조회 API는 후속 milestone에서 보존·감사 요구와 함께 결정한다.
+- AI/RAG 파일과 vector migration은 수정하지 않았다. 후속 retriever도 M033의 `deleted_at is null` 관계형 선필터 결과만 사용해야 한다.

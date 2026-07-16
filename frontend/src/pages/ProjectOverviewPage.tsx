@@ -149,6 +149,15 @@ function getProjectKnowledge(projectName: string, description: string): ProjectK
   return knowledgeMap[projectName] ?? buildGeneratedProjectKnowledge(projectName, description);
 }
 
+function toDateTimeLocal(value?: string) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 function getMeetingDescription(meeting: ProjectMeeting) {
   if (meeting.state === "완료") {
     return "데이터셋 구조 확인 및 결정사항 정리";
@@ -158,15 +167,32 @@ function getMeetingDescription(meeting: ProjectMeeting) {
     return "STT 보관 정책 및 관리자 권한 최종 확정";
   }
 
+  if (meeting.state === "진행 중") {
+    return "현재 진행 중인 회의입니다.";
+  }
+
+  if (meeting.state === "취소") {
+    return "취소된 회의입니다.";
+  }
+
   return "권한 기반 RAG 검색 구조 설계 결정";
 }
 
 function getMeetingStateLabel(meeting: ProjectMeeting) {
-  return meeting.state === "완료" ? "완료" : meeting.state === "예정" ? "예정" : "보고서 생성됨";
+  return meeting.state;
 }
 
 function getMeetingStateTone(meeting: ProjectMeeting) {
-  return meeting.state === "완료" ? "green" : meeting.state === "예정" ? "orange" : "violet";
+  if (meeting.state === "완료") {
+    return "green";
+  }
+  if (meeting.state === "예정") {
+    return "orange";
+  }
+  if (meeting.state === "취소") {
+    return "gray";
+  }
+  return "violet";
 }
 
 function parseMeetingDateLabel(date: string) {
@@ -262,6 +288,8 @@ export function ProjectOverviewPage({
   data,
   session,
   projectAiSpaceIds,
+  meetingMutationError,
+  meetingMutationLoading = false,
   onDeleteProject,
   meetingParticipants,
   onAddMeetingParticipant,
@@ -277,6 +305,7 @@ export function ProjectOverviewPage({
   onMoveProjectTask,
   onUpdateProjectTask,
   onUpdateMeetingParticipant,
+  onUpdateMeeting,
   onUpdateMeetingStatus,
   onUpdateProject
 }: {
@@ -284,6 +313,8 @@ export function ProjectOverviewPage({
   data: WorkspaceData["projectOverview"];
   session: AuthSession | null;
   projectAiSpaceIds: string[];
+  meetingMutationError?: string;
+  meetingMutationLoading?: boolean;
   onDeleteProject?: (spaceId: string) => void;
   meetingParticipants: Record<string, MeetingParticipantState[]>;
   onAddMeetingParticipant?: (
@@ -310,6 +341,11 @@ export function ProjectOverviewPage({
     meetingIndex: string,
     participantId: string,
     updates: Pick<MeetingParticipantState, "accessStatus" | "role">
+  ) => void;
+  onUpdateMeeting?: (
+    projectName: string,
+    meetingIndex: string,
+    updates: { title?: string; scheduledAt?: string }
   ) => void;
   onUpdateMeetingStatus?: (projectName: string, meetingIndex: string, state: ProjectMeeting["state"]) => void;
   onUpdateProject?: (spaceId: string, payload: { name: string; description: string }) => void;
@@ -612,6 +648,23 @@ export function ProjectOverviewPage({
     onDeleteProject?.(viewData.selectedSpace.id);
   }
 
+  function handleMeetingDetailsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMeeting || !canManageMeetingAccess || selectedMeeting.state !== "예정") {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const title = String(form.get("meetingTitle") ?? "").trim();
+    const scheduledAtValue = String(form.get("meetingScheduledAt") ?? "");
+    if (!title || !scheduledAtValue) {
+      return;
+    }
+    onUpdateMeeting?.(selectedProjectName, selectedMeeting.index, {
+      title,
+      scheduledAt: new Date(scheduledAtValue).toISOString()
+    });
+  }
+
   function handleStartMeetingDelete(meetingIndex: string) {
     if (!canDeleteMeeting) {
       return;
@@ -849,7 +902,7 @@ export function ProjectOverviewPage({
             <section className="project-list-section project-operations-section">
               <div className="project-list-head">
                 <strong>회의 운영 / 접근 제어</strong>
-                <span>local state · target API 대기</span>
+                <span>{projectAiAvailable ? "PostgreSQL target API" : "데모 local state"}</span>
               </div>
 
               <form className="project-meeting-create-form" onSubmit={handleCreateMeeting}>
@@ -874,11 +927,13 @@ export function ProjectOverviewPage({
                     value={newMeetingAt}
                   />
                 </label>
-                <button disabled={!canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt || meetingCreating} type="submit">
+                <button disabled={meetingMutationLoading || !canCreateMeeting || !newMeetingTitle.trim() || !newMeetingAt || meetingCreating} type="submit">
                   {meetingCreating ? "생성 중..." : "회의 생성"}
                 </button>
               </form>
               {meetingCreateError ? <p aria-live="polite" className="workspace-form-error">{meetingCreateError}</p> : null}
+
+              {meetingMutationError ? <div className="meeting-ai-error">{meetingMutationError}</div> : null}
 
               {selectedMeeting ? (
                 <>
@@ -900,7 +955,7 @@ export function ProjectOverviewPage({
                     <label>
                       <span>회의 상태</span>
                       <select
-                        disabled={!canManageMeetingAccess}
+                        disabled={meetingMutationLoading || !canManageMeetingAccess}
                         onChange={(event) =>
                           onUpdateMeetingStatus?.(
                             viewData.selectedSpace.name,
@@ -911,20 +966,53 @@ export function ProjectOverviewPage({
                         value={selectedMeeting.state}
                       >
                         <option value="예정">예정</option>
+                        <option value="진행 중">진행 중</option>
                         <option value="완료">완료</option>
+                        <option value="취소">취소</option>
                         <option value="보고서 생성됨">보고서 생성됨</option>
                       </select>
                     </label>
 
                     <button
                       className="project-operation-danger"
-                      disabled={!canDeleteMeeting}
+                      disabled={meetingMutationLoading || !canDeleteMeeting}
                       onClick={() => handleStartMeetingDelete(selectedMeeting.index)}
                       type="button"
                     >
                       회의 삭제
                     </button>
                   </div>
+
+                  <form
+                    className="project-meeting-create-form"
+                    key={`meeting-edit-${selectedMeeting.id ?? selectedMeeting.index}`}
+                    onSubmit={handleMeetingDetailsSubmit}
+                  >
+                    <label>
+                      <span>회의 제목 수정</span>
+                      <input
+                        defaultValue={selectedMeeting.title}
+                        disabled={meetingMutationLoading || !canManageMeetingAccess || selectedMeeting.state !== "예정"}
+                        name="meetingTitle"
+                        type="text"
+                      />
+                    </label>
+                    <label>
+                      <span>예정 일시 수정</span>
+                      <input
+                        defaultValue={toDateTimeLocal(selectedMeeting.scheduledAt)}
+                        disabled={meetingMutationLoading || !canManageMeetingAccess || selectedMeeting.state !== "예정"}
+                        name="meetingScheduledAt"
+                        type="datetime-local"
+                      />
+                    </label>
+                    <button
+                      disabled={meetingMutationLoading || !canManageMeetingAccess || selectedMeeting.state !== "예정"}
+                      type="submit"
+                    >
+                      회의 정보 저장
+                    </button>
+                  </form>
 
                   {meetingDeleteCandidate === selectedMeeting.index ? (
                     <div className="project-delete-confirm">
@@ -939,7 +1027,7 @@ export function ProjectOverviewPage({
                         type="text"
                         value={meetingDeleteConfirm}
                       />
-                      <button disabled={!canConfirmMeetingDelete} onClick={handleConfirmMeetingDelete} type="button">
+                      <button disabled={meetingMutationLoading || !canConfirmMeetingDelete} onClick={handleConfirmMeetingDelete} type="button">
                         삭제 확정
                       </button>
                     </div>

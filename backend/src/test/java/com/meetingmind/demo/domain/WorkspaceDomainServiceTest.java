@@ -633,46 +633,102 @@ class WorkspaceDomainServiceTest {
     }
 
     @Test
-    void listMeetingsAppliesMeetingAclAndKeepsManagerOverrideRoleNullable() {
+    void meetingListAndDetailApplyMeetingAcl() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult accessible = context.service.createMeeting(
+                owner.id(), space.space().id(), "접근 회의", SCHEDULED_AT, List.of(member.id())
+        );
+        context.service.createMeeting(
+                owner.id(), space.space().id(), "비공개 회의", SCHEDULED_AT.plusDays(1), List.of()
+        );
+
+        List<WorkspaceDomainService.MeetingView> meetings = context.service.listMeetings(
+                member.id(), space.space().id(), "SCHEDULED", "2026-07-09T00:00:00Z", "2026-07-11T00:00:00Z"
+        );
+        WorkspaceDomainService.MeetingView detail = context.service.meetingDetail(
+                member.id(), accessible.meeting().id()
+        );
+
+        assertThat(meetings).extracting(view -> view.meeting().id()).containsExactly(accessible.meeting().id());
+        assertThat(meetings.getFirst().myRole()).isEqualTo(MeetingRole.VIEWER);
+        assertThat(detail.participants()).hasSize(2);
+        assertThatThrownBy(() -> context.service.listMeetings(
+                member.id(), space.space().id(), null, "not-a-date", null
+        ))
+                .isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+    }
+
+    @Test
+    void meetingUpdateAllowsCanonicalTransitionsAndRejectsReverseTransition() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult created = context.service.createMeeting(
+                owner.id(), space.space().id(), "기존 제목", SCHEDULED_AT, List.of()
+        );
+
+        Meeting renamed = context.service.updateMeeting(
+                owner.id(), created.meeting().id(), "수정 제목", SCHEDULED_AT.plusHours(1), null
+        );
+        Meeting started = context.service.updateMeeting(
+                owner.id(), created.meeting().id(), null, null, "IN_PROGRESS"
+        );
+        Meeting ended = context.service.updateMeeting(
+                owner.id(), created.meeting().id(), null, null, "ENDED"
+        );
+
+        assertThat(renamed.title()).isEqualTo("수정 제목");
+        assertThat(renamed.scheduledAt()).isEqualTo(SCHEDULED_AT.plusHours(1));
+        assertThat(started.startedAt()).isEqualTo(OffsetDateTime.now(FIXED_CLOCK));
+        assertThat(ended.endedAt()).isEqualTo(OffsetDateTime.now(FIXED_CLOCK));
+        assertThatThrownBy(() -> context.service.updateMeeting(
+                owner.id(), created.meeting().id(), null, null, "SCHEDULED"
+        ))
+                .isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+    }
+
+    @Test
+    void meetingDeleteUsesOwnerOrHostAndExcludesDeletedMeetingFromAiContext() {
         TestContext context = newContext();
         User owner = context.user("user-owner");
         User admin = context.user("user-admin");
-        User member = context.user("user-member");
         WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
         context.store.addSpaceMember(space.space().id(), admin.id(), SpaceRole.ADMIN, FIXED_CLOCK.instant());
-        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
-        WorkspaceDomainService.MeetingCreationResult accessible = context.service.createMeeting(
-                owner.id(),
-                space.space().id(),
-                "접근 가능한 회의",
-                SCHEDULED_AT,
-                List.of(member.id())
-        );
-        WorkspaceDomainService.MeetingCreationResult restricted = context.service.createMeeting(
-                owner.id(),
-                space.space().id(),
-                "제한된 회의",
-                SCHEDULED_AT.plusDays(1),
-                List.of()
+        WorkspaceDomainService.MeetingCreationResult created = context.service.createMeeting(
+                owner.id(), space.space().id(), "삭제 회의", SCHEDULED_AT, List.of()
         );
 
-        assertThat(context.service.listMeetings(member.id(), space.space().id()))
-                .extracting(summary -> summary.meeting().id())
-                .containsExactly(accessible.meeting().id());
-        assertThat(context.service.listMeetings(admin.id(), space.space().id()))
-                .extracting(summary -> summary.meeting().id())
-                .containsExactly(accessible.meeting().id(), restricted.meeting().id());
-        assertThat(context.service.listMeetings(admin.id(), space.space().id()))
-                .allSatisfy(summary -> assertThat(summary.myRole()).isNull());
-        assertThat(context.service.listMeetings(
-                admin.id(),
-                space.space().id(),
-                com.meetingmind.demo.authz.MeetingStatus.SCHEDULED,
-                SCHEDULED_AT.plusHours(1),
-                SCHEDULED_AT.plusDays(2)
-        ))
-                .extracting(summary -> summary.meeting().id())
-                .containsExactly(restricted.meeting().id());
+        assertThatThrownBy(() -> context.service.deleteMeeting(admin.id(), created.meeting().id()))
+                .isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.FORBIDDEN, "MEETING_ACCESS_DENIED"));
+        assertThat(context.service.deleteMeeting(owner.id(), created.meeting().id())).isTrue();
+        assertThat(context.store.findMeetingById(created.meeting().id())).isEmpty();
+        assertThat(context.service.projectAiContextCandidates(owner.id(), space.space().id()).meetings()).isEmpty();
+        assertThatThrownBy(() -> context.service.meetingAiContext(created.meeting().id()))
+                .isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.NOT_FOUND, "MEETING_NOT_FOUND"));
+    }
+
+    @Test
+    void inProgressMeetingDeleteIsRejectedWithConflict() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult created = context.service.createMeeting(
+                owner.id(), space.space().id(), "진행 회의", SCHEDULED_AT, List.of()
+        );
+        context.service.updateMeeting(owner.id(), created.meeting().id(), null, null, "IN_PROGRESS");
+
+        assertThatThrownBy(() -> context.service.deleteMeeting(owner.id(), created.meeting().id()))
+                .isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.CONFLICT, "MEETING_ALREADY_PROCESSING"));
+        assertThat(context.store.findMeetingById(created.meeting().id())).isPresent();
     }
 
     private TestContext newContext() {

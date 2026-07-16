@@ -131,6 +131,18 @@ export interface MeetingListResponse {
   meetings: MeetingSummary[];
 }
 
+export interface MeetingDetailResponse {
+  id: string;
+  spaceId: string;
+  title: string;
+  status: MeetingStatus;
+  scheduledAt: ApiDateTime;
+  startedAt: ApiDateTime | null;
+  endedAt: ApiDateTime | null;
+  myRole: MeetingRole | null;
+  participants: MeetingParticipantSummary[];
+}
+
 export interface UpdateMeetingRequest {
   title?: string;
   scheduledAt?: ApiDateTime;

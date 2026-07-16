@@ -69,6 +69,9 @@ class JdbcWorkspaceStoreIntegrationTest {
                 OffsetDateTime.of(2026, 7, 15, 10, 0, 0, 0, ZoneOffset.UTC),
                 List.of()
         );
+        Meeting updatedMeeting = service.updateMeeting(
+                owner.id(), meeting.meeting().id(), "JDBC Meeting Updated", null, "SCHEDULED"
+        );
         store.addSpaceMember(space.space().id(), member.id(), com.meetingmind.demo.authz.SpaceRole.MEMBER, now);
         service.addMeetingParticipant(
                 owner.id(), meeting.meeting().id(), member.id(), "VIEWER", "member"
@@ -147,8 +150,10 @@ class JdbcWorkspaceStoreIntegrationTest {
         assertThat(reloaded.findSpaceById(space.space().id())).contains(space.space());
         assertThat(reloaded.findMeetingByJoinCode(meeting.meeting().joinCode()))
                 .get()
-                .extracting(Meeting::id)
-                .isEqualTo(meeting.meeting().id());
+                .satisfies(found -> {
+                    assertThat(found.id()).isEqualTo(meeting.meeting().id());
+                    assertThat(found.title()).isEqualTo(updatedMeeting.title());
+                });
         assertThat(reloaded.findMeetingParticipant(meeting.meeting().id(), guest.id()))
                 .get()
                 .satisfies(participant -> {
@@ -213,6 +218,18 @@ class JdbcWorkspaceStoreIntegrationTest {
                 .isInstanceOf(AuthorizationException.class)
                 .extracting("code")
                 .isEqualTo("SPACE_ACCESS_DENIED");
+
+        assertThat(reloadedService.deleteMeeting(owner.id(), inaccessibleMeeting.meeting().id())).isTrue();
+        assertThat(reloaded.findMeetingById(inaccessibleMeeting.meeting().id())).isEmpty();
+        assertThat(jdbc.queryForObject(
+                "select count(*) from meetings where id = ? and deleted_at is not null and deleted_by = ?",
+                Integer.class,
+                inaccessibleMeeting.meeting().id(),
+                owner.id()
+        )).isEqualTo(1);
+        assertThat(reloadedService.projectAiContextCandidates(owner.id(), space.space().id()).meetings())
+                .extracting(Meeting::id)
+                .containsExactly(meeting.meeting().id());
     }
 
     private User user(String id, Instant now) {

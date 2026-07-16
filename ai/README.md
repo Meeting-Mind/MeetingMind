@@ -27,7 +27,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## Embedding worker
 
-로컬 PostgreSQL에 V11 migration이 적용된 후 아래 명령으로 실행합니다.
+로컬 PostgreSQL에 V12 migration이 적용된 후 아래 명령으로 실행합니다.
 
 ```bash
 python -m app.embedding_worker

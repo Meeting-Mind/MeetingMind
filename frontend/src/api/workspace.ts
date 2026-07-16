@@ -22,6 +22,7 @@ import type {
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
   MeetingListResponse,
+  MeetingDetailResponse,
   MeetingParticipantsResponse,
   MeetingJoinRequestsResponse,
   OwnerTransferRequest,
@@ -127,6 +128,12 @@ export async function fetchCalendarEvents(
 
 export async function fetchMeetings(session: AuthSession, spaceId: string): Promise<MeetingListResponse> {
   return requestJson<MeetingListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/meetings`, {
+    headers: buildAuthHeaders(session)
+  });
+}
+
+export async function fetchMeeting(session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
+  return requestJson<MeetingDetailResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     headers: buildAuthHeaders(session)
   });
 }

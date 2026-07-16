@@ -167,13 +167,14 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     }
 
     synchronized Optional<Meeting> findMeetingById(String meetingId) {
-        return Optional.ofNullable(meetingsById.get(meetingId));
+        return Optional.ofNullable(meetingsById.get(meetingId)).filter(meeting -> !meeting.deleted());
     }
 
     synchronized Optional<Meeting> findMeetingByJoinCode(String joinCode) {
         return meetingsById.values()
                 .stream()
                 .filter(meeting -> meeting.joinCode().equals(joinCode))
+                .filter(meeting -> !meeting.deleted())
                 .findFirst();
     }
 
@@ -181,6 +182,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return meetingsById.values()
                 .stream()
                 .filter(meeting -> meeting.spaceId().equals(spaceId))
+                .filter(meeting -> !meeting.deleted())
                 .count();
     }
 
@@ -188,6 +190,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return meetingsById.values()
                 .stream()
                 .filter(meeting -> meeting.spaceId().equals(spaceId))
+                .filter(meeting -> !meeting.deleted())
                 .toList();
     }
 
@@ -210,6 +213,41 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     @Override
     synchronized void lockMeeting(String meetingId) {
         // synchronized store methods already serialize in-memory mutations.
+    }
+
+    @Override
+    synchronized Meeting updateMeeting(
+            String meetingId,
+            String title,
+            OffsetDateTime scheduledAt,
+            OffsetDateTime startedAt,
+            OffsetDateTime endedAt,
+            com.meetingmind.demo.authz.MeetingStatus status
+    ) {
+        Meeting current = findMeetingById(meetingId).orElseThrow();
+        Meeting updated = new Meeting(
+                current.id(), current.spaceId(), title, scheduledAt, current.joinCode(), startedAt, endedAt,
+                status, current.failureReason(), current.retentionPolicy(), current.deletedAt(), current.deletedBy()
+        );
+        meetingsById.put(meetingId, updated);
+        return updated;
+    }
+
+    @Override
+    synchronized Meeting softDeleteMeeting(
+            String meetingId,
+            com.meetingmind.demo.authz.MeetingStatus status,
+            String deletedBy,
+            Instant deletedAt
+    ) {
+        Meeting current = meetingsById.get(meetingId);
+        Meeting deleted = new Meeting(
+                current.id(), current.spaceId(), current.title(), current.scheduledAt(), current.joinCode(),
+                current.startedAt(), current.endedAt(), status, current.failureReason(), current.retentionPolicy(),
+                deletedAt, deletedBy
+        );
+        meetingsById.put(meetingId, deleted);
+        return deleted;
     }
 
     synchronized MeetingJoinRequest createMeetingJoinRequest(

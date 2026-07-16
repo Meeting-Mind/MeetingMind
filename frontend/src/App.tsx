@@ -3,10 +3,12 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import {
   createMeeting,
   createSpace,
+  deleteMeeting,
   fetchLegacyWorkspaceSnapshot,
   fetchMeetings,
   fetchSpaceMembers,
-  fetchSpaces
+  fetchSpaces,
+  updateMeeting
 } from "./api/workspace";
 import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
@@ -20,7 +22,14 @@ import { ReportAgentPage } from "./pages/ReportAgentPage";
 import { TeamMembersPage } from "./pages/TeamMembersPage";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { mockData } from "./data/mockData";
-import type { MeetingStatus, MeetingSummary, SpaceMemberSummary, SpaceSummary, WorkspaceData } from "./types";
+import type {
+  MeetingStatus,
+  MeetingSummary,
+  SpaceMemberSummary,
+  SpaceSummary,
+  UpdateMeetingRequest,
+  WorkspaceData
+} from "./types";
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
 type WorkspaceDataSource = "workspace-api" | "workspace-api-partial" | "legacy-api" | "mock-fallback";
@@ -245,7 +254,7 @@ function formatDateLabel(value: string) {
   return `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} 업데이트`;
 }
 
-function getMeetingState(status: MeetingStatus): ProjectMeeting["state"] {
+function meetingStatusLabel(status: MeetingStatus): ProjectMeeting["state"] {
   if (status === "IN_PROGRESS") {
     return "진행 중";
   }
@@ -258,7 +267,23 @@ function getMeetingState(status: MeetingStatus): ProjectMeeting["state"] {
   return "예정";
 }
 
-function mapMeetingSummary(meeting: MeetingSummary, index: number): ProjectMeeting {
+function meetingStateStatus(state: ProjectMeeting["state"]): MeetingStatus | null {
+  if (state === "예정") {
+    return "SCHEDULED";
+  }
+  if (state === "진행 중") {
+    return "IN_PROGRESS";
+  }
+  if (state === "완료" || state === "보고서 생성됨") {
+    return "ENDED";
+  }
+  if (state === "취소") {
+    return "CANCELED";
+  }
+  return null;
+}
+
+function toProjectMeeting(meeting: MeetingSummary, index: number): ProjectMeeting {
   const scheduledAt = new Date(meeting.scheduledAt);
   return {
     id: meeting.id,
@@ -267,7 +292,7 @@ function mapMeetingSummary(meeting: MeetingSummary, index: number): ProjectMeeti
     date: Number.isNaN(scheduledAt.getTime())
       ? "일정 미정"
       : `${String(scheduledAt.getMonth() + 1).padStart(2, "0")}.${String(scheduledAt.getDate()).padStart(2, "0")}`,
-    state: getMeetingState(meeting.status),
+    state: meetingStatusLabel(meeting.status),
     scheduledAt: meeting.scheduledAt,
     durationMinutes: 60
   };
@@ -337,7 +362,24 @@ export function App() {
   const [meetingParticipants, setMeetingParticipants] = useState<Record<string, MeetingParticipantState[]>>({});
   const [projectTasks, setProjectTasks] = useState<Record<string, ProjectTaskState[]>>(initialProjectTasks);
   const [projectAiSpaceIds, setProjectAiSpaceIds] = useState<string[]>([]);
+  const [meetingMutationError, setMeetingMutationError] = useState("");
+  const [meetingMutationLoading, setMeetingMutationLoading] = useState(false);
   const openAuthModal = useCallback(() => setAuthModalOpen(true), []);
+
+  const refreshTargetMeetings = useCallback(async (session: AuthSession, spaceId: string, projectName: string) => {
+    const response = await fetchMeetings(session, spaceId);
+    const meetings = response.meetings.map(toProjectMeeting);
+    setProjectMeetings((previous) => ({ ...previous, [projectName]: meetings }));
+    setData((previous) => ({
+      ...previous,
+      workspaceHome: {
+        ...previous.workspaceHome,
+        spaces: previous.workspaceHome.spaces.map((space) =>
+          space.id === spaceId ? { ...space, meetings: `진행 회의 ${meetings.length}건` } : space
+        )
+      }
+    }));
+  }, []);
 
   function handleAuthSuccess(session: AuthSession) {
     saveAuthSession(session);
@@ -561,14 +603,30 @@ export function App() {
       throw new Error("회의 제목과 예정 일시는 필수입니다.");
     }
 
+    const usesTargetApi = projectAiSpaceIds.includes(targetSpace.id);
+    if (usesTargetApi) {
+      if (!authSession || !payload?.title || !payload.scheduledAt) {
+        setMeetingMutationError("로그인과 회의 제목, 예정 일시가 필요합니다.");
+        return;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await createMeeting(authSession, targetSpace.id, {
+          title: payload.title,
+          scheduledAt: payload.scheduledAt
+        });
+        await refreshTargetMeetings(authSession, targetSpace.id, projectName);
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "회의를 생성하지 못했습니다.");
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+      return;
+    }
+
     const existingMeetings = projectMeetings[projectName] ?? [];
     const nextMeeting = buildMeeting(projectName, targetSpace.description, existingMeetings.length + 1, payload);
-    const created = await createMeeting(authSession, targetSpace.id, {
-      title: payload.title.trim(),
-      scheduledAt: payload.scheduledAt
-    });
-    nextMeeting.id = created.id;
-    nextMeeting.state = getMeetingState(created.status);
 
     setProjectMeetings((previous) => {
       return {
@@ -615,9 +673,28 @@ export function App() {
     }));
   }
 
-  function handleDeleteMeeting(projectName: string, meetingIndex: string) {
+  async function handleDeleteMeeting(projectName: string, meetingIndex: string) {
     const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
     if (!targetSpace) {
+      return;
+    }
+
+    const meeting = (projectMeetings[projectName] ?? []).find((item) => item.index === meetingIndex);
+    if (projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession || !meeting?.id) {
+        setMeetingMutationError("삭제할 Backend 회의 정보를 찾을 수 없습니다.");
+        return;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await deleteMeeting(authSession, meeting.id);
+        await refreshTargetMeetings(authSession, targetSpace.id, projectName);
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "회의를 삭제하지 못했습니다.");
+      } finally {
+        setMeetingMutationLoading(false);
+      }
       return;
     }
 
@@ -655,13 +732,71 @@ export function App() {
     }));
   }
 
-  function handleUpdateMeetingStatus(projectName: string, meetingIndex: string, state: ProjectMeeting["state"]) {
+  async function handleUpdateMeeting(
+    projectName: string,
+    meetingIndex: string,
+    updates: UpdateMeetingRequest
+  ) {
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    const meeting = (projectMeetings[projectName] ?? []).find((item) => item.index === meetingIndex);
+    if (!targetSpace || !meeting) {
+      return;
+    }
+
+    if (projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession || !meeting.id) {
+        setMeetingMutationError("수정할 Backend 회의 정보를 찾을 수 없습니다.");
+        return;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await updateMeeting(authSession, meeting.id, updates);
+        await refreshTargetMeetings(authSession, targetSpace.id, projectName);
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "회의를 수정하지 못했습니다.");
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+      return;
+    }
+
     setProjectMeetings((previous) => ({
       ...previous,
-      [projectName]: (previous[projectName] ?? []).map((meeting) =>
-        meeting.index === meetingIndex ? { ...meeting, state } : meeting
-      )
+      [projectName]: (previous[projectName] ?? []).map((current) => {
+        if (current.index !== meetingIndex) {
+          return current;
+        }
+        const scheduledAt = updates.scheduledAt ?? current.scheduledAt;
+        const date = scheduledAt ? new Date(scheduledAt) : null;
+        return {
+          ...current,
+          title: updates.title ?? current.title,
+          scheduledAt,
+          date: date
+            ? `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`
+            : current.date,
+          state: updates.status ? meetingStatusLabel(updates.status) : current.state
+        };
+      })
     }));
+  }
+
+  function handleUpdateMeetingStatus(projectName: string, meetingIndex: string, state: ProjectMeeting["state"]) {
+    const status = meetingStateStatus(state);
+    if (!status) {
+      setMeetingMutationError("지원하지 않는 회의 상태입니다.");
+      return;
+    }
+    void handleUpdateMeeting(projectName, meetingIndex, { status });
+  }
+
+  function handleUpdateMeetingDetails(
+    projectName: string,
+    meetingIndex: string,
+    updates: Pick<UpdateMeetingRequest, "title" | "scheduledAt">
+  ) {
+    void handleUpdateMeeting(projectName, meetingIndex, updates);
   }
 
   function handleAddMeetingParticipant(
@@ -971,7 +1106,7 @@ export function App() {
         const next = { ...previous };
         resources.forEach(({ space, meetingsResult }) => {
           next[space.name] =
-            meetingsResult.status === "fulfilled" ? meetingsResult.value.meetings.map(mapMeetingSummary) : [];
+            meetingsResult.status === "fulfilled" ? meetingsResult.value.meetings.map(toProjectMeeting) : [];
         });
         return next;
       });
@@ -1005,7 +1140,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [authSession]);
+  }, [authSession, refreshTargetMeetings]);
 
   return (
     <>
@@ -1059,6 +1194,8 @@ export function App() {
                 data={data.projectOverview}
                 session={authSession}
                 projectAiSpaceIds={projectAiSpaceIds}
+                meetingMutationError={meetingMutationError}
+                meetingMutationLoading={meetingMutationLoading}
                 onDeleteProject={handleDeleteProject}
                 onCreateMeeting={handleCreateMeeting}
                 onCreateProject={handleCreateProject}
@@ -1074,6 +1211,7 @@ export function App() {
                 onMoveProjectTask={handleMoveProjectTask}
                 onUpdateProjectTask={handleUpdateProjectTask}
                 onUpdateMeetingParticipant={handleUpdateMeetingParticipant}
+                onUpdateMeeting={handleUpdateMeetingDetails}
                 onUpdateMeetingStatus={handleUpdateMeetingStatus}
                 spaces={data.workspaceHome.spaces}
               />

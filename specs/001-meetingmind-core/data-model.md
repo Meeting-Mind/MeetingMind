@@ -68,6 +68,10 @@ Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장�
 - `joinCode`: in-memory prototype의 추측하기 어려운 원문 코드. 영속화 시에는 원문 대신 hash 저장을 우선한다.
 - `failureReason`
 - `retentionPolicy`
+- `deletedAt`: soft delete 시각. active Meeting은 null이다.
+- `deletedBy`: soft delete를 실행한 User ID. `deletedAt`과 함께 null 또는 함께 값이 있어야 한다.
+
+회의 삭제는 관계 산출물을 즉시 물리 삭제하지 않는다. `deletedAt`이 있는 Meeting은 일반 목록/상세/캘린더와 Meeting/Project AI context에서 제외한다. `SCHEDULED` 삭제는 `CANCELED`로 전환하고, `IN_PROGRESS` 삭제는 거부하며, `ENDED` 삭제는 상태를 유지한다.
 
 ### MeetingParticipant
 

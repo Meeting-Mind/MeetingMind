@@ -117,6 +117,8 @@ erDiagram
     string failureReason
     string retentionPolicy
     string joinCodeHash
+    datetime deletedAt
+    string deletedBy FK
   }
 
   MEETING_PARTICIPANT {
@@ -366,6 +368,7 @@ erDiagram
 
 - `MEETING(spaceId, scheduledAt)` index를 둔다.
 - `MEETING.status`는 `SCHEDULED`, `IN_PROGRESS`, `ENDED`, `CANCELED` 중 하나다.
+- `MEETING.deletedAt`과 `deletedBy`는 함께 null이거나 함께 값이 있는 soft-delete metadata다. active Meeting 조회와 AI context는 `deletedAt is null`을 적용한다.
 - `MEETING_PARTICIPANT(meetingId, userId)`는 active participant 기준 unique다.
 - `MEETING_PARTICIPANT.role`은 `HOST`, `EDITOR`, `VIEWER` 중 하나다.
 - `MEETING_PARTICIPANT.participantType`은 `member`, `guest` 중 하나다.

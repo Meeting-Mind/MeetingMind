@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -92,7 +93,7 @@ public class WorkspaceDomainService {
     }
 
     public List<MeetingSummary> listMeetings(String actorUserId, String spaceId) {
-        return listMeetings(actorUserId, spaceId, null, null, null);
+        return listMeetings(actorUserId, spaceId, (MeetingStatus) null, (OffsetDateTime) null, (OffsetDateTime) null);
     }
 
     public List<MeetingSummary> listMeetings(
@@ -178,6 +179,122 @@ public class WorkspaceDomainService {
         }
 
         return new MeetingCreationResult(meeting, host, store.findMeetingParticipants(meeting.id()));
+    }
+
+    public List<MeetingView> listMeetings(
+            String actorUserId,
+            String spaceId,
+            String status,
+            String from,
+            String to
+    ) {
+        requireUser(actorUserId);
+        spaceAccessPolicy.requireSpaceAccess(spaceAccessContext(spaceId, actorUserId));
+        MeetingStatus statusFilter = status == null ? null : MeetingStatus.parse(status);
+        OffsetDateTime fromFilter = parseDateTime(from, "from");
+        OffsetDateTime toFilter = parseDateTime(to, "to");
+        if (fromFilter != null && toFilter != null && fromFilter.isAfter(toFilter)) {
+            throw invalidRequest("from은 to보다 이후일 수 없습니다.");
+        }
+
+        return store.findMeetingsBySpaceId(spaceId).stream()
+                .filter(meeting -> meetingAccessPolicy.canReadAccess(meetingAccessContext(meeting.id(), actorUserId)))
+                .filter(meeting -> statusFilter == null || meeting.status() == statusFilter)
+                .filter(meeting -> fromFilter == null || !meeting.scheduledAt().isBefore(fromFilter))
+                .filter(meeting -> toFilter == null || !meeting.scheduledAt().isAfter(toFilter))
+                .map(meeting -> new MeetingView(meeting, activeMeetingRole(meeting.id(), actorUserId), List.of()))
+                .toList();
+    }
+
+    public MeetingView meetingDetail(String actorUserId, String meetingId) {
+        requireUser(actorUserId);
+        Meeting meeting = requireMeeting(meetingId);
+        meetingAccessPolicy.requireReadAccess(meetingAccessContext(meetingId, actorUserId));
+        List<MeetingParticipantWithUser> participants = store.findMeetingParticipants(meetingId).stream()
+                .map(participant -> new MeetingParticipantWithUser(
+                        participant,
+                        store.findUserById(participant.userId()).orElse(null)
+                ))
+                .toList();
+        return new MeetingView(meeting, activeMeetingRole(meetingId, actorUserId), participants);
+    }
+
+    @Transactional
+    public Meeting updateMeeting(
+            String actorUserId,
+            String meetingId,
+            String title,
+            OffsetDateTime scheduledAt,
+            String status
+    ) {
+        requireUser(actorUserId);
+        Meeting current = requireMeeting(meetingId);
+        store.lockMeeting(meetingId);
+        current = requireMeeting(meetingId);
+        meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
+
+        if (title == null && scheduledAt == null && status == null) {
+            throw invalidRequest("수정할 회의 필드가 필요합니다.");
+        }
+        if (title != null && title.isBlank()) {
+            throw invalidRequest("회의 제목은 blank일 수 없습니다.");
+        }
+        if ((title != null || scheduledAt != null) && current.status() != MeetingStatus.SCHEDULED) {
+            throw invalidRequest("회의 제목과 예정 일시는 SCHEDULED 상태에서만 수정할 수 있습니다.");
+        }
+
+        MeetingStatus nextStatus = status == null ? current.status() : MeetingStatus.parse(status);
+        validateMeetingTransition(current.status(), nextStatus);
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        OffsetDateTime startedAt = current.startedAt();
+        OffsetDateTime endedAt = current.endedAt();
+        if (current.status() != nextStatus && nextStatus == MeetingStatus.IN_PROGRESS) {
+            startedAt = now;
+        }
+        if (current.status() != nextStatus && nextStatus == MeetingStatus.ENDED) {
+            endedAt = now;
+        }
+
+        Meeting updated = store.updateMeeting(
+                meetingId,
+                title == null ? current.title() : title.trim(),
+                scheduledAt == null ? current.scheduledAt() : scheduledAt,
+                startedAt,
+                endedAt,
+                nextStatus
+        );
+        addAudit(
+                "MEETING_UPDATED",
+                actorUserId,
+                null,
+                meetingId,
+                current.title() + "/" + current.scheduledAt() + "/" + current.status(),
+                updated.title() + "/" + updated.scheduledAt() + "/" + updated.status()
+        );
+        return updated;
+    }
+
+    @Transactional
+    public boolean deleteMeeting(String actorUserId, String meetingId) {
+        requireUser(actorUserId);
+        Meeting current = requireMeeting(meetingId);
+        store.lockMeeting(meetingId);
+        current = requireMeeting(meetingId);
+        meetingAccessPolicy.requireDeleteAccess(meetingAccessContext(meetingId, actorUserId));
+        if (current.status() == MeetingStatus.IN_PROGRESS) {
+            throw new AuthorizationException(
+                    HttpStatus.CONFLICT,
+                    "MEETING_ALREADY_PROCESSING",
+                    "진행 중인 회의는 삭제할 수 없습니다."
+            );
+        }
+
+        MeetingStatus deletedStatus = current.status() == MeetingStatus.SCHEDULED
+                ? MeetingStatus.CANCELED
+                : current.status();
+        store.softDeleteMeeting(meetingId, deletedStatus, actorUserId, Instant.now(clock));
+        addAudit("MEETING_DELETED", actorUserId, null, meetingId, current.status().name(), deletedStatus.name());
+        return true;
     }
 
     public List<SpaceMemberWithUser> listSpaceMembers(String actorUserId, String spaceId) {
@@ -430,6 +547,36 @@ public class WorkspaceDomainService {
 
     private ParticipantType participantTypeForMeetingParticipant(String spaceId, String userId) {
         return store.findSpaceMember(spaceId, userId).isPresent() ? ParticipantType.MEMBER : ParticipantType.GUEST;
+    }
+
+    private MeetingRole activeMeetingRole(String meetingId, String userId) {
+        return store.findMeetingParticipant(meetingId, userId)
+                .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE)
+                .map(MeetingParticipant::role)
+                .orElse(null);
+    }
+
+    private OffsetDateTime parseDateTime(String value, String field) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw invalidRequest(field + "은 ISO-8601 일시여야 합니다.");
+        }
+    }
+
+    private void validateMeetingTransition(MeetingStatus current, MeetingStatus next) {
+        if (current == next) {
+            return;
+        }
+        boolean allowed = (current == MeetingStatus.SCHEDULED
+                && (next == MeetingStatus.IN_PROGRESS || next == MeetingStatus.CANCELED))
+                || (current == MeetingStatus.IN_PROGRESS && next == MeetingStatus.ENDED);
+        if (!allowed) {
+            throw invalidRequest("허용되지 않은 회의 상태 전이입니다: " + current + " -> " + next);
+        }
     }
 
     private MeetingJoinRequest requireMeetingJoinRequestById(String meetingId, String requestId) {
@@ -878,6 +1025,16 @@ public class WorkspaceDomainService {
             MeetingParticipant host,
             List<MeetingParticipant> participants
     ) {
+    }
+
+    public record MeetingView(
+            Meeting meeting,
+            MeetingRole myRole,
+            List<MeetingParticipantWithUser> participants
+    ) {
+        public MeetingView {
+            participants = participants == null ? List.of() : List.copyOf(participants);
+        }
     }
 
     public record SpaceSummary(Space space, SpaceRole role, long meetingCount) {

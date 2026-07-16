@@ -47,13 +47,13 @@ class MigrationIntegrationTest {
                     """);
         }
 
-        var v11Result = Flyway.configure()
+        var v12Result = Flyway.configure()
                 .dataSource(url, user, password)
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
 
-        assertThat(v11Result.migrationsExecuted).isEqualTo(1);
+        assertThat(v12Result.migrationsExecuted).isEqualTo(2);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -67,10 +67,23 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"
             );
 
             try (var statement = connection.createStatement()) {
+                try (var rows = statement.executeQuery("""
+                        select column_name
+                        from information_schema.columns
+                        where table_name = 'meetings'
+                          and column_name in ('deleted_at', 'deleted_by')
+                        order by column_name
+                        """)) {
+                    List<String> columns = new ArrayList<>();
+                    while (rows.next()) {
+                        columns.add(rows.getString("column_name"));
+                    }
+                    assertThat(columns).containsExactly("deleted_at", "deleted_by");
+                }
                 List<String> extensions = new ArrayList<>();
                 try (var rows = statement.executeQuery(
                         "select extname from pg_extension where extname in ('vector', 'pg_trgm') order by extname"

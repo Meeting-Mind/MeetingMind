@@ -8,7 +8,7 @@ begin
         where embedding is not null
           and vector_dims(embedding) <> 1536
     ) then
-        raise exception 'V11 requires every existing embedding vector to have 1536 dimensions';
+        raise exception 'V12 requires every existing embedding vector to have 1536 dimensions';
     end if;
 end
 $$;
