@@ -57,6 +57,22 @@ public abstract class WorkspaceStore {
 
     abstract void lockMeeting(String meetingId);
 
+    abstract Meeting updateMeeting(
+            String meetingId,
+            String title,
+            OffsetDateTime scheduledAt,
+            OffsetDateTime startedAt,
+            OffsetDateTime endedAt,
+            com.meetingmind.demo.authz.MeetingStatus status
+    );
+
+    abstract Meeting softDeleteMeeting(
+            String meetingId,
+            com.meetingmind.demo.authz.MeetingStatus status,
+            String deletedBy,
+            Instant deletedAt
+    );
+
     abstract MeetingJoinRequest createMeetingJoinRequest(String meetingId, String userId, Instant requestedAt);
 
     abstract Optional<MeetingJoinRequest> findMeetingJoinRequestById(String meetingId, String requestId);

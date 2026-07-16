@@ -15,8 +15,13 @@ import com.meetingmind.demo.dto.MeetingParticipantMutationResponse;
 import com.meetingmind.demo.dto.MeetingParticipantsResponse;
 import com.meetingmind.demo.dto.ReviewMeetingJoinRequestResponse;
 import com.meetingmind.demo.dto.UpdateMeetingParticipantRequest;
+import com.meetingmind.demo.dto.DeleteMeetingResponse;
+import com.meetingmind.demo.dto.MeetingDetailResponse;
+import com.meetingmind.demo.dto.UpdateMeetingRequest;
+import com.meetingmind.demo.dto.UpdateMeetingResponse;
 import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,6 +41,59 @@ public class MeetingController {
     public MeetingController(AuthService authService, WorkspaceDomainService workspaceDomainService) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
+    }
+
+    @GetMapping("/{meetingId}")
+    public MeetingDetailResponse getMeeting(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        WorkspaceDomainService.MeetingView view = workspaceDomainService.meetingDetail(user.id(), meetingId);
+        return new MeetingDetailResponse(
+                view.meeting().id(),
+                view.meeting().spaceId(),
+                view.meeting().title(),
+                view.meeting().status().name(),
+                view.meeting().scheduledAt().toString(),
+                view.meeting().startedAt() == null ? null : view.meeting().startedAt().toString(),
+                view.meeting().endedAt() == null ? null : view.meeting().endedAt().toString(),
+                view.myRole() == null ? null : view.myRole().name(),
+                view.participants().stream()
+                        .map(participant -> new MeetingDetailResponse.Participant(
+                                participant.participant().id(),
+                                participant.participant().userId(),
+                                participant.user() == null ? null : participant.user().displayName(),
+                                participant.participant().role().name(),
+                                participant.participant().participantType().name().toLowerCase(),
+                                participant.participant().accessStatus().name()
+                        ))
+                        .toList()
+        );
+    }
+
+    @PatchMapping("/{meetingId}")
+    public UpdateMeetingResponse updateMeeting(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId,
+            @RequestBody UpdateMeetingRequest request
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        var meeting = workspaceDomainService.updateMeeting(
+                user.id(), meetingId, request.title(), request.scheduledAt(), request.status()
+        );
+        return new UpdateMeetingResponse(
+                meeting.id(), meeting.title(), meeting.scheduledAt().toString(), meeting.status().name()
+        );
+    }
+
+    @DeleteMapping("/{meetingId}")
+    public DeleteMeetingResponse deleteMeeting(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new DeleteMeetingResponse(workspaceDomainService.deleteMeeting(user.id(), meetingId));
     }
 
     @GetMapping("/{meetingId}/participants")

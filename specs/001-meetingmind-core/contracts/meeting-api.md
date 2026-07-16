@@ -76,6 +76,7 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 ### Notes
 
 - Project owner/admin override 범위는 `requirements/permissions.md`를 따른다.
+- soft-deleted Meeting은 모든 목록 조건에서 제외한다. `status=CANCELED` query는 삭제되지 않고 취소된 회의만 반환한다.
 
 ## POST /api/v1/spaces/{spaceId}/meetings
 
@@ -235,6 +236,8 @@ None.
 - `title`: optional, 제공 시 blank 금지
 - `scheduledAt`: optional ISO-8601
 - `status`: 허용 상태 전이만 가능
+- `title`, `scheduledAt` 변경은 현재 상태가 `SCHEDULED`일 때만 가능
+- 허용 상태 전이는 `SCHEDULED -> IN_PROGRESS`, `SCHEDULED -> CANCELED`, `IN_PROGRESS -> ENDED`이며 동일 상태 요청은 idempotent하게 처리
 
 ### Response
 
@@ -279,12 +282,15 @@ None.
 - 인증 필요
 - 기본 `OWNER` 또는 `HOST`
 - `ADMIN` 삭제는 기본 권한이 아니며, 명시적 예외 정책이 있을 때만 허용한다.
-- 진행 중/종료 회의 삭제 가능 범위는 정책으로 제한
+- `SCHEDULED`는 `CANCELED`와 soft delete metadata를 함께 기록한다.
+- `IN_PROGRESS`는 삭제를 거부한다.
+- `ENDED`는 상태를 유지한 채 soft delete한다.
 
 ### Data Scope
 
 - Meeting scope
-- transcript/report/embedding 삭제 또는 비활성화 정책을 함께 적용한다.
+- `meetings.deleted_at`, `meetings.deleted_by`를 기록한다.
+- transcript/report/task/embedding 원천은 즉시 물리 삭제하지 않고 일반 조회와 AI context에서 제외한다.
 
 ### Request
 
@@ -321,7 +327,7 @@ None.
 
 ### Notes
 
-- soft delete와 cancel 상태 전환 기준은 Backend/Data owner가 확정한다.
+- hard purge, 복구 API, soft delete 유예 기간은 후속 보존 정책으로 둔다.
 - `ADMIN`은 회의 생성/참여자 관리/수정 override를 가질 수 있지만, 삭제는 기본 권한에 포함하지 않는다.
 
 ## GET /api/v1/meetings/{meetingId}/participants
