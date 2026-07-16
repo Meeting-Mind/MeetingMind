@@ -21,6 +21,7 @@ import type {
   DeleteMeetingResponse,
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
+  MeetingDetailResponse,
   MeetingListResponse,
   MeetingParticipantsResponse,
   MeetingJoinRequestsResponse,
@@ -158,6 +159,12 @@ export async function updateMeeting(
 export async function deleteMeeting(session: AuthSession, meetingId: string): Promise<DeleteMeetingResponse> {
   return requestJson<DeleteMeetingResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     method: "DELETE",
+    headers: buildAuthHeaders(session)
+  });
+}
+
+export async function fetchMeetingDetail(session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
+  return requestJson<MeetingDetailResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     headers: buildAuthHeaders(session)
   });
 }

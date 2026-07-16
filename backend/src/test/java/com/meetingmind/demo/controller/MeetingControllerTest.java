@@ -53,6 +53,32 @@ class MeetingControllerTest {
         assertThat(approved.participantType()).isEqualTo("guest");
     }
 
+    @Test
+    void getMeetingReturnsActualMeetingMetadata() {
+        AuthService authService = mock(AuthService.class);
+        AuthUserResponse owner = user("user-owner");
+        when(authService.currentUser("Bearer owner-token")).thenReturn(owner);
+
+        WorkspaceDomainService workspace = new WorkspaceDomainService(
+                new InMemoryWorkspaceStore(),
+                new SpaceAccessPolicy()
+        );
+        workspace.ensureUser(owner.id(), owner.email(), owner.displayName(), null, owner.status());
+        var space = workspace.createSpace(owner.id(), "MeetingMind", null);
+        var meeting = workspace.createMeeting(
+                owner.id(), space.space().id(), "상세 조회 테스트 회의", SCHEDULED_AT, List.of()
+        );
+        MeetingController controller = new MeetingController(authService, workspace);
+
+        var detail = controller.getMeeting("Bearer owner-token", meeting.meeting().id());
+
+        assertThat(detail.id()).isEqualTo(meeting.meeting().id());
+        assertThat(detail.title()).isEqualTo("상세 조회 테스트 회의");
+        assertThat(detail.roomCode()).isEqualTo(meeting.meeting().joinCode());
+        assertThat(detail.scheduledAt()).isEqualTo(SCHEDULED_AT.toString());
+        assertThat(detail.status()).isEqualTo("SCHEDULED");
+    }
+
     private AuthUserResponse user(String id) {
         return new AuthUserResponse(id, id + "@meetingmind.ai", id, null, "active");
     }

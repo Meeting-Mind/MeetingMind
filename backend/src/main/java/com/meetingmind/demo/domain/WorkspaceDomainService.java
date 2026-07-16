@@ -255,6 +255,12 @@ public class WorkspaceDomainService {
         return new OwnerTransferResult(update.newOwner(), update.previousOwner());
     }
 
+    public Meeting getMeeting(String actorUserId, String meetingId) {
+        requireUser(actorUserId);
+        meetingAccessPolicy.requireReadAccess(meetingAccessContext(meetingId, actorUserId));
+        return requireMeeting(meetingId);
+    }
+
     public List<MeetingParticipantWithUser> listMeetingParticipants(String actorUserId, String meetingId) {
         requireUser(actorUserId);
         meetingAccessPolicy.requireReadAccess(meetingAccessContext(meetingId, actorUserId));

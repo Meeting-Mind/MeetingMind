@@ -240,6 +240,14 @@ export interface MeetingDetail extends MeetingSummary {
   participants: MeetingParticipantSummary[];
 }
 
+export interface MeetingDetailResponse {
+  id: string;
+  title: string;
+  roomCode: string;
+  scheduledAt: ApiDateTime;
+  status: MeetingStatus;
+}
+
 export interface CreateMeetingRequest {
   title: string;
   scheduledAt: ApiDateTime;

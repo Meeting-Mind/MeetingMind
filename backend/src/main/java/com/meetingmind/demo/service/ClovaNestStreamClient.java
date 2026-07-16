@@ -1,5 +1,7 @@
 package com.meetingmind.demo.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
 import com.meetingmind.demo.clova.grpc.NestConfig;
 import com.meetingmind.demo.clova.grpc.NestData;
@@ -20,6 +22,7 @@ public class ClovaNestStreamClient implements AutoCloseable {
 
     private static final String HOST = "clovaspeech-gw.ncloud.com";
     private static final int PORT = 50051;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     // ponytail: diarization 옵션이 gRPC config JSON에서도 먹는지 문서에 명시 안 됨.
     // 트랙 단위로 이미 화자가 분리되므로 없어도 되지만, 실측 후 필요하면 이 JSON에 추가.
@@ -45,7 +48,10 @@ public class ClovaNestStreamClient implements AutoCloseable {
         this.requestObserver = stub.recognize(new StreamObserver<NestResponse>() {
             @Override
             public void onNext(NestResponse response) {
-                onTranscript.accept(response.getContents());
+                String text = extractTranscriptText(response.getContents());
+                if (text != null && !text.isBlank()) {
+                    onTranscript.accept(text);
+                }
             }
 
             @Override
@@ -62,6 +68,17 @@ public class ClovaNestStreamClient implements AutoCloseable {
                 .setType(RequestType.CONFIG)
                 .setConfig(NestConfig.newBuilder().setConfig(CONFIG_JSON))
                 .build());
+    }
+
+    // ponytail: config ack 등 다른 responseType은 transcription.text가 없어 자연히 걸러짐.
+    // 중간(interim) 결과까지 다 넘어오므로 문장 확정(epFlag) 기준 필터링이 필요해지면 여기에 추가.
+    private static String extractTranscriptText(String contents) {
+        try {
+            JsonNode text = JSON.readTree(contents).path("transcription").path("text");
+            return text.isTextual() ? text.asText() : null;
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     public void sendAudio(byte[] pcm16leMono16k) {

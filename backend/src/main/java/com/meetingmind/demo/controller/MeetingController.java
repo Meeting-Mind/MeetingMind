@@ -2,6 +2,7 @@ package com.meetingmind.demo.controller;
 
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
+import com.meetingmind.demo.domain.Meeting;
 import com.meetingmind.demo.domain.MeetingParticipant;
 import com.meetingmind.demo.domain.MeetingJoinRequest;
 import com.meetingmind.demo.domain.User;
@@ -10,6 +11,7 @@ import com.meetingmind.demo.domain.WorkspaceDomainService.MeetingParticipantWith
 import com.meetingmind.demo.dto.CreateMeetingJoinRequestRequest;
 import com.meetingmind.demo.dto.CreateMeetingJoinRequestResponse;
 import com.meetingmind.demo.dto.AddMeetingParticipantRequest;
+import com.meetingmind.demo.dto.MeetingDetailResponse;
 import com.meetingmind.demo.dto.MeetingJoinRequestSummaryResponse;
 import com.meetingmind.demo.dto.MeetingParticipantMutationResponse;
 import com.meetingmind.demo.dto.MeetingParticipantsResponse;
@@ -36,6 +38,22 @@ public class MeetingController {
     public MeetingController(AuthService authService, WorkspaceDomainService workspaceDomainService) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
+    }
+
+    @GetMapping("/{meetingId}")
+    public MeetingDetailResponse getMeeting(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        Meeting meeting = workspaceDomainService.getMeeting(user.id(), meetingId);
+        return new MeetingDetailResponse(
+                meeting.id(),
+                meeting.title(),
+                meeting.joinCode(),
+                meeting.scheduledAt().toString(),
+                meeting.status().name()
+        );
     }
 
     @GetMapping("/{meetingId}/participants")
