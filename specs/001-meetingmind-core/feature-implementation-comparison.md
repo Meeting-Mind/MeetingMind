@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | 인증/인가 | 부분 연동 | Backend signup/login/Google/refresh/logout과 access·refresh token이 PostgreSQL에 영속화되고 Frontend 보호 route가 있다. Frontend 자동 refresh/logout 연결은 남아 있다. |
 | 프로젝트/Space | 부분 연동 | Backend 목록·생성과 Frontend 연결이 있다. 수정·삭제·상세·대시보드 API는 로컬 상태 또는 미구현이다. |
-| 회의/권한 | 연동 | PostgreSQL 기반 회의 생성·목록·상세·수정·soft delete, 참가 신청/승인, participant ACL과 AI·LiveKit 권한 검증 경로가 있다. hard purge·복구·삭제 유예 운영은 남아 있다. |
+| 회의/권한 | 연동 | PostgreSQL 기반 회의 생성·목록·상세·수정·soft delete와 Frontend 상세/participant ACL, 참가 신청/승인, AI·LiveKit 권한 검증 경로가 있다. hard purge·복구·삭제 유예 운영은 남아 있다. |
 | AI/RAG | 부분 연동 | Meeting AI, Project AI, 보고서 candidate, 태스크 candidate가 Backend 권한 선필터 뒤에서 AI internal API를 호출한다. 실제 pgvector와 embedding worker는 없다. |
 | 화상 회의 | 화면/프로토타입 | LiveKit 화면과 token API가 있다. Frontend는 아직 인증된 meeting token 경로로 완전히 전환되지 않았다. |
 | STT/용어 | 화면/프로토타입 | mock transcript와 AI 용어 설명 prototype이 있다. 실제 STT 수집·저장·다운로드와 Backend 경유 용어 설명은 없다. |
@@ -30,8 +30,8 @@
 | --- | --- | --- |
 | 이메일·Google 인증 | 부분 연동 | Backend token 발급·갱신·폐기와 PostgreSQL 저장, Frontend 로그인은 구현됐다. Frontend 만료 자동 처리는 남아 있다. |
 | 프로젝트 생성/수정/삭제 | 부분 연동 | 생성·목록은 Backend API를 사용한다. 수정·삭제는 Frontend 로컬 흐름이며 Backend endpoint가 없다. |
-| 캘린더 | 화면/프로토타입 | 월/주/일 화면과 일정 이동 흐름은 있으나 Backend 일정 API와 알림은 없다. |
-| 회의 생성/참가/삭제 | 연동 | 생성·목록·상세·수정·soft delete API와 Frontend CRUD, URL/코드 참가 신청·HOST 승인이 PostgreSQL에 연결됐다. hard purge·복구·유예 기간은 후속이다. |
+| 캘린더 | 부분 연동 | ACL-filtered Space meeting 목록으로 월/주/일 일정과 생성·오류·회의 이동을 연결했다. 전용 Backend 일정 조회 API와 알림은 없다. |
+| 회의 생성/참가/삭제 | 연동 | 생성·목록·상세·수정·soft delete API, Frontend 초기 참여자/참가 코드·URL/participant ACL, URL·코드 참가 신청·HOST 승인이 연결됐다. hard purge·복구·유예 기간은 후속이다. |
 | 칸반보드 | 부분 연동 | Frontend 보드와 태스크 candidate 확정 시 Backend TaskCard 생성이 있다. 일반 카드 CRUD·목록 영속화는 남아 있다. |
 | 프로젝트별 챗봇 | 부분 연동 | Frontend→Backend→AI 경로와 SpaceMember/Meeting ACL 선필터가 구현됐다. 실제 ProjectKnowledge API·pgvector 검색·대화 이력은 남아 있다. |
 | 프로젝트 권한 관리 | 부분 연동 | SpaceRole/MeetingRole 정책과 default-deny 검증 계층은 있다. 멤버 초대·역할 변경·제거·오너 이양 API는 없다. |

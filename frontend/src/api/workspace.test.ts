@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "../auth/session";
-import { createMeeting, deleteMeeting, fetchMeetings, updateMeeting } from "./workspace";
+import {
+  addMeetingParticipant,
+  createMeeting,
+  deleteMeeting,
+  fetchMeeting,
+  fetchMeetingParticipants,
+  fetchMeetings,
+  fetchSpaceMembers,
+  updateMeeting,
+  updateMeetingParticipant
+} from "./workspace";
 
 const session: AuthSession = {
   accessToken: "access-token",
@@ -31,7 +41,8 @@ describe("meeting CRUD API client", () => {
     await fetchMeetings(session, "space-1");
     await createMeeting(session, "space-1", {
       title: "CRUD 회의",
-      scheduledAt: "2026-07-15T10:00:00+09:00"
+      scheduledAt: "2026-07-15T10:00:00+09:00",
+      participantUserIds: ["user-2"]
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/spaces/space-1/meetings", {
@@ -40,7 +51,72 @@ describe("meeting CRUD API client", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/v1/spaces/space-1/meetings",
-      expect.objectContaining({ method: "POST", body: expect.stringContaining("CRUD 회의") })
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          title: "CRUD 회의",
+          scheduledAt: "2026-07-15T10:00:00+09:00",
+          participantUserIds: ["user-2"]
+        })
+      })
+    );
+  });
+
+  it("loads meeting detail and Space members for target UI state", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "meeting-1", participants: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ participants: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ members: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchMeeting(session, "meeting-1");
+    await fetchMeetingParticipants(session, "meeting-1");
+    await fetchSpaceMembers(session, "space-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/meetings/meeting-1", {
+      headers: { Authorization: "Bearer access-token" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/meetings/meeting-1/participants", {
+      headers: { Authorization: "Bearer access-token" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/spaces/space-1/members", {
+      headers: { Authorization: "Bearer access-token" }
+    });
+  });
+
+  it("uses participant grant and role or access PATCH routes", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ participantId: "participant-2" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ participantId: "participant-2" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await addMeetingParticipant(session, "meeting-1", {
+      userId: "user-2",
+      role: "VIEWER",
+      participantType: "member"
+    });
+    await updateMeetingParticipant(session, "meeting-1", "participant-2", {
+      role: "EDITOR",
+      accessStatus: "ACTIVE"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/meetings/meeting-1/participants",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ userId: "user-2", role: "VIEWER", participantType: "member" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/meetings/meeting-1/participants/participant-2",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ role: "EDITOR", accessStatus: "ACTIVE" })
+      })
     );
   });
 
