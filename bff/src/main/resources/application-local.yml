@@ -1,0 +1,12 @@
+spring:
+  data:
+    redis:
+      port: ${BFF_REDIS_PORT:6380}
+
+meetingmind:
+  bff:
+    session-cookie:
+      name: ${BFF_SESSION_COOKIE_NAME:mm-session}
+      secure: ${BFF_SESSION_COOKIE_SECURE:false}
+    token-vault:
+      key-provider: local

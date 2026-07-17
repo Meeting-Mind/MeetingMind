@@ -7,9 +7,13 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 계정 | 사용자 | User | 서비스에 가입해 인증 가능한 계정 주체. 이메일 로그인 또는 소셜 로그인으로 식별된다. | User는 여러 AuthIdentity를 가질 수 있고 여러 Space에 멤버로 참여할 수 있다. | users, /users, /me | 멤버/참여자와 혼용 금지 | FR-AUTH-01, FR-AUTH-13 |
 | 계정 | 인증 수단 | AuthIdentity | 사용자의 로그인 방식을 나타내는 식별 정보. 이메일/비밀번호, Google OAuth 같은 provider 정보를 포함한다. | 한 User가 여러 AuthIdentity를 가질 수 있다. | auth_identities, /auth/* | User 자체와 동일시 금지 | FR-AUTH-04, FR-AUTH-05 |
-| 계정 | 세션 | AuthSession | 로그인 상태를 유지하기 위한 refresh 토큰 기반 인증 단위. | User에 속하며 revoke/expiry 상태를 가진다. | auth_sessions, /auth/refresh, /auth/logout | 브라우저 탭 세션과 혼용 주의 | FR-AUTH-07~10 |
-| 계정 | 액세스 토큰 | AccessToken | API 호출 인증에 사용하는 짧은 수명의 토큰. | RefreshToken으로 재발급된다. | 응답 필드 accessToken | 세션과 동일시 금지 | POL-TOKEN-01 |
-| 계정 | 리프레시 토큰 | RefreshToken | 액세스 토큰 재발급에 쓰는 장기 토큰. 원문은 저장하지 않고 hash와 revoke 상태만 저장한다. | AuthSession에 속한다. | refreshTokenHash, revokedAt | DB에 원문 저장 금지 | NFR-SEC-02, POL-TOKEN-02 |
+| 계정 | BFF 세션 | BffSession | 브라우저의 불투명 세션 쿠키를 서버 측 사용자·Token Bundle에 연결하는 Web BFF 인증 단위. | Redis에 저장되며 유휴/절대 만료와 revoke 상태를 가진다. | Spring Session Redis, /auth/session, /auth/logout | AuthSession, 브라우저 탭 상태와 혼용 금지 | FR-AUTH-09~10, FR-AUTH-18 |
+| 계정 | 인증 세션 | AuthSession | Auth Service가 기기별 단일 refresh family와 access JWT `sid` 폐기를 관리하는 사용자 로그인 단위. | User에 속하고 하나 이상의 BffSession/TokenBundle과 연결될 수 있으며 revoke event의 aggregate다. | auth_sessions, internal /auth/refresh, /auth/revoke | BFF 브라우저 세션 또는 사용자 전체 계정과 혼용 금지 | FR-AUTH-07~09, FR-AUTH-18 |
+| 계정 | 토큰 번들 | TokenBundle | BFF가 서비스 간 호출을 위해 보관하는 암호화된 access/refresh token과 만료·scope·audience 묶음. | BffSession이 식별자로 참조하며 브라우저에는 노출하지 않는다. | BFF Token Vault | 세션 쿠키 또는 Auth DB hash와 혼용 금지 | FR-AUTH-07~08, NFR-DATA-05 |
+| 계정 | 액세스 토큰 | AccessToken | BFF가 내부 Resource Service 호출 인증에 사용하는 짧은 수명의 토큰. | RefreshToken으로 재발급되며 브라우저에는 노출하지 않는다. | internal Authorization header | BFF 세션과 동일시 금지 | POL-TOKEN-01 |
+| 계정 | 리프레시 토큰 | RefreshToken | BFF가 Auth Service에서 AccessToken을 재발급받는 장기 토큰. | BFF는 암호문, Auth Service는 hash/revoke 상태를 저장한다. | TokenBundle, refreshTokenHash, revokedAt | 브라우저·로그·Auth Service DB에 원문 저장 금지 | NFR-SEC-02, POL-TOKEN-02 |
+| 아키텍처 | 웹 BFF | WebBff | 브라우저 세션, CSRF, 내부 토큰, 프론트 전용 API 조합을 담당하고 내부 서비스로 요청을 전달하는 서버. | 브라우저의 유일한 API 진입점이며 업무 데이터의 원천 저장소가 아니다. | bff service, /api/v1/* | API Gateway, Auth Service와 혼용 금지 | FR-AUTH-06~10, NFR-SCAL-02 |
+| 아키텍처 | 인증 서비스 | AuthService | 사용자 인증수단 검증, 내부 토큰 발급·회전·폐기와 공개키 제공을 담당하는 서비스. | User/AuthIdentity/AuthSession을 소유하고 Resource Service 업무 권한은 소유하지 않는다. | auth service, internal /auth/*, JWKS | Web BFF와 혼용 금지 | FR-AUTH-04~09, FR-AUTH-18 |
 | 프로젝트 | 프로젝트 | Space | 회의, 멤버, 칸반, 프로젝트 AI, 문서를 묶는 협업 공간. 화면에서는 '프로젝트'로 표시한다. | Space는 SpaceMember, Meeting, TaskCard, ProjectDocument를 포함한다. | spaces, /spaces | Workspace/Organization 혼용 금지 | FR-DASH-01~05 |
 | 프로젝트 | 프로젝트 멤버 | SpaceMember | 특정 프로젝트에 소속된 사용자와 그 프로젝트 역할의 연결. | User와 Space의 조인 엔티티. role은 OWNER/ADMIN/MEMBER 등. | space_members, /spaces/{spaceId}/members | User와 혼용 금지 | FR-DASH-02, FR-PERM-01 |
 | 프로젝트 | 프로젝트 역할 | SpaceRole | 프로젝트 단위 권한 묶음. OWNER, ADMIN, MEMBER를 기본값으로 한다. | 회의 ACL보다 상위 계층에서 먼저 평가된다. | space_members.role | Permission과 혼용 금지 | FR-AUTH-15, NFR-AZ-06 |

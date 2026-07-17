@@ -16,7 +16,7 @@
 
 | 영역 | 상태 | 현재 구현 경계 |
 | --- | --- | --- |
-| 인증/인가 | 부분 연동 | Backend signup/login/Google/refresh/logout과 access·refresh token이 PostgreSQL에 영속화되고 Frontend 보호 route가 있다. Frontend 자동 refresh/logout 연결은 남아 있다. |
+| 인증/인가 | 현재 호환 구현, 목표 재설계 | Backend signup/login/Google/refresh/logout과 refresh hash가 PostgreSQL에 영속화되고 Frontend 보호 route가 있다. Frontend token 저장·자동 refresh/logout gap은 `specs/002-bff-auth-msa`의 별도 BFF 서버 세션 전환으로 해소할 계획이다. |
 | 프로젝트/Space | 부분 연동 | Backend 목록·생성과 Frontend 연결이 있다. 수정·삭제·상세·대시보드 API는 로컬 상태 또는 미구현이다. |
 | 회의/권한 | 연동 | PostgreSQL 기반 회의 생성·목록·상세·수정·soft delete와 Frontend 상세/participant ACL, 참가 신청/승인, AI·LiveKit 권한 검증 경로가 있다. hard purge·복구·삭제 유예 운영은 남아 있다. |
 | AI/RAG | 부분 연동 | Meeting AI, Project AI, 보고서 candidate, 태스크 candidate가 Backend 권한 선필터 뒤에서 AI internal API를 호출한다. 실제 pgvector와 embedding worker는 없다. |
@@ -28,7 +28,7 @@
 
 | 기능 | 상태 | 구현 내용과 남은 경계 |
 | --- | --- | --- |
-| 이메일·Google 인증 | 부분 연동 | Backend token 발급·갱신·폐기와 PostgreSQL 저장, Frontend 로그인은 구현됐다. Frontend 만료 자동 처리는 남아 있다. |
+| 이메일·Google 인증 | 현재 호환 구현, 목표 재설계 | Backend token 발급·갱신·폐기와 PostgreSQL 저장, Frontend 로그인은 구현됐다. 목표에서는 Google 검증은 유지하되 token을 BFF 내부에만 두고 브라우저는 서버 세션을 사용한다. |
 | 프로젝트 생성/수정/삭제 | 부분 연동 | 생성·목록은 Backend API를 사용한다. 수정·삭제는 Frontend 로컬 흐름이며 Backend endpoint가 없다. |
 | 캘린더 | 부분 연동 | ACL-filtered Space meeting 목록으로 월/주/일 일정과 생성·오류·회의 이동을 연결했다. 전용 Backend 일정 조회 API와 알림은 없다. |
 | 회의 생성/참가/삭제 | 연동 | 생성·목록·상세·수정·soft delete API, Frontend 초기 참여자/참가 코드·URL/participant ACL, URL·코드 참가 신청·HOST 승인이 연결됐다. hard purge·복구·유예 기간은 후속이다. |

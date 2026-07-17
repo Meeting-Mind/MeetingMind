@@ -576,6 +576,6 @@ M038은 Auth JDBC를 변경하지 않고 Workspace와 Backend 저장 AI artifact
 ## Notes
 
 - 이 작업 목록은 문서 기준선 생성 이후의 구현 순서를 제안한다.
-- Q-001은 Google OAuth와 자체 회원가입/로그인, access/refresh token, `/api/v1/auth/*`, `sessionStorage`, 랜딩 외 보호 route로 결정되었다.
+- Q-001은 Core Prototype에서 Google OAuth와 자체 회원가입/로그인, access/refresh token, `/api/v1/auth/*`, `sessionStorage`, 랜딩 외 보호 route로 구현됐다. 목표 인증 전환의 실행 작업은 `../002-bff-auth-msa/tasks.md`를 따른다.
 - 실제 권한 구현 전 Q-002는 먼저 결정하는 편이 안전하다.
 - 요구사항 기준선 파일은 PR #8의 `agent/requirements-docs-baseline` 브랜치에 포함되어 있다.

@@ -1,0 +1,22 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
+meetingmind:
+  auth:
+    refresh-hash-secret: test-only-refresh-hash-secret-32-bytes-minimum
+    password-bcrypt-cost: 10
+    google:
+      client-ids:
+        - meetingmind-test-client
+    workload:
+      allow-test-header: true
+
+management:
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState

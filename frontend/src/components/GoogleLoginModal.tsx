@@ -56,10 +56,12 @@ function parseCredential(credential: string): GoogleAuthUser | null {
 
 export function GoogleLoginModal({
   isOpen,
+  notice,
   onClose,
   onSuccess
 }: {
   isOpen: boolean;
+  notice?: string;
   onClose: () => void;
   onSuccess: (session: AuthSession) => void;
 }) {
@@ -168,6 +170,7 @@ export function GoogleLoginModal({
         <p className="auth-modal-kicker">Sign In Required</p>
         <h2 id="auth-modal-title">로그인 후 이용할 수 있습니다</h2>
         <p className="auth-modal-copy">프로젝트 생성, 회의 입장, 워크스페이스 접근은 로그인 후 진행됩니다.</p>
+        {notice ? <div className="auth-modal-session-notice" role="status">{notice}</div> : null}
 
         <div className="auth-modal-tabs" role="tablist" aria-label="인증 방식">
           <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")} type="button">

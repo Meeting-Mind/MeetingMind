@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: ${AUTH_DB_URL:jdbc:postgresql://127.0.0.1:5435/meetingmind_auth}
+    username: meetingmind_auth_app
+    password: ${AUTH_DB_RUNTIME_PASSWORD:meetingmind_auth_app_local}
+  flyway:
+    url: ${AUTH_DB_URL:jdbc:postgresql://127.0.0.1:5435/meetingmind_auth}
+    user: ${AUTH_DB_MIGRATION_USER:meetingmind_auth_migrator}
+    password: ${AUTH_DB_MIGRATION_PASSWORD:meetingmind_auth_migrator_local}
+
+meetingmind:
+  auth:
+    refresh-hash-secret: ${AUTH_REFRESH_HASH_SECRET:local-only-refresh-hash-secret-change-me}
+    google:
+      client-ids: ${AUTH_GOOGLE_CLIENT_IDS:}
+    workload:
+      allow-test-header: ${AUTH_ALLOW_TEST_WORKLOAD_HEADER:true}

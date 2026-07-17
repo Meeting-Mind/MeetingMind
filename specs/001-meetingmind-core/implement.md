@@ -976,3 +976,7 @@
 - Passed: `cd frontend && TZ=UTC npm test -- --run`; STT target API client, 시간대 독립 포맷과 CI의 축소 ICU locale에서도 일관된 한국어 오전/오후 표기를 검증했다.
 - Passed: `cd frontend && npm run build`; bundle size warning 외 성공.
 - Passed: `cd ai && python3 -m compileall app tests`, `git diff --check`, legacy frontend STT endpoint 및 `roomCode` 참조 검색.
+
+## BFF/Auth Architecture Evolution Reference
+
+- 2026-07-16: Core의 `sessionStorage + Bearer` Auth는 현재 구현과 제한된 rollback을 위한 legacy compatibility로 분류했다. 목표 Browser-BFF/Auth Service, Redis session, encrypted Token Vault, AWS EKS/LiveKit Cloud 설계와 구현 작업은 `../002-bff-auth-msa/**`에서 관리한다. 이 기록 변경은 Core code/schema를 수정하거나 기존 migration을 되돌리지 않는다.

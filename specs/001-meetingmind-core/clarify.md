@@ -6,7 +6,7 @@
 
 | ID | Priority | Question | Why It Matters | Status | Decision |
 | --- | --- | --- | --- | --- | --- |
-| Q-001 | High | 로그인은 Google OAuth 단독으로 시작할까, 자체 계정/JWT를 병행할까? | Backend 보안 구조와 Frontend 인증 흐름을 결정한다. | Decided | Google OAuth와 자체 회원가입/로그인을 모두 지원한다. Backend는 access token과 refresh token을 발급하고, Frontend는 둘 다 `sessionStorage`에 저장한다. |
+| Q-001 | High | 로그인은 Google OAuth 단독으로 시작할까, 자체 계정/JWT를 병행할까? | Backend 보안 구조와 Frontend 인증 흐름을 결정한다. | Superseded for target | Core Prototype은 Google OAuth와 자체 계정, Backend token 발급과 Frontend `sessionStorage`를 구현했다. 목표 브라우저 인증은 `../002-bff-auth-msa/clarify.md` D-001~D-007의 BFF 서버 세션으로 대체한다. |
 | Q-002 | High | 회의 권한 등급은 어떤 값으로 정할까? | API 권한 모델과 UI 제어 범위를 결정한다. | Decided | MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다. `participant`는 role 값으로 쓰지 않고, 회의 게스트는 SpaceRole이 아니라 특정 회의의 MeetingParticipant로 등록한다. |
 | Q-003 | Medium | STT 원문 기본 보존 기간은 7일, 30일, 영구 중 무엇인가? | 저장 비용, 개인정보, 삭제 작업 설계를 결정한다. | Decided | STT 원문 보존 선택지는 7일/30일/영구이며 기본값은 30일이다. 음성 원본은 기본 장기 보관하지 않는다. |
 | Q-004 | Medium | Project Knowledge는 누가 공식 승인하고 최신화하는가? | Project AI가 공식 지식과 회의 기록을 구분하는 기준이 된다. | Decided | Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정한다. 회의 게스트는 기본 접근할 수 없다. |
@@ -35,7 +35,7 @@
 | Own account/JWT only | 이메일/비밀번호 또는 자체 가입과 JWT를 직접 운영한다. | Google 계정 없이도 사용할 수 있고 token 정책을 완전히 통제한다. | 비밀번호 저장, 가입/재설정, 보안 운영 범위가 커져 prototype 목적에 비해 무겁다. | Backend security, User credential model, Frontend signup/login UI |
 | Google OAuth + own account + access/refresh token | Google OAuth와 자체 이메일/비밀번호 계정을 모두 지원하고 Backend가 access token과 refresh token을 발급한다. | 사용자는 Google 또는 자체 계정으로 진입할 수 있고, Backend가 Space/Meeting 권한 판단에 쓸 앱 내부 subject를 안정적으로 가진다. refresh token으로 세션 연장이 가능하다. | 비밀번호 hash 저장, refresh token 폐기, token rotation, Google token 검증을 모두 다뤄야 해서 구현 범위가 커진다. | `contracts/auth-api.md`, `contracts/common.md`, `data-model.md`, `frontend/src/components/GoogleLoginModal.tsx`, `frontend/src/App.tsx`, future `frontend/src/auth/**`, future `backend/**/auth/**`, `application.yml` |
 
-### Final Direction
+### Prototype Compatibility Direction
 
 - Prototype 구현은 Google OAuth와 자체 회원가입/로그인을 모두 지원한다.
 - Frontend의 Google credential decode는 사용자 표시용으로만 사용하고, 실제 인증은 Backend 검증 결과만 신뢰한다.
@@ -45,6 +45,8 @@
 - Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 새로 만든다. 기존 prototype API는 당분간 유지한다.
 - 랜딩(`/`)만 공개하고, `/spaces`, `/project-overview`, `/live-meeting`, `/live-room`, `/meeting-ai`, `/report-agent`, `/team-members`는 로그인 필요 대상으로 둔다.
 - LiveKit token 발급은 후속 단계에서 인증된 사용자와 `MeetingParticipant` 권한 확인 뒤 허용한다.
+
+이 방향은 현재 Core 구현과 BFF Phase 1 compatibility adapter를 설명한다. 신규 Frontend/BFF/Auth 구현은 `../002-bff-auth-msa/contracts/*`와 데이터 모델을 우선한다.
 
 ## Current Assumptions
 
@@ -59,7 +61,7 @@
 - D-002: 문서 원칙상 최종 구조는 Backend가 권한 필터를 적용한 뒤 AI 서버에 컨텍스트를 전달하는 방식이다. 다만 AI 담당 prototype 작업은 백엔드 구현 전까지 mock 또는 이미 권한 필터링된 데모 컨텍스트만 사용한다.
 - D-003: AI prototype API는 우선 AI 서버 직접 호출 계약으로 정의한다. Backend route, 저장, 권한 필터 구현은 후속 담당자 작업이므로 현재 계약에는 already-filtered context 전제를 명시한다.
 - D-004: 실제 STT 저장 API, DB schema, pgvector migration은 후속 담당자 작업을 기다린다. AI 담당은 그 전까지 `TranscriptSegment` 유사 mock 데이터에서 `RagChunk`를 생성하는 adapter 경계와 in-memory retriever를 먼저 구현한다.
-- D-005: Auth는 Google OAuth와 자체 회원가입/로그인을 모두 지원한다. Auth API는 `/api/v1/auth/*`로 시작하고, Backend가 access token과 refresh token을 발급하며, Frontend는 두 token을 `sessionStorage`에 저장한다. 랜딩(`/`)만 공개 route로 둔다.
+- D-005: Core Prototype Auth는 Google OAuth와 자체 회원가입/로그인을 모두 지원한다. `/api/v1/auth/*`에서 Backend가 access/refresh를 발급하고 현재 Frontend가 `sessionStorage`에 저장한다. 이 결정은 legacy compatibility로 유지한다.
 - D-006: 요구사항 기준선은 `requirements/*` Markdown으로 관리한다. 작업자는 `requirements/INDEX.md`를 먼저 읽고 관련 요구사항 문서만 추가로 읽는다.
 - D-007: MeetingRole은 `HOST`, `EDITOR`, `VIEWER`를 기본값으로 한다. `participant`는 MeetingRole 값으로 쓰지 않고, 일반 참석자는 `VIEWER` 또는 별도 `participantType=member`로 표현한다.
 - D-008: 회의 게스트는 특정 회의의 `MeetingParticipant`로 등록되며 Space 전체 권한, Project Knowledge, Project AI 권한을 기본으로 갖지 않는다.
@@ -95,3 +97,4 @@
 - D-038: AI 운영 기준은 원문을 남기지 않는 구조화 로그와 요청 수, p95 지연, unsupported 사유, citation 검증 실패, embedding job 적체/실패 지표를 우선한다. 초기 알림은 provider 오류율 5%, 검색 p95 1초 지속 초과, `UNVERIFIED_OUTPUT` 1%, 최종 job 실패 1건, 가장 오래된 pending job 5분 초과를 기준으로 시작하고 실제 트래픽 기준선에 따라 조정한다.
 - D-039: 회의 채팅 첨부파일 RAG의 MVP는 텍스트 검색으로 제한한다. TXT, Markdown, 텍스트 추출 가능한 PDF는 정규화된 추출 텍스트를 기존 `text-embedding-3-small` 1536차원 공간에 저장한다. 이미지 파일과 이미지 전용 PDF는 검색 대상에서 제외하고 visual embedding, OCR/Vision 설명 생성, 원본 기반 멀티모달 답변은 별도 확장 milestone에서 결정한다.
 - D-040: Auth는 기존 JDBC `AuthStore`와 `users` 테이블 관리 경계를 유지한다. Workspace와 Backend가 저장하는 AI artifact의 도메인 모델 자체를 JPA entity로 전환하며, 별도 `*Entity`-record 변환 계층은 두지 않는다. 전환 중에도 Flyway만 schema owner이며 `ddl-auto=validate`를 사용한다. `user_id` 계열 FK는 Auth entity 연관관계가 아닌 scalar ID로 유지하고, pgvector 검색/worker의 `embedding_jobs`/`embedding_chunks`는 native SQL/JDBC 경계를 유지한다.
+- D-041: 목표 브라우저 인증과 MSA 전환에서는 D-005의 Frontend token 저장을 폐기한다. 별도 Web BFF의 Redis 서버 세션, 암호화 Token Vault와 내부 Auth Service 계약은 `../002-bff-auth-msa/**`를 우선한다. D-005는 현재 구현 설명과 제한된 rollback에만 유효하다.

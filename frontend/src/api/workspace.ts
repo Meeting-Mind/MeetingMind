@@ -1,4 +1,5 @@
-import { buildAuthHeaders, type AuthSession } from "../auth/session";
+import type { AuthSession } from "../auth/session";
+import { bffFetch, resetCsrfToken } from "../auth/csrf";
 import type {
   AddMeetingParticipantRequest,
   AddMeetingParticipantResponse,
@@ -59,61 +60,59 @@ import type {
   WorkspaceData
 } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
-
-export async function fetchLegacyWorkspaceSnapshot(session: AuthSession): Promise<Partial<WorkspaceData>> {
+export async function fetchLegacyWorkspaceSnapshot(_session: AuthSession): Promise<Partial<WorkspaceData>> {
   return requestJson<Partial<WorkspaceData>>("/api/workspace", {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchSpaces(session: AuthSession): Promise<SpaceListResponse> {
+export async function fetchSpaces(_session: AuthSession): Promise<SpaceListResponse> {
   return requestJson<SpaceListResponse>("/api/v1/spaces", {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function createSpace(session: AuthSession, request: CreateSpaceRequest): Promise<CreateSpaceResponse> {
+export async function createSpace(_session: AuthSession, request: CreateSpaceRequest): Promise<CreateSpaceResponse> {
   return requestJson<CreateSpaceResponse>("/api/v1/spaces", {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function updateSpace(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   request: UpdateSpaceRequest
 ): Promise<UpdateSpaceResponse> {
   return requestJson<UpdateSpaceResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}`, {
     method: "PATCH",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
-export async function deleteSpace(session: AuthSession, spaceId: string): Promise<DeleteSpaceResponse> {
+export async function deleteSpace(_session: AuthSession, spaceId: string): Promise<DeleteSpaceResponse> {
   return requestJson<DeleteSpaceResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}`, {
     method: "DELETE",
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchSpaceDetail(session: AuthSession, spaceId: string): Promise<SpaceDetail> {
+export async function fetchSpaceDetail(_session: AuthSession, spaceId: string): Promise<SpaceDetail> {
   return requestJson<SpaceDetail>(`/api/v1/spaces/${encodeURIComponent(spaceId)}`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchDashboardSummary(session: AuthSession): Promise<DashboardSummaryResponse> {
+export async function fetchDashboardSummary(_session: AuthSession): Promise<DashboardSummaryResponse> {
   return requestJson<DashboardSummaryResponse>("/api/v1/dashboard", {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function fetchCalendarEvents(
-  session: AuthSession,
+  _session: AuthSession,
   request: { from: string; to: string; spaceId?: string }
 ): Promise<CalendarEventsResponse> {
   const params = new URLSearchParams({
@@ -126,55 +125,55 @@ export async function fetchCalendarEvents(
   }
 
   return requestJson<CalendarEventsResponse>(`/api/v1/calendar/events?${params.toString()}`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchMeetings(session: AuthSession, spaceId: string): Promise<MeetingListResponse> {
+export async function fetchMeetings(_session: AuthSession, spaceId: string): Promise<MeetingListResponse> {
   return requestJson<MeetingListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/meetings`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function createMeeting(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   request: CreateMeetingRequest
 ): Promise<CreateMeetingResponse> {
   return requestJson<CreateMeetingResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/meetings`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function updateMeeting(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   request: UpdateMeetingRequest
 ): Promise<UpdateMeetingResponse> {
   return requestJson<UpdateMeetingResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     method: "PATCH",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
-export async function deleteMeeting(session: AuthSession, meetingId: string): Promise<DeleteMeetingResponse> {
+export async function deleteMeeting(_session: AuthSession, meetingId: string): Promise<DeleteMeetingResponse> {
   return requestJson<DeleteMeetingResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
     method: "DELETE",
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchMeetingDetail(session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
+export async function fetchMeetingDetail(_session: AuthSession, meetingId: string): Promise<MeetingDetailResponse> {
   return requestJson<MeetingDetailResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function startMeetingTranscription(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   request: StartMeetingTranscriptionRequest
 ): Promise<MeetingTranscriptionStartResponse> {
@@ -182,14 +181,14 @@ export async function startMeetingTranscription(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/transcription/start`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
 export async function stopMeetingTranscription(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   sessionId: string
 ): Promise<MeetingTranscriptStatusResponse> {
@@ -197,37 +196,37 @@ export async function stopMeetingTranscription(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/transcription/${encodeURIComponent(sessionId)}/stop`,
     {
       method: "POST",
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
-export async function fetchMeetingDialogue(session: AuthSession, meetingId: string): Promise<MeetingDialogueResponse> {
+export async function fetchMeetingDialogue(_session: AuthSession, meetingId: string): Promise<MeetingDialogueResponse> {
   return requestJson<MeetingDialogueResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/dialogue`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchMeetingParticipants(session: AuthSession, meetingId: string): Promise<MeetingParticipantsResponse> {
+export async function fetchMeetingParticipants(_session: AuthSession, meetingId: string): Promise<MeetingParticipantsResponse> {
   return requestJson<MeetingParticipantsResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/participants`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function addMeetingParticipant(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   request: AddMeetingParticipantRequest
 ): Promise<AddMeetingParticipantResponse> {
   return requestJson<AddMeetingParticipantResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/participants`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function updateMeetingParticipant(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   participantId: string,
   request: UpdateMeetingParticipantRequest
@@ -236,35 +235,35 @@ export async function updateMeetingParticipant(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/participants/${encodeURIComponent(participantId)}`,
     {
       method: "PATCH",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
 export async function createMeetingJoinRequest(
-  session: AuthSession,
+  _session: AuthSession,
   request: CreateMeetingJoinRequestRequest
 ): Promise<CreateMeetingJoinRequestResponse> {
   return requestJson<CreateMeetingJoinRequestResponse>("/api/v1/meetings/join-requests", {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function fetchMeetingJoinRequests(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string
 ): Promise<MeetingJoinRequestsResponse> {
   return requestJson<MeetingJoinRequestsResponse>(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests`,
-    { headers: buildAuthHeaders(session) }
+    { headers: undefined }
   );
 }
 
 export async function approveMeetingJoinRequest(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   requestId: string
 ): Promise<ReviewMeetingJoinRequestResponse> {
@@ -272,13 +271,13 @@ export async function approveMeetingJoinRequest(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests/${encodeURIComponent(requestId)}/approve`,
     {
       method: "POST",
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
 export async function rejectMeetingJoinRequest(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   requestId: string
 ): Promise<ReviewMeetingJoinRequestResponse> {
@@ -286,63 +285,63 @@ export async function rejectMeetingJoinRequest(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/join-requests/${encodeURIComponent(requestId)}/reject`,
     {
       method: "POST",
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
 export async function chatMeetingAi(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   request: { question: string }
 ): Promise<AiChatResponse> {
   return requestJson<AiChatResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/ai/chat`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function chatProjectAi(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   request: { question: string }
 ): Promise<AiChatResponse> {
   return requestJson<AiChatResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/ai/chat`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function generateReportCandidate(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string
 ): Promise<ReportCandidateResponse> {
   return requestJson<ReportCandidateResponse>(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/generate`,
     {
     method: "POST",
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
 export async function extractTaskCandidates(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string
 ): Promise<TaskCandidateGenerationResponse> {
   return requestJson<TaskCandidateGenerationResponse>(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates/generate`,
     {
       method: "POST",
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
 export async function fetchMeetingReports(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   status?: "CANDIDATE" | "DRAFT" | "CONFIRMED"
 ): Promise<ReportListResponse> {
@@ -353,12 +352,12 @@ export async function fetchMeetingReports(
   const query = params.toString() ? `?${params.toString()}` : "";
 
   return requestJson<ReportListResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/reports${query}`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function confirmMeetingReport(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   reportId: string
 ): Promise<ConfirmReportResponse> {
@@ -366,13 +365,13 @@ export async function confirmMeetingReport(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/${encodeURIComponent(reportId)}/confirm`,
     {
       method: "POST",
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
 export async function updateMeetingReport(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   reportId: string,
   request: UpdateReportRequest
@@ -381,14 +380,14 @@ export async function updateMeetingReport(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/${encodeURIComponent(reportId)}`,
     {
       method: "PATCH",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
 export async function downloadMeetingReport(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   reportId: string,
   format: ReportDownloadFormat
@@ -396,19 +395,19 @@ export async function downloadMeetingReport(
   return requestBlob(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/${encodeURIComponent(reportId)}/download?format=${encodeURIComponent(format)}`,
     {
-      headers: buildAuthHeaders(session)
+      headers: undefined
     }
   );
 }
 
-export async function fetchTaskCandidates(session: AuthSession, meetingId: string): Promise<TaskCandidatesResponse> {
+export async function fetchTaskCandidates(_session: AuthSession, meetingId: string): Promise<TaskCandidatesResponse> {
   return requestJson<TaskCandidatesResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function confirmTaskCandidate(
-  session: AuthSession,
+  _session: AuthSession,
   meetingId: string,
   candidateId: string,
   request: ConfirmTaskCandidateRequest
@@ -417,70 +416,70 @@ export async function confirmTaskCandidate(
     `/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates/${encodeURIComponent(candidateId)}/confirm`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
-export async function fetchTasks(session: AuthSession, spaceId: string): Promise<TaskListResponse> {
+export async function fetchTasks(_session: AuthSession, spaceId: string): Promise<TaskListResponse> {
   return requestJson<TaskListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/tasks`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function createTask(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   request: CreateTaskCardRequest
 ): Promise<CreateTaskCardResponse> {
   return requestJson<CreateTaskCardResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/tasks`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function updateTask(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   taskId: string,
   request: UpdateTaskCardRequest
 ): Promise<UpdateTaskCardResponse> {
   return requestJson<UpdateTaskCardResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/tasks/${encodeURIComponent(taskId)}`, {
     method: "PATCH",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
-export async function deleteTask(session: AuthSession, spaceId: string, taskId: string): Promise<DeleteTaskCardResponse> {
+export async function deleteTask(_session: AuthSession, spaceId: string, taskId: string): Promise<DeleteTaskCardResponse> {
   return requestJson<DeleteTaskCardResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/tasks/${encodeURIComponent(taskId)}`, {
     method: "DELETE",
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
-export async function fetchSpaceMembers(session: AuthSession, spaceId: string): Promise<SpaceMembersResponse> {
+export async function fetchSpaceMembers(_session: AuthSession, spaceId: string): Promise<SpaceMembersResponse> {
   return requestJson<SpaceMembersResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/members`, {
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function createSpaceInvitation(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   request: CreateSpaceInvitationRequest
 ): Promise<CreateSpaceInvitationResponse> {
   return requestJson<CreateSpaceInvitationResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/invitations`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
 export async function acceptSpaceInvitation(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   invitationId: string,
   request: ResolveInvitationRequest
@@ -489,14 +488,14 @@ export async function acceptSpaceInvitation(
     `/api/v1/spaces/${encodeURIComponent(spaceId)}/invitations/${encodeURIComponent(invitationId)}/accept`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
 export async function declineSpaceInvitation(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   invitationId: string,
   request: ResolveInvitationRequest
@@ -505,14 +504,14 @@ export async function declineSpaceInvitation(
     `/api/v1/spaces/${encodeURIComponent(spaceId)}/invitations/${encodeURIComponent(invitationId)}/decline`,
     {
       method: "POST",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
 export async function updateSpaceMemberRole(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   memberId: string,
   request: UpdateSpaceMemberRoleRequest
@@ -521,42 +520,44 @@ export async function updateSpaceMemberRole(
     `/api/v1/spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(memberId)}`,
     {
       method: "PATCH",
-      headers: jsonHeaders(session),
+      headers: jsonHeaders(),
       body: JSON.stringify(request)
     }
   );
 }
 
-export async function removeSpaceMember(session: AuthSession, spaceId: string, memberId: string): Promise<RemoveSpaceMemberResponse> {
+export async function removeSpaceMember(_session: AuthSession, spaceId: string, memberId: string): Promise<RemoveSpaceMemberResponse> {
   return requestJson<RemoveSpaceMemberResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(memberId)}`, {
     method: "DELETE",
-    headers: buildAuthHeaders(session)
+    headers: undefined
   });
 }
 
 export async function transferSpaceOwner(
-  session: AuthSession,
+  _session: AuthSession,
   spaceId: string,
   request: OwnerTransferRequest
 ): Promise<OwnerTransferResponse> {
   return requestJson<OwnerTransferResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/owner-transfer`, {
     method: "POST",
-    headers: jsonHeaders(session),
+    headers: jsonHeaders(),
     body: JSON.stringify(request)
   });
 }
 
-function jsonHeaders(session: AuthSession): HeadersInit {
+function jsonHeaders(): HeadersInit {
   return {
-    ...buildAuthHeaders(session),
     "Content-Type": "application/json"
   };
 }
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  const response = await bffFetch(path, init);
 
   if (!response.ok) {
+    if (response.status === 403) {
+      resetCsrfToken();
+    }
     const message = await readErrorMessage(response);
     throw new Error(message || `API request failed with ${response.status}`);
   }
@@ -565,9 +566,12 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 async function requestBlob(path: string, init: RequestInit): Promise<Blob> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  const response = await bffFetch(path, init);
 
   if (!response.ok) {
+    if (response.status === 403) {
+      resetCsrfToken();
+    }
     const message = await readErrorMessage(response);
     throw new Error(message || `API request failed with ${response.status}`);
   }

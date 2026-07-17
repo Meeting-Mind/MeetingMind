@@ -8,7 +8,7 @@
 | ID | 요건 | Priority |
 | --- | --- | --- |
 | NFR-SEC-01 | 비밀번호는 단방향 해시로 저장한다 | P0 |
-| NFR-SEC-02 | refresh 토큰 원문을 저장하지 않는다 | P0 |
+| NFR-SEC-02 | refresh 토큰 원문을 브라우저·로그·발급자 DB에 저장하지 않는다 | P0 |
 | NFR-SEC-03 | 소셜 ID token을 서버에서 검증한다 | P0 |
 | NFR-SEC-04 | 통신 구간을 암호화한다 | P0 |
 | NFR-SEC-05 | secret은 환경변수/.env로 관리한다 | P0 |
@@ -47,8 +47,8 @@
 | ID | 요건 | Priority |
 | --- | --- | --- |
 | NFR-SCAL-01 | 다중 프로젝트·동시 회의를 지원한다 | P1 |
-| NFR-SCAL-02 | 수평 확장 가능한 구조를 유지한다 | P2 |
-| NFR-AVAIL-01 | 서비스 가용성 목표를 만족한다 | P2 |
+| NFR-SCAL-02 | 외부 세션 저장소와 서비스 격리로 수평 확장 가능한 구조를 유지한다 | P2 |
+| NFR-AVAIL-01 | 단일 리전 Multi-AZ 기준의 서비스 가용성 목표를 만족한다 | P2 |
 | NFR-AVAIL-02 | 외부 API 실패 시 graceful degradation한다 | P1 |
 ## 사용성 / 접근성 (Usability)
 
@@ -81,7 +81,7 @@
 | NFR-DATA-02 | 청크 출처 메타데이터를 유지한다 | P1 |
 | NFR-DATA-03 | 음성 원본을 기본 장기 보관하지 않는다 | P0 |
 | NFR-DATA-04 | STT 보존정책을 적용한다 | P1 |
-| NFR-DATA-05 | 토큰 저장 위치를 규정한다 | P1 |
+| NFR-DATA-05 | 브라우저 세션과 BFF/Auth 토큰 저장 위치를 분리한다 | P1 |
 ## AI 품질 / 안전 (AI Safety)
 
 | ID | 요건 | Priority |

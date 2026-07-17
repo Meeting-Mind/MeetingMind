@@ -99,7 +99,7 @@ MeetingMind의 핵심 프로토타입은 Space 기반 프로젝트 관리, 회�
 
 열린 질문과 결정 이력의 canonical 기록은 `clarify.md`를 따른다. 이 섹션은 Core Prototype 스펙에 직접 영향을 주는 확정 결정만 요약한다.
 
-- Q-001: Google OAuth와 자체 회원가입/로그인을 병행하고 access/refresh token을 사용하기로 결정했다.
+- Q-001: Core Prototype은 Google OAuth와 자체 회원가입/로그인, access/refresh token을 구현했다. 목표 브라우저 인증은 `../002-bff-auth-msa/spec.md`의 BFF 서버 세션으로 대체한다.
 - Q-002: 회의별 권한 등급은 `VIEWER`, `EDITOR`, `HOST`를 기본값으로 결정했다. 회의 게스트는 SpaceRole이 아니라 특정 회의의 MeetingParticipant로 처리한다.
 - Q-003: STT 원문 기본 보존 기간은 30일로 결정했다. 선택지는 7일/30일/영구다.
 - Q-004: Project Knowledge는 SpaceMember가 조회하고 오너/관리자가 수정한다. 회의 게스트는 기본 접근할 수 없다.

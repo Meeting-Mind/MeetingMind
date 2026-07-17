@@ -16,6 +16,80 @@ services:
       timeout: 3s
       retries: 10
 
+  meetingmind-auth-db:
+    profiles: ["auth"]
+    image: postgres:16-alpine
+    container_name: meetingmind-auth-postgres-local
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME:-meetingmind_auth}
+      POSTGRES_USER: ${AUTH_DB_MIGRATION_USER:-meetingmind_auth_migrator}
+      POSTGRES_PASSWORD: ${AUTH_DB_MIGRATION_PASSWORD:-meetingmind_auth_migrator_local}
+      AUTH_DB_RUNTIME_PASSWORD: ${AUTH_DB_RUNTIME_PASSWORD:-meetingmind_auth_app_local}
+    ports:
+      - "${AUTH_DB_PORT:-5435}:5432"
+    volumes:
+      - meetingmind-auth-postgres-data:/var/lib/postgresql/data
+      - ./auth/docker/postgres/init-runtime-user.sh:/docker-entrypoint-initdb.d/10-auth-runtime-user.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  meetingmind-redis:
+    image: redis:7-alpine
+    container_name: meetingmind-redis-local
+    ports:
+      - "${MEETINGMIND_REDIS_PORT:-6380}:6379"
+    volumes:
+      - meetingmind-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  meetingmind-bff:
+    profiles: ["bff"]
+    build:
+      context: ./bff
+    environment:
+      BFF_REDIS_HOST: meetingmind-redis
+      BFF_REDIS_PORT: 6379
+      BFF_ACCEPT_BROWSER_TRAFFIC: ${BFF_ACCEPT_BROWSER_TRAFFIC:-true}
+      BFF_TOKEN_VAULT_LOCAL_KEY_BASE64: ${BFF_TOKEN_VAULT_LOCAL_KEY_BASE64:-}
+      BFF_BACKEND_BASE_URL: ${BFF_BACKEND_BASE_URL:-http://host.docker.internal:8080}
+    ports:
+      - "${MEETINGMIND_BFF_PORT:-8081}:8081"
+    depends_on:
+      meetingmind-redis:
+        condition: service_healthy
+
+  meetingmind-auth:
+    profiles: ["auth"]
+    build:
+      context: ./auth
+    environment:
+      AUTH_DB_URL: jdbc:postgresql://meetingmind-auth-db:5432/${AUTH_DB_NAME:-meetingmind_auth}
+      AUTH_DB_RUNTIME_PASSWORD: ${AUTH_DB_RUNTIME_PASSWORD:-meetingmind_auth_app_local}
+      AUTH_DB_MIGRATION_USER: ${AUTH_DB_MIGRATION_USER:-meetingmind_auth_migrator}
+      AUTH_DB_MIGRATION_PASSWORD: ${AUTH_DB_MIGRATION_PASSWORD:-meetingmind_auth_migrator_local}
+      AUTH_REFRESH_HASH_SECRET: ${AUTH_REFRESH_HASH_SECRET:-local-only-refresh-hash-secret-change-me}
+      AUTH_PASSWORD_BCRYPT_COST: ${AUTH_PASSWORD_BCRYPT_COST:-12}
+      AUTH_GOOGLE_CLIENT_IDS: ${AUTH_GOOGLE_CLIENT_IDS:-}
+      AUTH_ALLOW_TEST_WORKLOAD_HEADER: ${AUTH_ALLOW_TEST_WORKLOAD_HEADER:-true}
+      AUTH_SIGNING_PROVIDER: ${AUTH_SIGNING_PROVIDER:-disabled}
+      AUTH_SIGNING_ISSUER: ${AUTH_SIGNING_ISSUER:-https://auth.meetingmind.internal}
+      AUTH_SIGNING_KEY_RING_JSON: ${AUTH_SIGNING_KEY_RING_JSON:-}
+      AUTH_JWKS_SPIFFE_PRINCIPALS: ${AUTH_JWKS_SPIFFE_PRINCIPALS:-spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-core,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-ai,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-livekit}
+    ports:
+      - "${AUTH_SERVER_PORT:-8082}:8082"
+    depends_on:
+      meetingmind-auth-db:
+        condition: service_healthy
+
   meetingmind-ai-worker:
     profiles: ["ai"]
     build:
@@ -32,5 +106,7 @@ services:
 
 volumes:
   meetingmind-postgres-data:
+  meetingmind-auth-postgres-data:
+  meetingmind-redis-data:
 
 # docker compose -f compose.local.yml up -d

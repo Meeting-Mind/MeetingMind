@@ -1,0 +1,24 @@
+spring:
+  session:
+    store-type: none
+
+meetingmind:
+  bff:
+    session-cookie:
+      name: mm-session
+      secure: false
+    token-vault:
+      key-provider: local
+      namespace: meetingmind:bff:test-token-vault
+      local-key-id: test-key-v1
+      local-master-key-base64: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+
+management:
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,rollout
+  health:
+    redis:
+      enabled: false

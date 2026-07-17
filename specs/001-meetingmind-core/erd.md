@@ -2,6 +2,8 @@
 
 이 문서는 backend 전체 도메인의 ERD 초안이다. 구현자는 API 계약 변경이나 DB schema 변경 전에 이 파일과 `data-model.md` 영향 여부를 확인한다.
 
+> `AUTH_SESSION.refreshTokenHash`는 현재 Core 호환 schema다. 목표 BFF Session/Token Vault/Auth DB 관계는 `../002-bff-auth-msa/erd.md`가 대체하며 기존 migration은 rollback window가 끝날 때까지 보존한다.
+
 ## Mermaid ERD
 
 ```mermaid

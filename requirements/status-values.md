@@ -5,6 +5,16 @@ Google Sheets 상태값 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 
 | 대상 | 상태명 | 코드값 | 정의 | 전이/사용 기준 | DB 필드 | 관련 요구사항 |
 | --- | --- | --- | --- | --- | --- | --- |
+| BffSession | 활성 | ACTIVE | 유휴·절대 만료 전이며 BFF가 인증 요청을 처리할 수 있는 서버 세션. | 로그인/가입 성공 직후 | Redis BffSession.status | FR-AUTH-06, FR-AUTH-10 |
+| BffSession | 로그아웃 처리 중 | LOGOUT_PENDING | 브라우저 세션은 차단했고 Auth revoke 또는 비동기 정리를 재처리하는 상태. | downstream revoke 일시 실패 시 짧게 사용 | Redis BffSession.status 또는 revoke 작업 | FR-AUTH-09, FR-AUTH-18 |
+| BffSession | 폐기 | REVOKED | 현재/모든 기기 로그아웃, 계정 비활성화 또는 보안 사건으로 더 이상 사용할 수 없는 상태. | 명시적 revoke 시 | Redis BffSession.status | FR-AUTH-09, FR-AUTH-18 |
+| BffSession | 만료 | EXPIRED | 유휴 또는 절대 만료에 도달해 더 이상 사용할 수 없는 상태. | idleExpiresAt/absoluteExpiresAt 중 먼저 도달 시 | Redis BffSession.status | FR-AUTH-10, FR-AUTH-16 |
+| AuthSession.revokeReason | 현재 로그아웃 | CURRENT_LOGOUT | 사용자가 현재 브라우저/기기 세션을 명시적으로 종료했다. | 현재 session revoke 시 | auth_sessions.revoke_reason | FR-AUTH-09 |
+| AuthSession.revokeReason | 모든 기기 로그아웃 | ALL_DEVICE_LOGOUT | 최근 인증 또는 재인증 뒤 사용자 소유의 모든 AuthSession을 종료했다. | revoke-all 시 | auth_sessions.revoke_reason | FR-AUTH-18 |
+| AuthSession.revokeReason | 사용자 비활성화 | USER_DISABLED | 계정 비활성화 또는 탈퇴로 세션을 종료했다. | User status 비활성 전이 시 | auth_sessions.revoke_reason | FR-AUTH-13 |
+| AuthSession.revokeReason | Refresh 재사용 | REFRESH_REUSE | 이미 사용된 refresh credential이 다시 제시되어 해당 AuthSession family를 폐기했다. | reuse 탐지 트랜잭션 시 | auth_sessions.revoke_reason | FR-AUTH-08 |
+| AuthSession.revokeReason | 관리자 폐기 | ADMIN_REVOKE | 승인된 운영자 보안 조치로 세션을 폐기했다. | 감사 가능한 관리자 명령 시 | auth_sessions.revoke_reason | FR-AUTH-09 |
+| AuthSession.revokeReason | 만료 | EXPIRED | refresh 절대 만료에 도달해 세션을 종료했다. | AuthSession.expiresAt 도달 시 | auth_sessions.revoke_reason | FR-AUTH-10, FR-AUTH-16 |
 | Meeting | 예정 | SCHEDULED | 회의 일정이 생성되었지만 아직 시작되지 않은 상태. | 생성 직후 기본 상태 | meetings.status | FR-MREG-06 |
 | Meeting | 진행 중 | IN_PROGRESS | 실시간 회의방이 열리고 회의가 진행 중인 상태 | LiveKit/WebRTC 연결 시작 시 | meetings.status | FR-CALL-01, FR-MREG-06 |
 | Meeting | 종료 | ENDED | 회의가 종료되어 전사/회의록 후처리 대상으로 전환된 상태. | 호스트 종료 또는 시스템 종료 처리 | meetings.status | FR-CALL-06 |

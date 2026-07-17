@@ -68,6 +68,89 @@ body.app-theme select {
   font: inherit;
 }
 
+.auth-session-controls {
+  position: fixed;
+  z-index: 1200;
+  top: 18px;
+  right: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  align-items: center;
+  min-width: 260px;
+  max-width: min(360px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border: 1px solid rgba(107, 92, 246, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 36px rgba(46, 49, 77, 0.14);
+  color: #2e314d;
+  backdrop-filter: blur(12px);
+}
+
+.auth-session-user {
+  display: grid;
+  min-width: 0;
+}
+
+.auth-session-user strong,
+.auth-session-user span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-session-user strong {
+  font-size: 14px;
+}
+
+.auth-session-user span {
+  margin-top: 2px;
+  color: #77728f;
+  font-size: 11px;
+}
+
+.auth-session-controls button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #ddd8ef;
+  border-radius: 10px;
+  background: #f8f6ff;
+  color: #5a47de;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.auth-session-controls button:hover:not(:disabled) {
+  border-color: #6b5cf6;
+  background: #f1eeff;
+}
+
+.auth-session-controls button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.auth-session-controls p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #c43f39;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .auth-session-controls {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    max-width: none;
+  }
+}
+
 .workspace-catalog-shell,
 .app-shell,
 .lk-live-room-shell,
@@ -4758,6 +4841,18 @@ body.app-theme.meeting-access-body {
   color: #7b779a;
   font-size: 1rem;
   line-height: 1.6;
+}
+
+.auth-modal-session-notice {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(243, 122, 87, 0.24);
+  border-radius: 14px;
+  background: #fff4ef;
+  color: #a7442d;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .auth-modal-tabs {

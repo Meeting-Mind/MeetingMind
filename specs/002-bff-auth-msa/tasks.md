@@ -1,0 +1,65 @@
+# Tasks: BFF Auth and Gradual MSA
+
+## Status Legend
+
+- `[x]`: 완료 기준과 검증 기록이 존재함
+- `[ ]`: 미완료
+- `Blocked`: 선행 결정이나 외부 준비가 필요함
+- `Owner`는 책임 영역, `Agent`는 실제 작업 주체다. 구현 시작 전 팀 배정이 바뀌면 이 표부터 갱신한다.
+
+## Milestones
+
+| ID | Milestone | Exit Criterion | Status |
+| --- | --- | --- | --- |
+| M001 | 정책·설계 기준선 | 요구사항, 계약, 데이터 모델, 전환 계획이 일관되고 legacy/target이 구분됨 | Complete |
+| M002 | Web BFF 호환 경로 | 별도 BFF+Redis가 현재 Backend를 감싸고 브라우저에 token을 노출하지 않음 | Complete |
+| M003 | Browser session cutover | Frontend token 저장/Bearer가 제거되고 bootstrap·logout·최종 401이 동작함 | Complete |
+| M004 | Auth Service 추출 | Auth DB/JWT/JWKS/refresh/revoke가 내부 계약으로 분리되고 Core가 로컬 검증함 | Pending |
+| M005 | EKS 운영 기준선 | single-region Multi-AZ에서 BFF/Auth/Core/AI의 배포·관측·장애 훈련을 통과함 | Blocked |
+| M006 | 도메인 점진 분리 | 관측 근거가 있는 도메인이 독립 DB/API/rollback으로 하나씩 추출됨 | Pending |
+
+## Task List
+
+| ID | Milestone | Status | Area | Owner | Agent | Dependencies | Expected Files | Task | Completion Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T001 | M001 | [x] | requirements | Docs/Contracts | Codex | - | `requirements/policies.md`, `functional-requirements*.md`, `non-functional-requirements*.md`, `glossary.md`, `status-values.md` | 브라우저/BFF/Auth의 token·session 저장 책임과 EKS/LiveKit 목표를 정리한다. | `sessionStorage` refresh 지시와 NFR 충돌이 제거되고 요구사항 ID와 BffSession 상태가 목표 구조를 설명한다. |
+| T002 | M001 | [x] | spec | Docs/Contracts | Codex | T001 | `spec.md`, `clarify.md`, `research.md`, `plan.md` | 사용자 결정과 점진 MSA 근거·범위·차단 질문을 기록한다. | 별도 BFF, Redis, EKS Multi-AZ, LiveKit Cloud와 open gate가 추적된다. |
+| T003 | M001 | [x] | contracts | Shared Contract | Codex | T002 | `contracts/*.md` | Browser-BFF와 BFF-Auth 계약을 분리한다. | browser 응답에 token이 없고 내부 refresh/revoke/JWKS 경계가 명시된다. |
+| T004 | M001 | [x] | data | Shared Contract | Codex | T002 | `data-model.md`, `erd.md` | Redis/Token Vault/Auth DB의 모델과 보존·폐기 규칙을 정의한다. | 저장소별 원문/암호문/hash 역할과 관계가 일치한다. |
+| T005 | M001 | [x] | legacy-docs | Shared Contract | Codex | T003, T004 | `specs/001-meetingmind-core/**` | 기존 Core auth 문서를 Current Legacy Compatibility로 표시하고 target 문서를 연결한다. | 기존 구현 설명을 보존하면서 신규 구현자가 legacy token 계약을 목표로 오해하지 않는다. |
+| T006 | M001 | [x] | verification | Integration | Codex | T005 | `analyze.md`, `implement.md`, `tasks.md` | 요구사항/spec/plan/contracts/data/tasks 일관성과 Markdown diff를 검증한다. | `git diff --check` 통과와 finding/open gate가 기록된다. |
+| T010 | M002 | [x] | bff/foundation | Web BFF | Codex | T006 | `bff/**`, `compose.local.yml`, `.github/workflows/ci.yml`, `.gitignore` | 별도 Spring Boot Web BFF skeleton, health/probe, profile과 Redis 연결을 추가한다. | 독립 Gradle/Docker build, liveness/readiness와 실제 Redis를 사용한 복수 application context 세션 공유 테스트가 통과했다. |
+| T011 | M002 | [x] | bff/security | Web BFF | Codex | T010, Q-014 | `bff/src/main/**`, `bff/src/test/**`, `bff/build.gradle`, `.env.example` | SecurityFilterChain, 운영/로컬 cookie profile, CSRF와 session fixation 방지를 구현한다. | 운영 cookie 실응답과 단위 테스트에서 보안 속성을 확인했고, 인증된 상태 변경 요청의 CSRF negative test와 session ID 교체 테스트가 통과했다. |
+| T012 | M002 | [x] | bff/vault | Web BFF | Codex | T010 | `bff/src/main/java/com/meetingmind/bff/tokenvault/**`, `bff/src/test/**`, `bff/build.gradle`, BFF config/docs | KMS adapter와 로컬 test key adapter를 갖춘 encrypted Token Vault를 구현한다. | 실제 Redis raw value에 token 평문이 없고 KMS/local 암복호화, AAD 위변조, encrypt/CAS rotation 실패의 fail-closed 테스트가 통과했다. |
+| T013 | M002 | [x] | bff/compat-auth | Web BFF | Codex | T011, T012 | `bff/src/main/java/com/meetingmind/bff/auth/**`, BFF security/config/tests/docs | 현재 Backend auth API를 소비하는 compatibility client를 구현한다. | 실제 Redis E2E와 웹 계약 테스트에서 login/Google/signup 결과가 token 없는 user/session 응답, BffSession 참조와 encrypted Token Bundle로 변환됐다. |
+| T014 | M002 | [x] | bff/token-manager | Web BFF | Codex | T012, T013 | `bff/src/main/java/com/meetingmind/bff/auth/**`, `bff/src/main/java/com/meetingmind/bff/tokenvault/**`, 관련 tests/config/docs | access expiry, Redis single-flight refresh, downstream 401 1회 retry와 실패 cleanup을 구현한다. | 동시 refresh 하나, 원 요청 최대 1회, 최종 401 cleanup 자동 테스트와 실제 Redis lock 소유권 테스트가 통과했다. |
+| T015 | M002 | [x] | bff/proxy | Web BFF | Codex | T013, T014 | `contracts/bff-proxy-routes.md`, `bff/src/main/java/com/meetingmind/bff/proxy/**`, 관련 config/tests/docs | `/api/v1/*` route allowlist와 서비스별 timeout/circuit/bulkhead를 구현한다. | 임의 URL/method가 Token Manager 전에 거부되고 강제 지연/실패, circuit/bulkhead 및 AI/LiveKit/Core 오류 구분 자동 테스트가 통과했다. |
+| T016 | M002 | [x] | integration | Integration | Codex | T014, T015 | `bff/src/main/**`, `bff/src/test/**`, `scripts/bff-backend-compat-e2e.sh`, `.github/workflows/ci.yml`, integration docs | Browser 계약 기준으로 BFF→현재 Backend 호환 E2E를 고정한다. | token response/storage/log scan, CSRF, refresh, logout negative case가 통과했다. |
+| T020 | M003 | [x] | frontend/session | Frontend | Codex | T016 | `frontend/src/auth/**`, `frontend/src/api/**`, `App.tsx`, LiveKit request, Vite/Playwright/CI config와 관련 tests/docs | `sessionStorage` AuthSession과 Bearer header를 제거하고 BFF session bootstrap을 구현한다. | reload 후 `/auth/session` 복원, same-origin cookie/CSRF 요청, 브라우저 token 무저장과 Backend+BFF+Redis 브라우저 E2E 6건이 통과했다. |
+| T021 | M003 | [x] | frontend/logout | Frontend | Codex | T020 | `frontend/src/auth/**`, `frontend/src/components/**`, `frontend/src/App.tsx`, 관련 styles/tests/E2E/docs | 현재 세션 로그아웃 UI와 BFF API 연결, 사용자별 화면 상태 정리를 구현한다. | CSRF `204` 성공/멱등 호출, 네트워크 실패 시 세션 유지·재시도 안내, 성공 시 상태 초기화·이전 cookie 재사용 차단을 단위 및 브라우저 E2E로 검증했다. |
+| T022 | M003 | [x] | frontend/errors | Frontend | Codex | T020, T021 | `frontend/src/auth/**`, `frontend/src/api/**`, `frontend/src/App.tsx`, auth modal, LiveKit request와 관련 tests/E2E/docs | 최종 `401 SESSION_INVALID` 전역 처리와 로그인 화면 이동을 구현한다. | 공통 BFF fetch가 일반 인증 `401`과 최종 세션 만료를 구분하고, 1회 전환·메모리 reload·안전한 요청 경로 복귀를 단위 및 브라우저 E2E로 검증했다. |
+| T023 | M003 | [x] | rollout | Integration | Codex | T021, T022 | `bff` rollout readiness/metrics/config/tests, `rollout-runbook.md`, plan/research/data/tasks/implement docs | BFF traffic drain flag, login/refresh/logout/session/proxy 관측 지표와 제한된 rollback window를 구현한다. | rollout readiness on/off, 저카디널리티 요청·refresh·정확한 `SESSION_INVALID` 지표, 단계별 guardrail과 브라우저 token 재노출 없는 안정 BFF rollback을 자동 테스트·runbook으로 검증했다. |
+| T024 | M004 | [ ] | frontend/logout-all | Frontend/Auth | TBD | T032 | `frontend/src/**`, BFF/Auth revoke-all API와 관련 contracts/tests | 최근 10분 인증 또는 local/Google 재인증 뒤 모든 기기 로그아웃 UI와 API를 연결한다. | 현재 사용자에 속한 모든 BFF/Auth 세션 폐기와 다른 기기의 후속 요청 차단이 검증된다. |
+| T030 | M004 | [x] | security-decision | Shared Contract | Codex | Q-009, Q-010, Q-015 | requirements auth/security 정책, `clarify.md`, `research.md`, contracts/data model/ERD/plan | refresh family, JWT/JWKS·revoke hardening, workload 인증과 logout-all 재인증을 확정한다. | Q-009/Q-010/Q-015/Q-016이 Decided이고 audience별 Token Bundle, lineage/outbox ERD, forward-only migration과 event/mTLS 계약 정합성 검증이 통과했다. |
+| T031 | M004 | [x] | auth/foundation | Auth Service | Codex | T030 | `auth/**`, `compose.local.yml`, `.github/workflows/ci.yml`, root docs/config | 별도 Auth Service와 전용 DB/schema/migration을 추가한다. | 독립 Gradle/Docker build, DB 포함 readiness와 DB 제외 liveness, 실제 PostgreSQL V1→V2 forward-only migration, table별 필요한 DML만 허용하고 DELETE/DDL/Flyway history는 거부하는 runtime 계정 검증이 통과했다. |
+| T032 | M004 | [x] | auth/runtime | Auth Service | Codex | T031 | `auth/src/main/**`, `auth/src/test/**`, Auth 계약/data/plan/CI/docs | local/Google 인증, access 발급 port와 refresh rotation, revoke/revoke-all, 감사와 transactional outbox producer를 구현한다. | 실제 PostgreSQL API 통합 테스트에서 local/Google 가입·로그인, 원문 비저장, 1회용 refresh 회전·재사용 시 해당 family만 폐기, 현재/전체 세션 멱등 폐기와 subject/recent-auth negative case가 통과했고, T033 signing adapter 부재 시 전체 발급 transaction이 fail closed했다. |
+| T033 | M004 | [x] | auth/keys | Auth Service | Codex | T032 | `auth/**`, `backend/src/main/java/com/meetingmind/demo/auth/target/**`, secret/KMS config와 관련 docs/tests | T032 `AccessTokenIssuer` port에 비대칭 signing, `kid`/JWKS, rotation overlap과 Resource validator를 구현한다. | KMS `RAW` RS256/RSA-2048 metadata, 고정 header와 `iss/aud/sub/sid/jti/iat/nbf/exp/ver`, JWKS ETag/5분 cache/workload allowlist, unknown `kid` 1회 갱신과 old/new overlap 자동 테스트가 통과했다. |
+| T034 | M004 | [ ] | data/migration | Data | TBD | T031, T032 | future Auth/Core migrations | User/AuthIdentity/AuthSession을 forward-only로 이전한다. | cross-DB 직접 조회 없이 dual-run/reconciliation/rollback 기준을 통과한다. |
+| T035 | M004 | [ ] | integration | Integration | TBD | T032, T033, T034 | BFF/Auth/Core integration tests | BFF를 Auth Service로 전환하고 Core dual validation 뒤 legacy issuer를 종료한다. | 외부 Browser 계약 무변경, 관측 안정, rollback window 종료 승인 후 legacy만 제거한다. |
+| T040 | M005 | Blocked | platform-decision | Platform | TBD | Q-011, Q-012, Q-013 | `clarify.md`, infra ADR | region, node/IaC, SLO/RTO/RPO를 확정한다. | 운영 topology와 출시 gate가 수치로 결정된다. |
+| T041 | M005 | [ ] | infra/foundation | Platform | TBD | T040 | future `infra/**` | EKS single-region Multi-AZ, ingress/WAF, workload IAM과 NetworkPolicy를 IaC로 구성한다. | public/internal route와 AWS 권한 경계가 자동 검증된다. |
+| T042 | M005 | [ ] | infra/data | Platform/Data | TBD | T041 | future `infra/**` | HA Redis, 서비스별 RDS, KMS/Secrets와 backup을 구성한다. | encryption, failover, backup/restore와 최소 권한을 검증한다. |
+| T043 | M005 | [ ] | deploy | Platform | TBD | T041, T042 | Dockerfiles, manifests/charts | BFF/Auth/Core/AI 최소 replica/probe/PDB/HPA/anti-affinity를 적용한다. | rollout 중 가용성과 AZ 분산 기준을 통과한다. |
+| T044 | M005 | [ ] | realtime | Platform/Core | TBD | T041 | LiveKit adapter/config/runbook | LiveKit Cloud secret과 room/token 경계를 workload IAM/secret으로 연결한다. | provider 장애가 realtime에만 격리되고 Meeting metadata/report가 유지된다. |
+| T045 | M005 | [ ] | observability | Platform | TBD | T043, T044 | dashboards/alerts/runbooks | login/refresh/logout/session/Auth/Core/AI/LiveKit/KMS 지표와 redaction을 구성한다. | SLO alert와 token/PII log scan이 통과한다. |
+| T046 | M005 | [ ] | resilience | Integration | TBD | T045 | failure tests, `implement.md` | Pod/AZ/Redis/Auth/Core/AI/LiveKit/KMS 장애 훈련을 수행한다. | `plan.md` failure behavior와 RTO/RPO 기준을 충족하거나 출시를 차단한다. |
+| T050 | M006 | [ ] | architecture | Architecture | TBD | M005 | future service specs | 관측된 부하·변경·장애 경계로 첫 추출 도메인을 선택한다. | 분리 가치, API/event, DB ownership, SLO와 rollback이 새 feature spec에 승인된다. |
+| T051 | M006 | [ ] | extraction | Domain Owner | TBD | T050 | future service code/infra | 선택 도메인을 Strangler 방식으로 하나만 추출한다. | dual-run/reconciliation/rollback을 통과하고 다른 도메인 DB를 직접 조회하지 않는다. |
+
+## Rollback Rules
+
+- rollback은 기존 경로를 보존하는 Phase 1~3의 명시적 window에서만 수행하며 migration을 역수정하지 않는다.
+- Browser session cutover 뒤에는 direct Backend rollback을 사용하지 않는다. 신규 BFF release의 readiness를 내려 drain하고 같은 cookie/Redis/Token Vault 계약의 안정 BFF release로 traffic weight를 복원한다.
+- Auth DB 전환은 source-of-truth 전환 전 dual-write/reconciliation 또는 검증된 export/import를 사용하고 기존 table을 즉시 삭제하지 않는다.
+- issuer 전환은 `kid`/issuer가 구분되는 dual validation을 사용하고 신규 token 발급을 먼저 되돌린다. force push나 migration rollback SQL에 의존하지 않는다.
+- EKS 전환은 deployment/traffic weight를 되돌리되 Redis/RDS/KMS 데이터는 보존하고 원인 분석 전 자동 파괴하지 않는다.

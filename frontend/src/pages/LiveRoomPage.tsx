@@ -13,11 +13,11 @@ import {
   startMeetingTranscription,
   stopMeetingTranscription
 } from "../api/workspace";
-import { buildAuthHeaders, type AuthSession } from "../auth/session";
+import { bffFetch } from "../auth/csrf";
+import type { AuthSession } from "../auth/session";
 import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
 import type { WorkspaceData } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "";
 const PREJOIN_STORAGE_KEY = "meetingmind-prejoin";
 
 type RoomTokenResponse = {
@@ -486,10 +486,10 @@ export function LiveRoomPage({
         }
         let tokenResponse: Response;
         try {
-          tokenResponse = await fetch(`${API_BASE_URL}/api/v1/meetings/${encodeURIComponent(meetingId)}/livekit-token`, {
-            method: "POST",
-            headers: buildAuthHeaders(session)
-          });
+          tokenResponse = await bffFetch(
+            `/api/v1/meetings/${encodeURIComponent(meetingId)}/livekit-token`,
+            { method: "POST" }
+          );
         } catch (error) {
           throw new Error(`토큰 API 연결 실패: ${formatRoomError(error, "백엔드 토큰 요청에 실패했습니다.")}`);
         }

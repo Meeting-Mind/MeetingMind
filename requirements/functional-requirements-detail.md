@@ -43,8 +43,8 @@ Google Sheets 기능요건(FR) 시트의 전체 우선순위(P0/P1/P2) 상세 �
 - 우선순위: `P0`
 - 요구사항: Google OAuth로 로그인할 수 있어야 한다
 - 인수 기준: ID token 검증 성공 시 로그인/가입
-- 관련 모듈/데이터: /auth/google
-- 상세 동작: Google ID token을 서버에서 검증한 뒤 내부 세션을 발급한다.
+- 관련 모듈/데이터: Web BFF, Auth Service, /auth/google
+- 상세 동작: BFF가 받은 Google ID token을 Auth Service가 검증하고 내부 토큰과 BFF 브라우저 세션을 발급한다. Google credential은 검증 후 세션이나 Token Vault에 보관하지 않는다.
 - 조건/권한: issuer, audience, expiry, signature 검증을 통과해야 한다.
 - 실패/예외: 검증 실패, 만료, audience 불일치는 401로 처리한다.
 - 검증 기준: 유효 토큰만 로그인되고 잘못된 토큰은 계정 생성 없이 거부된다.
@@ -64,55 +64,55 @@ Google Sheets 기능요건(FR) 시트의 전체 우선순위(P0/P1/P2) 상세 �
 
 - 우선순위: `P0`
 - 요구사항: 이메일/비밀번호로 로그인할 수 있어야 한다
-- 인수 기준: 자격 일치 시 토큰 발급 / 불일치 401
-- 관련 모듈/데이터: /auth/login
-- 상세 동작: 이메일/비밀번호를 검증하고 access/refresh 토큰을 발급한다.
+- 인수 기준: 자격 일치 시 서버 세션 생성 / 불일치 401
+- 관련 모듈/데이터: Web BFF, Auth Service, BffSession, /auth/login
+- 상세 동작: BFF가 이메일/비밀번호를 Auth Service에 전달해 검증하고, 내부 access/refresh 토큰은 BFF Token Vault에 연결한 뒤 브라우저에는 세션 쿠키만 발급한다.
 - 조건/권한: 탈퇴/잠금 계정은 로그인 대상에서 제외한다.
 - 실패/예외: 자격 불일치, 미가입, 탈퇴 계정은 401로 동일 처리한다.
-- 검증 기준: 정상 계정은 토큰을 받고 실패 사유는 과도하게 노출되지 않는다.
+- 검증 기준: 정상 계정은 Secure/HttpOnly 세션 쿠키와 사용자 세션 응답을 받고 브라우저 응답·저장소에는 access/refresh 원문이 없으며 실패 사유는 과도하게 노출되지 않는다.
 
 ### FR-AUTH-07 토큰 발급
 
 - 우선순위: `P0`
-- 요구사항: 로그인 시 access/refresh 토큰 쌍을 발급한다
-- 인수 기준: 만료시간 포함 토큰 쌍 반환
-- 관련 모듈/데이터: -
-- 상세 동작: 로그인 성공 시 만료시간이 포함된 access/refresh 토큰 쌍을 생성한다.
-- 조건/권한: refresh 토큰 원문은 저장하지 않고 hash와 revoke 상태만 저장한다.
+- 요구사항: 로그인 시 서비스별 access JWT 집합과 refresh 토큰을 발급한다
+- 인수 기준: Auth Service가 인증된 BFF에 audience별 10분 access JWT와 14일 refresh를 반환
+- 관련 모듈/데이터: Auth Service, Web BFF Token Vault, AuthSession
+- 상세 동작: 로그인 성공 시 Auth Service가 `meetingmind-core`, `meetingmind-ai`, `meetingmind-livekit` 각각을 단일 audience로 갖는 access JWT와 하나의 refresh를 생성해 인증된 BFF에만 반환한다. BFF는 토큰을 브라우저 응답에 포함하지 않는다.
+- 조건/권한: BFF는 토큰을 복호화 가능한 암호문으로 보관하고 Auth Service는 refresh 원문 대신 hash와 revoke 상태만 저장한다.
 - 실패/예외: 토큰 생성 실패 시 세션을 만들지 않고 500/인증 오류를 기록한다.
-- 검증 기준: 응답에 토큰 만료정보가 포함되고 DB에는 원문 refresh가 없다.
+- 검증 기준: 각 access JWT는 다른 Resource Service에서 거부되고 BFF 내부 응답에 audience별 만료정보가 포함되며 브라우저·로그·Auth Service DB에는 원문 refresh가 없다.
 
 ### FR-AUTH-08 토큰 갱신
 
 - 우선순위: `P0`
-- 요구사항: refresh 토큰으로 토큰을 재발급한다
-- 인수 기준: 유효 refresh 시 신규 쌍 발급 / 폐기분 거부
-- 관련 모듈/데이터: /auth/refresh
-- 상세 동작: 유효한 refresh 토큰을 검증해 새 토큰 쌍을 발급한다.
-- 조건/권한: 토큰 hash, 만료, revoke 상태를 모두 확인한다.
-- 실패/예외: 만료, 폐기, 위조 토큰은 401로 처리한다.
-- 검증 기준: 유효 토큰은 재발급되고 폐기 토큰 재사용은 차단된다.
+- 요구사항: 1회용 refresh 토큰으로 서비스별 access JWT와 refresh를 회전한다
+- 인수 기준: 유효 refresh 시 신규 집합 발급 / 사용·폐기분 재사용 시 해당 AuthSession family 전체 폐기
+- 관련 모듈/데이터: Web BFF Token Manager, Auth Service internal refresh
+- 상세 동작: BFF가 서버 측 Token Vault의 refresh 토큰으로 Auth Service에 새 audience별 access JWT 집합과 refresh를 요청한다. 브라우저가 refresh 토큰이나 public refresh endpoint를 직접 사용하지 않는다.
+- 조건/권한: token hash, lineage, 만료, revoke 상태를 한 트랜잭션에서 확인하고 BFF session 단위 single-flight 외의 동시 refresh grace를 허용하지 않는다.
+- 실패/예외: 만료·위조 token은 401, 이미 사용된 refresh 재사용은 해당 AuthSession과 후속 family를 원자적으로 revoke하고 내부 `409 REFRESH_REUSE_DETECTED`로 처리한다. Browser에는 `SESSION_INVALID`로 정규화한다.
+- 검증 기준: 유효 token은 BFF 내부에서 1회 회전되고 이전 token 재사용 시 해당 기기 family 전체가 폐기되며 다른 기기 AuthSession은 유지되고 브라우저 저장소와 네트워크 응답에 token 원문이 노출되지 않는다.
 
 ### FR-AUTH-09 로그아웃
 
 - 우선순위: `P0`
 - 요구사항: 로그아웃 시 현재 세션을 폐기한다
-- 인수 기준: refresh 세션 revoke 처리
-- 관련 모듈/데이터: /auth/logout
-- 상세 동작: 현재 refresh 세션을 revoke 처리하고 클라이언트 토큰을 폐기한다.
+- 인수 기준: 현재 BFF 세션 삭제와 Auth refresh 세션 revoke 처리
+- 관련 모듈/데이터: BffSession, AuthSession, /auth/logout
+- 상세 동작: BFF가 현재 Auth 세션을 revoke하고 서버 세션과 Token Bundle을 삭제한 뒤 세션/CSRF 쿠키를 만료시킨다. Auth Service는 DB revoke와 transactional outbox를 함께 커밋하고 Resource Service는 `sid` revoke event를 로컬 denylist에 access 만료 시점까지 적용한다.
 - 조건/권한: 로그인 사용자의 현재 세션에 한해 수행한다.
 - 실패/예외: 이미 폐기된 세션은 멱등 처리하거나 204로 처리한다.
-- 검증 기준: 로그아웃 후 동일 refresh 토큰으로 재발급할 수 없다.
+- 검증 기준: 로그아웃 후 이전 세션 쿠키와 refresh를 재사용할 수 없고 revoke event를 처리한 Resource Service는 아직 만료되지 않은 해당 `sid` access도 거부한다. 이벤트 지연 시 잔여 위험은 access TTL 10분과 검증 skew 최대 60초로 제한한다.
 
 ### FR-AUTH-10 세션 유지/자동로그인
 
 - 우선순위: `P1`
 - 요구사항: 유효 세션이면 재방문 시 로그인을 유지한다
-- 인수 기준: 유효 토큰 시 로그인 유지
-- 관련 모듈/데이터: sessionStorage
-- 상세 동작: 앱 재방문 시 저장된 세션을 확인해 로그인 상태를 복원한다.
-- 조건/권한: access 만료 시 refresh가 유효한 경우에만 재발급한다.
-- 실패/예외: refresh 만료/폐기 시 로그인 화면으로 이동한다.
+- 인수 기준: 유효 BFF 세션 쿠키 시 로그인 유지
+- 관련 모듈/데이터: BffSession, /auth/session
+- 상세 동작: 앱 재방문 시 브라우저가 세션 쿠키로 BFF 세션 상태를 조회해 사용자 표시 상태를 복원한다.
+- 조건/권한: access 만료 처리는 BFF가 서버 측에서 수행하고 세션은 유휴·절대·Remember me 정책을 모두 만족해야 한다.
+- 실패/예외: BFF 세션 또는 Auth refresh 세션이 만료·폐기되면 쿠키를 만료시키고 로그인 화면으로 이동한다.
 - 검증 기준: 유효 세션은 유지되고 무효 세션은 자동 로그아웃된다.
 
 ### FR-AUTH-11 비밀번호 재설정
@@ -174,12 +174,12 @@ Google Sheets 기능요건(FR) 시트의 전체 우선순위(P0/P1/P2) 상세 �
 
 - 우선순위: `P1`
 - 요구사항: 토큰 만료 시 재발급 흐름을 처리한다
-- 인수 기준: 401 시 refresh 후 재시도
-- 관련 모듈/데이터: -
-- 상세 동작: access 만료 응답을 감지해 refresh 후 원 요청을 재시도한다.
-- 조건/권한: 재시도는 1회로 제한하고 동시 refresh 중복을 방지한다.
-- 실패/예외: refresh 실패 시 세션을 정리하고 로그인 화면으로 이동한다.
-- 검증 기준: 만료 상황에서 정상 재발급 또는 안전한 로그아웃이 동작한다.
+- 인수 기준: BFF가 만료 전 또는 downstream 401 시 refresh 후 1회 재시도
+- 관련 모듈/데이터: Web BFF Token Manager, Auth Service
+- 상세 동작: BFF가 access 만료를 감지해 서버 측 refresh 후 원 downstream 요청을 재시도한다. 프론트엔드는 token refresh를 수행하지 않는다.
+- 조건/권한: 재시도는 1회로 제한하고 BFF 세션 단위 single-flight/lock으로 동시 refresh 중복을 방지한다.
+- 실패/예외: refresh 실패 시 BFF와 Auth 세션을 정리하고 브라우저에 최종 401을 반환한다.
+- 검증 기준: 만료 상황에서 사용자 조작 없이 정상 재발급되거나 세션과 쿠키가 안전하게 정리된다.
 
 ### FR-AUTH-17 계정 탈퇴
 
@@ -191,6 +191,17 @@ Google Sheets 기능요건(FR) 시트의 전체 우선순위(P0/P1/P2) 상세 �
 - 조건/권한: 본인 인증 또는 재로그인 확인 후 실행한다.
 - 실패/예외: 소유 프로젝트가 있거나 보존 의무 데이터가 있으면 정책에 따라 제한/대체한다.
 - 검증 기준: 탈퇴 후 로그인 불가하며 데이터 처리 결과가 정책과 일치한다.
+
+### FR-AUTH-18 모든 기기 로그아웃
+
+- 우선순위: `P1`
+- 요구사항: 사용자의 모든 BFF/Auth 세션을 폐기할 수 있어야 한다
+- 인수 기준: 현재 사용자에 속한 모든 활성 세션 삭제/revoke
+- 관련 모듈/데이터: BffSession, AuthSession, /auth/logout-all
+- 상세 동작: BFF가 Auth Service에 사용자 전체 세션 폐기를 요청하고, 사용자 인덱스로 조회한 모든 BFF 세션과 Token Bundle을 삭제한다.
+- 조건/권한: `authenticatedAt`이 최근 10분 이내이거나 local 비밀번호 또는 새 Google credential 재검증을 통과한 사용자만 실행할 수 있다.
+- 실패/예외: 일부 downstream 폐기 실패 시 로컬 BFF 세션은 우선 삭제하고 실패를 감사 이벤트와 재처리 대상으로 남긴다.
+- 검증 기준: 기존 모든 브라우저 세션이 다음 요청에서 401을 받고 refresh 토큰도 재사용할 수 없다.
 
 ## ② 메인 대시보드 — 프로젝트 / 캘린더
 
