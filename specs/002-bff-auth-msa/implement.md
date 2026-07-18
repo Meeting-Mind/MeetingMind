@@ -2,7 +2,7 @@
 
 ## Scope
 
-M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 T020~T023 Browser session cutover와 M004의 T030 Auth 보안 shared contract, T031 foundation, T032 credential/session/revoke runtime 및 T033 KMS signing/JWKS/Resource validator까지 구현했다.
+M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 T020~T023 Browser session cutover와 M004의 T030 Auth 보안 shared contract, T031 foundation, T032 credential/session/revoke runtime, T033 KMS signing/JWKS/Resource validator 및 T036 CI security hardening까지 구현했다.
 
 ## Work Allocation
 
@@ -26,6 +26,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | 2026-07-17 | T031 Auth Service Foundation | Auth Service | Codex | `auth/**`, `compose.local.yml`, `.github/workflows/ci.yml`, root/config 및 관련 설계·검증 문서 | 독립 서비스·전용 PostgreSQL, forward-only schema, 최소 권한 runtime 계정과 health/CI 경계 구현 |
 | 2026-07-17 | T032 Auth Runtime | Auth Service | Codex | `auth/src/main/**`, `auth/src/test/**`, Compose/CI/root 및 Auth 계약/data/plan/analyze | local/Google 자격 검증, refresh family rotation/reuse, revoke-all, 감사/outbox와 workload/fail-closed signer 경계 구현 |
 | 2026-07-17 | T033 Auth Keys/JWKS | Auth Service | Codex | `auth/**`, `backend/**/auth/target/**`, Compose/env 및 Auth 계약/data/plan/tasks/analyze | AWS KMS RS256 signer, rotation key ring, 내부 JWKS와 비활성 Resource validator 구현 |
+| 2026-07-18 | T036 CI Security Hardening | Integration | Codex | `bff/build.gradle`, `auth/build.gradle`, `.gitleaksignore`, 관련 spec/plan/tasks/implement | BFF/Auth 수정 가능 취약점 제거와 테스트 fixture Gitleaks 오탐 정밀 예외 처리 |
 
 동시에 같은 파일을 수정한 다른 agent는 없으며 통합은 Requirements → Spec/Plan → Contracts/Data → legacy reference → analysis 순서로 진행한다.
 
@@ -119,6 +120,8 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - 내부 JWKS는 active/overlap public key를 `RSA`/`sig`/`RS256` JWK로 제공하고 5분 public cache와 stable ETag/304를 지원한다. Auth API와 별도 BFF/Resource SPIFFE principal allowlist를 적용하며 public ingress 제외 계약을 유지한다.
 - Core에 추가한 target validator는 JWKS를 최대 5분/ETag로 cache하고 unknown `kid`에서 정확히 한 번 강제 갱신한 뒤 fail closed한다. 서명, algorithm/type/kid, issuer, 정확히 하나의 Core audience, UUID/시간/profile claim을 검증하고 identity만 반환한다. 기존 HMAC issuer 요청 경로와의 dual validation 활성화는 T035이므로 T033에서 현재 Core 동작은 바꾸지 않았다.
 - T033은 DB entity/relation을 만들지 않는다. key ring은 배포 설정, public key cache는 프로세스 메모리이므로 migration과 ERD 변경은 필요 없고 contract/data-model/plan/tasks만 영향에 맞게 갱신했다.
+- T036은 CI Trivy가 탐지한 BFF/Auth의 `jackson-databind 2.21.2` HIGH 2건과 `tomcat-embed-core 10.1.54` HIGH 3건/CRITICAL 3건을 이미 Backend에서 검증한 Jackson `2.21.4`, Tomcat `10.1.55` 전체 모듈 정렬로 해소했다. 새 라이브러리나 API/DB 계약은 추가하지 않았다.
+- Gitleaks가 탐지한 10건은 모두 커밋된 고정 테스트 master key 또는 잘못된 key 길이 negative fixture였다. 경로·규칙 전체를 허용하지 않고 기존 `.gitleaksignore` 정책대로 commit/path/rule/line fingerprint만 등록해 이후 실제 secret 탐지를 유지했다.
 
 ## Verification
 
@@ -184,6 +187,11 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | T033 Resource validator | Pass | Backend 전체 `./gradlew test`; 118 tests 중 기존 환경 gate 7건 skipped, 0 failures/errors. ETag/300초 HTTP fetch, RS256/issuer/audience/expiry/필수 claim negative, unknown `kid` 1회 갱신, old/new overlap과 미발견 fail-closed 확인 |
 | T033 runtime artifact | Pass | bootJar에 KMS adapter/JWKS와 AWS SDK KMS가 포함되고 test signer/config 0건, `meetingmind-auth:t033` image build와 non-root `meetingmind` user 확인 |
 | T033 PostgreSQL/ERD | Not run | DB schema/SQL/entity 관계를 변경하지 않았고 T032 실제 PostgreSQL 회귀가 signer port 경계를 이미 검증함; migration/ERD 변경 불필요 |
+| T036 BFF/Auth tests | Pass | BFF와 Auth에서 각각 `./gradlew test`; 두 서비스 모두 `BUILD SUCCESSFUL` |
+| T036 container builds | Pass | `docker build --tag meetingmind-bff:ci bff`, `docker build --tag meetingmind-auth:ci auth` 성공 |
+| T036 Trivy image scan | Pass | Trivy `0.72.0`, `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL`; BFF/Auth 모두 Alpine 0건, JAR 0건 |
+| T036 repository secret scan | Pass | Gitleaks `8.30.1`이 현재 브랜치 HEAD 전체 이력 57 commits/약 3.44 MB를 검사해 `no leaks found` |
+| T036 diff validation | Pass | `git diff --check` 통과 |
 | `docker build --tag meetingmind-bff:t013 bff` | Pass | validation/compatibility client를 포함한 non-root Java 21 runtime image 생성 |
 | `docker build --tag meetingmind-bff:t012 bff` | Pass | AWS SDK/KMS adapter를 포함한 non-root Java 21 runtime image 생성 |
 | `docker build --tag meetingmind-bff:t010 bff` | Pass | non-root Java 21 runtime image 생성 |

@@ -107,6 +107,7 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - AC-004: `Web BFF → Auth Service → 도메인 서비스` 점진 전환 순서와 호환·롤백 경계가 계획과 tasks에 있다.
 - AC-005: AWS EKS 단일 리전 Multi-AZ와 LiveKit Cloud 결정, 서비스 장애별 degradation이 계획에 있다.
 - AC-006: 구현 전 차단 질문과 검증 기준이 `clarify.md`, `tasks.md`, `analyze.md`에서 추적된다.
+- AC-007: BFF/Auth 런타임 이미지는 수정 가능한 HIGH/CRITICAL 취약점이 없고, 저장소 전체 이력 secret scan은 실제 secret과 테스트 fixture 오탐을 fingerprint 단위로 구분해 통과해야 한다.
 
 ## Open Questions
 

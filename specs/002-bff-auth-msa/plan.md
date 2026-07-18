@@ -22,6 +22,7 @@
 - T031에서 독립 Auth Service/비루트 Docker image와 전용 PostgreSQL을 추가했다. Flyway V1 스키마와 기존 migration을 변경하지 않는 V2 최소 권한 축소, DB 포함 readiness/DB 제외 liveness를 실제 PostgreSQL·Compose·권한 negative test로 검증했다. 인증 endpoint runtime은 T032 전까지 노출하지 않는다.
 - T032에서 Web BFF workload 전용 internal signup/login/Google/refresh/revoke/revoke-all, BCrypt/HMAC 저장 경계, 1회용 refresh lineage/reuse family 폐기, 감사와 transactional outbox producer를 구현했다. direct certificate SPIFFE SAN을 기본으로 검증하고 local/test header는 운영 profile에서 강제로 무시한다. KMS signer가 없는 runtime은 발급 transaction 전체를 rollback하며 T033 전까지 임시 JWT를 만들지 않는다.
 - T033은 KMS key ID만 가진 rotation key ring, `RAW` RS256 KMS 서명, 내부 JWKS와 5분 ETag cache Resource validator를 구현한다. 정기 교체 설정은 5분 선게시와 1시간 이전 key overlap을 시작 시 강제하고 침해 대응만 명시적 emergency mode로 예외 처리한다. Core 요청 경로의 legacy/new dual validation 활성화는 T035까지 보류한다.
+- T036은 CI에서 발견된 BFF/Auth의 수정 가능한 Jackson/Tomcat 취약점을 Backend의 검증된 안전 버전으로 정렬하고, 고정 테스트 키에 대한 Gitleaks 오탐을 커밋·파일·규칙·라인 fingerprint 단위로만 예외 처리한다.
 - LiveKit client/server token 연동은 있으나 목표 운영 provider는 LiveKit Cloud로 확정됐다.
 
 ## Target Architecture

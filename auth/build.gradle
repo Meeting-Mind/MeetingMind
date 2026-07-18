@@ -12,11 +12,19 @@ java {
     }
 }
 
+ext {
+    tomcatVersion = '10.1.55'
+}
+
 dependencies {
     implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
     implementation platform('software.amazon.awssdk:bom:2.46.8')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation "org.apache.tomcat.embed:tomcat-embed-core:${tomcatVersion}"
+    implementation "org.apache.tomcat.embed:tomcat-embed-el:${tomcatVersion}"
+    implementation "org.apache.tomcat.embed:tomcat-embed-websocket:${tomcatVersion}"
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.4'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
