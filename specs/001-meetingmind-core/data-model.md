@@ -4,6 +4,8 @@
 
 관계 도식은 `erd.md`를 우선 확인한다. 이 문서는 엔티티별 필드, RAG 논리 구조, 권한/보존 규칙을 설명한다.
 
+> 인증 모델 안내: 아래 `AuthSession.refreshTokenHash`와 Frontend token 저장은 현재 Core 호환 구현이다. 목표 BFF/Auth 모델과 저장소 소유권은 `../002-bff-auth-msa/data-model.md`와 `../002-bff-auth-msa/erd.md`를 따른다.
+
 ## Entity Overview
 
 ### User
@@ -38,7 +40,7 @@ Backend가 발급하는 MeetingMind access token의 subject는 `User.id`다. 사
 - `revokedAt`
 - `userAgent`
 
-Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장한다. Backend는 refresh token 원문을 저장하지 않고 hash와 revoke 상태만 저장한다.
+현재 Frontend는 access token과 refresh token 원문을 `sessionStorage`에 저장하고 Backend는 refresh hash/revoke를 저장한다. 이 흐름은 BFF 전환 중 legacy compatibility로만 유지하며 목표 브라우저는 token을 저장하지 않는다.
 
 ### Space
 

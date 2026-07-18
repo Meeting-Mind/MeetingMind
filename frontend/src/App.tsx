@@ -14,7 +14,9 @@ import {
   updateMeeting,
   updateMeetingParticipant
 } from "./api/workspace";
-import { readStoredAuthSession, saveAuthSession, type AuthSession } from "./auth/session";
+import { bootstrapAuthSession, logoutCurrentSession, type AuthSession } from "./auth/session";
+import { subscribeToSessionInvalid } from "./auth/sessionInvalidation";
+import { AuthSessionControls } from "./components/AuthSessionControls";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
 import { LiveMeetingPage } from "./pages/LiveMeetingPage";
@@ -68,6 +70,20 @@ type ProjectTaskState = {
   meetingKey: string | null;
   sourceCandidateId: string | null;
 };
+
+const SESSION_EXPIRED_NOTICE = "로그인이 만료되었습니다. 다시 로그인해 주세요.";
+
+function readSessionExpiredReturnTo(search: string): string | null {
+  const params = new URLSearchParams(search);
+  if (params.get("auth") !== "session-expired") {
+    return null;
+  }
+  const returnTo = params.get("returnTo");
+  if (!returnTo || !returnTo.startsWith("/") || returnTo.startsWith("//")) {
+    return "/spaces";
+  }
+  return returnTo;
+}
 type TeamMember = {
   userId?: string;
   name: string;
@@ -362,20 +378,26 @@ function mapWorkspaceSpace(space: SpaceSummary, meetingCount: number, memberCoun
 
 function ProtectedRoute({
   children,
+  loading,
   onRequestLogin,
   session
 }: {
   children: ReactNode;
+  loading: boolean;
   onRequestLogin: () => void;
   session: AuthSession | null;
 }) {
   const location = useLocation();
 
   useEffect(() => {
-    if (!session) {
+    if (!loading && !session) {
       onRequestLogin();
     }
-  }, [location.pathname, location.search, onRequestLogin, session]);
+  }, [loading, location.pathname, location.search, onRequestLogin, session]);
+
+  if (loading) {
+    return null;
+  }
 
   if (!session) {
     return <Navigate replace state={{ requestedPath: `${location.pathname}${location.search}` }} to="/" />;
@@ -387,7 +409,9 @@ function ProtectedRoute({
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
+  const sessionExpiredReturnTo = readSessionExpiredReturnTo(location.search);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [authBootstrapLoading, setAuthBootstrapLoading] = useState(true);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [data, setData] = useState<WorkspaceData>(mockData);
   const [workspaceDataSource, setWorkspaceDataSource] = useState<WorkspaceDataSource>("mock-fallback");
@@ -403,6 +427,51 @@ export function App() {
   const [meetingMutationLoading, setMeetingMutationLoading] = useState(false);
   const [meetingReadLoading, setMeetingReadLoading] = useState(false);
   const openAuthModal = useCallback(() => setAuthModalOpen(true), []);
+
+  useEffect(() => {
+    let active = true;
+    void bootstrapAuthSession()
+      .then((session) => {
+        if (active) {
+          setAuthSession(session);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAuthSession(null);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAuthBootstrapLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let redirecting = false;
+    return subscribeToSessionInvalid(() => {
+      if (redirecting) {
+        return;
+      }
+      redirecting = true;
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      const returnTo = currentPath.startsWith("/") && !currentPath.startsWith("//") && currentPath !== "/"
+        ? currentPath
+        : "/spaces";
+      const params = new URLSearchParams({ auth: "session-expired", returnTo });
+      window.location.replace(`/?${params.toString()}`);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!authBootstrapLoading && !authSession && sessionExpiredReturnTo) {
+      setAuthModalOpen(true);
+    }
+  }, [authBootstrapLoading, authSession, sessionExpiredReturnTo]);
 
   const refreshTargetMeetings = useCallback(async (session: AuthSession, spaceId: string, projectName: string) => {
     const response = await fetchMeetings(session, spaceId);
@@ -453,15 +522,42 @@ export function App() {
   }, []);
 
   function handleAuthSuccess(session: AuthSession) {
-    saveAuthSession(session);
     setAuthSession(session);
     setLatestMeetingInvites({});
     setAuthModalOpen(false);
 
-    const requestedPath = (location.state as { requestedPath?: string } | null)?.requestedPath;
+    const requestedPath =
+      (location.state as { requestedPath?: string } | null)?.requestedPath ?? sessionExpiredReturnTo;
     if (requestedPath && requestedPath !== "/") {
       navigate(requestedPath, { replace: true });
     }
+  }
+
+  function handleAuthModalClose() {
+    setAuthModalOpen(false);
+    if (sessionExpiredReturnTo) {
+      navigate("/", { replace: true, state: null });
+    }
+  }
+
+  async function handleLogout() {
+    await logoutCurrentSession();
+    setAuthSession(null);
+    setAuthModalOpen(false);
+    setData(mockData);
+    setWorkspaceDataSource("mock-fallback");
+    setProjectMeetings(initialProjectMeetings);
+    setProjectMembers(initialProjectMembers);
+    setProjectRequests(initialProjectRequests);
+    setProjectInvites(initialProjectInvites);
+    setLatestMeetingInvites({});
+    setMeetingParticipants({});
+    setProjectTasks(initialProjectTasks);
+    setProjectAiSpaceIds([]);
+    setMeetingMutationError("");
+    setMeetingMutationLoading(false);
+    setMeetingReadLoading(false);
+    window.location.replace("/");
   }
 
   async function handleCreateProject({ name, description }: { name: string; description: string }) {
@@ -1328,7 +1424,7 @@ export function App() {
         <Route
           path="/spaces"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               <WorkspaceHomePage
                 actionItems={data.meetingAi.actions}
                 currentUserEmail={authSession?.user.email ?? ""}
@@ -1348,7 +1444,7 @@ export function App() {
         <Route
           path="/meeting-access"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               {authSession ? <MeetingAccessPage session={authSession} /> : null}
             </ProtectedRoute>
           }
@@ -1356,7 +1452,7 @@ export function App() {
         <Route
           path="/live-meeting"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               {authSession ? <LiveMeetingPage data={data.liveMeeting} session={authSession} /> : null}
             </ProtectedRoute>
           }
@@ -1364,7 +1460,7 @@ export function App() {
         <Route
           path="/live-room"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               {authSession ? <LiveRoomPage liveMeeting={data.liveMeeting} meetingAi={data.meetingAi} session={authSession} /> : null}
             </ProtectedRoute>
           }
@@ -1372,7 +1468,7 @@ export function App() {
         <Route
           path="/project-overview"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               <ProjectOverviewPage
                 currentUserId={authSession?.user.id ?? ""}
                 currentUserEmail={authSession?.user.email ?? ""}
@@ -1408,7 +1504,7 @@ export function App() {
         <Route
           path="/team-members"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               <TeamMembersPage
                 inviteMeta={projectInvites}
                 onApproveRequest={handleApproveJoinRequest}
@@ -1427,7 +1523,7 @@ export function App() {
         <Route
           path="/meeting-ai"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               <MeetingAiPage data={data.meetingAi} session={authSession} />
             </ProtectedRoute>
           }
@@ -1435,13 +1531,19 @@ export function App() {
         <Route
           path="/report-agent"
           element={
-            <ProtectedRoute onRequestLogin={openAuthModal} session={authSession}>
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               <ReportAgentPage data={data.reportAgent} session={authSession} />
             </ProtectedRoute>
           }
         />
       </Routes>
-      <GoogleLoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} onSuccess={handleAuthSuccess} />
+      {authSession ? <AuthSessionControls onLogout={handleLogout} session={authSession} /> : null}
+      <GoogleLoginModal
+        isOpen={authModalOpen}
+        notice={sessionExpiredReturnTo ? SESSION_EXPIRED_NOTICE : undefined}
+        onClose={handleAuthModalClose}
+        onSuccess={handleAuthSuccess}
+      />
     </>
   );
 }

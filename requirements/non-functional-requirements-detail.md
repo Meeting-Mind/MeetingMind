@@ -21,13 +21,13 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 
 - 분류: 보안
 - 우선순위: `P0`
-- 측정지표/기준: hash + revoke 상태만 저장
+- 측정지표/기준: 브라우저/로그 미저장, BFF 암호화 저장, Auth Service hash + revoke 저장
 - 비고: -
-- 상세 기준: refresh 토큰은 원문을 DB/로그/클라이언트 저장소에 남기지 않는다.
-- 측정 방법: DB 컬럼, 로그, 토큰 재사용 테스트를 점검한다.
-- 적용/예외 조건: 클라이언트 보관 정책은 별도 보안 기준을 따른다.
+- 상세 기준: refresh 토큰은 브라우저 저장소·브라우저 응답·로그에 남기지 않는다. 복호화가 필요한 BFF는 Token Vault에 KMS 기반 암호문만 저장하고 Auth Service는 원문 대신 hash와 revoke 상태만 저장한다. 평문은 BFF가 Auth Service에 refresh 요청을 보내는 프로세스 메모리에만 일시적으로 존재할 수 있다.
+- 측정 방법: 브라우저 저장소/네트워크 응답, BFF Redis/Token Vault 암호문, Auth Service DB 컬럼, 로그, 토큰 재사용 테스트를 점검한다.
+- 적용/예외 조건: BFF Token Vault의 복호화 가능한 암호문은 Auth Service에 토큰을 제시하기 위해 허용하는 유일한 서버 저장 예외다.
 - 검증 주기: 릴리즈 전/침투 테스트 시
-- 미결정 사항: 토큰 회전 방식 확정
+- 미결정 사항: 없음. 이미 사용된 refresh 재사용은 동시 grace 없이 해당 AuthSession family 전체를 폐기한다.
 
 ### NFR-SEC-03 소셜 ID token을 서버에서 검증한다
 
@@ -47,11 +47,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P0`
 - 측정지표/기준: HTTPS/TLS 적용
 - 비고: -
-- 상세 기준: 모든 운영 트래픽은 HTTPS/TLS를 사용한다.
+- 상세 기준: 모든 운영 트래픽은 HTTPS/TLS를 사용한다. BFF/Auth/Resource Service 내부 호출은 mTLS와 SPIFFE workload identity로 양방향 인증하고 NetworkPolicy와 endpoint allowlist를 함께 적용한다.
 - 측정 방법: 배포 URL, API 요청, mixed content 여부를 확인한다.
 - 적용/예외 조건: 로컬 개발 환경은 예외로 둘 수 있다.
 - 검증 주기: 배포 전/인프라 변경 시
-- 미결정 사항: TLS 최소 버전
+- 미결정 사항: 서비스 메시 제품과 인증서 발급 구현은 Q-012/T040에서 확정한다. workload identity 계약은 mTLS/SPIFFE로 고정한다.
 
 ### NFR-SEC-05 secret은 환경변수/.env로 관리한다
 
@@ -95,11 +95,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P1`
 - 측정지표/기준: 허용 출처 제한
 - 비고: -
-- 상세 기준: CORS 허용 출처와 CSRF 보호 범위를 제한한다.
+- 상세 기준: 브라우저와 Web BFF는 동일 Origin을 기본으로 하고 쿠키 인증을 사용하는 모든 상태 변경 요청은 CSRF token을 검증한다. CORS가 필요한 예외 Origin은 명시 allowlist로만 허용한다.
 - 측정 방법: 허용되지 않은 origin 요청과 인증 요청 테스트로 확인한다.
-- 적용/예외 조건: 토큰 기반 API와 쿠키 기반 API에 따라 정책을 분리한다.
+- 적용/예외 조건: 브라우저-BFF 쿠키 API에는 CSRF를 적용하고 BFF-내부 서비스 Bearer API에는 브라우저 CORS를 허용하지 않는다.
 - 검증 주기: 배포 환경 변경 시
-- 미결정 사항: 쿠키 사용 여부에 따른 CSRF 범위
+- 미결정 사항: 없음(`specs/002-bff-auth-msa/contracts/browser-auth-api.md`에서 전달 header와 운영/로컬 cookie profile 확정)
 
 ## 권한 / 접근 제어 (Authorization)
 
@@ -307,11 +307,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P2`
 - 측정지표/기준: 무상태 서버/스케일아웃
 - 비고: -
-- 상세 기준: 서버는 가능한 무상태로 구성하고 세션/작업 상태는 외부 저장소에 둔다.
-- 측정 방법: 스케일아웃 환경에서 요청 분산 테스트로 확인한다.
-- 적용/예외 조건: 실시간 연결 서버는 provider 특성에 따라 예외가 있을 수 있다.
+- 상세 기준: Web BFF와 업무 서비스는 EKS에서 수평 확장 가능하게 구성하고 브라우저 세션은 BFF 전용 Redis, 영속 업무 데이터는 서비스 소유 DB에 둔다. LiveKit 미디어 평면은 LiveKit Cloud로 분리한다.
+- 측정 방법: EKS 복수 Pod에서 sticky session 없이 요청 분산, Pod 재시작, 세션 유지와 서비스별 scale-out 테스트로 확인한다.
+- 적용/예외 조건: 장기 작업과 실시간 연결은 별도 worker/provider 특성에 맞는 상태 경계를 둔다.
 - 검증 주기: 인프라 변경 시
-- 미결정 사항: 상태 저장소 선택
+- 미결정 사항: EKS node 운영 방식과 HPA 기준값
 
 ### NFR-AVAIL-01 서비스 가용성 목표를 만족한다
 
@@ -319,11 +319,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P2`
 - 측정지표/기준: uptime 목표(예: 99.9%)
 - 비고: -
-- 상세 기준: 서비스 가용성 목표를 정의하고 모니터링한다.
-- 측정 방법: 업타임 모니터링과 장애 시간 집계로 측정한다.
-- 적용/예외 조건: 계획 점검 시간 제외 여부를 명시한다.
+- 상세 기준: AWS 단일 리전 Multi-AZ에서 Web BFF/Auth/Core/AI를 독립 배포하고 장애가 다른 기능으로 연쇄 전파되지 않도록 한다. 공용 진입점과 세션 저장소도 단일 Pod/AZ에 의존하지 않는다.
+- 측정 방법: 서비스별 업타임, 오류율, 지연, Pod/AZ 장애 주입과 부분 기능 유지 여부를 측정한다.
+- 적용/예외 조건: 멀티리전 재해복구는 현재 범위 밖이며 계획 점검 시간과 LiveKit Cloud SLA 반영 여부를 별도 명시한다.
 - 검증 주기: 월간
-- 미결정 사항: SLA 목표
+- 미결정 사항: 서비스별 SLO, RTO, RPO와 AWS 리전
 
 ### NFR-AVAIL-02 외부 API 실패 시 graceful degradation한다
 
@@ -331,11 +331,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P1`
 - 측정지표/기준: mock fallback/부분 동작
 - 비고: -
-- 상세 기준: 외부 API 실패 시 전체 기능 장애가 아닌 제한된 오류/대체 경로로 동작한다.
+- 상세 기준: AI 또는 LiveKit Cloud 실패 시 전체 기능 장애가 아닌 제한된 오류로 동작하고 Space/Meeting CRUD와 저장된 지식 조회는 가능한 범위에서 유지한다.
 - 측정 방법: LLM, STT, LiveKit 장애 mock 테스트로 확인한다.
-- 적용/예외 조건: mock fallback은 운영 응답과 명확히 구분한다.
+- 적용/예외 조건: 운영에서는 외부 API 실패를 mock 성공으로 위장하지 않고 기능별 unavailable 상태를 명시한다.
 - 검증 주기: 외부 연동 변경 시
-- 미결정 사항: fallback 범위
+- 미결정 사항: 기능별 부분 응답과 재시도 UX
 
 ## 사용성 / 접근성 (Usability)
 
@@ -407,11 +407,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P1`
 - 측정지표/기준: timeout/retry
 - 비고: -
-- 상세 기준: 외부 호출에는 timeout, retry, circuit breaker 또는 fallback을 적용한다.
+- 상세 기준: BFF-내부 서비스와 외부 provider 호출에는 timeout, circuit breaker, bulkhead 또는 fallback을 적용한다. Retry는 멱등성과 중복 과금/중복 mutation 위험을 확인한 요청에만 제한한다.
 - 측정 방법: 강제 지연/실패 테스트로 확인한다.
 - 적용/예외 조건: 비멱등 요청은 무조건 재시도하지 않는다.
 - 검증 주기: 연동 개발 시
-- 미결정 사항: timeout/retry 기본값
+- 미결정 사항: 운영 SLO 기준 최종값. Phase 1 BFF 기본값은 Core connect/read `1s/3s`, 동시 64, 연속 실패 5회·30초 open, AI `1s/30s`, 동시 8, 연속 실패 3회·30초 open, LiveKit `1s/2s`, 동시 16, 연속 실패 3회·15초 open으로 시작하고 관측값에 따라 조정한다.
 
 ### NFR-REL-02 데이터 유실을 방지한다
 
@@ -529,13 +529,13 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 
 - 분류: 데이터
 - 우선순위: `P1`
-- 측정지표/기준: FE sessionStorage, refresh 원문 미저장
+- 측정지표/기준: FE token 0건, HttpOnly 세션 쿠키, BFF 암호화 Token Vault, Auth Service refresh hash
 - 비고: -
-- 상세 기준: access token은 메모리 또는 sessionStorage 정책을 따르고 refresh 원문은 저장하지 않는다.
-- 측정 방법: 브라우저 저장소와 DB 저장값을 점검한다.
-- 적용/예외 조건: 모바일/데스크톱 환경별 보관 방식은 별도 정책을 둘 수 있다.
+- 상세 기준: 브라우저는 불투명한 BFF 세션 쿠키만 보유하고 access/refresh token을 메모리, Web Storage, IndexedDB에 저장하지 않는다. BFF는 암호화 Token Bundle, Auth Service는 refresh hash/revoke 상태만 저장한다.
+- 측정 방법: 브라우저 저장소/응답/header, Redis session, Token Vault, Auth Service DB와 로그를 점검한다.
+- 적용/예외 조건: 모바일/데스크톱/외부 API 클라이언트는 Web BFF 세션과 분리된 인증 정책을 별도로 정의한다.
 - 검증 주기: 인증 구현 변경 시
-- 미결정 사항: FE 저장소 최종 정책
+- 미결정 사항: 없음(Web BFF 브라우저 저장 정책 확정)
 
 ## AI 품질 / 안전 (AI Safety)
 

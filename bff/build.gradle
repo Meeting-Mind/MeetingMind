@@ -1,0 +1,45 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.14'
+}
+
+group = 'com.meetingmind'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+ext {
+    tomcatVersion = '10.1.55'
+}
+
+dependencies {
+    implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+    implementation platform('software.amazon.awssdk:bom:2.46.8')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation "org.apache.tomcat.embed:tomcat-embed-core:${tomcatVersion}"
+    implementation "org.apache.tomcat.embed:tomcat-embed-el:${tomcatVersion}"
+    implementation "org.apache.tomcat.embed:tomcat-embed-websocket:${tomcatVersion}"
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.4'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.session:spring-session-data-redis'
+    implementation 'software.amazon.awssdk:kms'
+    implementation 'software.amazon.awssdk:url-connection-client'
+
+    testImplementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    systemProperty 'spring.profiles.active', 'test'
+}

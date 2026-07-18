@@ -1,32 +1,32 @@
 # Auth API Contract
 
-Auth API는 target backend 계약이며 `/api/v1/auth/*`에서 시작한다. 현재 코드에 prototype 구현이 있다.
+Auth API는 현재 Core Backend의 token 기반 구현과 BFF 전환 중 호환 계약을 기록한다. 목표 Browser-BFF/Auth Service 계약은 `../../002-bff-auth-msa/contracts/README.md`가 대체하며, 이 문서의 token response를 새 브라우저 구현 기준으로 사용하지 않는다.
 
 ## Document Status
 
 | Field | Value |
 | --- | --- |
-| Status | Current Prototype, Target Backend |
+| Status | Current Legacy Compatibility |
 | Owner | Auth/Login |
 | Related requirements | FR-AUTH-01, FR-AUTH-02, FR-AUTH-03, FR-AUTH-04, FR-AUTH-05, FR-AUTH-06, FR-AUTH-07, FR-AUTH-08, FR-AUTH-09, FR-AUTH-10, FR-AUTH-13, FR-AUTH-16, NFR-SEC-01, NFR-SEC-02, NFR-SEC-03, NFR-SEC-06, POL-PW-01, POL-TOKEN-01 |
 | Related data model | User, AuthIdentity, AuthSession |
 
-## Token Rules
+## Legacy Compatibility Token Rules
 
 - Backend는 access token과 refresh token을 발급한다.
-- Frontend는 token pair를 `sessionStorage`에 저장한다.
+- 현재 Frontend는 token pair를 `sessionStorage`에 저장한다. 목표 Frontend는 이 저장을 제거한다.
 - 인증 API 요청은 `Authorization: Bearer {accessToken}`를 사용한다.
 - Refresh token 원문은 서버에 저장하지 않고 `AuthSession.refreshTokenHash`만 저장한다.
-- 기본 만료 후보는 access token 1시간, refresh token 14일이다.
+- 현재 access token은 1시간, refresh token은 14일이다. 목표 내부 access는 10~15분 범위로 재설계한다.
 
 ## POST /api/v1/auth/signup
 
-자체 이메일/비밀번호 계정을 만들고 token pair를 발급한다.
+자체 이메일/비밀번호 계정을 만들고 현재 호환 token pair를 발급한다.
 
 ### Status
 
 - Current Prototype
-- Target Backend
+- Legacy Compatibility Backend
 
 ### Auth and Permissions
 
@@ -103,7 +103,7 @@ Auth API는 target backend 계약이며 `/api/v1/auth/*`에서 시작한다. 현
 ### Status
 
 - Current Prototype
-- Target Backend
+- Legacy Compatibility Backend
 
 ### Auth and Permissions
 
@@ -156,12 +156,12 @@ Auth API는 target backend 계약이며 `/api/v1/auth/*`에서 시작한다. 현
 
 ## POST /api/v1/auth/google
 
-Google ID token을 backend가 검증한 뒤 내부 사용자와 연결하고 token pair를 발급한다.
+Google ID token을 backend가 검증한 뒤 내부 사용자와 연결하고 현재 호환 token pair를 발급한다.
 
 ### Status
 
 - Current Prototype
-- Target Backend
+- Legacy Compatibility Backend
 
 ### Auth and Permissions
 
@@ -219,7 +219,7 @@ Refresh token rotation으로 새 token pair를 발급한다.
 ### Status
 
 - Current Prototype
-- Target Backend
+- Legacy Compatibility Backend
 
 ### Auth and Permissions
 
@@ -276,7 +276,7 @@ Refresh token rotation으로 새 token pair를 발급한다.
 ### Status
 
 - Current Prototype
-- Target Backend
+- Legacy Compatibility Backend
 
 ### Auth and Permissions
 
@@ -332,7 +332,7 @@ None.
 ### Status
 
 - Current Prototype
-- Target Backend
+- Legacy Compatibility Backend
 
 ### Auth and Permissions
 

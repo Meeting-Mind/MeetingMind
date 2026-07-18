@@ -1,0 +1,96 @@
+server:
+  port: ${BFF_SERVER_PORT:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: meetingmind-web-bff
+  profiles:
+    default: local
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${BFF_REDIS_HOST:127.0.0.1}
+      port: ${BFF_REDIS_PORT:6379}
+      connect-timeout: 2s
+      timeout: 2s
+      repositories:
+        enabled: false
+  session:
+    store-type: redis
+    timeout: ${BFF_SESSION_IDLE_TIMEOUT:60m}
+    redis:
+      namespace: meetingmind:bff:session
+
+meetingmind:
+  bff:
+    session-cookie:
+      name: ${BFF_SESSION_COOKIE_NAME:__Host-mm-session}
+      secure: ${BFF_SESSION_COOKIE_SECURE:true}
+    session-lifetime:
+      standard-idle: 60m
+      standard-absolute: 12h
+      remember-idle: 7d
+      remember-absolute: 14d
+    rollout:
+      accept-browser-traffic: ${BFF_ACCEPT_BROWSER_TRAFFIC:true}
+    token-vault:
+      key-provider: ${BFF_TOKEN_VAULT_KEY_PROVIDER:kms}
+      namespace: ${BFF_TOKEN_VAULT_NAMESPACE:meetingmind:bff:token-vault}
+      kms-key-id: ${BFF_TOKEN_VAULT_KMS_KEY_ID:}
+      local-key-id: ${BFF_TOKEN_VAULT_LOCAL_KEY_ID:local-development}
+      local-master-key-base64: ${BFF_TOKEN_VAULT_LOCAL_KEY_BASE64:}
+    compat-auth:
+      base-url: ${BFF_BACKEND_BASE_URL:http://127.0.0.1:8080}
+      issuer: ${BFF_COMPAT_AUTH_ISSUER:meetingmind-core-legacy}
+      audience: ${BFF_COMPAT_AUTH_AUDIENCE:meetingmind-core}
+    token-manager:
+      access-expiry-skew: 30s
+      lock-namespace: ${BFF_TOKEN_REFRESH_LOCK_NAMESPACE:meetingmind:bff:token-refresh-lock}
+      lock-lease: 15s
+      wait-timeout: 16s
+      poll-interval: 25ms
+    downstream:
+      core:
+        base-url: ${BFF_CORE_BASE_URL:${BFF_BACKEND_BASE_URL:http://127.0.0.1:8080}}
+        connect-timeout: ${BFF_CORE_CONNECT_TIMEOUT:1s}
+        read-timeout: ${BFF_CORE_READ_TIMEOUT:3s}
+        max-concurrent: ${BFF_CORE_MAX_CONCURRENT:64}
+        failure-threshold: ${BFF_CORE_FAILURE_THRESHOLD:5}
+        open-duration: ${BFF_CORE_OPEN_DURATION:30s}
+      ai:
+        base-url: ${BFF_AI_BASE_URL:${BFF_BACKEND_BASE_URL:http://127.0.0.1:8080}}
+        connect-timeout: ${BFF_AI_CONNECT_TIMEOUT:1s}
+        read-timeout: ${BFF_AI_READ_TIMEOUT:30s}
+        max-concurrent: ${BFF_AI_MAX_CONCURRENT:8}
+        failure-threshold: ${BFF_AI_FAILURE_THRESHOLD:3}
+        open-duration: ${BFF_AI_OPEN_DURATION:30s}
+      livekit:
+        base-url: ${BFF_LIVEKIT_BASE_URL:${BFF_BACKEND_BASE_URL:http://127.0.0.1:8080}}
+        connect-timeout: ${BFF_LIVEKIT_CONNECT_TIMEOUT:1s}
+        read-timeout: ${BFF_LIVEKIT_READ_TIMEOUT:2s}
+        max-concurrent: ${BFF_LIVEKIT_MAX_CONCURRENT:16}
+        failure-threshold: ${BFF_LIVEKIT_FAILURE_THRESHOLD:3}
+        open-duration: ${BFF_LIVEKIT_OPEN_DURATION:15s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,redis,rollout
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true

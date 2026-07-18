@@ -1,7 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const password = "CiPass123!";
-const sessionStorageKey = "meetingmind.auth.session";
 const backendBaseURL = `http://127.0.0.1:${process.env.PLAYWRIGHT_BACKEND_PORT ?? "8080"}`;
 
 function apiPath(path: string) {
@@ -34,11 +33,14 @@ async function signup(request: APIRequestContext, label: string): Promise<AuthSe
   return (await response.json()) as AuthSession;
 }
 
-async function storeSession(page: Page, session: AuthSession) {
-  await page.addInitScript(
-    ({ key, value }) => window.sessionStorage.setItem(key, value),
-    { key: sessionStorageKey, value: JSON.stringify(session) }
-  );
+async function loginThroughBff(page: Page, session: AuthSession, path: string) {
+  await page.goto(path);
+  const dialog = page.getByRole("dialog", { name: "로그인 후 이용할 수 있습니다" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("이메일").fill(session.user.email);
+  await dialog.getByLabel("비밀번호").fill(password);
+  await dialog.locator("form").getByRole("button", { name: "로그인", exact: true }).click();
+  await expect(dialog).toBeHidden();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -48,15 +50,93 @@ test.beforeEach(async ({ page }) => {
 test("password login opens the requested protected route", async ({ page, request }) => {
   const session = await signup(request, "login");
 
-  await page.goto("/spaces");
-  const dialog = page.getByRole("dialog", { name: "로그인 후 이용할 수 있습니다" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel("이메일").fill(session.user.email);
-  await dialog.getByLabel("비밀번호").fill(password);
-  await dialog.locator("form").getByRole("button", { name: "로그인", exact: true }).click();
+  await loginThroughBff(page, session, "/spaces");
 
   await expect(page).toHaveURL(/\/spaces$/);
-  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("textbox", { name: "프로젝트 검색" })).toBeVisible();
+});
+
+test("current-session logout clears the authenticated UI and blocks reuse", async ({ page, request }) => {
+  const session = await signup(request, "logout-success");
+  await loginThroughBff(page, session, "/spaces");
+
+  const logoutResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().endsWith("/api/v1/auth/logout")
+  );
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  const logoutResponse = await logoutResponsePromise;
+
+  expect(logoutResponse.status()).toBe(204);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("complementary", { name: "사용자 세션" })).toHaveCount(0);
+
+  await page.goto("/spaces");
+  await expect(page.getByRole("dialog", { name: "로그인 후 이용할 수 있습니다" })).toBeVisible();
+});
+
+test("logout network failure keeps the session visible and offers retry feedback", async ({ page, request }) => {
+  const session = await signup(request, "logout-failure");
+  await page.route("**/api/v1/auth/logout", (route) => route.abort("failed"));
+  await loginThroughBff(page, session, "/spaces");
+
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+
+  await expect(page.getByRole("alert")).toHaveText(
+    "로그아웃 서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요."
+  );
+  await expect(page).toHaveURL(/\/spaces$/);
+  await expect(page.getByRole("complementary", { name: "사용자 세션" })).toBeVisible();
+});
+
+test("final SESSION_INVALID redirects once and returns to the requested route after login", async ({ page, request }) => {
+  const session = await signup(request, "session-invalid");
+  let finalSessionInvalidSent = false;
+  let finalSessionInvalidCount = 0;
+
+  await page.route("**/api/v1/auth/session", async (route) => {
+    if (finalSessionInvalidSent) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ authenticated: false, user: null, session: null })
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/v1/spaces", async (route) => {
+    if (route.request().method() === "GET" && !finalSessionInvalidSent) {
+      finalSessionInvalidSent = true;
+      finalSessionInvalidCount += 1;
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "SESSION_INVALID",
+          message: "로그인이 만료되었습니다. 다시 로그인해 주세요.",
+          fieldErrors: [],
+          traceId: "playwright-session-invalid"
+        })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await loginThroughBff(page, session, "/spaces");
+
+  const expiredDialog = page.getByRole("dialog", { name: "로그인 후 이용할 수 있습니다" });
+  await expect(page).toHaveURL(/\/?auth=session-expired&returnTo=%2Fspaces$/);
+  await expect(expiredDialog).toBeVisible();
+  await expect(expiredDialog.getByRole("status")).toHaveText("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+  await expect(page.getByRole("complementary", { name: "사용자 세션" })).toHaveCount(0);
+  expect(finalSessionInvalidCount).toBe(1);
+
+  await expiredDialog.getByLabel("이메일").fill(session.user.email);
+  await expiredDialog.getByLabel("비밀번호").fill(password);
+  await expiredDialog.locator("form").getByRole("button", { name: "로그인", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/spaces$/);
   await expect(page.getByRole("textbox", { name: "프로젝트 검색" })).toBeVisible();
 });
 
@@ -82,8 +162,11 @@ test("meeting prejoin allows an active HOST and denies an unknown meeting", asyn
   expect(meetingResponse.ok()).toBeTruthy();
   const meeting = (await meetingResponse.json()) as { id: string };
 
-  await storeSession(page, session);
-  await page.goto(`/live-meeting?spaceId=${space.id}&meetingId=${meeting.id}&meeting=CI+permission+meeting`);
+  await loginThroughBff(
+    page,
+    session,
+    `/live-meeting?spaceId=${space.id}&meetingId=${meeting.id}&meeting=CI+permission+meeting`
+  );
   await expect(page.getByText("참여 권한 확인됨")).toBeVisible();
   await expect(page.getByText("HOST 권한으로 입장합니다")).toBeVisible();
 
@@ -114,13 +197,13 @@ test("workspace restores persisted spaces and meetings after reload", async ({ p
   });
   expect(meetingResponse.ok()).toBeTruthy();
 
-  await storeSession(page, session);
-  await page.goto("/spaces");
+  await loginThroughBff(page, session, "/spaces");
   await expect(page.getByText("Workspace API", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: spaceName })).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole("heading", { name: spaceName })).toBeVisible();
+  expect(await page.evaluate(() => window.sessionStorage.getItem("meetingmind.auth.session"))).toBeNull();
   await page.getByRole("heading", { name: spaceName }).click();
   await expect(page.getByText(meetingTitle, { exact: true }).first()).toBeVisible();
 });
@@ -140,8 +223,7 @@ test("failed project creation keeps the form open without a phantom project", as
     }
     await route.continue();
   });
-  await storeSession(page, session);
-  await page.goto("/spaces");
+  await loginThroughBff(page, session, "/spaces");
   await page.getByRole("button", { name: "+ 새 프로젝트 만들기" }).click();
 
   const dialog = page.getByRole("dialog", { name: "새 프로젝트 만들기" });
@@ -165,8 +247,11 @@ test("meeting CRUD is persisted through the project UI", async ({ page, request 
   expect(spaceResponse.ok()).toBeTruthy();
   const space = (await spaceResponse.json()) as { id: string };
 
-  await storeSession(page, session);
-  await page.goto(`/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`);
+  await loginThroughBff(
+    page,
+    session,
+    `/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`
+  );
   await expect(page.getByRole("heading", { name: `${spaceName} 프로젝트` })).toBeVisible();
   await expect(page.getByText("PostgreSQL target API")).toBeVisible();
   await expect(page.getByLabel("새 회의 제목")).toBeEnabled();
@@ -232,8 +317,11 @@ test("meeting detail participant ACL is loaded and mutated through the project U
   expect(meetingResponse.ok()).toBeTruthy();
   const meeting = (await meetingResponse.json()) as { id: string };
 
-  await storeSession(page, owner);
-  await page.goto(`/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`);
+  await loginThroughBff(
+    page,
+    owner,
+    `/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`
+  );
   const guestRow = page.locator(".project-acl-row").filter({ hasText: guest.user.displayName });
   await expect(guestRow).toBeVisible();
   await expect(guestRow.getByRole("combobox")).toHaveValue("VIEWER");

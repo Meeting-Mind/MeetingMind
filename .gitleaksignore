@@ -3,3 +3,13 @@ ec9a0a404441fd2f25da6b5dc9ce42d207d56e6e:backend/.env:openai-api-key:4
 79589ca4b1091381f961ab26c4855f0c396595ed:backend/.env:generic-api-key:2
 79589ca4b1091381f961ab26c4855f0c396595ed:backend/.env:generic-api-key:3
 79589ca4b1091381f961ab26c4855f0c396595ed:backend/.env:openai-api-key:4
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/auth/RedisRefreshSingleFlightLockIntegrationTest.java:generic-api-key:16
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/auth/BffSessionManagerTest.java:generic-api-key:34
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/auth/BffTokenManagerTest.java:generic-api-key:42
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/tokenvault/RedisTokenVaultIntegrationTest.java:generic-api-key:18
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/auth/BffAuthRedisIntegrationTest.java:generic-api-key:42
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/resources/application-test.yml:generic-api-key:14
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:frontend/playwright.config.ts:generic-api-key:46
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/tokenvault/TokenVaultTest.java:generic-api-key:23
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/tokenvault/TokenVaultTest.java:generic-api-key:108
+46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:scripts/bff-backend-compat-e2e.sh:generic-api-key:113

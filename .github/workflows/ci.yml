@@ -42,6 +42,94 @@ jobs:
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
 
+  bff:
+    name: Web BFF
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: bff
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Test and package Web BFF
+        env:
+          BFF_REDIS_INTEGRATION: "true"
+          BFF_REDIS_PORT: "6379"
+        run: ./gradlew clean test bootJar
+
+      - name: Verify bootJar
+        run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
+
+      - name: Run BFF to current Backend compatibility E2E
+        env:
+          BFF_REDIS_HOST: "127.0.0.1"
+          BFF_REDIS_PORT: "6379"
+        run: ../scripts/bff-backend-compat-e2e.sh
+
+  auth:
+    name: Auth Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: meetingmind_auth_ci
+          POSTGRES_USER: meetingmind_auth_migrator
+          POSTGRES_PASSWORD: meetingmind_auth_migrator_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meetingmind_auth_migrator -d meetingmind_auth_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: auth
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Test Auth foundation, runtime and PostgreSQL privileges
+        env:
+          AUTH_DB_INTEGRATION: "true"
+          AUTH_TEST_POSTGRES_URL: jdbc:postgresql://127.0.0.1:5432/meetingmind_auth_ci
+          AUTH_TEST_MIGRATION_USER: meetingmind_auth_migrator
+          AUTH_TEST_MIGRATION_PASSWORD: meetingmind_auth_migrator_ci
+          AUTH_TEST_RUNTIME_USER: meetingmind_auth_app
+          AUTH_TEST_RUNTIME_PASSWORD: meetingmind_auth_app_ci
+        run: ./gradlew clean test bootJar
+
+      - name: Verify bootJar
+        run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -142,9 +230,20 @@ jobs:
     name: Playwright
     needs:
       - backend
+      - bff
       - frontend
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: frontend
@@ -187,11 +286,15 @@ jobs:
     name: Container Images
     needs:
       - backend
+      - bff
+      - auth
       - ai
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
       backend_digest: ${{ steps.digests.outputs.backend }}
+      bff_digest: ${{ steps.digests.outputs.bff }}
+      auth_digest: ${{ steps.digests.outputs.auth }}
       ai_digest: ${{ steps.digests.outputs.ai }}
     steps:
       - name: Checkout
@@ -200,6 +303,12 @@ jobs:
       - name: Build Backend image
         run: docker build --tag meetingmind-backend:ci backend
 
+      - name: Build Web BFF image
+        run: docker build --tag meetingmind-bff:ci bff
+
+      - name: Build Auth Service image
+        run: docker build --tag meetingmind-auth:ci auth
+
       - name: Build AI image
         run: docker build --tag meetingmind-ai:ci ai
 
@@ -207,6 +316,8 @@ jobs:
         id: digests
         run: |
           echo "backend=$(docker image inspect meetingmind-backend:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          echo "bff=$(docker image inspect meetingmind-bff:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          echo "auth=$(docker image inspect meetingmind-auth:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "ai=$(docker image inspect meetingmind-ai:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
 
       - name: Install checksum-verified Trivy
@@ -223,6 +334,12 @@ jobs:
 
       - name: Scan Backend image
         run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-backend:ci
+
+      - name: Scan Web BFF image
+        run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-bff:ci
+
+      - name: Scan Auth Service image
+        run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-auth:ci
 
       - name: Scan AI image
         run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-ai:ci
@@ -257,6 +374,8 @@ jobs:
     if: ${{ always() }}
     needs:
       - backend
+      - bff
+      - auth
       - frontend
       - ai
       - migration
@@ -269,6 +388,8 @@ jobs:
       - name: Write CI summary
         env:
           BACKEND_RESULT: ${{ needs.backend.result }}
+          BFF_RESULT: ${{ needs.bff.result }}
+          AUTH_RESULT: ${{ needs.auth.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           AI_RESULT: ${{ needs.ai.result }}
           MIGRATION_RESULT: ${{ needs.migration.result }}
@@ -276,6 +397,8 @@ jobs:
           CONTAINERS_RESULT: ${{ needs.containers.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
           BACKEND_DIGEST: ${{ needs.containers.outputs.backend_digest }}
+          BFF_DIGEST: ${{ needs.containers.outputs.bff_digest }}
+          AUTH_DIGEST: ${{ needs.containers.outputs.auth_digest }}
           AI_DIGEST: ${{ needs.containers.outputs.ai_digest }}
         run: |
           {
@@ -284,6 +407,8 @@ jobs:
             echo "| Check | Scope | Result |"
             echo "| --- | --- | --- |"
             echo "| Backend | test + bootJar | ${BACKEND_RESULT} |"
+            echo "| Web BFF | Redis session integration + bootJar | ${BFF_RESULT} |"
+            echo "| Auth Service | PostgreSQL migration + least-privilege + bootJar | ${AUTH_RESULT} |"
             echo "| Frontend | lint + unit + build | ${FRONTEND_RESULT} |"
             echo "| AI | compile + unit | ${AI_RESULT} |"
             echo "| PostgreSQL | Flyway V1-V10 + pgvector | ${MIGRATION_RESULT} |"
@@ -294,6 +419,8 @@ jobs:
             echo "### Image content digests"
             echo
             echo "- Backend: \`${BACKEND_DIGEST:-not-produced}\`"
+            echo "- Web BFF: \`${BFF_DIGEST:-not-produced}\`"
+            echo "- Auth Service: \`${AUTH_DIGEST:-not-produced}\`"
             echo "- AI: \`${AI_DIGEST:-not-produced}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -301,6 +428,8 @@ jobs:
         env:
           RESULTS: >-
             ${{ needs.backend.result }}
+            ${{ needs.bff.result }}
+            ${{ needs.auth.result }}
             ${{ needs.frontend.result }}
             ${{ needs.ai.result }}
             ${{ needs.migration.result }}

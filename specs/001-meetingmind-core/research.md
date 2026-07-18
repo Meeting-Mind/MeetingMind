@@ -25,6 +25,8 @@ MeetingMind는 STT 자체보다 회의 지식의 재사용에 집중한다.
 
 ## Authentication Decision Research
 
+> 이 절의 선택은 Core Prototype 구현 당시 결정이다. 기업 운영 목표는 브라우저 무토큰 Web BFF와 내부 Auth Service로 진화했으며 근거와 대안은 `../002-bff-auth-msa/research.md`를 우선한다.
+
 ### Options Considered
 
 - Google OAuth only: 빠른 prototype에는 유리하지만 Backend가 앱 고유 access token을 갖지 못해 Space/Meeting 권한, LiveKit token 발급, AI 컨텍스트 권한 선필터와 연결하기 어렵다.
@@ -32,7 +34,7 @@ MeetingMind는 STT 자체보다 회의 지식의 재사용에 집중한다.
 - Google OAuth + MeetingMind access token: Frontend는 Google Identity Services로 ID token을 받고, Backend가 ID token을 검증한 뒤 MeetingMind access token을 발급한다. 외부 identity 검증과 앱 내부 권한 판단을 분리할 수 있다.
 - Google OAuth + own account + access/refresh token: Google OAuth와 자체 이메일/비밀번호 로그인을 모두 지원하고 Backend가 access token과 refresh token을 발급한다.
 
-### Decision
+### Prototype Decision
 
 Google OAuth + own account + access/refresh token 병행안을 채택한다. 이유는 다음과 같다.
 

@@ -1,32 +1,122 @@
-import { describe, expect, it } from "vitest";
-import { parseStoredAuthSession, type AuthSession } from "./session";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetCsrfToken } from "./csrf";
+import { bootstrapAuthSession, loginWithPassword, logoutCurrentSession, type AuthSession } from "./session";
 
 const validSession: AuthSession = {
-  accessToken: "access-token",
-  refreshToken: "refresh-token",
-  tokenType: "Bearer",
-  expiresIn: 3600,
-  refreshExpiresIn: 1209600,
   user: {
     id: "user-1",
     email: "user@example.com",
     displayName: "User",
-    status: "active"
+    status: "ACTIVE"
+  },
+  session: {
+    expiresAt: "2026-07-17T00:00:00Z",
+    idleExpiresAt: "2026-07-16T13:00:00Z",
+    rememberMe: false
   }
 };
 
-describe("parseStoredAuthSession", () => {
-  it("restores a valid bearer session", () => {
-    expect(parseStoredAuthSession(JSON.stringify(validSession))).toEqual(validSession);
+afterEach(() => {
+  resetCsrfToken();
+  vi.unstubAllGlobals();
+});
+
+describe("BFF auth session", () => {
+  it("restores an authenticated session from the bootstrap endpoint", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ authenticated: true, ...validSession }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(bootstrapAuthSession()).resolves.toEqual(validSession);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/session", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" }
+    });
   });
 
-  it.each([
-    null,
-    "not-json",
-    JSON.stringify({ ...validSession, accessToken: "" }),
-    JSON.stringify({ ...validSession, tokenType: "Basic" }),
-    JSON.stringify({ ...validSession, user: { ...validSession.user, id: "" } })
-  ])("rejects invalid stored data", (raw) => {
-    expect(parseStoredAuthSession(raw)).toBeNull();
+  it("returns null only for the explicit unauthenticated shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ authenticated: false, user: null, session: null }), { status: 200 })
+      )
+    );
+
+    await expect(bootstrapAuthSession()).resolves.toBeNull();
+  });
+
+  it("rejects malformed bootstrap data instead of guessing authentication", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ authenticated: true, user: validSession.user, session: null }), { status: 200 })
+      )
+    );
+
+    await expect(bootstrapAuthSession()).rejects.toThrow("세션 확인 응답이 올바르지 않습니다.");
+  });
+
+  it("logs in with CSRF and receives only the user and server session view", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "csrf-value", headerName: "X-CSRF-TOKEN" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(validSession), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(loginWithPassword({ email: "user@example.com", password: "password-123!" })).resolves.toEqual(
+      validSession
+    );
+    const loginInit = fetchMock.mock.calls[1]?.[1];
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/auth/login");
+    expect(loginInit?.credentials).toBe("same-origin");
+    expect(new Headers(loginInit?.headers).get("X-CSRF-TOKEN")).toBe("csrf-value");
+    expect(JSON.parse(String(loginInit?.body))).toEqual({
+      email: "user@example.com",
+      password: "password-123!",
+      rememberMe: false
+    });
+  });
+
+  it("logs out idempotently with a fresh CSRF token for each completed session", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "csrf-first", headerName: "X-CSRF-TOKEN" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "csrf-second", headerName: "X-CSRF-TOKEN" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(logoutCurrentSession()).resolves.toBeUndefined();
+    await expect(logoutCurrentSession()).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/auth/csrf",
+      "/api/v1/auth/logout",
+      "/api/v1/auth/csrf",
+      "/api/v1/auth/logout"
+    ]);
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("X-CSRF-TOKEN")).toBe("csrf-first");
+    expect(new Headers(fetchMock.mock.calls[3]?.[1]?.headers).get("X-CSRF-TOKEN")).toBe("csrf-second");
+  });
+
+  it("keeps the client session usable when the logout server cannot be reached", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "csrf-value", headerName: "X-CSRF-TOKEN" }), { status: 200 })
+      )
+      .mockRejectedValueOnce(new TypeError("network unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(logoutCurrentSession()).rejects.toThrow(
+      "로그아웃 서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요."
+    );
   });
 });

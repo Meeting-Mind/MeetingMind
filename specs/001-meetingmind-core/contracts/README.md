@@ -7,7 +7,7 @@
 | File | Scope | Primary Owners |
 | --- | --- | --- |
 | `common.md` | 공통 API 규칙, 오류 응답, role/status enum, source reference | Docs/Contracts |
-| `auth-api.md` | 회원가입, 로그인, Google OAuth, token refresh, logout, current user | Auth/Login |
+| `auth-api.md` | 현재 token 기반 회원가입/로그인/refresh/logout 호환 계약. 목표 계약은 `../../002-bff-auth-msa/contracts/README.md` | Auth/Login |
 | `space-api.md` | 프로젝트(Space), 대시보드, 캘린더, 멤버/오너 이양 | Backend, Frontend |
 | `meeting-api.md` | 회의 생성/초대/삭제, 회의 ACL, transcript/report 조회/수정 | Backend, Frontend |
 | `kanban-api.md` | 칸반 보드, task card, AI task candidate 확정 | Backend, Frontend |
@@ -44,6 +44,7 @@
 | Status | Meaning |
 | --- | --- |
 | Current Prototype | 현재 코드 또는 mock fallback이 직접 사용하는 계약 |
+| Legacy Compatibility | BFF 점진 전환과 제한된 rollback에만 유지하는 현재 구현 계약 |
 | Target Backend | backend `/api/v1` 전환 시 구현 기준이 되는 계약 |
 | Backend-to-AI Internal | Backend가 권한 필터 후 AI 서버에 전달하는 내부 계약 |
 | Future Draft | 현재 구현 범위 밖이지만 후속 설계 후보로 보관하는 계약 |

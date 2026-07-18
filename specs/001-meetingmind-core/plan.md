@@ -2,6 +2,10 @@
 
 # Implementation Plan: MeetingMind Core Prototype
 
+## Architecture Evolution Notice
+
+이 계획은 현재 통합 Core Prototype의 구현 기록이다. 인증 진입점, token 저장, Auth 분리와 AWS 배포의 신규 목표는 `../002-bff-auth-msa/plan.md`가 대체한다. Core API와 DB는 BFF compatibility/rollback 기간에 보존하고 Strangler 방식으로 이동한다.
+
 ## Current State
 
 - Frontend는 React/Vite/TypeScript로 워크스페이스, 회의 대기, 라이브룸, Meeting AI, 프로젝트 개요, 팀원, Report Agent 화면을 제공한다.
@@ -10,7 +14,7 @@
 - Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용한다. V12 기반 embedding worker와 pgvector semantic 검색은 연결됐고 legacy STT streaming session/file만 `MeetingTranscript` 생명주기와 아직 분리되어 있다.
 - 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
-## Target Architecture
+## Core Prototype Target Architecture
 
 - Frontend: mock fallback은 유지하되 API 계약과 실제 데이터 전환 지점을 분리한다.
 - Backend: Space, Meeting, Membership, Report, Action Item, Knowledge API를 단계적으로 추가한다.
