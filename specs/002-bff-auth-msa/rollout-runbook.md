@@ -16,8 +16,19 @@
 | Control | Default | Behavior |
 | --- | --- | --- |
 | `BFF_ACCEPT_BROWSER_TRAFFIC` | `true` | `false`면 rollout readiness component를 `DOWN`으로 만들어 신규 traffic을 drain한다. liveness는 유지해 원인 조사와 정상 종료를 허용한다. |
+| `BFF_AUTH_PROVIDER` | `auth-service` | 신규 인증 발급 대상을 선택한다. `legacy`는 승인된 rollback에서만 사용하며 호출 실패에 따른 자동 fallback은 없다. |
+| `BFF_AUTH_ISSUER` | `https://auth.meetingmind.internal` | 새 Token Bundle metadata issuer. legacy rollback은 `meetingmind-core-legacy`를 함께 설정한다. |
+| `MEETINGMIND_AUTH_VALIDATION_MODE` | `DUAL` | Core가 `LEGACY_ONLY`, `DUAL`, `TARGET_ONLY` 중 하나로 legacy/target issuer 수용 범위를 결정한다. |
 
 traffic percentage는 EKS ingress/deployment controller가 소유한다. 애플리케이션 flag가 임의 사용자 ID, cookie 또는 header로 canary를 선택하지 않는다.
+
+## Auth Service Cutover Order
+
+1. T034 final delta `APPLY`와 `VERIFY`를 통과하고 Auth DB/JWKS/KMS readiness를 확인한다.
+2. Core를 `MEETINGMIND_AUTH_VALIDATION_MODE=DUAL`로 먼저 배포해 legacy와 target profile을 결정적으로 구분한다. target 검증 실패는 legacy로 재시도하지 않는다.
+3. BFF를 `BFF_AUTH_PROVIDER=auth-service`, target issuer로 배포한다. 기존 직렬화 BffSession/Token Bundle은 추측 변환하지 않고 재로그인을 요구한다.
+4. 신규 login/signup에서 실제 AuthSession ID, Auth UUID Redis principal index, Core projection `204`, 서비스별 audience proxy와 refresh/revoke smoke를 확인한다.
+5. 7일 guardrail과 legacy 발급 0건을 확인한 뒤 Core를 `TARGET_ONLY`로 전환한다. legacy endpoint/DB 삭제는 별도 승인 뒤에만 수행한다.
 
 ## Metrics
 
@@ -63,6 +74,8 @@ metric label에는 path variable, user/session ID, email, token, provider body�
 4. Redis session과 encrypted Token Vault namespace/key/schema를 그대로 보존하고 cleanup 또는 migration rollback을 실행하지 않는다.
 5. current Backend compatibility API/DB 상태와 refresh/logout 결과를 확인한다.
 6. incident ID, 최초 위반 metric/window, 영향 traffic 비율, token/PII redaction 확인과 재출시 조건을 기록한다.
+
+Auth Service cutover rollback은 Core를 `DUAL`로 유지한 상태에서 신규 BFF를 drain하고 `BFF_AUTH_PROVIDER=legacy`, `BFF_AUTH_ISSUER=meetingmind-core-legacy`로 신규 발급을 되돌린다. 이미 발급된 target BffSession은 provider 간 refresh token을 혼용하지 않고 만료/강제 재로그인한다. Auth/Core DB migration은 역수정하거나 삭제하지 않는다.
 
 Frontend direct Backend, Browser token storage/Bearer 재도입은 이 runbook의 rollback 수단이 아니다. 필요하다고 판단되면 별도 보안 사건과 승인된 새 spec으로 다룬다.
 

@@ -2,6 +2,7 @@ package com.meetingmind.bff.auth;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public final class BrowserAuthRequests {
@@ -22,4 +23,9 @@ public final class BrowserAuthRequests {
     public record Google(
             @NotBlank @Size(max = 16_384) String credential,
             boolean rememberMe) {}
+
+    public record Reauthenticate(
+            @NotBlank @Pattern(regexp = "PASSWORD|GOOGLE") String method,
+            @Size(max = 128) String password,
+            @Size(max = 16_384) String credential) {}
 }

@@ -1,9 +1,13 @@
 spring:
   session:
     store-type: none
+    redis:
+      repository-type: default
 
 meetingmind:
   bff:
+    auth-provider: legacy
+    auth-issuer: meetingmind-core-legacy
     session-cookie:
       name: mm-session
       secure: false

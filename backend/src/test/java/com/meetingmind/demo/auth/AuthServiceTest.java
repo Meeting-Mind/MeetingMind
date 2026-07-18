@@ -3,6 +3,8 @@ package com.meetingmind.demo.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.demo.auth.target.TargetAccessTokenValidator;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
@@ -117,11 +119,24 @@ class AuthServiceTest {
     private static AuthService newAuthService(GoogleCredentialVerifier googleCredentialVerifier) {
         AuthEnvironment environment = new AuthEnvironment(Map.of("MEETINGMIND_JWT_SECRET", "test-secret")::get);
         AuthTokenService tokenService = new AuthTokenService(environment, FIXED_CLOCK, new SecureRandom());
+        TargetAccessTokenValidator unusedTargetValidator = new TargetAccessTokenValidator(
+                "https://unused.invalid",
+                "unused",
+                etag -> {
+                    throw new AssertionError("legacy-only test must not fetch JWKS");
+                },
+                new ObjectMapper(),
+                FIXED_CLOCK);
         return new AuthService(
                 new InMemoryAuthStore(),
                 new PasswordHasher(new SecureRandom()),
                 tokenService,
-                googleCredentialVerifier
+                googleCredentialVerifier,
+                new AccessTokenSubjectResolver(
+                        AccessTokenSubjectResolver.Mode.LEGACY_ONLY,
+                        tokenService,
+                        unusedTargetValidator,
+                        new ObjectMapper())
         );
     }
 

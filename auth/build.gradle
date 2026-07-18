@@ -12,6 +12,17 @@ java {
     }
 }
 
+sourceSets {
+    migration {
+        java.srcDir 'src/migration/java'
+    }
+}
+
+configurations {
+    migrationImplementation.extendsFrom implementation
+    migrationRuntimeOnly.extendsFrom runtimeOnly
+}
+
 ext {
     tomcatVersion = '10.1.55'
 }
@@ -43,4 +54,18 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+sourceSets.test.compileClasspath += sourceSets.migration.output
+sourceSets.test.runtimeClasspath += sourceSets.migration.output
+
+tasks.named('compileTestJava') {
+    dependsOn tasks.named('compileMigrationJava')
+}
+
+tasks.register('migrateLegacyAuthData', JavaExec) {
+    group = 'application'
+    description = 'Dry-run, apply, or verify the legacy User/AuthIdentity migration.'
+    classpath = sourceSets.migration.runtimeClasspath
+    mainClass = 'com.meetingmind.auth.migration.LegacyAuthDataMigration'
 }

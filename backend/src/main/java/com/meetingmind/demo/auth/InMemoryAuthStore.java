@@ -14,12 +14,18 @@ public class InMemoryAuthStore implements AuthStore {
 
     private final Map<String, AuthUser> usersById = new HashMap<>();
     private final Map<String, String> userIdByEmail = new HashMap<>();
+    private final Map<UUID, String> userIdByAuthUserId = new HashMap<>();
     private final Map<String, AuthIdentity> identitiesByKey = new HashMap<>();
     private final Map<String, RefreshTokenSession> refreshSessionsByHash = new HashMap<>();
 
     @Override
     public synchronized Optional<AuthUser> findUserById(String userId) {
         return Optional.ofNullable(usersById.get(userId));
+    }
+
+    @Override
+    public synchronized Optional<AuthUser> findUserByAuthUserId(UUID authUserId) {
+        return Optional.ofNullable(userIdByAuthUserId.get(authUserId)).map(usersById::get);
     }
 
     @Override
@@ -46,6 +52,7 @@ public class InMemoryAuthStore implements AuthStore {
         );
         usersById.put(user.id(), user);
         userIdByEmail.put(user.email(), user.id());
+        userIdByAuthUserId.put(UUID.fromString(userId.substring("user-".length())), userId);
         return user;
     }
 
@@ -146,6 +153,39 @@ public class InMemoryAuthStore implements AuthStore {
                         session.userAgent()
                 )
         );
+    }
+
+    @Override
+    public synchronized AuthUser upsertAuthProjection(
+            UUID authUserId,
+            String resourceUserId,
+            String email,
+            String displayName,
+            String pictureUrl,
+            String status,
+            Instant now) {
+        String owner = userIdByAuthUserId.get(authUserId);
+        AuthUser existing = usersById.get(resourceUserId);
+        if ((owner != null && !owner.equals(resourceUserId))
+                || (existing != null
+                        && !resourceUserId.equals(userIdByAuthUserId.get(authUserId)))) {
+            throw new AuthException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "USER_PROJECTION_CONFLICT",
+                    "사용자 projection 소유권이 충돌합니다.");
+        }
+        AuthUser projected = new AuthUser(
+                resourceUserId,
+                AuthStore.normalizeEmail(email),
+                displayName,
+                pictureUrl,
+                status,
+                existing == null ? now : existing.createdAt(),
+                existing == null ? now : existing.lastLoginAt());
+        usersById.put(resourceUserId, projected);
+        userIdByEmail.put(projected.email(), resourceUserId);
+        userIdByAuthUserId.put(authUserId, resourceUserId);
+        return projected;
     }
 
     private static String identityKey(String provider, String providerUserId) {

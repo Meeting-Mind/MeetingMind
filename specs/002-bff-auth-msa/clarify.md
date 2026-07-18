@@ -21,12 +21,20 @@
 | Q-015 | High | BFF와 내부 서비스 간 workload 인증은 mTLS, client credential, 서명 요청 중 무엇인가? | private network 침해 시 내부 endpoint 오용을 방지한다. | Decided | mTLS와 SPIFFE workload identity를 사용하고 NetworkPolicy, public ingress 차단, 목적지·principal allowlist를 함께 적용한다. 제품 선택은 Q-012/T040에서 한다. |
 | Q-016 | High | 모든 기기 로그아웃의 최근 인증 허용 시간과 재인증 UX는 무엇인가? | 탈취된 BFF 세션이 다른 정상 기기까지 폐기하는 것을 막고 local/Google 사용자의 재인증 방식을 일관되게 정한다. | Decided | 최근 인증 10분을 허용하고 초과 시 local은 비밀번호, Google은 새 ID credential을 재검증한다. Auth revoke-all이 durable하게 기록된 뒤 성공 처리한다. |
 | Q-017 | High | Auth Service가 revoke-all의 사용자 소유권을 어떤 값으로 독립 검증할까? | `userId`만 신뢰하면 내부 BFF 침해나 결합 오류가 다른 사용자의 모든 세션을 폐기할 수 있다. | Decided | BFF가 서버 세션의 `currentAuthSessionId`와 `userId`, `authenticatedAt`을 함께 보내고 Auth Service가 AuthSession 소유자 결합과 최근 10분을 재검증한다. 브라우저 입력은 전달하지 않는다. |
+| Q-018 | High | Core의 기존 문자열 User PK와 Auth의 UUID subject를 어떻게 연결할까? | 모든 업무 FK를 한 번에 UUID로 바꾸면 T034 범위와 팀 충돌이 커지고, legacy 문자열을 JWT subject로 유지하면 목표 Auth 계약이 오염된다. | Decided | Core `users.id`와 기존 FK는 유지하고 `users.auth_user_id UUID` unique projection을 추가한다. canonical `user-{UUID}`의 suffix를 결정적으로 backfill하며 Auth/JWT는 UUID만 사용한다. 비정형 ID는 추측 변환하지 않고 인증 이관 대사에서 fail closed한다. |
+| Q-019 | High | legacy User/AuthIdentity를 Auth DB로 어떤 동기화 방식으로 이전할까? | dual-write/CDC를 도입할지, 짧은 인증 쓰기 중단으로 검증 가능한 export/import를 사용할지 결정한다. | Decided | 반복 실행 가능한 오프라인 snapshot/delta 이관과 대사를 사용한다. 최종 실행은 login/signup/Google 인증 쓰기를 짧게 중단한 뒤 수행하고, User/AuthIdentity만 이전한다. legacy refresh/AuthSession은 lineage를 추정하지 않고 전원 재로그인시킨다. 기존 DB/issuer는 제한된 rollback window 동안 읽기 가능한 상태로 보존한다. |
+| Q-020 | High | Auth UUID와 Core 문자열 ID 중 Browser/Core API에 노출할 사용자 ID는 무엇인가? | Auth 로그인 응답이 UUID로 바뀌지만 현재 Core 응답과 Frontend 참가자·멤버 비교는 `user-{UUID}`를 사용해 그대로 전환하면 현재 사용자 판별이 깨진다. | Decided | Browser/Core 외부 계약은 `user-{Auth UUID}` resource ID를 유지하고, Auth UUID는 BFF 내부 session index와 JWT `sub`에만 사용한다. BFF session은 두 ID를 모두 보관하고 Core는 `auth_user_id`로 기존 문자열 resource User를 찾는다. |
+| Q-021 | High | Auth cutover 뒤 새 가입 User의 Core projection을 언제, 누가 생성할까? | T034는 기존 사용자만 이전하므로 새 Auth User가 Core `users`에 없으면 유효 JWT여도 첫 업무 요청이 401이 된다. | Decided | BFF가 Auth 발급 성공 직후 `meetingmind-core` access와 workload identity로 idempotent Core internal projection upsert를 호출하고 성공 후에만 Browser session을 만든다. 실패 시 새 AuthSession을 best-effort revoke하고 로그인/가입을 실패 처리하며 Auth 계정은 다음 시도에서 재사용한다. |
+| Q-022 | High | 모든 기기 로그아웃의 재인증은 기존 login을 재사용할까, 세션을 만들지 않는 전용 검증을 둘까? | 기존 login 재사용은 민감 동작 확인을 위해 불필요한 AuthSession/refresh family를 만들고, Browser가 `authenticatedAt`을 보내게 하면 최근 인증 시각을 위조할 수 있다. | Decided | Browser와 BFF/Auth 내부 계약에 전용 `reauthenticate`를 둔다. Auth가 현재 AuthSession/User 결합을 먼저 확인하고 local 비밀번호 또는 기존에 연결된 Google identity를 검증한 뒤 서버 시각 `authenticatedAt`만 반환한다. 새 User/AuthSession/token을 만들거나 Google identity를 연결하지 않으며 BFF가 이 시각을 서버 세션에 저장한 뒤 body 없는 `logout-all`을 1회 재시도한다. |
 
 ## Blocking Decisions
 
 - Q-009, Q-010, Q-015는 T030에서 결정됐다. Auth Service runtime은 이 계약을 구현하는 T031~T035 순서를 따른다.
-- Q-016은 결정됐지만 모든 기기 로그아웃은 Auth revoke-all과 revoke event를 구현하는 T032 이후 T024에서 노출한다.
+- Q-016은 T032의 Auth revoke-all/revoke event와 T035의 실제 AuthSession ID/BFF 사용자 session index를 선행한 뒤 T024에서 모든 기기 로그아웃으로 구현했다.
 - Q-017은 T032에서 계약·runtime에 반영한다. 이미 폐기된 동일 요청의 멱등 재시도를 위해 current AuthSession row의 소유자 결합은 유지하되 신규 active session 폐기는 최근 인증 검증을 계속 요구한다.
+- Q-018과 Q-019는 T034에서 Core projection, 오프라인 이관·대사 도구와 강제 재로그인 운영 경계로 구현한다.
+- Q-020과 Q-021은 권장안으로 결정됐다. T035는 external resource ID와 internal Auth UUID를 분리하고 동기 Core projection 성공을 Browser session 생성의 선행 조건으로 구현한다.
+- Q-022는 T024 준비에서 결정됐다. 재인증 증명과 시각은 Browser가 `logout-all`에 직접 보내지 않고 전용 Browser→BFF→Auth 경계에서 검증하며, legacy provider에서는 불완전한 local-only 전체 로그아웃을 성공으로 위장하지 않는다.
 - Q-011~Q-013은 로컬/CI 구현을 막지 않지만 운영 EKS 프로비저닝과 출시 승인을 막는다.
 
 ## Decisions
@@ -44,8 +52,13 @@
 - D-011: 일반 BFF 세션은 유휴 60분/절대 12시간, Remember me 세션은 7일 sliding 유휴/14일 절대 만료를 사용한다. 모든 sliding 갱신은 최초 로그인 기준 절대 만료를 넘지 않는다.
 - D-012: Token Bundle payload는 bundle/session/version을 인증 데이터로 묶은 AES-256-GCM envelope encryption을 사용한다. 운영 data key는 AWS KMS와 workload IAM으로 생성·복호화하고, local/test adapter는 외부 주입한 256-bit AES master key만 허용한다.
 - D-013: Phase 1의 현재 Backend는 안정된 논리 AuthSession ID를 응답하지 않으므로 Web BFF가 브라우저 로그인마다 호환용 `authSessionId`를 생성해 BffSession/TokenBundle만 묶는다. 이 값은 브라우저나 현재 Backend로 전달하지 않으며 Auth Service 추출 시 서버 발급 ID로 대체한다.
+- D-014: Browser/Core 외부 사용자 ID는 `user-{Auth UUID}`를 유지한다. Auth UUID는 JWT `sub`, BFF 내부 session attribute와 Spring Session principal index, Core `users.auth_user_id`에서만 사용한다.
+- D-015: 신규 Auth User의 Core projection은 BFF가 인증 성공 직후 동기 생성한다. Core는 target JWT와 workload identity를 함께 검증하고 `sub == authUserId`, `resourceUserId == "user-" + authUserId`일 때만 멱등 upsert한다. projection 실패 시 BFF는 Browser session을 만들지 않고 AuthSession을 best-effort revoke한다.
 - D-014: Browser session cutover 이후 rollback은 direct Backend가 아니라 동일 cookie/Redis/Token Vault 계약을 사용하는 안정 BFF release로 수행한다. 신규 release는 readiness drain 뒤 ingress traffic weight를 0으로 내리고, Browser token/Bearer 코드는 복원하지 않는다.
 - D-015: Refresh credential은 AuthSession별 한 family와 1회용 lineage를 사용한다. 사용된 credential 재사용은 grace 없이 해당 AuthSession/family 전체를 revoke하고 durable event를 기록하며 다른 기기의 AuthSession은 유지한다.
 - D-016: Access는 KMS RSA-2048 `RS256`으로 서명한 audience별 10분 JWT다. 각 JWT는 단일 Resource Service audience와 `iss/sub/sid/jti/iat/nbf/exp/ver`를 필수로 가지며 업무 권한 원본은 포함하지 않는다.
 - D-017: 현재/전체 로그아웃과 보안 폐기는 Auth DB revoke와 transactional outbox를 함께 커밋한다. Resource Service는 at-least-once revoke event를 idempotent하게 소비해 `sid`를 access 만료까지 로컬 denylist에 보관한다.
 - D-018: 내부 서비스 호출은 mTLS SPIFFE workload identity, NetworkPolicy와 principal/endpoint allowlist를 함께 사용한다. 모든 기기 로그아웃은 최근 10분 인증 또는 local/Google 재인증을 요구한다.
+- D-019: Core의 업무 식별자 `users.id`는 문자열 PK로 유지하고 Auth subject용 `users.auth_user_id UUID`를 projection으로 둔다. canonical legacy ID만 결정적으로 변환하고 비정형 ID는 수동 정리 없이는 Auth로 이전하지 않는다.
+- D-020: T034는 별도 source/target JDBC 연결을 사용하는 오프라인 도구로 User/AuthIdentity snapshot과 최종 delta를 이관한다. dry-run/apply/verify와 exact reconciliation을 제공하며 DB link, runtime dual-write와 legacy AuthSession 변환을 사용하지 않는다.
+- D-021: 모든 기기 로그아웃의 step-up 인증은 세션 비생성 전용 endpoint를 사용한다. Auth Service가 현재 AuthSession/User와 local/Google identity를 결합 검증해 서버 시각만 반환하고, Auth 전체 revoke의 durable commit 뒤 BFF가 Auth UUID Spring Session index로 다른 세션을 먼저, 현재 세션을 마지막에 삭제한다.

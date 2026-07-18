@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public final class TokenVault {
 
@@ -121,11 +123,12 @@ public final class TokenVault {
                 envelope.encryptedPayload(),
                 envelope.encryptedDataKey(),
                 envelope.keyId(),
-                payload.accessExpiresAt(),
+                payload.schemaVersion(),
+                accessExpiries(payload),
                 payload.refreshExpiresAt(),
                 payload.issuer(),
-                payload.audiences(),
-                payload.scopes(),
+                payload.accessTokens().keySet(),
+                payload.scopesByAudience(),
                 version,
                 createdAt,
                 updatedAt);
@@ -138,8 +141,9 @@ public final class TokenVault {
 
     private void validateNewPayload(TokenBundlePayload payload) {
         if (payload == null
-                || !payload.accessExpiresAt().isAfter(clock.instant())
-                || payload.refreshExpiresAt().isBefore(payload.accessExpiresAt())) {
+                || payload.accessTokens().values().stream()
+                        .anyMatch(token -> !token.expiresAt().isAfter(clock.instant())
+                                || payload.refreshExpiresAt().isBefore(token.expiresAt()))) {
             throw TokenVaultException.of(TokenVaultException.Code.INVALID_BUNDLE);
         }
     }
@@ -147,7 +151,8 @@ public final class TokenVault {
     private void validateStoredPayload(TokenBundlePayload payload) {
         if (payload == null
                 || !payload.refreshExpiresAt().isAfter(clock.instant())
-                || payload.refreshExpiresAt().isBefore(payload.accessExpiresAt())) {
+                || payload.accessTokens().values().stream()
+                        .anyMatch(token -> payload.refreshExpiresAt().isBefore(token.expiresAt()))) {
             throw TokenVaultException.of(TokenVaultException.Code.INVALID_BUNDLE);
         }
     }
@@ -156,5 +161,12 @@ public final class TokenVault {
         if (expected == null || !actual.equals(expected)) {
             throw TokenVaultException.of(TokenVaultException.Code.INVALID_BUNDLE);
         }
+    }
+
+    private Map<String, Instant> accessExpiries(TokenBundlePayload payload) {
+        return payload.accessTokens().entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey,
+                        entry -> entry.getValue().expiresAt()));
     }
 }

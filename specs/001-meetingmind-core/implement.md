@@ -980,3 +980,4 @@
 ## BFF/Auth Architecture Evolution Reference
 
 - 2026-07-16: Core의 `sessionStorage + Bearer` Auth는 현재 구현과 제한된 rollback을 위한 legacy compatibility로 분류했다. 목표 Browser-BFF/Auth Service, Redis session, encrypted Token Vault, AWS EKS/LiveKit Cloud 설계와 구현 작업은 `../002-bff-auth-msa/**`에서 관리한다. 이 기록 변경은 Core code/schema를 수정하거나 기존 migration을 되돌리지 않는다.
+- 2026-07-18: `../002-bff-auth-msa` T035에서 Core 요청 경로에 deterministic legacy/target access resolver를 연결했다. target 검증 실패는 legacy로 재시도하지 않고, 유효 target UUID `sub`는 V13 `users.auth_user_id`로 기존 문자열 업무 User를 찾는다. BFF 전용 `/internal/v1/users/projection`은 target Core JWT subject, deterministic resource ID와 workload identity를 모두 검증해 신규 User를 멱등 upsert한다. V13 필드만 사용하므로 migration/ERD 관계 추가는 없으며 Backend 전체 테스트, 실제 PostgreSQL projection insert/update/conflict와 bootJar를 검증했다.

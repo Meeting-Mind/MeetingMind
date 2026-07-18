@@ -14,7 +14,12 @@ import {
   updateMeeting,
   updateMeetingParticipant
 } from "./api/workspace";
-import { bootstrapAuthSession, logoutCurrentSession, type AuthSession } from "./auth/session";
+import {
+  bootstrapAuthSession,
+  logoutAllDevices,
+  logoutCurrentSession,
+  type AuthSession
+} from "./auth/session";
 import { subscribeToSessionInvalid } from "./auth/sessionInvalidation";
 import { AuthSessionControls } from "./components/AuthSessionControls";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
@@ -542,6 +547,15 @@ export function App() {
 
   async function handleLogout() {
     await logoutCurrentSession();
+    finishLogout();
+  }
+
+  async function handleLogoutAll() {
+    await logoutAllDevices();
+    finishLogout();
+  }
+
+  function finishLogout() {
     setAuthSession(null);
     setAuthModalOpen(false);
     setData(mockData);
@@ -1537,7 +1551,13 @@ export function App() {
           }
         />
       </Routes>
-      {authSession ? <AuthSessionControls onLogout={handleLogout} session={authSession} /> : null}
+      {authSession ? (
+        <AuthSessionControls
+          onLogout={handleLogout}
+          onLogoutAll={handleLogoutAll}
+          session={authSession}
+        />
+      ) : null}
       <GoogleLoginModal
         isOpen={authModalOpen}
         notice={sessionExpiredReturnTo ? SESSION_EXPIRED_NOTICE : undefined}

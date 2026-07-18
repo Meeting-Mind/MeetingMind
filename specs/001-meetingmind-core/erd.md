@@ -4,6 +4,8 @@
 
 > `AUTH_SESSION.refreshTokenHash`는 현재 Core 호환 schema다. 목표 BFF Session/Token Vault/Auth DB 관계는 `../002-bff-auth-msa/erd.md`가 대체하며 기존 migration은 rollback window가 끝날 때까지 보존한다.
 
+T035 internal User projection과 dual access validation은 V13의 기존 `USER.authUserId`를 사용하므로 새로운 물리 relation이나 cross-DB FK를 추가하지 않는다.
+
 ## Mermaid ERD
 
 ```mermaid
@@ -50,6 +52,7 @@ erDiagram
 
   USER {
     string id PK
+    uuid authUserId UK
     string email
     string displayName
     string pictureUrl
@@ -350,6 +353,7 @@ erDiagram
 - `USER.email`은 unique다. 탈퇴/비활성 계정 재가입 정책은 Auth owner가 결정한다.
 - `AUTH_IDENTITY(provider, providerUserId)`는 unique다.
 - `AUTH_IDENTITY.passwordHash`는 `provider=local`일 때만 required다.
+- `USER.authUserId`는 Auth UUID subject용 nullable unique projection이며 Auth DB와 물리 FK를 만들지 않는다. 기존 업무 FK는 `USER.id`를 유지한다.
 - `AUTH_SESSION.refreshTokenHash`는 unique이며 refresh token 원문은 저장하지 않는다.
 - `AUTH_SESSION(userId, revokedAt, expiresAt)` index를 둔다.
 

@@ -9,8 +9,12 @@ public record BffAuthUser(
         String pictureUrl,
         String status) implements Serializable {
 
-    static BffAuthUser from(LegacyAuthUser user) {
+    static BffAuthUser from(AuthTokenResponse.User user) {
         return new BffAuthUser(
-                user.id(), user.email(), user.displayName(), user.pictureUrl(), user.status());
+                user.resourceUserId(),
+                user.email(),
+                user.displayName(),
+                user.pictureUrl(),
+                user.status());
     }
 }

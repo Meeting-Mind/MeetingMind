@@ -12,6 +12,8 @@
 - Backend는 Spring Boot 3/Java 21로 `/api/workspace` mock 응답과 `/api/livekit/token` 토큰 발급을 제공한다.
 - AI 서버는 FastAPI로 `/api/meeting-ai/ask`를 제공하고 OpenAI Responses API를 직접 호출한다.
 - Backend Auth/Workspace와 AI source로 사용하는 Transcript/Report/Task/ProjectKnowledge/Audit runtime은 `local`/`db` profile에서 Spring JDBC PostgreSQL repository를 사용한다. `test` profile은 격리된 in-memory adapter를 사용한다. V12 기반 embedding worker와 pgvector semantic 검색은 연결됐고 legacy STT streaming session/file만 `MeetingTranscript` 생명주기와 아직 분리되어 있다.
+- `../002-bff-auth-msa` T034의 V13은 기존 문자열 User PK/FK를 유지한 채 `users.auth_user_id UUID` projection만 추가해 목표 Auth subject와 연결한다.
+- T035는 Core access를 `LEGACY_ONLY|DUAL|TARGET_ONLY` mode로 전환하고 exact JWT header profile로 validator 하나만 선택한다. target `sub`는 `users.auth_user_id`로 User를 찾으며 BFF internal projection은 target Core access와 workload identity를 모두 요구한다.
 - 제품 요구사항 기준선은 `requirements/INDEX.md`에서 라우팅되는 Markdown 문서다. 기능 구현 전 관련 요구사항 문서를 먼저 확인한다.
 
 ## Core Prototype Target Architecture
@@ -43,6 +45,7 @@
 - 2026-07-14 기준 backend에는 Flyway core, PostgreSQL Flyway module, PostgreSQL driver, Spring Boot JDBC starter가 있다. `local` profile이 기본 profile이며 Compose 기본값으로 DataSource와 Flyway를 활성화하고 `db` profile은 환경변수 기반 DataSource를 사용한다. M032에서 Auth/Workspace JDBC repository 계층을 연결했으며 Docker PostgreSQL이 기본 실행 전제다.
 - migration 도구는 Flyway를 사용한다. migration 파일 위치는 Spring Boot 기본 경로인 `backend/src/main/resources/db/migration`으로 둔다.
 - 원격에 공유된 `V1`~`V10` migration은 수정하지 않는다. vector/job/search 보강은 `V12` forward migration으로 추가한다.
+- Auth 분리의 Core projection은 기존 migration을 수정하지 않고 `V13` forward migration으로 추가한다. canonical `user-{UUID}`만 backfill하고 비정형 User는 nullable로 유지한다.
 - 로컬 DB는 PostgreSQL 16 + pgvector를 다른 프로젝트 DB와 격리된 컨테이너로 실행하고 host `5434`를 기본값으로 사용한다.
 - Backend 기본 `local` profile은 `localhost:5434/meetingmind` 기본값으로 DataSource와 Flyway를 실행한다. `db` profile은 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`를 필수로 사용한다.
 

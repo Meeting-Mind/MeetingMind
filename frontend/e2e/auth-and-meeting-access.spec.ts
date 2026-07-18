@@ -74,6 +74,52 @@ test("current-session logout clears the authenticated UI and blocks reuse", asyn
   await expect(page.getByRole("dialog", { name: "로그인 후 이용할 수 있습니다" })).toBeVisible();
 });
 
+test("all-device logout confirms, performs step-up authentication, and retries once", async ({ page, request }) => {
+  const session = await signup(request, "logout-all");
+  let logoutAllCalls = 0;
+  let reauthenticationBody: unknown = null;
+
+  await page.route("**/api/v1/auth/logout-all", async (route) => {
+    logoutAllCalls += 1;
+    if (logoutAllCalls === 1) {
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "REAUTHENTICATION_REQUIRED",
+          message: "다시 인증해 주세요.",
+          fieldErrors: [],
+          traceId: "playwright-reauthentication"
+        })
+      });
+      return;
+    }
+    await route.fulfill({ status: 204 });
+  });
+  await page.route("**/api/v1/auth/reauthenticate", async (route) => {
+    reauthenticationBody = route.request().postDataJSON();
+    await route.fulfill({ status: 204 });
+  });
+  await loginThroughBff(page, session, "/spaces");
+
+  await page.getByRole("button", { name: "모든 기기", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "모든 기기에서 로그아웃" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "모든 기기에서 로그아웃", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("다시 인증");
+
+  await dialog.getByLabel("비밀번호").fill(password);
+  await dialog.getByRole("button", { name: "비밀번호 확인 후 로그아웃" }).click();
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("complementary", { name: "사용자 세션" })).toHaveCount(0);
+  expect(logoutAllCalls).toBe(2);
+  expect(reauthenticationBody).toEqual({ method: "PASSWORD", password });
+  expect(JSON.stringify(reauthenticationBody)).not.toContain("userId");
+  expect(JSON.stringify(reauthenticationBody)).not.toContain("authSessionId");
+  expect(JSON.stringify(reauthenticationBody)).not.toContain("authenticatedAt");
+});
+
 test("logout network failure keeps the session visible and offers retry feedback", async ({ page, request }) => {
   const session = await signup(request, "logout-failure");
   await page.route("**/api/v1/auth/logout", (route) => route.abort("failed"));

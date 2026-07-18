@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,7 @@ class TokenVaultTest {
         String persisted = objectMapper.writeValueAsString(encrypted);
 
         assertThat(persisted)
-                .doesNotContain(payload.accessToken())
+                .doesNotContain(coreToken(payload))
                 .doesNotContain(payload.refreshToken());
         assertThat(payload.toString()).isEqualTo("TokenBundlePayload[REDACTED]");
         assertThat(tokenVault.read(bundleId, payload.authSessionId())).isEqualTo(payload);
@@ -114,14 +115,13 @@ class TokenVaultTest {
         UUID bundleId = UUID.randomUUID();
         TokenBundlePayload payload = new TokenBundlePayload(
                 UUID.randomUUID(),
-                "expired-access-secret",
+                2,
+                targetAccessTokens("expired-access-secret", NOW.plusSeconds(1)),
                 "usable-refresh-secret",
                 "Bearer",
-                NOW.plusSeconds(1),
                 NOW.plusSeconds(1209600),
                 "meetingmind-auth",
-                Set.of("meetingmind-core"),
-                Set.of());
+                Map.of());
         TokenVault writer = new TokenVault(store, cipher, objectMapper, Clock.fixed(NOW, ZoneOffset.UTC));
         writer.create(bundleId, payload);
         TokenVault reader = new TokenVault(
@@ -136,28 +136,26 @@ class TokenVaultTest {
     private TokenBundlePayload payload(String accessToken, String refreshToken) {
         return new TokenBundlePayload(
                 UUID.randomUUID(),
-                accessToken,
+                2,
+                targetAccessTokens(accessToken, NOW.plusSeconds(900)),
                 refreshToken,
                 "Bearer",
-                NOW.plusSeconds(900),
                 NOW.plusSeconds(1209600),
                 "meetingmind-auth",
-                Set.of("meetingmind-core"),
-                Set.of("meeting:read"));
+                Map.of("meetingmind-core", Set.of("meeting:read")));
     }
 
     private TokenBundlePayload replacement(
             TokenBundlePayload current, String accessToken, String refreshToken) {
         return new TokenBundlePayload(
                 current.authSessionId(),
-                accessToken,
+                current.schemaVersion(),
+                targetAccessTokens(accessToken, NOW.plusSeconds(1800)),
                 refreshToken,
                 current.tokenType(),
-                NOW.plusSeconds(1800),
                 current.refreshExpiresAt(),
                 current.issuer(),
-                current.audiences(),
-                current.scopes());
+                current.scopesByAudience());
     }
 
     private EncryptedTokenBundle copyWithVersion(EncryptedTokenBundle bundle, long version) {
@@ -167,14 +165,27 @@ class TokenVaultTest {
                 bundle.encryptedPayload(),
                 bundle.encryptedDataKey(),
                 bundle.keyId(),
-                bundle.accessExpiresAt(),
+                bundle.schemaVersion(),
+                bundle.accessExpiresAtByAudience(),
                 bundle.refreshExpiresAt(),
                 bundle.issuer(),
                 bundle.audiences(),
-                bundle.scopes(),
+                bundle.scopesByAudience(),
                 version,
                 bundle.createdAt(),
                 bundle.updatedAt());
+    }
+
+    private Map<String, AudienceAccessToken> targetAccessTokens(
+            String coreToken, Instant expiresAt) {
+        return Map.of(
+                "meetingmind-core", new AudienceAccessToken(coreToken, expiresAt),
+                "meetingmind-ai", new AudienceAccessToken(coreToken + "-ai", expiresAt),
+                "meetingmind-livekit", new AudienceAccessToken(coreToken + "-livekit", expiresAt));
+    }
+
+    private String coreToken(TokenBundlePayload payload) {
+        return payload.requireAccessToken("meetingmind-core").token();
     }
 
     private static final class InMemoryStore implements EncryptedTokenBundleStore {

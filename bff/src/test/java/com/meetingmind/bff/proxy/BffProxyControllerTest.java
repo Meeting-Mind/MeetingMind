@@ -1,6 +1,7 @@
 package com.meetingmind.bff.proxy;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -50,11 +51,11 @@ class BffProxyControllerTest {
     @SuppressWarnings("unchecked")
     void proxiesAnAllowedRouteThroughTheTokenManager() throws Exception {
         doAnswer(invocation -> {
-                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(1);
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
                     return call.execute("Bearer internal-access");
                 })
                 .when(tokenManager)
-                .execute(any(), any(AuthorizedDownstreamCall.class));
+                .execute(any(), anyString(), any(AuthorizedDownstreamCall.class));
         when(downstreamClient.execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access")))
                 .thenReturn(new ProxyResponse(
                         HttpStatus.OK,
@@ -94,7 +95,7 @@ class BffProxyControllerTest {
     @Test
     void returnsTheServiceSpecificCommonErrorShape() throws Exception {
         String meetingId = "meeting-" + java.util.UUID.randomUUID();
-        when(tokenManager.execute(any(), any()))
+        when(tokenManager.execute(any(), anyString(), any()))
                 .thenThrow(BffProxyException.unavailable(DownstreamService.AI));
 
         mvc.perform(post("/api/v1/meetings/" + meetingId + "/ai/chat")

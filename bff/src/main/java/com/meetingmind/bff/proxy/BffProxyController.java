@@ -45,6 +45,7 @@ public class BffProxyController {
                 body);
         ProxyResponse response = tokenManager.execute(
                 request,
+                route.service().audience(),
                 authorization -> downstreamClient.execute(route.service(), proxyRequest, authorization));
         HttpHeaders responseHeaders = new HttpHeaders();
         if (response.contentType() != null) {

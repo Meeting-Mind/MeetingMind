@@ -19,10 +19,14 @@ class BffRequestMetricsFilterTest {
     void recordsBoundedAuthAndProtectedOutcomesWithoutRawPaths() throws Exception {
         perform("/api/v1/auth/login", 401);
         perform("/api/v1/auth/logout", 204);
+        perform("/api/v1/auth/reauthenticate", 401);
+        perform("/api/v1/auth/logout-all", 403);
         perform("/api/v1/spaces/space-secret-value", 401);
 
         assertTimer("login", "rejected");
         assertTimer("logout", "success");
+        assertTimer("reauthenticate", "rejected");
+        assertTimer("logout_all", "client_error");
         assertTimer("protected", "unauthenticated");
         assertThat(meterRegistry.getMeters())
                 .allSatisfy(meter -> assertThat(meter.getId().getTags())

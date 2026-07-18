@@ -12,10 +12,12 @@ T031 foundation과 T032 인증·refresh·폐기 runtime 위에 T033 AWS KMS `RS2
 - local BCrypt 가입·로그인과 Google ID credential 검증
 - HMAC-SHA-256 refresh lookup hash, 14일 family와 1회용 rotation/reuse 폐기
 - 현재/모든 AuthSession revoke, 감사와 unpublished transactional outbox
+- 현재 AuthSession/User 결합을 유지하는 local/Google 세션 비생성 재인증
 - direct mTLS client certificate SPIFFE URI SAN과 Web BFF principal allowlist
 - KMS RSA-2048 `RAW` RS256 서명과 audience별 10분 access JWT
 - 5분 cache/ETag 내부 JWKS와 BFF/Resource workload principal allowlist
 - 5분 선게시, 1시간 이전 key overlap을 검증하는 rotation key ring
+- runtime image와 분리된 legacy User/AuthIdentity offline migration source set
 
 `/internal/v1/auth/*`는 Browser/public API가 아니다. 운영에서는 direct client certificate의 SPIFFE URI SAN만 사용한다. local/test/integration profile은 명시적으로 활성화한 `X-MeetingMind-Test-Principal`만 개발용으로 허용한다.
 
@@ -72,10 +74,22 @@ X-MeetingMind-Test-Principal: spiffe://meetingmind.internal/ns/meetingmind/sa/me
 
 Runtime role 이름은 migration 계약과 일치하는 `meetingmind_auth_app`으로 고정한다. 이 계정은 application table의 필요한 `SELECT/INSERT/UPDATE`만 수행하고 감사 table은 `SELECT/INSERT`만 사용한다. `DELETE`, DDL과 Flyway history 접근은 허용하지 않는다. Migration 계정은 Flyway history와 DDL을 소유하며 운영 migration job과 application Pod는 서로 다른 credential을 사용해야 한다.
 
+## Legacy Auth Data Migration
+
+T034 도구는 `src/migration` source set에 있어 Auth runtime `bootJar`에 포함되지 않는다. Core V13 적용 뒤 별도 source/target credential로 실행한다.
+
+```bash
+AUTH_DATA_MIGRATION_MODE=DRY_RUN ./gradlew migrateLegacyAuthData
+AUTH_DATA_MIGRATION_MODE=APPLY ./gradlew migrateLegacyAuthData
+AUTH_DATA_MIGRATION_MODE=VERIFY ./gradlew migrateLegacyAuthData
+```
+
+필수 `AUTH_MIGRATION_SOURCE_*`, `AUTH_MIGRATION_TARGET_*` 설정, 인증 쓰기 중단, 대사와 rollback 절차는 [`auth-data-migration-runbook.md`](../specs/002-bff-auth-msa/auth-data-migration-runbook.md)를 따른다. User/AuthIdentity만 이전하며 legacy AuthSession/refresh는 복사하지 않는다.
+
 ## Verification
 
 ```bash
 ./gradlew test bootJar
 ```
 
-실제 PostgreSQL 검증은 `AUTH_DB_INTEGRATION=true`와 `AUTH_TEST_POSTGRES_*` 환경변수를 사용한다. CI는 local/Google 인증, refresh 회전·reuse family 폐기, 현재/전체 세션 revoke, subject/recent-auth negative case, 원문 비저장과 outbox를 실행한다. T033 단위 테스트는 KMS request/key metadata, 필수 JWT claim/signature, JWKS ETag/workload allowlist, 정기/emergency rotation과 old/new overlap을 검증한다.
+실제 PostgreSQL 검증은 `AUTH_DB_INTEGRATION=true`와 `AUTH_TEST_POSTGRES_*` 환경변수를 사용한다. CI는 local/Google 인증, 세션 비생성 재인증, refresh 회전·reuse family 폐기, 현재/전체 세션 revoke, subject/recent-auth negative case, 원문 비저장과 outbox를 실행한다. T033 단위 테스트는 KMS request/key metadata, 필수 JWT claim/signature, JWKS ETag/workload allowlist, 정기/emergency rotation과 old/new overlap을 검증한다.

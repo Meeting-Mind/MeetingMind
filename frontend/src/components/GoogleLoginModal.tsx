@@ -1,58 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { loginWithGoogle, loginWithPassword, signupWithPassword, type AuthSession } from "../auth/session";
-
-type GoogleCredentialResponse = {
-  credential?: string;
-};
-
-type GoogleAuthUser = {
-  email: string;
-  name: string;
-  picture?: string;
-};
-
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize: (config: {
-            client_id: string;
-            callback: (response: GoogleCredentialResponse) => void;
-          }) => void;
-          renderButton: (
-            element: HTMLElement,
-            options: {
-              theme?: "outline" | "filled_blue" | "filled_black";
-              size?: "large" | "medium" | "small";
-              shape?: "rectangular" | "pill" | "circle" | "square";
-              text?: "signin_with" | "signup_with" | "continue_with" | "signin";
-              width?: number;
-            }
-          ) => void;
-        };
-      };
-    };
-  }
-}
-
-function parseCredential(credential: string): GoogleAuthUser | null {
-  const [, payload] = credential.split(".");
-  if (!payload) {
-    return null;
-  }
-
-  try {
-    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    return {
-      email: decoded.email,
-      name: decoded.name,
-      picture: decoded.picture
-    };
-  } catch {
-    return null;
-  }
-}
+import { GoogleCredentialButton } from "./GoogleCredentialButton";
 
 export function GoogleLoginModal({
   isOpen,
@@ -65,8 +13,6 @@ export function GoogleLoginModal({
   onClose: () => void;
   onSuccess: (session: AuthSession) => void;
 }) {
-  const buttonRef = useRef<HTMLDivElement | null>(null);
-  const [scriptReady, setScriptReady] = useState(Boolean(window.google));
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -74,6 +20,23 @@ export function GoogleLoginModal({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+
+  const handleGoogleCredential = useCallback(async (credential: string) => {
+    setError("");
+    setLoading(true);
+    try {
+      const session = await loginWithGoogle(credential);
+      onSuccess(session);
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Google 로그인을 완료하지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, [onSuccess]);
+
+  const handleGoogleError = useCallback((message: string) => {
+    setError(message);
+  }, []);
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,69 +55,6 @@ export function GoogleLoginModal({
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    if (window.google) {
-      setScriptReady(true);
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setScriptReady(true);
-    script.onerror = () => setError("Google 로그인 스크립트를 불러오지 못했습니다.");
-    document.head.appendChild(script);
-
-    return () => {
-      script.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen || !scriptReady || !clientId || !buttonRef.current || !window.google) {
-      return;
-    }
-
-    setError("");
-    buttonRef.current.innerHTML = "";
-
-    window.google.accounts.id.initialize({
-      client_id: clientId,
-      callback: async (response) => {
-        if (!response.credential) {
-          setError("Google 로그인 응답을 확인하지 못했습니다.");
-          return;
-        }
-
-        const user = parseCredential(response.credential);
-        if (!user) {
-          setError("로그인 정보를 해석하지 못했습니다.");
-          return;
-        }
-
-        setError("");
-        setLoading(true);
-        try {
-          const session = await loginWithGoogle(response.credential);
-          onSuccess(session);
-        } catch (exception) {
-          setError(exception instanceof Error ? exception.message : `${user.email} Google 로그인을 완료하지 못했습니다.`);
-        } finally {
-          setLoading(false);
-        }
-      }
-    });
-
-    window.google.accounts.id.renderButton(buttonRef.current, {
-      theme: "outline",
-      size: "large",
-      shape: "pill",
-      text: "continue_with",
-      width: 320
-    });
-  }, [clientId, isOpen, onSuccess, scriptReady]);
 
   if (!isOpen) {
     return null;
@@ -230,7 +130,14 @@ export function GoogleLoginModal({
         {error ? <div className="auth-modal-warning">{error}</div> : null}
 
         <div className="auth-modal-divider">또는</div>
-        <div className="auth-modal-button" ref={buttonRef} />
+        {clientId ? (
+          <GoogleCredentialButton
+            clientId={clientId}
+            disabled={loading}
+            onCredential={handleGoogleCredential}
+            onError={handleGoogleError}
+          />
+        ) : null}
       </section>
     </div>
   );

@@ -1,15 +1,19 @@
 import { useState } from "react";
 import type { AuthSession } from "../auth/session";
+import { AllDeviceLogoutModal } from "./AllDeviceLogoutModal";
 
 export function AuthSessionControls({
   session,
-  onLogout
+  onLogout,
+  onLogoutAll
 }: {
   session: AuthSession;
   onLogout: () => Promise<void>;
+  onLogoutAll: () => Promise<void>;
 }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [allDeviceLogoutOpen, setAllDeviceLogoutOpen] = useState(false);
 
   async function handleLogout() {
     if (loading) {
@@ -31,10 +35,26 @@ export function AuthSessionControls({
         <strong>{session.user.displayName}</strong>
         <span>{session.user.email}</span>
       </div>
-      <button disabled={loading} onClick={() => void handleLogout()} type="button">
-        {loading ? "로그아웃 중..." : "로그아웃"}
-      </button>
+      <div className="auth-session-actions">
+        <button disabled={loading} onClick={() => void handleLogout()} type="button">
+          {loading ? "로그아웃 중..." : "로그아웃"}
+        </button>
+        <button
+          className="danger"
+          disabled={loading}
+          onClick={() => setAllDeviceLogoutOpen(true)}
+          type="button"
+        >
+          모든 기기
+        </button>
+      </div>
       {error ? <p role="alert">{error}</p> : null}
+      {allDeviceLogoutOpen ? (
+        <AllDeviceLogoutModal
+          onClose={() => setAllDeviceLogoutOpen(false)}
+          onLogoutAll={onLogoutAll}
+        />
+      ) : null}
     </aside>
   );
 }

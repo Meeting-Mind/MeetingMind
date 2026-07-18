@@ -12,7 +12,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withUnauthorizedRequest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.Set;
+import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -40,13 +43,14 @@ class LegacyBackendAuthClientTest {
                         """))
                 .andRespond(withSuccess(tokenResponse(), MediaType.APPLICATION_JSON));
 
-        LegacyAuthTokenResponse response = client.login(
+        AuthTokenResponse response = client.login(
                 new BrowserAuthRequests.Login("user@example.com", "password-123!", true),
                 "Browser\r\nInjectedHeader");
 
-        assertThat(response.accessToken()).isEqualTo("legacy-access-secret");
+        assertThat(response.accessTokens().get(AuthTokenResponse.LEGACY_AUDIENCE).token())
+                .isEqualTo("legacy-access-secret");
         assertThat(response.refreshToken()).isEqualTo("legacy-refresh-secret");
-        assertThat(response.toString()).isEqualTo("LegacyAuthTokenResponse[REDACTED]");
+        assertThat(response.toString()).contains("tokens=REDACTED");
         server.verify();
     }
 
@@ -82,9 +86,13 @@ class LegacyBackendAuthClientTest {
                         """))
                 .andRespond(withSuccess(tokenResponse(), MediaType.APPLICATION_JSON));
 
-        LegacyAuthTokenResponse response = client.refresh("legacy-refresh-secret", "JUnit");
+        AuthTokenResponse response = client.refresh(
+                UUID.fromString("e655a7be-39b1-44eb-9559-419ea96e5c62"),
+                "legacy-refresh-secret",
+                "JUnit");
 
-        assertThat(response.accessToken()).isEqualTo("legacy-access-secret");
+        assertThat(response.accessTokens().get(AuthTokenResponse.LEGACY_AUDIENCE).token())
+                .isEqualTo("legacy-access-secret");
         server.verify();
     }
 
@@ -101,7 +109,11 @@ class LegacyBackendAuthClientTest {
                         """))
                 .andRespond(withSuccess());
 
-        client.revokeBestEffort("Bearer", "legacy-access-secret", "legacy-refresh-secret");
+        client.revokeBestEffort(
+                UUID.randomUUID(),
+                "Bearer",
+                Map.of(AuthTokenResponse.LEGACY_AUDIENCE, "legacy-access-secret"),
+                "legacy-refresh-secret");
 
         server.verify();
     }
@@ -114,7 +126,11 @@ class LegacyBackendAuthClientTest {
         server.expect(requestTo("http://backend.example/api/v1/auth/logout"))
                 .andRespond(withServerError().body("provider-secret-detail"));
 
-        client.revokeBestEffort("Bearer", "legacy-access-secret", "legacy-refresh-secret");
+        client.revokeBestEffort(
+                UUID.randomUUID(),
+                "Bearer",
+                Map.of(AuthTokenResponse.LEGACY_AUDIENCE, "legacy-access-secret"),
+                "legacy-refresh-secret");
 
         assertThat(output.getAll())
                 .contains("event=compat_auth_revoke_failed outcome=local_session_invalidated")
@@ -122,6 +138,33 @@ class LegacyBackendAuthClientTest {
                 .doesNotContain("legacy-refresh-secret")
                 .doesNotContain("provider-secret-detail");
         server.verify();
+    }
+
+    @Test
+    void doesNotPretendLegacyProviderCanLogoutAllDevices() {
+        LegacyBackendAuthClient client = new LegacyBackendAuthClient(
+                RestClient.builder().baseUrl("http://backend.example").build(),
+                objectMapper);
+
+        assertThatThrownBy(() -> client.reauthenticate(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        new BrowserAuthRequests.Reauthenticate(
+                                "PASSWORD",
+                                "password-123!",
+                                null)))
+                .isInstanceOfSatisfying(
+                        BffAuthException.class,
+                        exception -> assertThat(exception.code())
+                                .isEqualTo("AUTH_FEATURE_UNAVAILABLE"));
+        assertThatThrownBy(() -> client.revokeAll(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        Instant.now()))
+                .isInstanceOfSatisfying(
+                        BffAuthException.class,
+                        exception -> assertThat(exception.code())
+                                .isEqualTo("AUTH_FEATURE_UNAVAILABLE"));
     }
 
     private String tokenResponse() {
@@ -133,7 +176,7 @@ class LegacyBackendAuthClientTest {
                   "expiresIn":3600,
                   "refreshExpiresIn":1209600,
                   "user":{
-                    "id":"user-id",
+                    "id":"user-0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
                     "email":"user@example.com",
                     "displayName":"User",
                     "pictureUrl":null,

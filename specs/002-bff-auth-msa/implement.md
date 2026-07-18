@@ -2,7 +2,7 @@
 
 ## Scope
 
-M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 T020~T023 Browser session cutover와 M004의 T030 Auth 보안 shared contract, T031 foundation, T032 credential/session/revoke runtime, T033 KMS signing/JWKS/Resource validator 및 T036 CI security hardening까지 구현했다.
+M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 T020~T023 Browser session cutover와 M004의 T030 Auth 보안 shared contract, T031 foundation, T032 credential/session/revoke runtime, T033 KMS signing/JWKS/Resource validator, T034 Auth 데이터 이전, T035 BFF→Auth/Core cutover, T036 CI security hardening 및 T024 모든 기기 로그아웃까지 구현했다.
 
 ## Work Allocation
 
@@ -27,6 +27,11 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | 2026-07-17 | T032 Auth Runtime | Auth Service | Codex | `auth/src/main/**`, `auth/src/test/**`, Compose/CI/root 및 Auth 계약/data/plan/analyze | local/Google 자격 검증, refresh family rotation/reuse, revoke-all, 감사/outbox와 workload/fail-closed signer 경계 구현 |
 | 2026-07-17 | T033 Auth Keys/JWKS | Auth Service | Codex | `auth/**`, `backend/**/auth/target/**`, Compose/env 및 Auth 계약/data/plan/tasks/analyze | AWS KMS RS256 signer, rotation key ring, 내부 JWKS와 비활성 Resource validator 구현 |
 | 2026-07-18 | T036 CI Security Hardening | Integration | Codex | `bff/build.gradle`, `auth/build.gradle`, `.gitleaksignore`, 관련 spec/plan/tasks/implement | BFF/Auth 수정 가능 취약점 제거와 테스트 fixture Gitleaks 오탐 정밀 예외 처리 |
+| 2026-07-18 | T034 Auth Data Migration | Data | Codex | Core V13, `auth/src/migration/**`, PostgreSQL tests, migration runbook과 Core/Auth data/ERD/plan/tasks | 문자열 업무 PK를 보존한 UUID projection, 반복 가능한 User/AuthIdentity offline 이전과 exact reconciliation 구현 |
+| 2026-07-18 | T035 Preparation | Integration | Codex | BFF/Auth/Core runtime, Frontend identity comparisons, contracts/data/plan/tasks/analyze | external/internal User ID 불일치와 신규 Auth User projection 공백을 발견하고 blocking Q-020/Q-021 및 순차 구현 경계 정의 |
+| 2026-07-18 | T035 Auth Cutover | Integration | Codex | BFF Auth/Token Vault/session/proxy, Core validator/projection, Compose/CI/E2E/contracts/runbook | target Auth client, actual AuthSession/Auth UUID index, audience bundle v2, deterministic dual validation과 동기 Core User projection 구현·검증 |
+| 2026-07-18 | T024 Preparation | Frontend/Auth | Codex | Browser/Auth 재인증 계약, BFF indexed logout-all, Frontend session controls/tests | Q-022 전용 step-up 인증과 Auth-first/현재 BFF session last cleanup 경계를 확정하고 구현 단위를 shared contract→Auth→BFF→Frontend로 고정 |
+| 2026-07-18 | T024 All-device Logout | Frontend/Auth | Codex | Auth 재인증, BFF indexed revoke/cleanup, Frontend session controls/modal, metrics/docs/tests | 세션 비생성 local/Google step-up, Auth-first 전체 revoke, 다른 BFF session/Token Bundle 정리와 현재 session last 폐기 UI/API 구현·검증 |
 
 동시에 같은 파일을 수정한 다른 agent는 없으며 통합은 Requirements → Spec/Plan → Contracts/Data → legacy reference → analysis 순서로 진행한다.
 
@@ -95,7 +100,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - Access는 AWS KMS 비반출 RSA-2048 key의 `RS256`으로 서명하고 `meetingmind-core|ai|livekit` 단일 audience별 10분 JWT를 발급한다. 필수 header/claim, 60초 skew, 90일 rotation, 1시간 overlap과 5분 JWKS cache를 Auth 계약에 고정하고 업무 RBAC/ACL은 token에 넣지 않는다.
 - 로그아웃의 DB revoke와 `AuthSessionRevokedV1` transactional outbox를 함께 커밋한다. BFF/Resource Service는 at-least-once event를 idempotent 처리해 `sid`를 `denyUntil`까지 로컬 denylist에 유지하며 중앙 Auth/Redis 매 요청 조회를 추가하지 않는다.
 - 내부 endpoint는 mTLS SPIFFE workload identity, NetworkPolicy와 principal/endpoint allowlist를 동시에 요구한다. 인증서 제품은 Q-012/T040에 남기되 shared secret/client credential 방식으로 계약을 되돌리지 않는다.
-- 모든 기기 로그아웃은 최근 10분 `authenticatedAt` 또는 local 비밀번호/새 Google credential 재인증을 요구한다. Q-016은 결정됐지만 실제 UI/API는 T032 Auth revoke-all/outbox 뒤 T024에서 연결한다.
+- 모든 기기 로그아웃은 최근 10분 `authenticatedAt` 또는 local 비밀번호/새 Google credential 재인증을 요구한다. Q-016 결정과 T032 Auth revoke-all/outbox, T035 session index를 선행한 뒤 T024에서 실제 UI/API를 연결했다.
 - target Token Bundle을 audience별 access expiry와 schema version 2로 확장하고 AuthSession `refreshFamilyId`, AuthOutboxEvent를 data model/ERD에 추가했다. 이는 future Auth DB와 Vault document의 forward-only 변경이며 현재 Backend DB나 BFF runtime code는 T030에서 수정하지 않았다.
 - `auth`를 Java 21/Spring Boot 3.5.14 독립 Gradle 프로젝트와 비루트 Docker image로 추가했다. 기존 Java 운영 스택과 같은 버전을 사용하고 health/JDBC/Flyway/PostgreSQL 외에 T031 범위를 넘는 인증·키 의존성은 추가하지 않았다.
 - liveness는 process 상태만, readiness는 실제 Auth DB 연결을 포함한다. DB 중단 검증에서 liveness는 `UP`/200을 유지하고 readiness만 `DOWN`/503으로 전환돼 장애 시 재시작 반복 대신 traffic 수용을 중지한다.
@@ -120,8 +125,21 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - 내부 JWKS는 active/overlap public key를 `RSA`/`sig`/`RS256` JWK로 제공하고 5분 public cache와 stable ETag/304를 지원한다. Auth API와 별도 BFF/Resource SPIFFE principal allowlist를 적용하며 public ingress 제외 계약을 유지한다.
 - Core에 추가한 target validator는 JWKS를 최대 5분/ETag로 cache하고 unknown `kid`에서 정확히 한 번 강제 갱신한 뒤 fail closed한다. 서명, algorithm/type/kid, issuer, 정확히 하나의 Core audience, UUID/시간/profile claim을 검증하고 identity만 반환한다. 기존 HMAC issuer 요청 경로와의 dual validation 활성화는 T035이므로 T033에서 현재 Core 동작은 바꾸지 않았다.
 - T033은 DB entity/relation을 만들지 않는다. key ring은 배포 설정, public key cache는 프로세스 메모리이므로 migration과 ERD 변경은 필요 없고 contract/data-model/plan/tasks만 영향에 맞게 갱신했다.
+- T034는 Core V13에 nullable unique `users.auth_user_id UUID`와 canonical `user-{UUID}` backfill/check를 추가했다. 기존 문자열 User PK와 Space/Meeting FK는 바꾸지 않았고 legacy `JdbcAuthStore` 신규 가입은 같은 UUID projection을 함께 기록한다.
+- Auth 이관 도구는 `src/migration` source set에 분리해 runtime bootJar에 넣지 않았다. source/target JDBC transaction을 별도로 열고 identity가 있는 User/AuthIdentity만 staging한 뒤 ID/projection/email/provider ownership을 검사한다. `APPLY`는 target transaction 안에서 멱등 upsert와 exact reconciliation을 수행하고 `VERIFY`는 쓰기 없이 불일치를 차단한다.
+- legacy BCrypt hash와 Google provider subject는 보존하지만 refresh hash/AuthSession은 복사하지 않는다. 최종 delta 전 인증 쓰기 drain, `DRY_RUN→APPLY→VERIFY`, 강제 재로그인과 forward-only rollback 경계를 `auth-data-migration-runbook.md`에 기록했다.
+- T034는 Browser/BFF/Auth API shape를 바꾸지 않으므로 contracts 변경은 없다. Core/Auth 물리 관계가 바뀌어 두 feature의 data model/ERD와 plan/tasks를 함께 갱신했다.
+- Q-020/Q-021은 권장안으로 확정했다. Browser/Core `User.id`는 `user-{Auth UUID}`를 유지하고 Auth UUID는 JWT `sub`, BFF session principal index와 Core `users.auth_user_id`에만 사용한다. BFF는 target Auth 성공 직후 Core projection `204`를 받아야 session/Vault를 확정하며 실패 시 실제 AuthSession을 best-effort revoke한다.
+- BFF 인증 client는 명시적 `auth-service|legacy` provider로 나눴다. target은 실제 `authSessionId`, Auth UUID와 고정 3개 audience access를 검증하고 provider 장애를 legacy로 자동 fallback하지 않는다. schema v1은 `meetingmind-legacy` 단일 access, v2는 Core/AI/LiveKit access·expiry map이며 refresh는 bundle 전체를 CAS 원자 교체한다.
+- Spring Session Redis는 indexed repository를 사용하고 Auth UUID 문자열을 principal index로 저장한다. 기존 직렬화 session/Vault 문서는 추측 변환하지 않고 fail closed하며 T024가 같은 index를 logout-all에 사용한다.
+- Core access resolver는 unverified header를 validator 선택에만 사용한다. exact legacy `HS256/JWT/no kid`와 target `RS256/at+jwt/kid`만 구분하고 선택한 validator 하나만 실행해 target 실패의 legacy downgrade를 차단한다. target `sub`는 Core UUID projection으로 기존 문자열 업무 User를 찾는다.
+- Core internal projection은 BFF workload와 `meetingmind-core` target JWT를 함께 검증하고 `sub == authUserId`, `resourceUserId == "user-" + authUserId` ownership 아래 표시 정보를 멱등 upsert한다. local/test header는 명시적 비운영 profile에서만 허용한다.
 - T036은 CI Trivy가 탐지한 BFF/Auth의 `jackson-databind 2.21.2` HIGH 2건과 `tomcat-embed-core 10.1.54` HIGH 3건/CRITICAL 3건을 이미 Backend에서 검증한 Jackson `2.21.4`, Tomcat `10.1.55` 전체 모듈 정렬로 해소했다. 새 라이브러리나 API/DB 계약은 추가하지 않았다.
 - Gitleaks가 탐지한 10건은 모두 커밋된 고정 테스트 master key 또는 잘못된 key 길이 negative fixture였다. 경로·규칙 전체를 허용하지 않고 기존 `.gitleaksignore` 정책대로 commit/path/rule/line fingerprint만 등록해 이후 실제 secret 탐지를 유지했다.
+- T024 Auth 재인증은 현재 AuthSession/User 결합과 provider별 credential을 검증하고 Auth 서버 시각만 반환한다. local/Google 모두 새 User, identity, AuthSession, refresh/access를 만들지 않으며 실패 감사만 남긴다.
+- BFF는 최근 인증이 없으면 `403 REAUTHENTICATION_REQUIRED`를 반환하고, 재인증 성공 시 Auth의 durable revoke-all을 먼저 호출한다. 이후 Auth UUID principal index의 다른 BffSession/Token Bundle을 정리하고 현재 request session을 마지막에 무효화하며 indexed 정리 실패는 `503`으로 성공을 위장하지 않는다.
+- Frontend는 현재 세션 로그아웃과 별도로 확인 modal을 제공한다. 첫 logout-all이 최근 인증을 요구할 때만 비밀번호 또는 Google step-up을 수행하고 body 없는 logout-all을 정확히 한 번 재시도하며, `204` 뒤에만 전역 사용자 상태를 지운다.
+- `reauthenticate`와 `logout_all`을 별도 저카디널리티 Browser metric operation으로 분류했고 사용자/session ID나 raw path를 label에 넣지 않는다.
 
 ## Verification
 
@@ -187,11 +205,29 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | T033 Resource validator | Pass | Backend 전체 `./gradlew test`; 118 tests 중 기존 환경 gate 7건 skipped, 0 failures/errors. ETag/300초 HTTP fetch, RS256/issuer/audience/expiry/필수 claim negative, unknown `kid` 1회 갱신, old/new overlap과 미발견 fail-closed 확인 |
 | T033 runtime artifact | Pass | bootJar에 KMS adapter/JWKS와 AWS SDK KMS가 포함되고 test signer/config 0건, `meetingmind-auth:t033` image build와 non-root `meetingmind` user 확인 |
 | T033 PostgreSQL/ERD | Not run | DB schema/SQL/entity 관계를 변경하지 않았고 T032 실제 PostgreSQL 회귀가 signer port 경계를 이미 검증함; migration/ERD 변경 불필요 |
+| T034 Backend tests | Pass | `backend ./gradlew test`; 전체 단위 테스트 통과 |
+| T034 Core PostgreSQL migration | Pass | 격리 pgvector PostgreSQL에서 V1→V10, 기존 데이터 삽입, V11→V13 upgrade와 Flyway 1~13 이력, canonical projection backfill·비정형 ID null 유지 검증 |
+| T034 Auth tests | Pass | `auth ./gradlew test`; migration source set compile과 기존 Auth 단위 테스트 전체 통과 |
+| T034 Auth PostgreSQL migration | Pass | 격리 PostgreSQL에서 실제 Auth runtime 회귀와 별도 source schema의 dry-run/apply/verify, 동일 snapshot 재실행, local/Google identity exact 대사, projection mismatch fail-closed 검증 |
+| T034 runtime artifact | Pass | `./gradlew bootJar` 성공, Auth bootJar의 `com/meetingmind/auth/migration` class 0건 확인 |
+| T034 diff validation | Pass | `git diff --check` 통과 |
+| T035 BFF full regression/package | Pass | `bff ./gradlew test`, `bootJar`; target Auth/Core client, 실제 AuthSession·external/internal ID, audience 선택/원자 refresh, projection 실패 revoke와 legacy schema 회귀 통과 |
+| T035 Core full regression/package | Pass | `backend ./gradlew test`, `bootJar`; deterministic dual-mode/downgrade negative, UUID User lookup, projection subject/ID/workload 검증과 기존 Core 회귀 통과 |
+| T035 actual Redis | Pass | 실제 Redis에서 indexed Spring Session의 Auth UUID→BffSession 조회/로그아웃 삭제, ciphertext 무원문, refresh lock/CAS와 복수 context session 공유 통과 |
+| T035 actual PostgreSQL | Pass | 실제 Core PostgreSQL에서 `auth_user_id` 조회, 신규 projection insert·표시 정보 멱등 update와 resource/Auth ownership conflict 차단 통과 |
+| T035 explicit legacy rollback E2E | Pass | 격리 포트 `28080/28081` 실제 Backend+BFF+Redis에서 `BFF_AUTH_PROVIDER=legacy` signup→refresh→Core proxy→logout→stale cookie 차단과 token/log 무노출 통과 |
+| T035 Auth regression/package | Pass | `auth ./gradlew test bootJar`; 기존 AuthSession/refresh/revoke/KMS/JWKS runtime 회귀와 독립 artifact 생성 통과 |
 | T036 BFF/Auth tests | Pass | BFF와 Auth에서 각각 `./gradlew test`; 두 서비스 모두 `BUILD SUCCESSFUL` |
 | T036 container builds | Pass | `docker build --tag meetingmind-bff:ci bff`, `docker build --tag meetingmind-auth:ci auth` 성공 |
 | T036 Trivy image scan | Pass | Trivy `0.72.0`, `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL`; BFF/Auth 모두 Alpine 0건, JAR 0건 |
 | T036 repository secret scan | Pass | Gitleaks `8.30.1`이 현재 브랜치 HEAD 전체 이력 57 commits/약 3.44 MB를 검사해 `no leaks found` |
 | T036 diff validation | Pass | `git diff --check` 통과 |
+| T024 Auth PostgreSQL integration | Pass | 실제 PostgreSQL에서 malformed/subject mismatch/wrong local·Google credential을 무변경 거부하고 local/Google 성공 시 새 AuthSession/token 없이 Auth 서버 시각만 갱신한 뒤 전체 revoke/outbox를 검증 |
+| T024 BFF Redis integration | Pass | 실제 Redis에 동일 Auth UUID의 BffSession 2개를 만들고 stale logout-all `403`→재인증→`204`, 두 cookie 후속 보호 요청 `401`, principal index와 Token Vault 0건을 검증 |
+| T024 BFF full regression/package | Pass | `./gradlew test bootJar`; 82 tests, 6 environment-gated skipped, 0 failures/errors와 독립 bootJar 생성 |
+| T024 Frontend regression | Pass | Vitest 4 files/22 tests, ESLint 0 errors/기존 warnings 9건, TypeScript+Vite production build 성공; 기존 bundle size warning만 존재 |
+| T024 Browser E2E | Pass | 격리 포트 Backend+BFF+Redis+Frontend에서 Playwright 10/10 통과; 확인 modal, step-up proof 최소 body, logout-all 정확히 1회 재시도와 인증 UI 정리 검증 |
+| T024 Auth regression/package | Pass | `./gradlew test bootJar`; 16 tests 중 PostgreSQL environment gate 1건 skipped, 0 failures/errors와 독립 bootJar 생성 |
 | `docker build --tag meetingmind-bff:t013 bff` | Pass | validation/compatibility client를 포함한 non-root Java 21 runtime image 생성 |
 | `docker build --tag meetingmind-bff:t012 bff` | Pass | AWS SDK/KMS adapter를 포함한 non-root Java 21 runtime image 생성 |
 | `docker build --tag meetingmind-bff:t010 bff` | Pass | non-root Java 21 runtime image 생성 |
@@ -224,6 +260,5 @@ Refresh rotation은 기존 V1의 `usedAt/replacementId` check, replacement FK와
 
 - Q-011~Q-013 AWS region, EKS/IaC/node, SLO/RTO/RPO.
 - mTLS/SPIFFE 인증서 발급·회전 제품과 event transport 제품 선택은 Q-012/T040에서 한다. identity/event 의미는 T030 계약을 유지한다.
-- T024의 T032 dependency는 충족됐다. BFF recent-auth/재인증과 Frontend 모든 기기 로그아웃 연결은 별도 task로 남는다.
 - Auth outbox transport publisher/consumer, Phase 1 revoke 실패의 암호화된 durable retry queue와 운영 경보는 T045 출시 gate다.
-- T033 Resource validator는 현재 Core 요청 경로에 의도적으로 연결하지 않았다. T034 데이터 이전 뒤 T035에서 legacy/new issuer dual validation과 BFF→Auth cutover를 함께 검증한다.
+- T035에서 T033 Resource validator를 실제 Core 요청 경로의 `DUAL` resolver에 연결했다. legacy issuer 종료는 7일 관측 뒤 Core `TARGET_ONLY` 전환과 별도 운영 승인이 필요하다.

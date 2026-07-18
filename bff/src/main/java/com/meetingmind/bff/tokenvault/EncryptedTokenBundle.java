@@ -1,6 +1,7 @@
 package com.meetingmind.bff.tokenvault;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -10,11 +11,12 @@ public record EncryptedTokenBundle(
         byte[] encryptedPayload,
         byte[] encryptedDataKey,
         String keyId,
-        Instant accessExpiresAt,
+        int schemaVersion,
+        Map<String, Instant> accessExpiresAtByAudience,
         Instant refreshExpiresAt,
         String issuer,
         Set<String> audiences,
-        Set<String> scopes,
+        Map<String, Set<String>> scopesByAudience,
         long version,
         Instant createdAt,
         Instant updatedAt) {
@@ -28,7 +30,9 @@ public record EncryptedTokenBundle(
                 || encryptedDataKey.length == 0
                 || keyId == null
                 || keyId.isBlank()
-                || accessExpiresAt == null
+                || (schemaVersion != 1 && schemaVersion != 2)
+                || accessExpiresAtByAudience == null
+                || accessExpiresAtByAudience.isEmpty()
                 || refreshExpiresAt == null
                 || issuer == null
                 || issuer.isBlank()
@@ -39,8 +43,16 @@ public record EncryptedTokenBundle(
         }
         encryptedPayload = encryptedPayload.clone();
         encryptedDataKey = encryptedDataKey.clone();
+        accessExpiresAtByAudience = Map.copyOf(accessExpiresAtByAudience);
         audiences = audiences == null ? Set.of() : Set.copyOf(audiences);
-        scopes = scopes == null ? Set.of() : Set.copyOf(scopes);
+        scopesByAudience = scopesByAudience == null
+                ? Map.of()
+                : scopesByAudience.entrySet().stream()
+                        .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                                Map.Entry::getKey,
+                                entry -> entry.getValue() == null
+                                        ? Set.of()
+                                        : Set.copyOf(entry.getValue())));
     }
 
     @Override

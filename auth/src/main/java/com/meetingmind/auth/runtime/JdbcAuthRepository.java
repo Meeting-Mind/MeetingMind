@@ -53,6 +53,14 @@ class JdbcAuthRepository {
                 """, IDENTITY_MAPPER, provider, providerUserId));
     }
 
+    Optional<AuthModels.Identity> findIdentityByUserAndProvider(UUID userId, String provider) {
+        return first(jdbc.query("""
+                select id, user_id, provider, provider_user_id, password_hash, created_at, last_used_at
+                from auth_identities
+                where user_id = ? and provider = ?
+                """, IDENTITY_MAPPER, userId, provider));
+    }
+
     AuthModels.User insertUser(
             UUID userId,
             String email,

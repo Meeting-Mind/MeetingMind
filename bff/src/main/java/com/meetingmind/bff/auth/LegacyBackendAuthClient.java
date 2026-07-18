@@ -2,6 +2,9 @@ package com.meetingmind.bff.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -10,7 +13,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
+public final class LegacyBackendAuthClient implements AuthClient {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LegacyBackendAuthClient.class);
 
@@ -29,49 +32,80 @@ public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
     }
 
     @Override
-    public LegacyAuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
-        return exchange(
+    public AuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
+        return adapt(exchange(
                 SIGNUP_PATH,
                 new LegacySignupRequest(request.email(), request.password(), request.displayName()),
                 userAgent,
-                false);
+                false));
     }
 
     @Override
-    public LegacyAuthTokenResponse login(BrowserAuthRequests.Login request, String userAgent) {
-        return exchange(
+    public AuthTokenResponse login(BrowserAuthRequests.Login request, String userAgent) {
+        return adapt(exchange(
                 LOGIN_PATH,
                 new LegacyLoginRequest(request.email(), request.password()),
                 userAgent,
-                false);
+                false));
     }
 
     @Override
-    public LegacyAuthTokenResponse google(BrowserAuthRequests.Google request, String userAgent) {
-        return exchange(
+    public AuthTokenResponse google(BrowserAuthRequests.Google request, String userAgent) {
+        return adapt(exchange(
                 GOOGLE_PATH,
                 new LegacyGoogleRequest(request.credential()),
                 userAgent,
-                true);
+                true));
     }
 
     @Override
-    public LegacyAuthTokenResponse refresh(String refreshToken, String userAgent) {
+    public AuthTokenResponse refresh(UUID authSessionId, String refreshToken, String userAgent) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw BffAuthException.of(
                     HttpStatus.UNAUTHORIZED,
                     "REFRESH_TOKEN_INVALID",
                     "로그인이 만료되었습니다. 다시 로그인해 주세요.");
         }
-        return exchange(REFRESH_PATH, new LegacyRefreshRequest(refreshToken), userAgent, false);
+        AuthTokenResponse refreshed = adapt(exchange(
+                REFRESH_PATH, new LegacyRefreshRequest(refreshToken), userAgent, false));
+        return new AuthTokenResponse(
+                refreshed.schemaVersion(),
+                authSessionId,
+                refreshed.accessTokens(),
+                refreshed.refreshToken(),
+                refreshed.tokenType(),
+                refreshed.refreshExpiresIn(),
+                refreshed.user());
     }
 
     @Override
-    public void revokeBestEffort(String tokenType, String accessToken, String refreshToken) {
+    public Instant reauthenticate(
+            UUID currentAuthSessionId,
+            UUID userId,
+            BrowserAuthRequests.Reauthenticate request) {
+        throw allDeviceLogoutUnavailable();
+    }
+
+    @Override
+    public void revokeAll(UUID currentAuthSessionId, UUID userId, Instant authenticatedAt) {
+        throw allDeviceLogoutUnavailable();
+    }
+
+    @Override
+    public void revokeBestEffort(
+            UUID authSessionId,
+            String tokenType,
+            Map<String, String> accessTokens,
+            String refreshToken) {
+        String legacyAccess = accessTokens.get(AuthTokenResponse.LEGACY_AUDIENCE);
+        if (legacyAccess == null) {
+            LOGGER.warn("event=compat_auth_revoke_skipped reason=legacy_access_missing");
+            return;
+        }
         try {
             restClient.post()
                     .uri(LOGOUT_PATH)
-                    .header(HttpHeaders.AUTHORIZATION, tokenType + " " + accessToken)
+                    .header(HttpHeaders.AUTHORIZATION, tokenType + " " + legacyAccess)
                     .body(new LegacyLogoutRequest(refreshToken))
                     .retrieve()
                     .toBodilessEntity();
@@ -80,19 +114,19 @@ public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
         }
     }
 
-    private LegacyAuthTokenResponse exchange(String path, Object body, String userAgent, boolean google) {
+    private LegacyTokenResponse exchange(String path, Object body, String userAgent, boolean google) {
         try {
             RestClient.RequestBodySpec request = restClient.post().uri(path);
             String sanitizedUserAgent = sanitizeUserAgent(userAgent);
             if (!sanitizedUserAgent.isEmpty()) {
                 request.header(HttpHeaders.USER_AGENT, sanitizedUserAgent);
             }
-            LegacyAuthTokenResponse response = request.body(body)
+            LegacyTokenResponse response = request.body(body)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (backendRequest, backendResponse) -> {
                         throw mapBackendError(backendResponse.getStatusCode(), backendResponse.getBody(), google);
                     })
-                    .body(LegacyAuthTokenResponse.class);
+                    .body(LegacyTokenResponse.class);
             return validate(response);
         } catch (BffAuthException exception) {
             throw exception;
@@ -145,7 +179,7 @@ public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
         }
     }
 
-    private LegacyAuthTokenResponse validate(LegacyAuthTokenResponse response) {
+    private LegacyTokenResponse validate(LegacyTokenResponse response) {
         if (response == null
                 || isBlank(response.accessToken())
                 || isBlank(response.refreshToken())
@@ -163,6 +197,41 @@ public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
                     "인증 요청을 처리하지 못했습니다.");
         }
         return response;
+    }
+
+    private AuthTokenResponse adapt(LegacyTokenResponse response) {
+        UUID authUserId = parseCanonicalResourceUserId(response.user().id());
+        return new AuthTokenResponse(
+                AuthTokenResponse.LEGACY_SCHEMA_VERSION,
+                UUID.randomUUID(),
+                Map.of(
+                        AuthTokenResponse.LEGACY_AUDIENCE,
+                        new AuthTokenResponse.AccessToken(response.accessToken(), response.expiresIn())),
+                response.refreshToken(),
+                response.tokenType(),
+                response.refreshExpiresIn(),
+                new AuthTokenResponse.User(
+                        authUserId,
+                        response.user().id(),
+                        response.user().email(),
+                        response.user().displayName(),
+                        response.user().pictureUrl(),
+                        response.user().status()));
+    }
+
+    private UUID parseCanonicalResourceUserId(String value) {
+        if (value == null || !value.startsWith("user-")) {
+            throw invalidResponse();
+        }
+        try {
+            UUID authUserId = UUID.fromString(value.substring("user-".length()));
+            if (!value.equals("user-" + authUserId)) {
+                throw invalidResponse();
+            }
+            return authUserId;
+        } catch (IllegalArgumentException exception) {
+            throw invalidResponse();
+        }
     }
 
     private String sanitizeUserAgent(String value) {
@@ -190,6 +259,20 @@ public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
                 "인증 서비스에 일시적으로 연결할 수 없습니다.");
     }
 
+    private BffAuthException allDeviceLogoutUnavailable() {
+        return BffAuthException.of(
+                HttpStatus.CONFLICT,
+                "AUTH_FEATURE_UNAVAILABLE",
+                "현재 인증 모드에서는 모든 기기 로그아웃을 사용할 수 없습니다.");
+    }
+
+    private BffAuthException invalidResponse() {
+        return BffAuthException.of(
+                HttpStatus.BAD_GATEWAY,
+                "AUTH_SERVICE_INVALID_RESPONSE",
+                "인증 요청을 처리하지 못했습니다.");
+    }
+
     private record LegacySignupRequest(String email, String password, String displayName) {}
 
     private record LegacyLoginRequest(String email, String password) {}
@@ -201,4 +284,21 @@ public final class LegacyBackendAuthClient implements CompatibilityAuthClient {
     private record LegacyLogoutRequest(String refreshToken) {}
 
     private record LegacyAuthError(String code, String message) {}
+
+    private record LegacyTokenResponse(
+            String accessToken,
+            String refreshToken,
+            String tokenType,
+            long expiresIn,
+            long refreshExpiresIn,
+            LegacyUser user) {
+    }
+
+    private record LegacyUser(
+            String id,
+            String email,
+            String displayName,
+            String pictureUrl,
+            String status) {
+    }
 }

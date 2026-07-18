@@ -40,6 +40,18 @@ public class JdbcAuthStore implements AuthStore {
     }
 
     @Override
+    public Optional<AuthUser> findUserByAuthUserId(UUID authUserId) {
+        return first(jdbc.query(
+                """
+                select id, email, display_name, picture_url, status, created_at, last_login_at
+                from users
+                where auth_user_id = ?
+                """,
+                USER_MAPPER,
+                authUserId));
+    }
+
+    @Override
     public Optional<AuthUser> findUserByEmail(String email) {
         return first(jdbc.query(
                 """
@@ -68,8 +80,9 @@ public class JdbcAuthStore implements AuthStore {
 
     @Override
     public AuthUser createUser(String email, String displayName, String pictureUrl, Instant now) {
+        UUID authUserId = UUID.randomUUID();
         AuthUser user = new AuthUser(
-                "user-" + UUID.randomUUID(),
+                "user-" + authUserId,
                 AuthStore.normalizeEmail(email),
                 displayName,
                 pictureUrl,
@@ -79,10 +92,12 @@ public class JdbcAuthStore implements AuthStore {
         );
         jdbc.update(
                 """
-                insert into users (id, email, display_name, picture_url, status, created_at, last_login_at)
-                values (?, ?, ?, ?, ?, ?, ?)
+                insert into users (
+                    id, auth_user_id, email, display_name, picture_url, status, created_at, last_login_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 user.id(),
+                authUserId,
                 user.email(),
                 user.displayName(),
                 user.pictureUrl(),
@@ -218,6 +233,69 @@ public class JdbcAuthStore implements AuthStore {
                 timestamp(revokedAt),
                 refreshTokenHash
         );
+    }
+
+    @Override
+    public AuthUser upsertAuthProjection(
+            UUID authUserId,
+            String resourceUserId,
+            String email,
+            String displayName,
+            String pictureUrl,
+            String status,
+            Instant now) {
+        Optional<ProjectionOwner> owner = first(jdbc.query(
+                "select auth_user_id from users where id = ?",
+                (rs, rowNum) -> new ProjectionOwner(
+                        resourceUserId,
+                        rs.getObject("auth_user_id", UUID.class)),
+                resourceUserId));
+        if (owner.isPresent() && !authUserId.equals(owner.get().authUserId())) {
+            throw new AuthException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "USER_PROJECTION_CONFLICT",
+                    "사용자 projection 소유권이 충돌합니다.");
+        }
+        Optional<AuthUser> byAuthUserId = findUserByAuthUserId(authUserId);
+        if (byAuthUserId.isPresent() && !resourceUserId.equals(byAuthUserId.get().id())) {
+            throw new AuthException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "USER_PROJECTION_CONFLICT",
+                    "사용자 projection 소유권이 충돌합니다.");
+        }
+        if (owner.isPresent()) {
+            jdbc.update(
+                    """
+                    update users
+                    set email = ?, display_name = ?, picture_url = ?, status = ?
+                    where id = ? and auth_user_id = ?
+                    """,
+                    AuthStore.normalizeEmail(email),
+                    displayName,
+                    pictureUrl,
+                    status,
+                    resourceUserId,
+                    authUserId);
+        } else {
+            jdbc.update(
+                    """
+                    insert into users (
+                        id, auth_user_id, email, display_name, picture_url, status, created_at, last_login_at
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    resourceUserId,
+                    authUserId,
+                    AuthStore.normalizeEmail(email),
+                    displayName,
+                    pictureUrl,
+                    status,
+                    timestamp(now),
+                    timestamp(now));
+        }
+        return findUserById(resourceUserId).orElseThrow();
+    }
+
+    private record ProjectionOwner(String resourceUserId, UUID authUserId) {
     }
 
     private static AuthUser mapUser(ResultSet rs, int rowNum) throws SQLException {

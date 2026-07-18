@@ -133,6 +133,24 @@ body.app-theme select {
   opacity: 0.65;
 }
 
+.auth-session-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.auth-session-controls button.danger,
+.auth-modal-danger {
+  border-color: rgba(196, 63, 57, 0.28);
+  background: #fff4f3;
+  color: #b93832;
+}
+
+.auth-session-controls button.danger:hover:not(:disabled),
+.auth-modal-danger:hover:not(:disabled) {
+  border-color: #c43f39;
+  background: #ffe9e7;
+}
+
 .auth-session-controls p {
   grid-column: 1 / -1;
   margin: 0;
@@ -4927,6 +4945,11 @@ body.app-theme.meeting-access-body {
   opacity: 0.66;
 }
 
+.auth-modal > .auth-modal-submit {
+  width: 100%;
+  margin-top: 20px;
+}
+
 .auth-modal-warning {
   margin-top: 18px;
   display: flex;
@@ -4964,6 +4987,11 @@ body.app-theme.meeting-access-body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.auth-modal-button.disabled {
+  pointer-events: none;
+  opacity: 0.66;
 }
 
 .project-meetings-modal-toolbar {

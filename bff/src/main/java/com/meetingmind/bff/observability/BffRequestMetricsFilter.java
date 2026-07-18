@@ -53,6 +53,8 @@ public class BffRequestMetricsFilter extends OncePerRequestFilter {
             case "/api/v1/auth/google" -> "google";
             case "/api/v1/auth/session" -> "session";
             case "/api/v1/auth/logout" -> "logout";
+            case "/api/v1/auth/reauthenticate" -> "reauthenticate";
+            case "/api/v1/auth/logout-all" -> "logout_all";
             default -> "protected";
         };
     }
@@ -67,7 +69,10 @@ public class BffRequestMetricsFilter extends OncePerRequestFilter {
         if (status == 401 && "protected".equals(operation)) {
             return "unauthenticated";
         }
-        if ("login".equals(operation) || "signup".equals(operation) || "google".equals(operation)) {
+        if ("login".equals(operation)
+                || "signup".equals(operation)
+                || "google".equals(operation)
+                || "reauthenticate".equals(operation)) {
             return "rejected";
         }
         return "client_error";

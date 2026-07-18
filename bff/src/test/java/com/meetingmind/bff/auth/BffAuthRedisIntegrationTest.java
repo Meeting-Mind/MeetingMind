@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Set;
 import java.util.UUID;
@@ -30,6 +31,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
+import org.springframework.session.FindByIndexNameSessionRepository;
 
 @EnabledIfEnvironmentVariable(named = "BFF_REDIS_INTEGRATION", matches = "true")
 @ExtendWith(OutputCaptureExtension.class)
@@ -206,7 +208,7 @@ class BffAuthRedisIntegrationTest {
             assertThat(observation.logoutCalls).hasValue(1);
             assertThat(observation.logoutAuthorization.get()).isEqualTo("Bearer " + ROTATED_ACCESS_TOKEN);
             assertThat(observation.logoutBody.get()).contains(ROTATED_REFRESH_TOKEN);
-            assertRedisDeleted(context, sessionNamespace, vaultNamespace);
+            assertRedisDeleted(context, vaultNamespace, authenticatedCookie);
 
             HttpResponse<String> staleSession = browser.send(
                     HttpRequest.newBuilder(uri(bffPort, "/api/v1/spaces"))
@@ -241,6 +243,258 @@ class BffAuthRedisIntegrationTest {
         } finally {
             backend.stop(0);
         }
+    }
+
+    @Test
+    void reauthenticatesThenDeletesEveryIndexedTargetSessionAndTokenBundle() throws Exception {
+        TargetLogoutObservation observation = new TargetLogoutObservation();
+        HttpServer target = targetAuthAndCoreStub(observation);
+        String testId = UUID.randomUUID().toString();
+        String sessionNamespace = "meetingmind:bff:t024:session:" + testId;
+        String vaultNamespace = "meetingmind:bff:t024:vault:" + testId;
+
+        target.start();
+        try (ConfigurableApplicationContext context = targetApplication(
+                target.getAddress().getPort(),
+                sessionNamespace,
+                vaultNamespace)) {
+            int bffPort = context.getEnvironment()
+                    .getRequiredProperty("local.server.port", Integer.class);
+            ObjectMapper objectMapper = context.getBean(ObjectMapper.class);
+            HttpClient browser = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(2))
+                    .build();
+
+            BrowserSession first = targetLogin(browser, objectMapper, bffPort);
+            BrowserSession second = targetLogin(browser, objectMapper, bffPort);
+            @SuppressWarnings("unchecked")
+            FindByIndexNameSessionRepository<Session> repository =
+                    (FindByIndexNameSessionRepository<Session>)
+                            context.getBean(SessionRepository.class);
+            Session firstSession = repository.findById(sessionId(first.cookie()));
+            firstSession.setAttribute(
+                    BffSessionAttributes.AUTHENTICATED_AT,
+                    Instant.now().minusSeconds(601));
+            repository.save(firstSession);
+
+            HttpResponse<String> staleLogoutAll = browser.send(
+                    HttpRequest.newBuilder(uri(bffPort, "/api/v1/auth/logout-all"))
+                            .header("Cookie", first.cookie())
+                            .header("X-CSRF-TOKEN", first.csrf())
+                            .POST(HttpRequest.BodyPublishers.noBody())
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertThat(staleLogoutAll.statusCode()).isEqualTo(403);
+            assertThat(objectMapper.readTree(staleLogoutAll.body()).path("code").asText())
+                    .isEqualTo("REAUTHENTICATION_REQUIRED");
+            assertThat(repository.findByPrincipalName(
+                    "0a5b7c1e-5d75-4dc0-a10e-a330d0583930"))
+                    .hasSize(2);
+
+            HttpResponse<String> reauthentication = browser.send(
+                    HttpRequest.newBuilder(uri(bffPort, "/api/v1/auth/reauthenticate"))
+                            .header("Content-Type", "application/json")
+                            .header("Cookie", first.cookie())
+                            .header("X-CSRF-TOKEN", first.csrf())
+                            .POST(HttpRequest.BodyPublishers.ofString("""
+                                    {
+                                      "method":"PASSWORD",
+                                      "password":"password-123!"
+                                    }
+                                    """))
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertThat(reauthentication.statusCode()).isEqualTo(204);
+            assertThat(observation.reauthenticationBody.get())
+                    .contains(AUTH_SESSION_ID_FOR_FIRST_DEVICE)
+                    .contains("0a5b7c1e-5d75-4dc0-a10e-a330d0583930")
+                    .contains("\"method\":\"PASSWORD\"")
+                    .doesNotContain("authenticatedAt");
+
+            HttpResponse<String> logoutAll = browser.send(
+                    HttpRequest.newBuilder(uri(bffPort, "/api/v1/auth/logout-all"))
+                            .header("Cookie", first.cookie())
+                            .header("X-CSRF-TOKEN", first.csrf())
+                            .POST(HttpRequest.BodyPublishers.noBody())
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertThat(logoutAll.statusCode()).isEqualTo(204);
+            assertThat(observation.successfulRevokeAllCalls).hasValue(1);
+            assertThat(repository.findByPrincipalName(
+                    "0a5b7c1e-5d75-4dc0-a10e-a330d0583930"))
+                    .isEmpty();
+            assertThat(context.getBean(StringRedisTemplate.class)
+                    .keys(vaultNamespace + ":*"))
+                    .isEmpty();
+
+            assertThat(protectedRequest(browser, bffPort, first.cookie()).statusCode())
+                    .isEqualTo(401);
+            assertThat(protectedRequest(browser, bffPort, second.cookie()).statusCode())
+                    .isEqualTo(401);
+            cleanupRedis(context, sessionNamespace, vaultNamespace);
+        } finally {
+            target.stop(0);
+        }
+    }
+
+    private static final String AUTH_SESSION_ID_FOR_FIRST_DEVICE =
+            "e655a7be-39b1-44eb-9559-419ea96e5c62";
+
+    private HttpServer targetAuthAndCoreStub(TargetLogoutObservation observation) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/auth/login", exchange -> {
+            int login = observation.loginCalls.incrementAndGet();
+            String authSessionId = login == 1
+                    ? AUTH_SESSION_ID_FOR_FIRST_DEVICE
+                    : "9cbbdd20-a648-4be4-ae6f-2d31777202bb";
+            byte[] response = ("""
+                    {
+                      "accessTokens":[
+                        {"audience":"meetingmind-core","token":"core-secret-%d","expiresIn":600},
+                        {"audience":"meetingmind-ai","token":"ai-secret-%d","expiresIn":600},
+                        {"audience":"meetingmind-livekit","token":"livekit-secret-%d","expiresIn":600}
+                      ],
+                      "refreshToken":"mmr_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                      "tokenType":"Bearer",
+                      "refreshExpiresIn":1209600,
+                      "authSessionId":"%s",
+                      "user":{
+                        "id":"0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
+                        "email":"user@example.com",
+                        "displayName":"User",
+                        "pictureUrl":null,
+                        "status":"ACTIVE"
+                      }
+                    }
+                    """).formatted(login, login, login, authSessionId)
+                    .getBytes(StandardCharsets.UTF_8);
+            json(exchange, 200, response);
+        });
+        server.createContext("/internal/v1/auth/reauthenticate", exchange -> {
+            observation.reauthenticationBody.set(
+                    new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = ("{\"authenticatedAt\":\""
+                    + Instant.now()
+                    + "\"}").getBytes(StandardCharsets.UTF_8);
+            json(exchange, 200, response);
+        });
+        server.createContext("/internal/v1/auth/revoke-all", exchange -> {
+            String body = new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8);
+            observation.revokeAllBody.set(body);
+            Instant authenticatedAt = Instant.parse(
+                    new ObjectMapper().readTree(body).path("authenticatedAt").asText());
+            if (authenticatedAt.isBefore(Instant.now().minusSeconds(600))) {
+                json(
+                        exchange,
+                        401,
+                        """
+                        {
+                          "code":"RECENT_AUTH_REQUIRED",
+                          "message":"최근 인증이 필요합니다."
+                        }
+                        """.getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            observation.successfulRevokeAllCalls.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.createContext("/internal/v1/users/projection", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.createContext("/api/v1/spaces", exchange -> json(
+                exchange,
+                200,
+                "[]".getBytes(StandardCharsets.UTF_8)));
+        return server;
+    }
+
+    private ConfigurableApplicationContext targetApplication(
+            int targetPort,
+            String sessionNamespace,
+            String vaultNamespace) {
+        String principal =
+                "spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff";
+        return new SpringApplicationBuilder(MeetingMindBffApplication.class)
+                .profiles("redis-integration")
+                .run(
+                        "--server.port=0",
+                        "--spring.data.redis.host="
+                                + environment("BFF_REDIS_HOST", "127.0.0.1"),
+                        "--spring.data.redis.port="
+                                + environment("BFF_REDIS_PORT", "6380"),
+                        "--spring.session.store-type=redis",
+                        "--spring.session.redis.namespace=" + sessionNamespace,
+                        "--spring.session.redis.repository-type=indexed",
+                        "--meetingmind.bff.session-cookie.name=mm-session",
+                        "--meetingmind.bff.session-cookie.secure=false",
+                        "--meetingmind.bff.token-vault.key-provider=local",
+                        "--meetingmind.bff.token-vault.namespace=" + vaultNamespace,
+                        "--meetingmind.bff.token-vault.local-key-id=t024-integration-test",
+                        "--meetingmind.bff.token-vault.local-master-key-base64=" + LOCAL_KEY,
+                        "--meetingmind.bff.auth-provider=auth-service",
+                        "--meetingmind.bff.auth-issuer=https://auth.meetingmind.internal",
+                        "--meetingmind.bff.target-auth.base-url=http://127.0.0.1:" + targetPort,
+                        "--meetingmind.bff.target-auth.allow-test-principal-header=true",
+                        "--meetingmind.bff.target-auth.test-principal=" + principal,
+                        "--meetingmind.bff.core-projection.base-url=http://127.0.0.1:" + targetPort,
+                        "--meetingmind.bff.core-projection.allow-test-principal-header=true",
+                        "--meetingmind.bff.core-projection.test-principal=" + principal,
+                        "--meetingmind.bff.downstream.core.base-url=http://127.0.0.1:" + targetPort,
+                        "--management.health.redis.enabled=false");
+    }
+
+    private BrowserSession targetLogin(
+            HttpClient browser,
+            ObjectMapper objectMapper,
+            int bffPort) throws Exception {
+        HttpResponse<String> csrfResponse = browser.send(
+                HttpRequest.newBuilder(uri(bffPort, "/api/v1/auth/csrf"))
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        String anonymousCookie = cookiePair(csrfResponse);
+        String csrf = objectMapper.readTree(csrfResponse.body()).path("token").asText();
+        HttpResponse<String> login = browser.send(
+                HttpRequest.newBuilder(uri(bffPort, "/api/v1/auth/login"))
+                        .header("Content-Type", "application/json")
+                        .header("Cookie", anonymousCookie)
+                        .header("X-CSRF-TOKEN", csrf)
+                        .POST(HttpRequest.BodyPublishers.ofString(loginBody()))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(login.statusCode()).isEqualTo(200);
+        assertTokenless(login.body());
+        return new BrowserSession(cookiePair(login), csrf);
+    }
+
+    private HttpResponse<String> protectedRequest(
+            HttpClient browser,
+            int bffPort,
+            String cookie) throws Exception {
+        return browser.send(
+                HttpRequest.newBuilder(uri(bffPort, "/api/v1/spaces"))
+                        .header("Cookie", cookie)
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private String sessionId(String cookie) {
+        String encoded = cookie.substring(cookie.indexOf('=') + 1);
+        return new String(
+                Base64.getDecoder().decode(encoded),
+                StandardCharsets.UTF_8);
+    }
+
+    private void json(HttpExchange exchange, int status, byte[] body) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, body.length);
+        exchange.getResponseBody().write(body);
+        exchange.close();
     }
 
     private HttpServer backendStub(AtomicReference<String> requestBody) throws IOException {
@@ -302,7 +556,7 @@ class BffAuthRedisIntegrationTest {
                   "expiresIn":%d,
                   "refreshExpiresIn":1209600,
                   "user":{
-                    "id":"user-id",
+                    "id":"user-0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
                     "email":"user@example.com",
                     "displayName":"User",
                     "pictureUrl":null,
@@ -326,13 +580,17 @@ class BffAuthRedisIntegrationTest {
                         "--spring.data.redis.port=" + environment("BFF_REDIS_PORT", "6380"),
                         "--spring.session.store-type=redis",
                         "--spring.session.redis.namespace=" + sessionNamespace,
+                        "--spring.session.redis.repository-type=indexed",
                         "--meetingmind.bff.session-cookie.name=mm-session",
                         "--meetingmind.bff.session-cookie.secure=false",
                         "--meetingmind.bff.token-vault.key-provider=local",
                         "--meetingmind.bff.token-vault.namespace=" + vaultNamespace,
                         "--meetingmind.bff.token-vault.local-key-id=t013-integration-test",
                         "--meetingmind.bff.token-vault.local-master-key-base64=" + LOCAL_KEY,
+                        "--meetingmind.bff.auth-provider=legacy",
+                        "--meetingmind.bff.auth-issuer=meetingmind-core-legacy",
                         "--meetingmind.bff.compat-auth.base-url=http://127.0.0.1:" + backendPort,
+                        "--meetingmind.bff.core-projection.base-url=http://127.0.0.1:" + backendPort,
                         "--meetingmind.bff.downstream.core.base-url=http://127.0.0.1:" + backendPort,
                         "--management.health.redis.enabled=false");
     }
@@ -356,11 +614,19 @@ class BffAuthRedisIntegrationTest {
         assertThat(session).isNotNull();
         assertThat(session.getAttributeNames())
                 .contains(
-                        BffSessionAttributes.USER_ID,
+                        BffSessionAttributes.RESOURCE_USER_ID,
+                        BffSessionAttributes.AUTH_USER_ID,
                         BffSessionAttributes.AUTH_SESSION_ID,
                         BffSessionAttributes.TOKEN_BUNDLE_ID,
                         BffSessionAttributes.ABSOLUTE_EXPIRES_AT)
                 .doesNotContain("accessToken", "refreshToken");
+        assertThat(repository).isInstanceOf(FindByIndexNameSessionRepository.class);
+        @SuppressWarnings("rawtypes")
+        FindByIndexNameSessionRepository indexed =
+                (FindByIndexNameSessionRepository) repository;
+        assertThat(indexed.findByPrincipalName(
+                        "0a5b7c1e-5d75-4dc0-a10e-a330d0583930"))
+                .containsKey(sessionId);
     }
 
     private void cleanupRedis(
@@ -381,10 +647,22 @@ class BffAuthRedisIntegrationTest {
     }
 
     private void assertRedisDeleted(
-            ConfigurableApplicationContext context, String sessionNamespace, String vaultNamespace) {
+            ConfigurableApplicationContext context,
+            String vaultNamespace,
+            String authenticatedCookie) {
         StringRedisTemplate redis = context.getBean(StringRedisTemplate.class);
-        assertThat(redis.keys(sessionNamespace + "*")).isEmpty();
         assertThat(redis.keys(vaultNamespace + "*")).isEmpty();
+        String encodedSessionId = authenticatedCookie.substring(authenticatedCookie.indexOf('=') + 1);
+        String sessionId = new String(
+                Base64.getDecoder().decode(encodedSessionId), StandardCharsets.UTF_8);
+        @SuppressWarnings("unchecked")
+        FindByIndexNameSessionRepository<Session> repository =
+                (FindByIndexNameSessionRepository<Session>)
+                        context.getBean(SessionRepository.class);
+        assertThat(repository.findById(sessionId)).isNull();
+        assertThat(repository.findByPrincipalName(
+                        "0a5b7c1e-5d75-4dc0-a10e-a330d0583930"))
+                .isEmpty();
     }
 
     private void assertTokenless(String body) {
@@ -429,5 +707,16 @@ class BffAuthRedisIntegrationTest {
         private final AtomicReference<String> spacesAuthorization = new AtomicReference<>();
         private final AtomicReference<String> logoutAuthorization = new AtomicReference<>();
         private final AtomicReference<String> logoutBody = new AtomicReference<>();
+    }
+
+    private record BrowserSession(String cookie, String csrf) {
+    }
+
+    private static final class TargetLogoutObservation {
+
+        private final AtomicInteger loginCalls = new AtomicInteger();
+        private final AtomicInteger successfulRevokeAllCalls = new AtomicInteger();
+        private final AtomicReference<String> reauthenticationBody = new AtomicReference<>();
+        private final AtomicReference<String> revokeAllBody = new AtomicReference<>();
     }
 }
