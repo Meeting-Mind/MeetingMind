@@ -201,6 +201,7 @@ test("meeting prejoin allows an active HOST and denies an unknown meeting", asyn
     data: {
       title: "CI permission meeting",
       scheduledAt: "2030-01-01T09:00:00+09:00",
+      scheduledEndAt: "2030-01-01T10:00:00+09:00",
       participantUserIds: []
     },
     headers: authorization
@@ -237,6 +238,7 @@ test("workspace restores persisted spaces and meetings after reload", async ({ p
     data: {
       title: meetingTitle,
       scheduledAt: "2030-01-02T09:00:00+09:00",
+      scheduledEndAt: "2030-01-02T10:00:00+09:00",
       participantUserIds: []
     },
     headers: authorization
@@ -304,12 +306,14 @@ test("meeting CRUD is persisted through the project UI", async ({ page, request 
 
   await page.getByLabel("새 회의 제목").fill("CI CRUD 회의");
   await page.getByLabel("새 회의 일시").fill("2030-03-01T10:00");
+  await page.getByLabel("새 회의 종료 일시").fill("2030-03-01T11:00");
   await page.getByRole("button", { name: "회의 생성", exact: true }).click();
   await expect(page.getByRole("link", { name: /CI CRUD 회의/ })).toBeVisible();
   await expect(page.getByLabel("회의 참가 코드")).not.toHaveValue("");
 
   await page.getByLabel("회의 제목 수정").fill("CI CRUD 회의 수정");
   await page.getByLabel("예정 일시 수정").fill("2030-03-02T11:30");
+  await page.getByLabel("예정 종료 수정").fill("2030-03-02T12:30");
   await page.getByRole("button", { name: "회의 정보 저장" }).click();
   await expect(page.getByRole("link", { name: /CI CRUD 회의 수정/ })).toBeVisible();
 
@@ -327,6 +331,7 @@ test("meeting CRUD is persisted through the project UI", async ({ page, request 
   await page.getByLabel("회의 생성 프로젝트").selectOption(space.id);
   await page.getByLabel("회의 제목", { exact: true }).fill("CI 캘린더 회의");
   await page.getByLabel("회의 시작 일시").fill("2030-04-03T14:00");
+  await page.getByLabel("회의 종료 일시").fill("2030-04-03T15:00");
   await page.getByRole("button", { name: "일정 추가" }).click();
   await expect(page.getByLabel("캘린더 회의 참가 코드")).not.toHaveValue("");
   await page.getByLabel("캘린더 기준 날짜").fill("2030-04-03");
@@ -356,6 +361,7 @@ test("meeting detail participant ACL is loaded and mutated through the project U
     data: {
       title: "CI ACL 회의",
       scheduledAt: "2030-05-01T09:00:00+09:00",
+      scheduledEndAt: "2030-05-01T10:00:00+09:00",
       participantUserIds: [guest.user.id]
     },
     headers: authorization
@@ -416,6 +422,7 @@ test("calendar and domain dictionary mutations use the Browser to BFF to Core pa
     data: {
       title: "CI calendar target meeting",
       scheduledAt: "2030-04-03T14:00:00+09:00",
+      scheduledEndAt: "2030-04-03T15:00:00+09:00",
       participantUserIds: []
     },
     headers: authorization
@@ -442,11 +449,11 @@ test("calendar and domain dictionary mutations use the Browser to BFF to Core pa
   const termRow = page.locator(".domain-term-row").filter({ hasText: term });
   await expect(termRow).toContainText("회의별 검색 증거를 연결하는 테스트 용어입니다.");
   await termRow.getByRole("button", { name: "수정" }).click();
-  await termRow.getByLabel("수정할 용어 설명").fill("수정된 Domain Dictionary 설명입니다.");
+  await page.getByLabel("수정할 용어 설명").fill("수정된 Domain Dictionary 설명입니다.");
   const updateTermResponse = page.waitForResponse(
     (response) => response.request().method() === "PATCH" && response.url().includes(`/api/v1/spaces/${space.id}/terms/`)
   );
-  await termRow.getByRole("button", { name: "저장" }).click();
+  await page.getByRole("button", { name: "저장" }).click();
   expect((await updateTermResponse).ok()).toBeTruthy();
   await expect(termRow).toContainText("수정된 Domain Dictionary 설명입니다.");
 
@@ -518,6 +525,8 @@ test("member, invitation, task, and report mutations stay on the Browser to BFF 
     `/team-members?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`
   );
   await expect(page.getByRole("heading", { name: "Members" })).toBeVisible();
+  const memberRow = page.locator(".team-members-row").filter({ hasText: member.user.email });
+  await expect(memberRow).toBeVisible();
 
   const inviteResponsePromise = page.waitForResponse(
     (response) => response.request().method() === "POST" && response.url().endsWith(`/api/v1/spaces/${space.id}/invitations`)
@@ -527,8 +536,6 @@ test("member, invitation, task, and report mutations stay on the Browser to BFF 
   const inviteResponse = await inviteResponsePromise;
   expect(inviteResponse.ok(), await inviteResponse.text()).toBeTruthy();
 
-  const memberRow = page.locator(".team-members-row").filter({ hasText: member.user.email });
-  await expect(memberRow).toBeVisible();
   const roleResponsePromise = page.waitForResponse(
     (response) => response.request().method() === "PATCH" && response.url().includes(`/api/v1/spaces/${space.id}/members/`)
   );
