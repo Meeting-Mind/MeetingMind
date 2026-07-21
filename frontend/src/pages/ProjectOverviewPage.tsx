@@ -604,25 +604,6 @@ export function ProjectOverviewPage({
     : false;
   const selectedProjectTasks = projectTasks[selectedProjectName] ?? [];
 
-  useEffect(() => {
-    let active = true;
-    if (!session || !projectAiAvailable) {
-      return () => { active = false; };
-    }
-    void fetchProjectAiHistory(session, selectedSpaceId)
-      .then((history) => {
-        if (active && history.messages.length) {
-          setMessages(history.messages.map((message) => ({
-            role: message.role === "USER" ? "user" : "ai",
-            text: message.content
-          })));
-        }
-      })
-      .catch(() => {
-        // Chat remains available when optional history loading fails.
-      });
-    return () => { active = false; };
-  }, [projectAiAvailable, selectedSpaceId, session]);
   const aclGrantCandidates = members.filter(
     (member) =>
       !visibleParticipants.some(
