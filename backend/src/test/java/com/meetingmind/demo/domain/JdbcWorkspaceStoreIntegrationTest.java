@@ -71,11 +71,13 @@ class JdbcWorkspaceStoreIntegrationTest {
                 owner.id(),
                 space.space().id(),
                 "JDBC Meeting",
+                "JPA schedule persistence",
                 OffsetDateTime.of(2026, 7, 15, 10, 0, 0, 0, ZoneOffset.UTC),
+                OffsetDateTime.of(2026, 7, 15, 11, 30, 0, 0, ZoneOffset.UTC),
                 List.of()
         );
         Meeting updatedMeeting = service.updateMeeting(
-                owner.id(), meeting.meeting().id(), "JDBC Meeting Updated", null, "SCHEDULED"
+                owner.id(), meeting.meeting().id(), "JDBC Meeting Updated", "Updated schedule persistence", null, null, "SCHEDULED"
         );
         store.addSpaceMember(space.space().id(), member.id(), com.meetingmind.demo.authz.SpaceRole.MEMBER, now);
         service.addMeetingParticipant(
@@ -161,6 +163,8 @@ class JdbcWorkspaceStoreIntegrationTest {
                 .satisfies(found -> {
                     assertThat(found.id()).isEqualTo(meeting.meeting().id());
                     assertThat(found.title()).isEqualTo(updatedMeeting.title());
+                    assertThat(found.description()).isEqualTo("Updated schedule persistence");
+                    assertThat(found.scheduledEndAt()).isEqualTo(OffsetDateTime.of(2026, 7, 15, 11, 30, 0, 0, ZoneOffset.UTC));
                 });
         assertThat(reloaded.findMeetingParticipant(meeting.meeting().id(), guest.id()))
                 .get()
@@ -238,6 +242,78 @@ class JdbcWorkspaceStoreIntegrationTest {
         assertThat(reloadedService.projectAiContextCandidates(owner.id(), space.space().id()).meetings())
                 .extracting(Meeting::id)
                 .containsExactly(meeting.meeting().id());
+    }
+
+    @Test
+    void persistsAndResolvesSpaceInvitationThroughJpaStore() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("invitation-owner-" + suffix, now));
+        User invitee = store.saveUser(user("invitation-invitee-" + suffix, now));
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(owner.id(), "Invitation Space", null);
+
+        WorkspaceDomainService.SpaceInvitationCreation created = service.createSpaceInvitation(
+                owner.id(), space.space().id(), invitee.email(), "MEMBER"
+        );
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(entityManager.find(SpaceInvitation.class, created.invitation().id()))
+                .satisfies(invitation -> {
+                    assertThat(invitation.email()).isEqualTo(invitee.email());
+                    assertThat(invitation.status()).isEqualTo(InvitationStatus.PENDING);
+                });
+
+        WorkspaceDomainService.SpaceInvitationResolution resolved = service.resolveSpaceInvitation(
+                invitee.id(), invitee.email(), space.space().id(), created.invitation().id(), created.token(), true
+        );
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(resolved.member()).isNotNull();
+        assertThat(entityManager.find(SpaceInvitation.class, created.invitation().id()).status())
+                .isEqualTo(InvitationStatus.ACCEPTED);
+        assertThat(store.findSpaceMember(space.space().id(), invitee.id())).isPresent();
+    }
+
+    @Test
+    void persistsTaskSoftDeleteAndReportDraftVersionThroughJpaStore() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("artifact-owner-" + suffix, now));
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(owner.id(), "Artifact Space", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = service.createMeeting(
+                owner.id(), space.space().id(), "Artifact Meeting",
+                OffsetDateTime.of(2026, 7, 20, 10, 0, 0, 0, ZoneOffset.UTC), List.of()
+        );
+        TaskCard task = service.createTaskCard(
+                owner.id(), space.space().id(), "삭제 대상 태스크", null, null, null, null,
+                "HIGH", List.of("persistence", "kanban")
+        );
+        MeetingReport candidate = service.saveReportCandidate(
+                meeting.meeting().id(), owner.id(), "초안 원본", "원본 요약", "# 원본", List.of(), List.of(), List.of()
+        );
+        MeetingReport draft = service.updateMeetingReport(
+                owner.id(), meeting.meeting().id(), candidate.id(),
+                new WorkspaceDomainService.ReportPatch("수정 초안", true, null, false, "# 수정", true)
+        );
+        service.deleteTaskCard(owner.id(), space.space().id(), task.id());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(entityManager.find(TaskCard.class, task.id()))
+                .satisfies(persisted -> {
+                    assertThat(persisted.deletedAt()).isNotNull();
+                    assertThat(persisted.priority()).isEqualTo(TaskCardPriority.HIGH);
+                    assertThat(persisted.labels()).containsExactly("persistence", "kanban");
+                });
+        assertThat(store.findTaskCardById(space.space().id(), task.id())).isEmpty();
+        assertThat(entityManager.find(MeetingReport.class, draft.id()))
+                .satisfies(report -> {
+                    assertThat(report.status()).isEqualTo(MeetingReportStatus.DRAFT);
+                    assertThat(report.version()).isEqualTo(candidate.version() + 1);
+                });
+        assertThat(store.findMeetingReports(meeting.meeting().id())).hasSize(2);
     }
 
     @Test

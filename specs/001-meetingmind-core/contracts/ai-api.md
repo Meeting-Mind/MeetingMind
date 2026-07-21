@@ -8,8 +8,8 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 | --- | --- |
 | Status | Current Prototype, Backend-to-AI Internal |
 | Owner | AI, Backend |
-| Related requirements | FR-MBOT-01, FR-MBOT-02, FR-MBOT-03, FR-MBOT-04, FR-PBOT-01, FR-PBOT-02, FR-PBOT-03, FR-PBOT-04, FR-RPT-01, FR-RPT-02, FR-TASK-01, FR-TERM-01, FR-TERM-02, FR-TERM-03, FR-TERM-04, NFR-AI-01, NFR-AI-02, NFR-AZ-01, NFR-AZ-02, NFR-AZ-04, NFR-COST-01 |
-| Related data model | TranscriptSegment, MeetingReport, ProjectKnowledge, EmbeddingChunk, SourceReference, TaskCandidate |
+| Related requirements | FR-MBOT-01, FR-MBOT-02, FR-MBOT-03, FR-MBOT-04, FR-PBOT-01, FR-PBOT-02, FR-PBOT-03, FR-PBOT-04, FR-PBOT-05, FR-RPT-01, FR-RPT-02, FR-TASK-01, FR-TERM-01, FR-TERM-02, FR-TERM-03, FR-TERM-04, NFR-AI-01, NFR-AI-02, NFR-AZ-01, NFR-AZ-02, NFR-AZ-04, NFR-COST-01 |
+| Related data model | TranscriptSegment, MeetingReport, ProjectKnowledge, ProjectAiMessage, EmbeddingChunk, SourceReference, TaskCandidate |
 
 ## Common AI Rules
 
@@ -21,6 +21,53 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 - Target supported 응답은 검색 결과에 존재하는 source ID를 최소 1개 인용하고, public `sources[]`에는 실제 인용한 source만 포함한다.
 - 저장성 결과는 `candidate` 상태로만 반환한다. 실제 저장/확정은 Backend API가 담당한다.
 - 응답에는 가능한 한 `sources[]`를 포함한다.
+- Project AI 대화 이력은 `spaceId`와 인증된 `userId`로 격리한다. 다른 사용자, Space member가 아니게 된 사용자, meeting guest는 읽거나 재사용할 수 없다.
+- 이전 대화는 최대 최근 10개 turn만 AI에 전달하는 비신뢰 대화 문맥이다. 검색 권한, RAG source, citation은 현재 요청의 Backend scope와 새로 검색된 source만 사용한다.
+- 보고서 AI 편집은 기존 report 본문과 사용자 instruction을 비신뢰 편집 문맥으로만 전달한다. 새 report의 사실, decision/action item, citation은 현재 단일 meeting source에서 다시 검증해야 한다.
+
+## GET /api/v1/spaces/{spaceId}/ai/history
+
+인증 사용자의 해당 Space Project AI 대화를 시간순으로 조회한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- active `SpaceMember`만 호출할 수 있다. Meeting guest와 비멤버는 `403 SPACE_ACCESS_DENIED`다.
+- 응답은 호출자 자신의 `userId`에 속한 메시지만 포함한다. Space OWNER/ADMIN도 다른 사용자의 대화를 조회할 수 없다.
+
+### Data Scope
+
+- `spaceId` + current `userId`.
+- 최신 50개 메시지를 오래된 순서로 반환한다. 다음 chat 요청에는 이 중 최근 10개만 비신뢰 문맥으로 사용한다.
+
+### Response
+
+```json
+{
+  "messages": [
+    {
+      "id": "project-ai-message-001",
+      "role": "USER",
+      "content": "이전 결정의 근거는 무엇인가요?",
+      "createdAt": "2026-07-20T10:00:00Z"
+    },
+    {
+      "id": "project-ai-message-002",
+      "role": "ASSISTANT",
+      "content": "공식 지식의 권한 정책을 근거로 설명할 수 있습니다.",
+      "createdAt": "2026-07-20T10:00:02Z"
+    }
+  ]
+}
+```
+
+### Notes
+
+- 성공한 Project AI chat만 USER/ASSISTANT 쌍으로 저장한다. gateway/provider 오류는 대화 이력에 기록하지 않는다.
+- 이력 본문은 source나 citation이 아니며, 모델이 이력의 지시를 따르거나 이력을 근거로 답하지 않도록 internal prompt에서 명시한다.
 
 ## Prototype vs Target Boundary
 
@@ -56,11 +103,11 @@ Meeting/Project chat의 Backend-to-AI 통합은 Backend가 확정한 scope envel
 
 ### Meeting Attachment Indexing Boundary
 
-- M033의 RAG 구현은 첨부파일 도메인에 의존하지 않는다. 회의 채팅과 파일 저장 API가 확정된 뒤 별도 milestone에서 `meetingAttachment` source를 추가한다.
+- M034의 RAG 구현은 첨부파일 도메인에 의존하지 않는다. 회의 채팅과 파일 저장 API가 확정된 뒤 별도 milestone에서 `meetingAttachment` source를 추가한다.
 - MVP 검색 대상은 TXT, Markdown, 텍스트 추출에 성공한 PDF다. 추출 텍스트를 정규화하고 기존 `text-embedding-3-small` 1536차원 embedding을 사용한다.
 - 이미지 파일과 이미지 전용 PDF는 MVP 검색 대상에서 제외한다. visual embedding, OCR/Vision 설명, 원본 이미지를 포함한 멀티모달 답변은 확장 계약 없이 수행하지 않는다.
 - 첨부파일 source는 Backend가 확인한 `meetingId`와 `allowedMeetingIds` 범위를 그대로 적용하고, 삭제·보존 만료·권한 회수된 파일은 즉시 검색에서 제외한다.
-- 첨부파일 API와 citation shape, 페이지 anchor, 허용 MIME/용량/보존 정책은 M034 contract task에서 API·ERD·data model과 함께 확정한다.
+- 첨부파일 API, citation shape, 페이지 anchor, 허용 MIME/용량/보존 정책은 현재 전달 범위에서 구현하지 않는다. M035 재개 전에 별도 contract를 확정한다.
 
 public/internal AI 응답은 아래 nullable 필드를 사용한다. `unsupported=false`이면 `unsupportedReason`은 `null`이다.
 
@@ -82,6 +129,83 @@ public/internal AI 응답은 아래 nullable 필드를 사용한다. `unsupporte
 
 Backend는 AI 내부 요청에 `X-Request-ID`를 전달하고 AI는 같은 값을 응답 헤더와 구조 로그의 `traceId`로 유지한다. API 처리, 검색, embedding job/queue 로그는 endpoint, 처리 시간, source 수, unsupported reason, citation failure, queue 수치와 오류 종류만 기록한다. 질문, STT, 답변, API key와 service token 원문은 기록하지 않는다.
 
+## POST /api/v1/meetings/{meetingId}/terms/explain
+
+선택한 회의 자막 용어를 설명한다. Browser는 BFF를 통해 이 endpoint만 호출하며, AI 서버 prototype endpoint를 직접 호출하지 않는다.
+
+### Status
+
+- Target Backend
+- Backend-to-AI Internal
+
+### Auth and Permissions
+
+- 인증된 회의 participant 또는 해당 회의 접근 권한자가 호출할 수 있다.
+- Backend는 `MeetingAccessPolicy.requireReadAccess`를 먼저 통과시킨 뒤 해당 meeting의 `spaceId`를 결정한다.
+- 회의 게스트도 본인이 접근 가능한 해당 회의에서만 active Domain Dictionary를 조회할 수 있다. Space 전체 용어 목록 권한을 확장하지 않는다.
+
+### Data Scope
+
+- active `DomainTerm`의 exact case-insensitive match는 현재 meeting의 Space 범위에서만 찾는다.
+- 사전에 없으면 AI 내부 요청은 `projectId=spaceId`, 단일 `meetingId`와 현재 회의의 `transcript`, `decision` 검색 범위만 전달한다.
+- 다른 회의, Project Knowledge, Browser가 보낸 context는 검색 또는 prompt에 포함하지 않는다.
+
+### Request
+
+```json
+{
+  "term": "pgvector"
+}
+```
+
+### Validation
+
+- `term`: trim 후 필수, 최대 120자다.
+- 등록어 exact match면 `local-glossary` 응답을 즉시 반환하고 AI gateway/LLM을 호출하지 않는다.
+- 미등록어는 internal pgvector 검색 근거가 없거나 관련도 gate를 통과하지 못하면 `200 OK + unsupported=true`로 반환하고 LLM을 호출하지 않는다.
+- `sourceType`은 등록어의 `glossary`, 미등록어 근거의 `transcript` 또는 `decision`, 근거가 없을 때의 `none`이다.
+
+### Response
+
+```json
+{
+  "term": "pgvector",
+  "explanation": "PostgreSQL에서 벡터 검색을 지원하는 확장입니다.",
+  "sourceType": "glossary",
+  "sources": [
+    {
+      "sourceId": "term-00000000-0000-0000-0000-000000000001",
+      "type": "glossary",
+      "title": "Domain Dictionary",
+      "text": "PostgreSQL에서 벡터 검색을 지원하는 확장입니다."
+    }
+  ],
+  "unsupported": false,
+  "unsupportedReason": null,
+  "model": "local-glossary"
+}
+```
+
+### Errors
+
+- `400 INVALID_REQUEST`: 용어가 없거나 120자를 초과한다.
+- `401 AUTH_REQUIRED`, `403 MEETING_ACCESS_DENIED`: 인증 또는 회의 접근 권한이 없다.
+- `503 AI_PROVIDER_UNAVAILABLE`: 미등록어의 AI provider timeout, 연결 실패, structured output 오류다.
+
+### Audit
+
+- 별도 domain audit event는 만들지 않는다. Backend/AI observability는 term 원문 없이 endpoint, 처리 시간, source 수, unsupported reason만 기록한다.
+
+### Requirement Trace
+
+- FR-TERM-01, FR-TERM-02, FR-TERM-03, FR-TERM-04
+- NFR-AI-01, NFR-AZ-01, NFR-COST-01
+
+### Notes
+
+- 기존 `POST /api/meeting-ai/explain-term`은 AI server prototype 검증용으로 유지한다.
+- 이 endpoint는 기존 `DomainTerm`, `TranscriptSegment`, `MeetingReport` 결정사항을 읽기만 하므로 ERD/data-model 변경은 없다.
+
 ## POST /api/meeting-ai/explain-term
 
 회의 중 transcript 또는 Domain Dictionary 기준으로 특정 용어를 설명한다.
@@ -89,12 +213,12 @@ Backend는 AI 내부 요청에 `X-Request-ID`를 전달하고 AI는 같은 값�
 ### Status
 
 - Current Prototype
-- Backend-to-AI Internal target 후보
+- Browser direct-call 금지
 
 ### Auth and Permissions
 
 - AI 서버 직접 호출 시 인증은 prototype 범위 밖이다.
-- Target에서는 Backend가 meeting 접근 권한을 확인하고 already-filtered context만 전달한다.
+- Target Browser 경로는 `POST /api/v1/meetings/{meetingId}/terms/explain`을 사용한다.
 
 ### Data Scope
 

@@ -633,6 +633,47 @@ class WorkspaceDomainServiceTest {
     }
 
     @Test
+    void projectKnowledgeCrudKeepsOfficialKnowledgeAndMasksInaccessibleMeetingSource() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult privateMeeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "비공개 회의", SCHEDULED_AT, List.of()
+        );
+
+        ProjectKnowledge created = context.service.createProjectKnowledge(
+                owner.id(), space.space().id(), "manual", "권한 설계", "공식 지식 본문", privateMeeting.meeting().id()
+        );
+
+        assertThat(context.service.listProjectKnowledge(member.id(), space.space().id(), null, "공식"))
+                .singleElement()
+                .satisfies(view -> {
+                    assertThat(view.knowledge().id()).isEqualTo(created.id());
+                    assertThat(view.sourceMeetingAccessible()).isFalse();
+                });
+        assertThat(context.service.listProjectKnowledge(owner.id(), space.space().id(), "MANUAL", null))
+                .singleElement()
+                .extracting(view -> view.sourceMeetingAccessible())
+                .isEqualTo(true);
+        assertThatThrownBy(() -> context.service.createProjectKnowledge(
+                member.id(), space.space().id(), "manual", "권한 없는 등록", "본문", null
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.FORBIDDEN, "SPACE_ACCESS_DENIED"));
+
+        ProjectKnowledge updated = context.service.updateProjectKnowledge(
+                owner.id(), space.space().id(), created.id(),
+                new WorkspaceDomainService.ProjectKnowledgePatch("권한 설계 v2", true, "수정된 본문", true)
+        );
+        assertThat(updated.title()).isEqualTo("권한 설계 v2");
+        assertThat(updated.embeddingStatus()).isEqualTo(EmbeddingStatus.PENDING);
+        assertThat(context.service.archiveProjectKnowledge(owner.id(), space.space().id(), created.id())).isTrue();
+        assertThat(context.service.listProjectKnowledge(owner.id(), space.space().id(), null, null)).isEmpty();
+        assertThat(context.service.projectAiContextCandidates(owner.id(), space.space().id()).projectKnowledge()).isEmpty();
+    }
+
+    @Test
     void meetingListAndDetailApplyMeetingAcl() {
         TestContext context = newContext();
         User owner = context.user("user-owner");
@@ -729,6 +770,41 @@ class WorkspaceDomainServiceTest {
                 .isInstanceOf(AuthorizationException.class)
                 .satisfies(error -> assertAuthz(error, HttpStatus.CONFLICT, "MEETING_ALREADY_PROCESSING"));
         assertThat(context.store.findMeetingById(created.meeting().id())).isPresent();
+    }
+
+    @Test
+    void dashboardSummaryUsesMeetingAclAndMasksPrivateTaskSources() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult privateMeeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Private planning", OffsetDateTime.parse("2026-07-09T10:00:00+09:00"), List.of()
+        );
+        TaskCard task = context.service.createTaskCard(
+                owner.id(), space.space().id(), "Follow-up", null, null, null, privateMeeting.meeting().id()
+        );
+        MeetingReport report = new MeetingReport(
+                "report-private", privateMeeting.meeting().id(), MeetingReportStatus.CONFIRMED,
+                "Private report", "summary", "markdown", List.of(), List.of(), List.of(), owner.id(), 1, true,
+                FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
+        );
+        context.store.saveMeetingReport(report);
+
+        WorkspaceDomainService.DashboardSummary ownerDashboard = context.service.dashboardSummary(owner.id());
+        WorkspaceDomainService.DashboardSummary memberDashboard = context.service.dashboardSummary(member.id());
+
+        assertThat(ownerDashboard.todayMeetings()).extracting(Meeting::id).containsExactly(privateMeeting.meeting().id());
+        assertThat(ownerDashboard.actionItems()).filteredOn(view -> view.task().id().equals(task.id()))
+                .singleElement().extracting(WorkspaceDomainService.TaskCardView::meetingSourceVisible).isEqualTo(true);
+        assertThat(ownerDashboard.latestReports()).extracting(view -> view.report().id()).containsExactly(report.id());
+        assertThat(memberDashboard.todayMeetings()).isEmpty();
+        assertThat(memberDashboard.actionItems()).filteredOn(view -> view.task().id().equals(task.id()))
+                .singleElement().extracting(WorkspaceDomainService.TaskCardView::meetingSourceVisible).isEqualTo(false);
+        assertThat(memberDashboard.recentActivities()).extracting(WorkspaceDomainService.DashboardActivity::title)
+                .noneMatch(title -> title.contains("Private planning"));
+        assertThat(memberDashboard.latestReports()).isEmpty();
     }
 
     private TestContext newContext() {

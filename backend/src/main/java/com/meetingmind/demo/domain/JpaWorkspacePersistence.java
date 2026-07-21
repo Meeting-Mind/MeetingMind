@@ -40,6 +40,31 @@ public class JpaWorkspacePersistence {
         entityManager.find(Space.class, spaceId, LockModeType.PESSIMISTIC_WRITE);
     }
 
+    public SpaceInvitation saveSpaceInvitation(SpaceInvitation invitation) {
+        return entityManager.merge(invitation);
+    }
+
+    public Optional<SpaceInvitation> findSpaceInvitation(String spaceId, String invitationId) {
+        return first(entityManager.createQuery(
+                        "select i from SpaceInvitation i where i.spaceId = :spaceId and i.id = :invitationId",
+                        SpaceInvitation.class)
+                .setParameter("spaceId", spaceId)
+                .setParameter("invitationId", invitationId)
+                .setMaxResults(1)
+                .getResultList());
+    }
+
+    public Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email) {
+        return first(entityManager.createQuery(
+                        "select i from SpaceInvitation i where i.spaceId = :spaceId and lower(i.email) = lower(:email) "
+                                + "and i.status = 'PENDING' order by i.id",
+                        SpaceInvitation.class)
+                .setParameter("spaceId", spaceId)
+                .setParameter("email", email)
+                .setMaxResults(1)
+                .getResultList());
+    }
+
     public SpaceMember saveSpaceMember(SpaceMember member) {
         return entityManager.merge(member);
     }
@@ -144,7 +169,9 @@ public class JpaWorkspacePersistence {
     public Meeting updateMeeting(
             String meetingId,
             String title,
+            String description,
             OffsetDateTime scheduledAt,
+            OffsetDateTime scheduledEndAt,
             OffsetDateTime startedAt,
             OffsetDateTime endedAt,
             MeetingStatus status
@@ -154,7 +181,9 @@ public class JpaWorkspacePersistence {
             throw new IllegalStateException("회의를 찾을 수 없습니다.");
         }
         entity.title = title;
+        entity.description = description;
         entity.scheduledAt = scheduledAt;
+        entity.scheduledEndAt = scheduledEndAt;
         entity.startedAt = startedAt;
         entity.endedAt = endedAt;
         entity.status = status.name();
@@ -369,6 +398,31 @@ public class JpaWorkspacePersistence {
                 .setParameter("candidateId", candidateId).setMaxResults(1).getResultList()).map(JpaWorkspacePersistence::toTaskCard);
     }
 
+    public Optional<TaskCard> findTaskCardById(String spaceId, String taskId) {
+        return first(entityManager.createQuery(
+                        "select c from TaskCard c where c.spaceId = :spaceId and c.id = :taskId and c.deletedAt is null",
+                        TaskCard.class)
+                .setParameter("spaceId", spaceId)
+                .setParameter("taskId", taskId)
+                .setMaxResults(1)
+                .getResultList()).map(JpaWorkspacePersistence::toTaskCard);
+    }
+
+    public List<TaskCard> findTaskCards(String spaceId) {
+        return entityManager.createQuery(
+                        "select c from TaskCard c where c.spaceId = :spaceId and c.deletedAt is null order by c.updatedAt desc, c.id",
+                        TaskCard.class)
+                .setParameter("spaceId", spaceId)
+                .getResultList().stream().map(JpaWorkspacePersistence::toTaskCard).toList();
+    }
+
+    public void softDeleteTaskCard(String taskId, Instant deletedAt) {
+        TaskCard entity = entityManager.find(TaskCard.class, taskId);
+        if (entity != null && entity.deletedAt == null) {
+            entity.deletedAt = deletedAt;
+        }
+    }
+
     public ProjectKnowledge saveProjectKnowledge(ProjectKnowledge knowledge) {
         return entityManager.merge(knowledge);
     }
@@ -410,10 +464,21 @@ public class JpaWorkspacePersistence {
             return space.id;
         }
         Meeting meeting = entityManager.find(Meeting.class, resourceId);
-        if (meeting == null) {
-            throw new IllegalStateException("감사 로그의 Space를 찾을 수 없습니다: " + resourceId);
+        if (meeting != null) {
+            return meeting.spaceId;
         }
-        return meeting.spaceId;
+        TaskCard taskCard = entityManager.find(TaskCard.class, resourceId);
+        if (taskCard != null) {
+            return taskCard.spaceId;
+        }
+        MeetingReport report = entityManager.find(MeetingReport.class, resourceId);
+        if (report != null) {
+            Meeting reportMeeting = entityManager.find(Meeting.class, report.meetingId);
+            if (reportMeeting != null) {
+                return reportMeeting.spaceId;
+            }
+        }
+        throw new IllegalStateException("감사 로그의 Space를 찾을 수 없습니다: " + resourceId);
     }
 
     private static Map<String, String> auditValue(String resourceId, String value) {

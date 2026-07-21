@@ -2,9 +2,29 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { chatMeetingAi } from "../api/workspace";
 import type { AuthSession } from "../auth/session";
-import type { WorkspaceData } from "../types";
+import type { UnsupportedReason, WorkspaceData } from "../types";
 
-type ChatMessage = { role: "user" | "ai"; text: string; sources?: string[]; unsupported?: boolean };
+type ChatMessage = {
+  role: "user" | "ai";
+  text: string;
+  sources?: string[];
+  unsupported?: boolean;
+  unsupportedReason?: UnsupportedReason | null;
+};
+
+function unsupportedMessage(reason: UnsupportedReason | null): string {
+  switch (reason) {
+    case "LOW_RELEVANCE":
+      return "검색된 기록은 있지만 질문에 답할 만큼 관련성이 높지 않습니다.";
+    case "MODEL_UNSUPPORTED":
+      return "제공된 근거만으로는 답변을 확정할 수 없습니다.";
+    case "UNVERIFIED_OUTPUT":
+      return "응답의 근거를 확인하지 못해 답변을 제공할 수 없습니다.";
+    case "NO_EVIDENCE":
+    default:
+      return "현재 회의에서 확인 가능한 근거가 없어 답변할 수 없습니다.";
+  }
+}
 
 export function MeetingAiPage({ data, session }: { data: WorkspaceData["meetingAi"]; session: AuthSession | null }) {
   const [searchParams] = useSearchParams();
@@ -51,9 +71,10 @@ export function MeetingAiPage({ data, session }: { data: WorkspaceData["meetingA
         ...previous,
         {
           role: "ai",
-          text: result.unsupported ? "확인 가능한 근거가 없어 답변할 수 없습니다." : result.answer,
+          text: result.unsupported ? unsupportedMessage(result.unsupportedReason) : result.answer,
           sources: result.sources.map((source) => `${source.title} · ${source.type}`),
-          unsupported: result.unsupported
+          unsupported: result.unsupported,
+          unsupportedReason: result.unsupportedReason
         }
       ]);
     } catch (fetchError) {
@@ -188,7 +209,11 @@ export function MeetingAiPage({ data, session }: { data: WorkspaceData["meetingA
                       ))}
                     </div>
                   ) : null}
-                  {message.unsupported ? <div className="meeting-ai-unsupported">근거 없음</div> : null}
+                  {message.unsupported ? (
+                    <div className="meeting-ai-unsupported">
+                      {message.unsupportedReason === "LOW_RELEVANCE" ? "관련도 부족" : "근거 없음"}
+                    </div>
+                  ) : null}
                 </div>
               ))}
               {loading ? <div className="bubble ai">답변 생성 중입니다...</div> : null}

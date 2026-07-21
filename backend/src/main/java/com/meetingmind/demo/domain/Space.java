@@ -16,23 +16,48 @@ public class Space {
     @Column(name = "created_by", nullable = false) String createdBy;
     @Column(name = "deleted_at") Instant deletedAt;
     @Column(name = "created_at", nullable = false) Instant createdAt;
+    @Column(name = "updated_at", nullable = false) Instant updatedAt;
 
     protected Space() {
     }
 
     public Space(String id, String name, String description, String createdBy, Instant createdAt) {
+        this(id, name, description, createdBy, null, createdAt, createdAt);
+    }
+
+    private Space(
+            String id,
+            String name,
+            String description,
+            String createdBy,
+            Instant deletedAt,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
         this.id = id;
         this.name = name;
         this.description = description;
         this.createdBy = createdBy;
+        this.deletedAt = deletedAt;
         this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
     }
 
     public String id() { return id; }
     public String name() { return name; }
     public String description() { return description; }
     public String createdBy() { return createdBy; }
+    public Instant deletedAt() { return deletedAt; }
     public Instant createdAt() { return createdAt; }
+    public Instant updatedAt() { return updatedAt; }
+
+    public Space updated(String nextName, String nextDescription, Instant now) {
+        return new Space(id, nextName, nextDescription, createdBy, deletedAt, createdAt, now);
+    }
+
+    public Space deleted(Instant value) {
+        return new Space(id, name, description, createdBy, value, createdAt, updatedAt);
+    }
 
     @Override public boolean equals(Object other) { return other instanceof Space value && Objects.equals(id, value.id); }
     @Override public int hashCode() { return Objects.hashCode(id); }

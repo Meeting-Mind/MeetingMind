@@ -66,13 +66,13 @@ class MigrationIntegrationTest {
                     """);
         }
 
-        var v13Result = Flyway.configure()
+        var workspaceResult = Flyway.configure()
                 .dataSource(url, user, password)
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
 
-        assertThat(v13Result.migrationsExecuted).isEqualTo(3);
+        assertThat(workspaceResult.migrationsExecuted).isEqualTo(8);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -86,7 +86,7 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"
             );
 
             try (var statement = connection.createStatement()) {
@@ -111,14 +111,34 @@ class MigrationIntegrationTest {
                         select column_name
                         from information_schema.columns
                         where table_name = 'meetings'
-                          and column_name in ('deleted_at', 'deleted_by')
+                          and column_name in ('deleted_at', 'deleted_by', 'description', 'scheduled_end_at')
                         order by column_name
                         """)) {
                     List<String> columns = new ArrayList<>();
                     while (rows.next()) {
                         columns.add(rows.getString("column_name"));
                     }
-                    assertThat(columns).containsExactly("deleted_at", "deleted_by");
+                    assertThat(columns).containsExactly("deleted_at", "deleted_by", "description", "scheduled_end_at");
+                }
+                try (var rows = statement.executeQuery("""
+                        select column_name
+                        from information_schema.columns
+                        where table_name = 'task_cards'
+                          and column_name in ('deleted_at', 'priority', 'labels')
+                        order by column_name
+                        """)) {
+                    List<String> columns = new ArrayList<>();
+                    while (rows.next()) {
+                        columns.add(rows.getString("column_name"));
+                    }
+                    assertThat(columns).containsExactly("deleted_at", "labels", "priority");
+                }
+                try (var rows = statement.executeQuery("""
+                        select updated_at is not null
+                        from spaces where id = 'migration-space'
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getBoolean(1)).isTrue();
                 }
                 List<String> extensions = new ArrayList<>();
                 try (var rows = statement.executeQuery(

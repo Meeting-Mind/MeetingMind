@@ -44,6 +44,7 @@ public class TaskCandidate {
     public List<String> sourceIds() { return List.copyOf(sourceIds); } public String createdBy() { return createdBy; }
     public Instant createdAt() { return createdAt; } public Instant confirmedAt() { return confirmedAt; }
     public TaskCandidate confirmed(Instant confirmedAt) { return new TaskCandidate(id, meetingId, title, assigneeName, suggestedAssigneeId, dueDate, TaskCandidateStatus.CONFIRMED, sourceIds, createdBy, createdAt, confirmedAt); }
+    public TaskCandidate dismissed() { return new TaskCandidate(id, meetingId, title, assigneeName, suggestedAssigneeId, dueDate, TaskCandidateStatus.DISMISSED, sourceIds, createdBy, createdAt, null); }
     @Override public boolean equals(Object other) { return other instanceof TaskCandidate value && Objects.equals(id, value.id); }
     @Override public int hashCode() { return Objects.hashCode(id); }
 }

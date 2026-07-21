@@ -7,10 +7,22 @@ public record ReportAiGatewayRequest(
         String meetingId,
         String title,
         String format,
-        List<SourceContext> sources
+        List<SourceContext> sources,
+        String instruction,
+        String currentReportMarkdown
 ) {
     public ReportAiGatewayRequest {
         sources = sources == null ? List.of() : List.copyOf(sources);
+    }
+
+    public ReportAiGatewayRequest(
+            String projectId,
+            String meetingId,
+            String title,
+            String format,
+            List<SourceContext> sources
+    ) {
+        this(projectId, meetingId, title, format, sources, null, null);
     }
 
     public record SourceContext(

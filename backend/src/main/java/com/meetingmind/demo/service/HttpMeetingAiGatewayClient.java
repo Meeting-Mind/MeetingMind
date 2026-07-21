@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.MeetingAiGatewayChatRequest;
+import com.meetingmind.demo.dto.ai.MeetingAiGatewayTermRequest;
+import com.meetingmind.demo.dto.ai.TermExplanationResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -22,6 +24,7 @@ public class HttpMeetingAiGatewayClient implements MeetingAiGatewayClient {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final URI chatUri;
+    private final URI explainTermUri;
     private final String serviceToken;
 
     @Autowired
@@ -42,13 +45,23 @@ public class HttpMeetingAiGatewayClient implements MeetingAiGatewayClient {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.chatUri = URI.create(stripTrailingSlash(aiBaseUrl) + "/api/internal/meeting-ai/chat");
+        this.explainTermUri = URI.create(stripTrailingSlash(aiBaseUrl) + "/api/internal/meeting-ai/explain-term");
         this.serviceToken = serviceToken == null ? "" : serviceToken;
     }
 
     @Override
     public AiChatResponse chat(MeetingAiGatewayChatRequest request) {
+        return post(chatUri, request, AiChatResponse.class);
+    }
+
+    @Override
+    public TermExplanationResponse explainTerm(MeetingAiGatewayTermRequest request) {
+        return post(explainTermUri, request, TermExplanationResponse.class);
+    }
+
+    private <T> T post(URI uri, Object request, Class<T> responseType) {
         try {
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(chatUri)
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
                     .version(HttpClient.Version.HTTP_1_1)
                     .timeout(REQUEST_TIMEOUT)
                     .header("Content-Type", "application/json")
@@ -59,7 +72,7 @@ public class HttpMeetingAiGatewayClient implements MeetingAiGatewayClient {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new AiGatewayException("AI provider returned " + response.statusCode());
             }
-            return objectMapper.readValue(response.body(), AiChatResponse.class);
+            return objectMapper.readValue(response.body(), responseType);
         } catch (JsonProcessingException exception) {
             throw new AiGatewayException("AI request or response JSON is invalid.", exception);
         } catch (IOException exception) {

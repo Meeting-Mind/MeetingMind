@@ -256,6 +256,10 @@ T032 첫 Google 연결 통합 테스트는 `pg_advisory_xact_lock`의 PostgreSQL
 
 Refresh rotation은 기존 V1의 `usedAt/replacementId` check, replacement FK와 active leaf partial unique 때문에 두 개의 순차 SQL로는 중간 상태가 제약을 위반한다. 적용 migration을 완화하지 않고 data-modifying CTE 한 statement로 이전 leaf update와 replacement insert를 함께 수행해 최종 invariant와 forward-only 기준을 보존했다.
 
+## BFF Workspace Route Expansion
+
+- 2026-07-21: Core의 Workspace API 확장에 맞춰 BFF route allowlist를 갱신했다. Space detail/update/delete, invitation, DomainTerm, TaskCard, ProjectKnowledge, calendar/dashboard, report history/download, term explanation, Project AI history와 candidate dismissal을 entity prefix+UUID 검증으로 허용한다. `ProxyRouteRegistryTest` 전체 회귀로 unknown route/method 차단과 Core/AI downstream 분류를 확인했다.
+
 ## Open Implementation Gates
 
 - Q-011~Q-013 AWS region, EKS/IaC/node, SLO/RTO/RPO.

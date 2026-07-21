@@ -67,6 +67,28 @@ class SpaceControllerTest {
     }
 
     @Test
+    void spaceDetailIncludesOnlyAccessibleUpcomingMeetingsAndOpenActionItems() {
+        TestContext context = newContext();
+        var space = context.controller.createSpace(
+                "Bearer access-token",
+                new CreateSpaceRequest("MeetingMind", "AI 회의 지식화 프로젝트")
+        );
+        var meeting = context.controller.createMeeting(
+                "Bearer access-token",
+                space.id(),
+                new CreateMeetingRequest("API 구조 논의", OffsetDateTime.parse("2099-07-10T10:00:00+09:00"), List.of())
+        );
+
+        var detail = context.controller.spaceDetail("Bearer access-token", space.id());
+
+        assertThat(detail.id()).isEqualTo(space.id());
+        assertThat(detail.role()).isEqualTo("OWNER");
+        assertThat(detail.upcomingMeetings()).extracting(value -> value.id()).containsExactly(meeting.id());
+        assertThat(detail.actionItems()).isEmpty();
+        assertThat(detail.aiEntrypoints()).containsExactly("project-ai", "meeting-ai");
+    }
+
+    @Test
     void listMeetingsReturnsTargetMeetingShape() {
         TestContext context = newContext();
         var space = context.controller.createSpace(
@@ -101,8 +123,7 @@ class SpaceControllerTest {
                         "active"
                 ));
         WorkspaceDomainService workspace = new WorkspaceDomainService(
-                new InMemoryWorkspaceStore(),
-                new SpaceAccessPolicy()
+                new InMemoryWorkspaceStore(), new SpaceAccessPolicy()
         );
         return new TestContext(new SpaceController(authService, workspace));
     }

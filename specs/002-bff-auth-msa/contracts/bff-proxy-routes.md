@@ -11,14 +11,16 @@
 
 ## Allowed Routes
 
-`{spaceId}`, `{meetingId}`, `{memberId}`, `{participantId}`, `{requestId}`, `{candidateId}`, `{reportId}`는 각각 `space-`, `meeting-`, `space-member-`, `meeting-participant-`, `join-request-`, `task-candidate-`, `report-` prefix 뒤 UUID를 사용한다. transcription `{sessionId}`만 현재 Backend 계약에 따라 bare UUID다. 아래 목록 외 동적 path 또는 method는 허용하지 않는다.
+`{spaceId}`, `{meetingId}`, `{memberId}`, `{participantId}`, `{requestId}`, `{candidateId}`, `{reportId}`, `{taskId}`, `{termId}`, `{knowledgeId}`, `{invitationId}`는 각각 `space-`, `meeting-`, `space-member-`, `meeting-participant-`, `join-request-`, `task-candidate-`, `report-`, `task-`, `term-`, `knowledge-`, `space-invitation-` prefix 뒤 UUID를 사용한다. transcription `{sessionId}`만 현재 Backend 계약에 따라 bare UUID다. 아래 목록 외 동적 path 또는 method는 허용하지 않는다.
 
 | Logical Service | Methods and Paths |
 | --- | --- |
-| Core | `GET|POST /api/v1/spaces`, `GET|POST /api/v1/spaces/{spaceId}/meetings`, `GET /api/v1/spaces/{spaceId}/members`, `PATCH|DELETE /api/v1/spaces/{spaceId}/members/{memberId}`, `POST /api/v1/spaces/{spaceId}/owner-transfer`, `GET /api/v1/spaces/{spaceId}/project-ai/context-candidates` |
+| Core | `GET|POST /api/v1/spaces`, `GET|PATCH|DELETE /api/v1/spaces/{spaceId}`, `GET|POST /api/v1/spaces/{spaceId}/meetings`, `GET /api/v1/spaces/{spaceId}/members`, `PATCH|DELETE /api/v1/spaces/{spaceId}/members/{memberId}`, `POST /api/v1/spaces/{spaceId}/owner-transfer`, `GET /api/v1/spaces/{spaceId}/project-ai/context-candidates` |
+| Core | `POST /api/v1/spaces/{spaceId}/invitations`, `POST /api/v1/spaces/{spaceId}/invitations/{invitationId}/accept|decline`, `GET|POST /api/v1/spaces/{spaceId}/terms`, `PATCH|DELETE /api/v1/spaces/{spaceId}/terms/{termId}` |
+| Core | `GET|POST /api/v1/spaces/{spaceId}/tasks`, `PATCH|DELETE /api/v1/spaces/{spaceId}/tasks/{taskId}`, `GET|POST /api/v1/spaces/{spaceId}/knowledge`, `GET|PATCH|DELETE /api/v1/spaces/{spaceId}/knowledge/{knowledgeId}`, `GET /api/v1/spaces/{spaceId}/ai/history`, `GET /api/v1/dashboard`, `GET /api/v1/calendar/events` |
 | Core | `GET|PATCH|DELETE /api/v1/meetings/{meetingId}`, `GET|POST /api/v1/meetings/{meetingId}/participants`, `PATCH /api/v1/meetings/{meetingId}/participants/{participantId}`, `GET /api/v1/meetings/{meetingId}/join-requests`, `POST /api/v1/meetings/join-requests`, `POST /api/v1/meetings/{meetingId}/join-requests/{requestId}/approve|reject`, `GET /api/v1/meetings/{meetingId}/dialogue` |
-| Core | `GET /api/v1/meetings/{meetingId}/task-candidates`, `POST /api/v1/meetings/{meetingId}/task-candidates/{candidateId}/confirm`, `POST /api/v1/meetings/{meetingId}/reports/{reportId}/confirm` |
-| AI | `POST /api/v1/spaces/{spaceId}/ai/chat`, `POST /api/v1/meetings/{meetingId}/ai/chat`, `POST /api/v1/meetings/{meetingId}/reports/generate`, `POST /api/v1/meetings/{meetingId}/task-candidates/generate` |
+| Core | `POST /api/v1/meetings/{meetingId}/terms/explain`, `GET /api/v1/meetings/{meetingId}/task-candidates`, `POST /api/v1/meetings/{meetingId}/task-candidates/{candidateId}/confirm|dismiss`, `GET /api/v1/meetings/{meetingId}/reports`, `GET|PATCH /api/v1/meetings/{meetingId}/reports/{reportId}`, `POST /api/v1/meetings/{meetingId}/reports/{reportId}/confirm|restore`, `GET /api/v1/meetings/{meetingId}/reports/{reportId}/download` |
+| AI | `POST /api/v1/spaces/{spaceId}/ai/chat`, `POST /api/v1/meetings/{meetingId}/ai/chat`, `POST /api/v1/meetings/{meetingId}/reports/generate`, `POST /api/v1/meetings/{meetingId}/reports/{reportId}/ai-edits`, `POST /api/v1/meetings/{meetingId}/task-candidates/generate` |
 | LiveKit | `POST /api/v1/meetings/{meetingId}/livekit-token`, `POST /api/v1/meetings/{meetingId}/transcription/start`, `POST /api/v1/meetings/{meetingId}/transcription/{sessionId}/stop` |
 
 Query parameter는 허용된 route의 현재 Backend 계약에만 전달하며 목적지 선택에 사용하지 않는다.

@@ -22,6 +22,8 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
     @Override Optional<User> findUserById(String userId) { return delegate.findUserById(userId); }
     @Override Space createSpace(String name, String description, String createdBy, Instant now) { return delegate.createSpace(name, description, createdBy, now); }
     @Override Optional<Space> findSpaceById(String spaceId) { return delegate.findSpaceById(spaceId); }
+    @Override Space updateSpace(String spaceId, String name, String description, Instant updatedAt) { return delegate.updateSpace(spaceId, name, description, updatedAt); }
+    @Override void softDeleteSpace(String spaceId, Instant deletedAt) { delegate.softDeleteSpace(spaceId, deletedAt); }
     @Override SpaceMember addSpaceMember(String spaceId, String userId, SpaceRole role, Instant joinedAt) { return delegate.addSpaceMember(spaceId, userId, role, joinedAt); }
     @Override Optional<SpaceMember> findSpaceMember(String spaceId, String userId) { return delegate.findSpaceMember(spaceId, userId); }
     @Override Optional<SpaceMember> findSpaceMemberById(String spaceId, String memberId) { return delegate.findSpaceMemberById(spaceId, memberId); }
@@ -32,14 +34,17 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
     @Override SpaceMember updateSpaceMemberRole(String memberId, SpaceRole role) { return delegate.updateSpaceMemberRole(memberId, role); }
     @Override void removeSpaceMember(String memberId) { delegate.removeSpaceMember(memberId); }
     @Override OwnerTransferUpdate transferOwner(String currentOwnerMemberId, String targetMemberId, SpaceRole previousOwnerRole) { return delegate.transferOwner(currentOwnerMemberId, targetMemberId, previousOwnerRole); }
-    @Override Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt) { return delegate.createMeeting(spaceId, title, scheduledAt); }
+    @Override SpaceInvitation saveSpaceInvitation(SpaceInvitation invitation) { return delegate.saveSpaceInvitation(invitation); }
+    @Override Optional<SpaceInvitation> findSpaceInvitationById(String spaceId, String invitationId) { return delegate.findSpaceInvitationById(spaceId, invitationId); }
+    @Override Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email) { return delegate.findPendingSpaceInvitation(spaceId, email); }
+    @Override Meeting createMeeting(String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt) { return delegate.createMeeting(spaceId, title, description, scheduledAt, scheduledEndAt); }
     @Override Optional<Meeting> findMeetingById(String meetingId) { return delegate.findMeetingById(meetingId); }
     @Override Optional<Meeting> findMeetingByJoinCode(String joinCode) { return delegate.findMeetingByJoinCode(joinCode); }
     @Override long countMeetingsBySpaceId(String spaceId) { return delegate.countMeetingsBySpaceId(spaceId); }
     @Override List<Meeting> findMeetingsBySpaceId(String spaceId) { return delegate.findMeetingsBySpaceId(spaceId); }
     @Override List<Meeting> findProjectAiMeetings(String spaceId, String userId) { return delegate.findProjectAiMeetings(spaceId, userId); }
     @Override void lockMeeting(String meetingId) { delegate.lockMeeting(meetingId); }
-    @Override Meeting updateMeeting(String meetingId, String title, OffsetDateTime scheduledAt, OffsetDateTime startedAt, OffsetDateTime endedAt, MeetingStatus status) { return delegate.updateMeeting(meetingId, title, scheduledAt, startedAt, endedAt, status); }
+    @Override Meeting updateMeeting(String meetingId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt, OffsetDateTime startedAt, OffsetDateTime endedAt, MeetingStatus status) { return delegate.updateMeeting(meetingId, title, description, scheduledAt, scheduledEndAt, startedAt, endedAt, status); }
     @Override Meeting softDeleteMeeting(String meetingId, MeetingStatus status, String deletedBy, Instant deletedAt) { return delegate.softDeleteMeeting(meetingId, status, deletedBy, deletedAt); }
     @Override MeetingJoinRequest createMeetingJoinRequest(String meetingId, String userId, Instant requestedAt) { return delegate.createMeetingJoinRequest(meetingId, userId, requestedAt); }
     @Override Optional<MeetingJoinRequest> findMeetingJoinRequestById(String meetingId, String requestId) { return delegate.findMeetingJoinRequestById(meetingId, requestId); }
@@ -66,6 +71,9 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
     @Override Optional<TaskCandidate> findTaskCandidateByIdForUpdate(String candidateId) { return delegate.findTaskCandidateByIdForUpdate(candidateId); }
     @Override List<TaskCandidate> findTaskCandidates(String meetingId) { return delegate.findTaskCandidates(meetingId); }
     @Override TaskCard saveTaskCard(TaskCard taskCard) { return delegate.saveTaskCard(taskCard); }
+    @Override Optional<TaskCard> findTaskCardById(String spaceId, String taskId) { return delegate.findTaskCardById(spaceId, taskId); }
+    @Override List<TaskCard> findTaskCards(String spaceId) { return delegate.findTaskCards(spaceId); }
+    @Override void softDeleteTaskCard(String taskId, Instant deletedAt) { delegate.softDeleteTaskCard(taskId, deletedAt); }
     @Override Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId) { return delegate.findTaskCardBySourceCandidateId(candidateId); }
     @Override ProjectKnowledge saveProjectKnowledge(ProjectKnowledge knowledge) { return delegate.saveProjectKnowledge(knowledge); }
     @Override List<ProjectKnowledge> findProjectKnowledge(String spaceId) { return delegate.findProjectKnowledge(spaceId); }

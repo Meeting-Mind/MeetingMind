@@ -12,16 +12,22 @@ import type {
   CreateMeetingJoinRequestResponse,
   CreateMeetingRequest,
   CreateMeetingResponse,
+  CreateProjectKnowledgeRequest,
   CreateSpaceRequest,
   CreateSpaceResponse,
   CreateSpaceInvitationRequest,
   CreateSpaceInvitationResponse,
   CreateTaskCardRequest,
   CreateTaskCardResponse,
+  CreateDomainTermRequest,
   DashboardSummaryResponse,
+  DeleteDomainTermResponse,
   DeleteMeetingResponse,
+  DeleteProjectKnowledgeResponse,
   DeleteSpaceResponse,
   DeleteTaskCardResponse,
+  DomainTermListResponse,
+  DomainTermMutationResponse,
   MeetingDetailResponse,
   MeetingDialogueResponse,
   MeetingListResponse,
@@ -31,17 +37,25 @@ import type {
   MeetingJoinRequestsResponse,
   OwnerTransferRequest,
   OwnerTransferResponse,
+  ProjectKnowledgeListResponse,
+  ProjectKnowledgeDetailResponse,
+  ProjectKnowledgeMutationResponse,
+  ProjectAiHistoryResponse,
   ReportCandidateResponse,
+  ReportDetailResponse,
   ReportDownloadFormat,
   ReportListResponse,
   RemoveSpaceMemberResponse,
   ResolveInvitationRequest,
+  RestoreReportResponse,
   ResolveSpaceInvitationResponse,
   ReviewMeetingJoinRequestResponse,
   SpaceDetail,
   SpaceListResponse,
   SpaceMembersResponse,
   StartMeetingTranscriptionRequest,
+  TermExplanationResponse,
+  TaskCandidateSummary,
   TaskCandidatesResponse,
   TaskCandidateGenerationResponse,
   TaskListResponse,
@@ -51,12 +65,14 @@ import type {
   UpdateMeetingParticipantResponse,
   UpdateMeetingRequest,
   UpdateMeetingResponse,
+  UpdateProjectKnowledgeRequest,
   UpdateSpaceRequest,
   UpdateSpaceMemberRoleRequest,
   UpdateSpaceMemberRoleResponse,
   UpdateSpaceResponse,
   UpdateTaskCardRequest,
   UpdateTaskCardResponse,
+  UpdateDomainTermRequest,
   WorkspaceData
 } from "../types";
 
@@ -70,6 +86,66 @@ export async function fetchSpaces(_session: AuthSession): Promise<SpaceListRespo
   return requestJson<SpaceListResponse>("/api/v1/spaces", {
     headers: undefined
   });
+}
+
+export async function fetchDomainTerms(
+  _session: AuthSession,
+  spaceId: string,
+  request: { keyword?: string; status?: "ACTIVE" | "ARCHIVED" } = {}
+): Promise<DomainTermListResponse> {
+  const params = new URLSearchParams();
+  if (request.keyword?.trim()) {
+    params.set("keyword", request.keyword.trim());
+  }
+  if (request.status) {
+    params.set("status", request.status);
+  }
+  const query = params.size ? `?${params.toString()}` : "";
+  return requestJson<DomainTermListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/terms${query}`, {
+    headers: undefined
+  });
+}
+
+export async function createDomainTerm(
+  _session: AuthSession,
+  spaceId: string,
+  request: CreateDomainTermRequest
+): Promise<DomainTermMutationResponse> {
+  return requestJson<DomainTermMutationResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/terms`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(request)
+  });
+}
+
+export async function updateDomainTerm(
+  _session: AuthSession,
+  spaceId: string,
+  termId: string,
+  request: UpdateDomainTermRequest
+): Promise<DomainTermMutationResponse> {
+  return requestJson<DomainTermMutationResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/terms/${encodeURIComponent(termId)}`,
+    {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify(request)
+    }
+  );
+}
+
+export async function archiveDomainTerm(
+  _session: AuthSession,
+  spaceId: string,
+  termId: string
+): Promise<DeleteDomainTermResponse> {
+  return requestJson<DeleteDomainTermResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/terms/${encodeURIComponent(termId)}`,
+    {
+      method: "DELETE",
+      headers: jsonHeaders()
+    }
+  );
 }
 
 export async function createSpace(_session: AuthSession, request: CreateSpaceRequest): Promise<CreateSpaceResponse> {
@@ -302,6 +378,21 @@ export async function chatMeetingAi(
   });
 }
 
+export async function explainMeetingTerm(
+  _session: AuthSession,
+  meetingId: string,
+  request: { term: string }
+): Promise<TermExplanationResponse> {
+  return requestJson<TermExplanationResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/terms/explain`,
+    {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify(request)
+    }
+  );
+}
+
 export async function chatProjectAi(
   _session: AuthSession,
   spaceId: string,
@@ -314,6 +405,15 @@ export async function chatProjectAi(
   });
 }
 
+export async function fetchProjectAiHistory(
+  _session: AuthSession,
+  spaceId: string
+): Promise<ProjectAiHistoryResponse> {
+  return requestJson<ProjectAiHistoryResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/ai/history`, {
+    headers: undefined
+  });
+}
+
 export async function generateReportCandidate(
   _session: AuthSession,
   meetingId: string
@@ -323,6 +423,22 @@ export async function generateReportCandidate(
     {
     method: "POST",
       headers: undefined
+    }
+  );
+}
+
+export async function editMeetingReportWithAi(
+  _session: AuthSession,
+  meetingId: string,
+  reportId: string,
+  instruction: string
+): Promise<ReportCandidateResponse> {
+  return requestJson<ReportCandidateResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/${encodeURIComponent(reportId)}/ai-edits`,
+    {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ instruction })
     }
   );
 }
@@ -400,6 +516,28 @@ export async function downloadMeetingReport(
   );
 }
 
+export async function fetchMeetingReportDetail(
+  _session: AuthSession,
+  meetingId: string,
+  reportId: string
+): Promise<ReportDetailResponse> {
+  return requestJson<ReportDetailResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/${encodeURIComponent(reportId)}`,
+    { headers: undefined }
+  );
+}
+
+export async function restoreMeetingReport(
+  _session: AuthSession,
+  meetingId: string,
+  reportId: string
+): Promise<RestoreReportResponse> {
+  return requestJson<RestoreReportResponse>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/reports/${encodeURIComponent(reportId)}/restore`,
+    { method: "POST", headers: jsonHeaders() }
+  );
+}
+
 export async function fetchTaskCandidates(_session: AuthSession, meetingId: string): Promise<TaskCandidatesResponse> {
   return requestJson<TaskCandidatesResponse>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates`, {
     headers: undefined
@@ -422,10 +560,86 @@ export async function confirmTaskCandidate(
   );
 }
 
+export async function dismissTaskCandidate(
+  _session: AuthSession,
+  meetingId: string,
+  candidateId: string
+): Promise<TaskCandidateSummary> {
+  return requestJson<TaskCandidateSummary>(
+    `/api/v1/meetings/${encodeURIComponent(meetingId)}/task-candidates/${encodeURIComponent(candidateId)}/dismiss`,
+    {
+      method: "POST",
+      headers: jsonHeaders()
+    }
+  );
+}
+
 export async function fetchTasks(_session: AuthSession, spaceId: string): Promise<TaskListResponse> {
   return requestJson<TaskListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/tasks`, {
     headers: undefined
   });
+}
+
+export async function fetchProjectKnowledge(
+  _session: AuthSession,
+  spaceId: string
+): Promise<ProjectKnowledgeListResponse> {
+  return requestJson<ProjectKnowledgeListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge`, {
+    headers: undefined
+  });
+}
+
+export async function fetchProjectKnowledgeDetail(
+  _session: AuthSession,
+  spaceId: string,
+  knowledgeId: string
+): Promise<ProjectKnowledgeDetailResponse> {
+  return requestJson<ProjectKnowledgeDetailResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
+    { headers: undefined }
+  );
+}
+
+export async function createProjectKnowledge(
+  _session: AuthSession,
+  spaceId: string,
+  request: CreateProjectKnowledgeRequest
+): Promise<ProjectKnowledgeMutationResponse> {
+  return requestJson<ProjectKnowledgeMutationResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(request)
+  });
+}
+
+export async function updateProjectKnowledge(
+  _session: AuthSession,
+  spaceId: string,
+  knowledgeId: string,
+  request: UpdateProjectKnowledgeRequest
+): Promise<ProjectKnowledgeMutationResponse> {
+  return requestJson<ProjectKnowledgeMutationResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
+    {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify(request)
+    }
+  );
+}
+
+export async function deleteProjectKnowledge(
+  _session: AuthSession,
+  spaceId: string,
+  knowledgeId: string
+): Promise<DeleteProjectKnowledgeResponse> {
+  return requestJson<DeleteProjectKnowledgeResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
+    {
+      method: "DELETE",
+      headers: jsonHeaders()
+    }
+  );
 }
 
 export async function createTask(

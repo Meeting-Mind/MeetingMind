@@ -4,6 +4,7 @@ import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type { WorkspaceData } from "../types";
 
 type TeamMember = {
+  memberId?: string;
   name: string;
   email: string;
   role: string;
@@ -40,7 +41,8 @@ export function TeamMembersPage({
   onRemoveMember,
   onTransferOwner,
   onUpdateMemberRole,
-  onCreateProject
+  onCreateProject,
+  onCreateSpaceInvitation
 }: {
   spaces: WorkspaceData["workspaceHome"]["spaces"];
   projectMembers: Record<string, TeamMember[]>;
@@ -48,19 +50,26 @@ export function TeamMembersPage({
   inviteMeta: Record<string, InviteMeta>;
   onApproveRequest?: (projectName: string, requestId: string) => void;
   onRejectRequest?: (projectName: string, requestId: string) => void;
-  onRemoveMember?: (projectName: string, memberEmail: string) => void;
+  onRemoveMember?: (projectName: string, memberId: string | undefined, memberEmail: string) => Promise<boolean>;
   onTransferOwner?: (
     projectName: string,
+    targetMemberId: string | undefined,
     targetMemberEmail: string,
     previousOwnerRole: Exclude<TeamMember["spaceRole"], "OWNER">,
     confirmation: string
-  ) => void;
+  ) => Promise<boolean>;
   onUpdateMemberRole?: (
     projectName: string,
+    memberId: string | undefined,
     memberEmail: string,
     role: Exclude<TeamMember["spaceRole"], "OWNER">
-  ) => void;
+  ) => Promise<boolean>;
   onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
+  onCreateSpaceInvitation?: (
+    spaceId: string,
+    email: string,
+    role: "ADMIN" | "MEMBER"
+  ) => Promise<{ invitationId: string; inviteUrl: string; expiresAt: string }>;
 }) {
   useEffect(() => {
     document.body.className = "app-theme";
@@ -87,6 +96,13 @@ export function TeamMembersPage({
   const [transferTargetEmail, setTransferTargetEmail] = useState("");
   const [previousOwnerRole, setPreviousOwnerRole] = useState<Exclude<TeamMember["spaceRole"], "OWNER">>("ADMIN");
   const [transferConfirm, setTransferConfirm] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"ADMIN" | "MEMBER">("MEMBER");
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [isCreatingInvite, setIsCreatingInvite] = useState(false);
+  const [memberActionError, setMemberActionError] = useState("");
+  const [isMutatingMembers, setIsMutatingMembers] = useState(false);
   const canTransferOwner = Boolean(transferTargetEmail) && transferConfirm === "TRANSFER OWNER";
 
   async function handleCopyInvite(value: string) {
@@ -97,16 +113,81 @@ export function TeamMembersPage({
     }
   }
 
-  function handleOwnerTransfer(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canTransferOwner) {
+    if (!selectedSpace || !inviteEmail.trim() || !onCreateSpaceInvitation || isCreatingInvite) {
+      return;
+    }
+    setInviteError("");
+    setIsCreatingInvite(true);
+    try {
+      const created = await onCreateSpaceInvitation(selectedSpace.id, inviteEmail.trim(), inviteRole);
+      setInviteUrl(created.inviteUrl);
+      setInviteEmail("");
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : "Space 초대를 생성하지 못했습니다.");
+    } finally {
+      setIsCreatingInvite(false);
+    }
+  }
+
+  async function handleOwnerTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const target = transferCandidates.find((member) => member.email === transferTargetEmail);
+    if (!canTransferOwner || !target || !onTransferOwner || isMutatingMembers) {
       return;
     }
 
-    onTransferOwner?.(projectName, transferTargetEmail, previousOwnerRole, transferConfirm);
-    setTransferTargetEmail("");
-    setPreviousOwnerRole("ADMIN");
-    setTransferConfirm("");
+    setMemberActionError("");
+    setIsMutatingMembers(true);
+    try {
+      const transferred = await onTransferOwner(projectName, target.memberId, target.email, previousOwnerRole, transferConfirm);
+      if (transferred) {
+        setTransferTargetEmail("");
+        setPreviousOwnerRole("ADMIN");
+        setTransferConfirm("");
+      } else {
+        setMemberActionError("Owner 권한을 이양하지 못했습니다.");
+      }
+    } catch (error) {
+      setMemberActionError(error instanceof Error ? error.message : "Owner 권한을 이양하지 못했습니다.");
+    } finally {
+      setIsMutatingMembers(false);
+    }
+  }
+
+  async function handleMemberRoleChange(member: TeamMember, role: Exclude<TeamMember["spaceRole"], "OWNER">) {
+    if (!onUpdateMemberRole || isMutatingMembers) {
+      return;
+    }
+    setMemberActionError("");
+    setIsMutatingMembers(true);
+    try {
+      if (!await onUpdateMemberRole(projectName, member.memberId, member.email, role)) {
+        setMemberActionError("멤버 역할을 변경하지 못했습니다.");
+      }
+    } catch (error) {
+      setMemberActionError(error instanceof Error ? error.message : "멤버 역할을 변경하지 못했습니다.");
+    } finally {
+      setIsMutatingMembers(false);
+    }
+  }
+
+  async function handleRemoveMember(member: TeamMember) {
+    if (!onRemoveMember || isMutatingMembers) {
+      return;
+    }
+    setMemberActionError("");
+    setIsMutatingMembers(true);
+    try {
+      if (!await onRemoveMember(projectName, member.memberId, member.email)) {
+        setMemberActionError("멤버를 제거하지 못했습니다.");
+      }
+    } catch (error) {
+      setMemberActionError(error instanceof Error ? error.message : "멤버를 제거하지 못했습니다.");
+    } finally {
+      setIsMutatingMembers(false);
+    }
   }
 
   return (
@@ -133,9 +214,34 @@ export function TeamMembersPage({
             <p>{projectName} 프로젝트 멤버와 권한, 담당 영역, 최근 참여 맥락을 확인합니다.</p>
           </div>
           <div className="team-members-invite-panel">
-            <button className="team-members-invite-button" onClick={() => void handleCopyInvite(invite.link)} type="button">
-              Space 초대 링크
-            </button>
+            {onCreateSpaceInvitation ? (
+              <form onSubmit={handleCreateInvite}>
+                <input
+                  aria-label="초대 이메일"
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  placeholder="초대 이메일"
+                  type="email"
+                  value={inviteEmail}
+                />
+                <select aria-label="초대 역할" onChange={(event) => setInviteRole(event.target.value as "ADMIN" | "MEMBER")} value={inviteRole}>
+                  <option value="MEMBER">MEMBER</option>
+                  <option value="ADMIN">ADMIN</option>
+                </select>
+                <button className="team-members-invite-button" disabled={isCreatingInvite || !inviteEmail.trim()} type="submit">
+                  {isCreatingInvite ? "생성 중..." : "Space 초대 생성"}
+                </button>
+              </form>
+            ) : (
+              <button className="team-members-invite-button" onClick={() => void handleCopyInvite(invite.link)} type="button">
+                Space 초대 링크
+              </button>
+            )}
+            {inviteError ? <p role="alert">{inviteError}</p> : null}
+            {inviteUrl ? (
+              <button className="team-members-invite-button" onClick={() => void handleCopyInvite(inviteUrl)} type="button">
+                Space 초대 링크 복사
+              </button>
+            ) : null}
             <div
               className="team-members-invite-code"
               onClick={() => void handleCopyInvite(invite.code)}
@@ -244,8 +350,9 @@ export function TeamMembersPage({
               type="text"
               value={transferConfirm}
             />
-            <button disabled={!canTransferOwner} type="submit">이양</button>
+            <button disabled={!canTransferOwner || isMutatingMembers} type="submit">이양</button>
           </form>
+          {memberActionError ? <p role="alert">{memberActionError}</p> : null}
         </section>
 
         <section className="team-members-toolbar">
@@ -318,14 +425,11 @@ export function TeamMembersPage({
                   <div className="team-members-col actions">
                     <select
                       aria-label={`${member.name} Space role 변경`}
-                      disabled={member.spaceRole === "OWNER"}
-                      onChange={(event) =>
-                        onUpdateMemberRole?.(
-                          projectName,
-                          member.email,
-                          event.target.value as Exclude<TeamMember["spaceRole"], "OWNER">
-                        )
-                      }
+                      disabled={member.spaceRole === "OWNER" || isMutatingMembers}
+                      onChange={(event) => void handleMemberRoleChange(
+                        member,
+                        event.target.value as Exclude<TeamMember["spaceRole"], "OWNER">
+                      )}
                       value={member.spaceRole === "OWNER" ? "OWNER" : member.spaceRole}
                     >
                       <option value="OWNER" disabled>OWNER</option>
@@ -333,8 +437,8 @@ export function TeamMembersPage({
                       <option value="MEMBER">MEMBER</option>
                     </select>
                     <button
-                      disabled={member.spaceRole === "OWNER"}
-                      onClick={() => onRemoveMember?.(projectName, member.email)}
+                      disabled={member.spaceRole === "OWNER" || isMutatingMembers}
+                      onClick={() => void handleRemoveMember(member)}
                       type="button"
                     >
                       제거

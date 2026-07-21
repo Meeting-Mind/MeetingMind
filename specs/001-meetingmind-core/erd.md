@@ -18,11 +18,15 @@ erDiagram
   USER ||--o{ TASK_CANDIDATE : creates
   USER ||--o{ MEETING_JOIN_REQUEST : requests
   USER ||--o{ TASK_CARD : assigned
+  USER ||--o{ MEETING_MESSAGE : writes
+  USER ||--o{ MEETING_ATTACHMENT : uploads
+  USER ||--o{ PROJECT_AI_MESSAGE : owns
 
   SPACE ||--o{ SPACE_MEMBER : has
   SPACE ||--o{ MEETING : owns
   SPACE ||--o{ SPACE_INVITATION : issues
   SPACE ||--o{ PROJECT_KNOWLEDGE : has
+  SPACE ||--o{ PROJECT_AI_MESSAGE : contains
   SPACE ||--o{ DOMAIN_TERM : defines
   SPACE ||--o{ TASK_CARD : has
   SPACE ||--o{ EMBEDDING_CHUNK : indexes
@@ -36,10 +40,13 @@ erDiagram
   MEETING ||--o{ TRANSCRIPT_SEGMENT : contains
   MEETING ||--o{ MEETING_REPORT : has
   MEETING ||--o{ TASK_CANDIDATE : suggests
+  MEETING ||--o{ MEETING_MESSAGE : contains
+  MEETING ||--o{ MEETING_ATTACHMENT : stores
   MEETING ||--o{ MEETING_ROOM : opens
   MEETING ||--o{ EMBEDDING_CHUNK : indexes
 
   MEETING_SPEAKER ||--o{ TRANSCRIPT_SEGMENT : speaks
+  MEETING_MESSAGE ||--o{ MEETING_ATTACHMENT : publishes
   MEETING_REPORT ||--o{ REPORT_DECISION : contains
   MEETING_REPORT ||--o{ REPORT_ACTION_ITEM : contains
   TASK_CANDIDATE ||--o| TASK_CARD : confirmed_as
@@ -49,6 +56,9 @@ erDiagram
   EMBEDDING_JOB ||--o{ EMBEDDING_CHUNK : produces
   TRANSCRIPT_SEGMENT ||--o{ CHUNK_SOURCE_SEGMENT : source
   EMBEDDING_CHUNK ||--o{ CHUNK_SOURCE_SEGMENT : includes
+  MEETING_ATTACHMENT ||--o{ ATTACHMENT_CHUNK_ANCHOR : anchors
+  EMBEDDING_CHUNK ||--o{ ATTACHMENT_CHUNK_ANCHOR : cites
+  MEETING_ATTACHMENT ||--o{ EMBEDDING_JOB : reindexes
 
   USER {
     string id PK
@@ -88,6 +98,7 @@ erDiagram
     string createdBy FK
     datetime deletedAt
     datetime createdAt
+    datetime updatedAt
   }
 
   SPACE_MEMBER {
@@ -115,7 +126,9 @@ erDiagram
     string id PK
     string spaceId FK
     string title
+    string description
     datetime scheduledAt
+    datetime scheduledEndAt
     datetime startedAt
     datetime endedAt
     string status
@@ -188,6 +201,36 @@ erDiagram
     string source
   }
 
+  MEETING_MESSAGE {
+    string id PK
+    string meetingId FK
+    string authorUserId FK
+    string text
+    datetime createdAt
+    datetime deletedAt
+  }
+
+  MEETING_ATTACHMENT {
+    string id PK
+    string meetingId FK
+    string messageId FK
+    string uploadedBy FK
+    string originalFilename
+    string contentType
+    long sizeBytes
+    string sha256
+    string objectKey
+    string status
+    string extractionFailureCode
+    string extractedTextObjectKey
+    int extractedChars
+    datetime retentionUntil
+    datetime uploadExpiresAt
+    datetime completedAt
+    datetime deletedAt
+    datetime expiredAt
+  }
+
   MEETING_REPORT {
     string id PK
     string meetingId FK
@@ -243,10 +286,13 @@ erDiagram
     string title
     string description
     string status
+    string priority
+    string[] labels
     string assigneeId FK
     date dueDate
     datetime createdAt
     datetime updatedAt
+    datetime deletedAt
   }
 
   PROJECT_KNOWLEDGE {
@@ -263,6 +309,15 @@ erDiagram
     datetime createdAt
     datetime updatedAt
     datetime deletedAt
+  }
+
+  PROJECT_AI_MESSAGE {
+    string id PK
+    string spaceId FK
+    string userId FK
+    string role
+    string content
+    datetime createdAt
   }
 
   DOMAIN_TERM {
@@ -299,6 +354,7 @@ erDiagram
     string spaceId FK
     string projectKnowledgeId FK
     string meetingId FK
+    string attachmentId FK
     string status
     string model
     int dimension
@@ -318,6 +374,15 @@ erDiagram
     string id PK
     string chunkId FK
     string segmentId FK
+  }
+
+  ATTACHMENT_CHUNK_ANCHOR {
+    string id PK
+    string chunkId FK
+    string attachmentId FK
+    int pageNumber
+    int charStart
+    int charEnd
   }
 
   AUDIT_LOG {
@@ -366,6 +431,7 @@ erDiagram
 - `SPACE_INVITATION.spaceId`는 required이며, 수락 시 `SpaceMember`를 생성한다.
 - `SPACE_INVITATION.status`는 `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` 중 하나다.
 - `SPACE_INVITATION.tokenHash`는 unique이며 token 원문은 저장하지 않는다.
+- Space invitation token은 생성 응답에서 초대 권한자에게 한 번만 반환하고, 수락/거절 시 인증 이메일과 token hash를 함께 검증한다. 기본 만료는 7일이다.
 - `MEETING_JOIN_REQUEST(meetingId, userId)`는 pending 기준 unique다. join request는 회의 URL 또는 joinCode로 생성되고 host 승인 후 `MeetingParticipant`를 생성한다.
 - `MEETING_JOIN_REQUEST.status`는 `PENDING`, `APPROVED`, `REJECTED` 중 하나다.
 - `MEETING.joinCodeHash`는 unique다. 원문 코드는 생성/인가된 조회 응답에만 노출하고 영속 저장하지 않는다.
@@ -386,6 +452,12 @@ erDiagram
 - 기간 보존 transcript는 `retentionUntil`을 가지며 `legalHold=true`이면 정리 대상에서 제외한다.
 - `TRANSCRIPT_SEGMENT(meetingId, sequence)`은 unique다.
 - `TRANSCRIPT_SEGMENT(meetingId, startMs)` index를 둔다.
+- `MEETING_MESSAGE`는 text가 있거나 active `MEETING_ATTACHMENT`를 하나 이상 가져야 한다. soft-deleted message와 attachment는 기본 목록/RAG에서 제외한다.
+- `MEETING_ATTACHMENT.messageId`는 upload session·검증·추출 중 null일 수 있으나, 게시 뒤 같은 `meetingId`의 `MEETING_MESSAGE`를 참조해야 한다.
+- `MEETING_ATTACHMENT.status`는 `PENDING_UPLOAD`, `PROCESSING`, `READY`, `UNSUPPORTED`, `FAILED`, `DELETED`, `EXPIRED` 중 하나다. `READY`만 attachment embedding source가 된다.
+- `MEETING_ATTACHMENT(meetingId, sha256)`는 deleted/expired가 아닌 row 기준 unique이며, `objectKey`는 private storage의 opaque key다.
+- `MEETING_ATTACHMENT(meetingId, status, retentionUntil)` index와 `MEETING_MESSAGE(meetingId, createdAt)` index를 둔다.
+- `ATTACHMENT_CHUNK_ANCHOR(chunkId, attachmentId, pageNumber, charStart, charEnd)`는 unique다. PDF page는 1-based이고 TXT/Markdown은 null이다.
 
 ### Report and Task
 
@@ -397,13 +469,16 @@ erDiagram
 - 새 report version을 확정하면 기존 current confirmed report는 `isCurrent=false`로 바꾼다.
 - `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환할 수 있고 확정 시 `confirmedAt`을 기록한다.
 - 확정 대상은 해당 meeting의 최신 version이어야 한다.
-- candidate 만료 검증은 `Q-008`의 TTL 정책 결정 후 추가한다.
+- MeetingReport `CANDIDATE`는 생성 후 7일 안에만 확정하거나 후보 기반 편집으로 새 draft를 만들 수 있다. 만료 여부는 `createdAt`과 정책값으로 계산한다.
 - `TASK_CANDIDATE.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나다.
 - `TASK_CANDIDATE.sourceIds`는 Backend canonical source allowlist로 필터링한 근거 ID를 JSON으로 보존한다.
 - `TASK_CANDIDATE.suggestedAssigneeId`와 `TASK_CARD.assigneeId`는 application layer에서 active SpaceMember인지 검증한다.
 - `TASK_CANDIDATE.CANDIDATE`만 TaskCard로 확정할 수 있고 확정 시 `confirmedAt`을 기록한다.
-- candidate 만료 검증은 `Q-009`의 TTL 정책 결정 후 추가한다.
+- TaskCandidate는 생성 후 7일 안에만 TaskCard로 확정할 수 있다. 만료 여부는 `createdAt`과 정책값으로 계산하며 별도 status를 추가하지 않는다.
 - `TASK_CARD.sourceCandidateId`는 nullable이지만, 값이 있으면 unique다. 후보 하나는 최대 하나의 TaskCard로만 확정된다.
+- `TASK_CARD.deletedAt`이 null인 행만 일반 칸반 조회에 포함한다. 삭제된 카드도 `sourceCandidateId` unique 제약은 유지한다.
+- `TASK_CARD.priority`는 `LOW`, `MEDIUM`, `HIGH` 중 하나이며 기본값은 `MEDIUM`이다.
+- `TASK_CARD.labels`는 PostgreSQL `text[]`로 저장하며, application layer에서 카드당 최대 10개, 각 1~40자, 대소문자 무시 중복 불가를 검증한다.
 - `TASK_CARD(spaceId, status)`와 `TASK_CARD(assigneeId, status)` index를 둔다.
 
 ### Knowledge, Terms, and RAG
@@ -414,17 +489,18 @@ erDiagram
 - `PROJECT_KNOWLEDGE.embeddingStatus`는 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` 중 하나다.
 - ProjectKnowledge 수정 시 기존 chunk는 유지하고 `embeddingStatus=PENDING`으로 표시한 뒤 비동기 재색인 완료 시 새 chunk로 교체한다.
 - `PROJECT_KNOWLEDGE(spaceId, type, updatedAt)` index를 둔다.
+- `PROJECT_AI_MESSAGE`는 `(spaceId, userId, createdAt)` index를 두며, 조회와 AI 문맥은 항상 같은 인증 사용자와 Space로 제한한다.
 - `DOMAIN_TERM(spaceId, term)`은 active term 기준 unique다.
 - `DOMAIN_TERM.status`는 `ACTIVE`, `ARCHIVED` 중 하나다.
 - `EMBEDDING_CHUNK(spaceId, scope, sourceType, sourceId)` index를 둔다.
 - `EMBEDDING_CHUNK.meetingId`는 meeting-scoped chunk일 때 required이고 ProjectKnowledge-only chunk에서는 null일 수 있다.
 - `CHUNK_SOURCE_SEGMENT(chunkId, segmentId)`는 unique다.
-- `EMBEDDING_JOB`은 ProjectKnowledge 또는 Meeting 중 정확히 하나만 source로 가져야 한다.
-- source별 `(projectKnowledgeId, generation)` 또는 `(meetingId, generation)`은 unique다.
+- `EMBEDDING_JOB`은 현재 ProjectKnowledge 또는 Meeting 중 정확히 하나만 source로 가져야 한다. MeetingAttachment source는 M035 재개 시 별도 migration과 함께 추가한다.
+- source별 `(projectKnowledgeId, generation)`, `(meetingId, generation)`, `(attachmentId, generation)`은 unique다.
 - 새 generation의 job이 `COMPLETED`되기 전까지 기존 `EMBEDDING_CHUNK.isActive=true` 행을 유지한다.
 - 완료 시 같은 source의 이전 generation은 inactive/replaced 처리하고 최신 generation만 검색한다.
 - `EMBEDDING_CHUNK.embedding`은 target forward migration에서 `vector(1536)`으로 고정하고 cosine exact search를 사용한다.
-- `EMBEDDING_CHUNK.scope`는 query mode가 아니라 source 소유 범위다. meeting 산출물은 `meeting`, ProjectKnowledge는 `project`로 저장한다.
+- `EMBEDDING_CHUNK.scope`는 query mode가 아니라 source 소유 범위다. meeting 산출물과 `meetingAttachment`는 `meeting`, ProjectKnowledge는 `project`로 저장한다.
 - Project AI는 권한 필터를 통과한 meeting-owned chunk와 ProjectKnowledge chunk를 함께 검색하며 동일 source를 project scope로 중복 임베딩하지 않는다.
 
 ### Audit

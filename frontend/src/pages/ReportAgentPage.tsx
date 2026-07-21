@@ -3,12 +3,19 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   confirmMeetingReport,
   confirmTaskCandidate,
+  dismissTaskCandidate,
+  downloadMeetingReport,
+  editMeetingReportWithAi,
   extractTaskCandidates,
+  fetchMeetingReportDetail,
+  fetchMeetingReports,
   fetchTaskCandidates,
-  generateReportCandidate
+  generateReportCandidate,
+  restoreMeetingReport,
+  updateMeetingReport
 } from "../api/workspace";
 import type { AuthSession } from "../auth/session";
-import type { TaskAssigneeOption, TaskCandidateSummary, WorkspaceData } from "../types";
+import type { ReportDetailResponse, ReportDownloadFormat, ReportSummary, TaskAssigneeOption, TaskCandidateSummary, WorkspaceData } from "../types";
 
 type ChangeCommit = {
   id: string;
@@ -393,6 +400,7 @@ export function ReportAgentPage({
   const projectName = searchParams.get("project");
   const meetingTitle = searchParams.get("meeting");
   const meetingId = searchParams.get("meetingId");
+  const spaceId = searchParams.get("spaceId");
   const round = searchParams.get("round");
   const meetingAiParams = new URLSearchParams();
   if (projectName) {
@@ -418,7 +426,14 @@ export function ReportAgentPage({
   const [isCommitListOpen, setIsCommitListOpen] = useState(false);
   const [selectedCommitId, setSelectedCommitId] = useState<string | null>(null);
   const [reportCandidate, setReportCandidate] = useState<ReportCandidateDraft | null>(null);
+  const [reportHistory, setReportHistory] = useState<ReportSummary[]>([]);
+  const [currentReportId, setCurrentReportId] = useState<string | null>(null);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [selectedReportDetail, setSelectedReportDetail] = useState<ReportDetailResponse | null>(null);
+  const [isLoadingReportDetail, setIsLoadingReportDetail] = useState(false);
+  const [isRestoringReport, setIsRestoringReport] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isEditingReportWithAi, setIsEditingReportWithAi] = useState(false);
   const [isConfirmingReport, setIsConfirmingReport] = useState(false);
   const [reportGenerationError, setReportGenerationError] = useState("");
   const [taskCandidates, setTaskCandidates] = useState<TaskCandidateDraft[]>([]);
@@ -427,6 +442,7 @@ export function ReportAgentPage({
   const [isLoadingTaskCandidates, setIsLoadingTaskCandidates] = useState(false);
   const [isExtractingTasks, setIsExtractingTasks] = useState(false);
   const [confirmingTaskCandidateId, setConfirmingTaskCandidateId] = useState<string | null>(null);
+  const [dismissingTaskCandidateId, setDismissingTaskCandidateId] = useState<string | null>(null);
   const [taskCandidateError, setTaskCandidateError] = useState("");
   const changeCommits = reportState.commits;
 
@@ -446,6 +462,12 @@ export function ReportAgentPage({
     setIsCommitListOpen(false);
     setSelectedCommitId(null);
     setReportCandidate(null);
+    setReportHistory([]);
+    setCurrentReportId(null);
+    setSelectedReportId(null);
+    setSelectedReportDetail(null);
+    setIsLoadingReportDetail(false);
+    setIsRestoringReport(false);
     setIsGeneratingReport(false);
     setIsConfirmingReport(false);
     setReportGenerationError("");
@@ -455,8 +477,9 @@ export function ReportAgentPage({
     setIsLoadingTaskCandidates(false);
     setIsExtractingTasks(false);
     setConfirmingTaskCandidateId(null);
+    setDismissingTaskCandidateId(null);
     setTaskCandidateError("");
-  }, [projectName, meetingTitle, reportView, round]);
+  }, [meetingId, projectName, meetingTitle, reportView, round]);
 
   useEffect(() => {
     let active = true;
@@ -488,6 +511,55 @@ export function ReportAgentPage({
         }
       });
 
+    return () => {
+      active = false;
+    };
+  }, [meetingId, session]);
+
+  useEffect(() => {
+    let active = true;
+    if (!session || !meetingId) {
+      return () => {
+        active = false;
+      };
+    }
+    Promise.all([
+      fetchMeetingReports(session, meetingId),
+      fetchMeetingReports(session, meetingId, "CANDIDATE")
+    ])
+      .then(([historyResponse, candidateResponse]) => {
+        if (!active) {
+          return;
+        }
+        const history = [...historyResponse.reports].sort((left, right) => right.version - left.version);
+        const report = history.find((candidate) => candidate.isCurrent) ?? history[0];
+        const candidate = [...candidateResponse.reports].sort((left, right) => right.version - left.version)[0];
+        setReportHistory(history);
+        setReportCandidate(candidate ? {
+            id: candidate.id,
+            summary: candidate.summary,
+            markdown: "",
+            status: "candidate",
+            sources: [],
+            version: candidate.version,
+            isCurrent: candidate.isCurrent,
+            confirmedAt: null
+        } : null);
+        if (!report) {
+          setCurrentReportId(null);
+          setSelectedReportId(null);
+          return;
+        }
+        setCurrentReportId(report.id);
+        setSelectedReportId(report.id);
+        setReportState((current) => ({ ...current, title: report.title, summary: report.summary }));
+        setSaveLabel(`● v${report.version} ${report.status.toLowerCase()} 불러옴`);
+      })
+      .catch((error) => {
+        if (active) {
+          setReportGenerationError(error instanceof Error ? error.message : "회의록 이력을 불러오지 못했습니다.");
+        }
+      });
     return () => {
       active = false;
     };
@@ -709,20 +781,85 @@ export function ReportAgentPage({
     }));
   }
 
-  function handleProjectDocumentSave() {
-    const key = "meetingmind.savedReports";
-    const previous = localStorage.getItem(key);
-    const parsed = previous ? (JSON.parse(previous) as ReportView[]) : [];
-    const next = [
-      {
-        ...reportState,
-        commits: [],
-        chat: []
-      },
-      ...parsed.filter((item) => item.title !== reportState.title)
-    ];
-    localStorage.setItem(key, JSON.stringify(next));
-    setSaveLabel("● 프로젝트 문서로 저장됨 · 방금 전");
+  async function handleSaveReport() {
+    if (!session || !meetingId || !currentReportId) {
+      setReportGenerationError("저장할 Backend 회의록이 없습니다. 먼저 candidate를 생성하거나 공식 회의록을 선택하세요.");
+      return;
+    }
+    setReportGenerationError("");
+    try {
+      const updated = await updateMeetingReport(session, meetingId, currentReportId, {
+        title: reportState.title,
+        summary: reportState.summary,
+        markdown: buildReportMarkdown(reportState)
+      });
+      setCurrentReportId(updated.id);
+      setSelectedReportId(updated.id);
+      setSaveLabel(`● v${updated.version} draft 저장됨`);
+      const reports = await fetchMeetingReports(session, meetingId);
+      setReportHistory([...reports.reports].sort((left, right) => right.version - left.version));
+    } catch (error) {
+      setReportGenerationError(error instanceof Error ? error.message : "회의록을 저장하지 못했습니다.");
+    }
+  }
+
+  async function handleDownloadReport(format: ReportDownloadFormat) {
+    const reportId = selectedReportId ?? currentReportId;
+    if (!session || !meetingId || !reportId) {
+      setReportGenerationError("다운로드할 Backend 회의록이 없습니다.");
+      return;
+    }
+    setReportGenerationError("");
+    try {
+      const blob = await downloadMeetingReport(session, meetingId, reportId, format);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `meeting-report-${reportId}.${format === "markdown" ? "md" : format}`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      setReportGenerationError(error instanceof Error ? error.message : "회의록을 다운로드하지 못했습니다.");
+    }
+  }
+
+  async function handleSelectReport(report: ReportSummary) {
+    if (!session || !meetingId || isLoadingReportDetail) {
+      return;
+    }
+    setSelectedReportId(report.id);
+    setReportGenerationError("");
+    setIsLoadingReportDetail(true);
+    try {
+      const detail = await fetchMeetingReportDetail(session, meetingId, report.id);
+      setSelectedReportDetail(detail);
+      setSaveLabel(`● v${report.version} ${report.status.toLowerCase()} 본문을 확인 중`);
+    } catch (error) {
+      setSelectedReportDetail(null);
+      setReportGenerationError(error instanceof Error ? error.message : "회의록 본문을 불러오지 못했습니다.");
+    } finally {
+      setIsLoadingReportDetail(false);
+    }
+  }
+
+  async function handleRestoreReport() {
+    if (!session || !meetingId || !selectedReportDetail || isRestoringReport) {
+      return;
+    }
+    setReportGenerationError("");
+    setIsRestoringReport(true);
+    try {
+      const restored = await restoreMeetingReport(session, meetingId, selectedReportDetail.id);
+      const reports = await fetchMeetingReports(session, meetingId);
+      setReportHistory([...reports.reports].sort((left, right) => right.version - left.version));
+      setSelectedReportId(restored.id);
+      setSelectedReportDetail(null);
+      setSaveLabel(`● v${selectedReportDetail.version}에서 v${restored.version} draft를 복원함`);
+    } catch (error) {
+      setReportGenerationError(error instanceof Error ? error.message : "회의록 version을 복원하지 못했습니다.");
+    } finally {
+      setIsRestoringReport(false);
+    }
   }
 
   async function handleGenerateReportCandidate() {
@@ -750,6 +887,8 @@ export function ReportAgentPage({
         isCurrent: response.candidate.isCurrent,
         confirmedAt: null
       });
+      setCurrentReportId(response.candidate.id);
+      setSelectedReportId(response.candidate.id);
       setSaveLabel("● 회의록 candidate 생성됨 · 확정 대기");
     } catch (error) {
       setReportGenerationError(error instanceof Error ? error.message : "회의록 candidate 생성에 실패했습니다.");
@@ -774,7 +913,11 @@ export function ReportAgentPage({
         isCurrent: response.isCurrent,
         confirmedAt: response.confirmedAt
       } : current);
+      setCurrentReportId(response.id);
+      setSelectedReportId(response.id);
       setSaveLabel("● 공식 회의록으로 확정됨 · 방금 전");
+      const reports = await fetchMeetingReports(session, meetingId);
+      setReportHistory([...reports.reports].sort((left, right) => right.version - left.version));
     } catch (error) {
       setReportGenerationError(error instanceof Error ? error.message : "회의록 확정에 실패했습니다.");
     } finally {
@@ -850,93 +993,85 @@ export function ReportAgentPage({
     }
   }
 
-  function handleExportPdf() {
-    const printWindow = window.open("", "_blank", "width=1100,height=900");
-    if (!printWindow) {
+  async function handleDismissTaskCandidate(candidateId: string) {
+    if (!session || !meetingId || !canConfirmTaskCandidates || dismissingTaskCandidateId) {
+      return;
+    }
+    const candidate = taskCandidates.find((item) => item.id === candidateId);
+    if (!candidate || candidate.status !== "candidate") {
+      return;
+    }
+    setDismissingTaskCandidateId(candidateId);
+    setTaskCandidateError("");
+    try {
+      await dismissTaskCandidate(session, meetingId, candidateId);
+      setTaskCandidates((current) => current.map((item) => (
+        item.id === candidateId ? { ...item, status: "dismissed" } : item
+      )));
+      setSaveLabel("● 태스크 candidate가 등록 대상에서 제외됨");
+    } catch (error) {
+      setTaskCandidateError(error instanceof Error ? error.message : "태스크 후보 제외에 실패했습니다.");
+    } finally {
+      setDismissingTaskCandidateId(null);
+    }
+  }
+
+  async function applyAgentPrompt(prompt: string) {
+    const normalized = prompt.trim();
+    if (!normalized) {
       return;
     }
 
-    const subjectHtml = reportState.subjectLines.map((line) => `<div class="doc-line">- ${line}</div>`).join("");
-    const contentHtml = reportState.contentLines.map((line) => `<div class="doc-line">${line}</div>`).join("");
-    const resultHtml = reportState.resultLines.map((line) => `<div class="doc-line">${line}</div>`).join("");
-
-    printWindow.document.write(`
-      <html lang="ko">
-        <head>
-          <title>${reportState.title}</title>
-          <style>
-            body { margin: 0; background: #f4f2fb; font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color: #20233a; }
-            .page { width: 1120px; margin: 24px auto; background: white; padding: 32px; box-sizing: border-box; }
-            .title { font-size: 30px; font-weight: 800; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            th, td { border: 1px solid #7d7f8f; padding: 12px 14px; vertical-align: top; font-size: 16px; line-height: 1.7; }
-            th { width: 130px; background: #f7f7fb; font-weight: 700; text-align: center; }
-            .narrow { width: 90px; }
-            .doc-block { min-height: 200px; white-space: pre-line; }
-            .doc-line { margin-bottom: 6px; }
-            .doc-block.tall { min-height: 320px; }
-            .doc-block.medium { min-height: 180px; }
-            @media print {
-              body { background: white; }
-              .page { margin: 0; width: auto; padding: 0; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="page">
-            <div class="title">${reportState.title}</div>
-            <table>
-              <tr>
-                <th>회 의 명</th>
-                <td colspan="5">${reportState.title}</td>
-              </tr>
-              <tr>
-                <th>회의일자</th>
-                <td>${reportState.writtenDate}</td>
-                <th class="narrow">시 간</th>
-                <td colspan="3">${reportState.startsAt} ~ ${reportState.endsAt}</td>
-              </tr>
-              <tr>
-                <th>회의장소</th>
-                <td colspan="5">${reportState.location}</td>
-              </tr>
-              <tr>
-                <th>참석인원</th>
-                <td>${reportState.attendees}</td>
-                <th class="narrow">주 관 자</th>
-                <td colspan="3">${reportState.owner}</td>
-              </tr>
-              <tr>
-                <th>회의주제</th>
-                <td colspan="5"><div class="doc-block medium">${subjectHtml}</div></td>
-              </tr>
-              <tr>
-                <th>회의내용</th>
-                <td colspan="5"><div class="doc-block tall">${contentHtml}</div></td>
-              </tr>
-              <tr>
-                <th>회의결과</th>
-                <td colspan="5"><div class="doc-block">${resultHtml}</div></td>
-              </tr>
-              <tr>
-                <th>작성일자</th>
-                <td>${reportState.writtenDate}</td>
-                <th class="narrow">작성자</th>
-                <td colspan="3">${reportState.writer}</td>
-              </tr>
-            </table>
-          </div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-  }
-
-  function applyAgentPrompt(prompt: string) {
-    const normalized = prompt.trim();
-    if (!normalized) {
+    if (session && meetingId && currentReportId) {
+      setReportGenerationError("");
+      setIsEditingReportWithAi(true);
+      setReportState((current) => ({
+        ...current,
+        chat: [...current.chat, createChatMessage({ role: "user", text: normalized })]
+      }));
+      setChatInput("");
+      try {
+        const response = await editMeetingReportWithAi(session, meetingId, currentReportId, normalized);
+        if (response.unsupported || !response.candidate) {
+          setReportState((current) => ({
+            ...current,
+            chat: [...current.chat, createChatMessage({
+              role: "ai",
+              text: "현재 회의 근거만으로는 변경안을 만들 수 없습니다.",
+              sources: ["근거 없음"]
+            })]
+          }));
+          return;
+        }
+        const candidate = response.candidate;
+        setReportCandidate({
+          id: candidate.id,
+          summary: candidate.summary,
+          markdown: candidate.markdown,
+          status: "candidate",
+          sources: candidate.sourceIds,
+          version: candidate.version,
+          isCurrent: candidate.isCurrent,
+          confirmedAt: null
+        });
+        setCurrentReportId(candidate.id);
+        setSelectedReportId(candidate.id);
+        setReportState((current) => ({
+          ...current,
+          title: candidate.title,
+          summary: candidate.summary,
+          chat: [...current.chat, createChatMessage({
+            role: "ai",
+            text: "현재 회의 근거로 수정 candidate를 만들었습니다. 검토 후 확정해 주세요.",
+            sources: response.sources.map((source) => source.title || source.sourceId)
+          })]
+        }));
+        setSaveLabel(`● AI 수정 candidate v${candidate.version} 생성됨`);
+      } catch (error) {
+        setReportGenerationError(error instanceof Error ? error.message : "AI 수정 candidate 생성에 실패했습니다.");
+      } finally {
+        setIsEditingReportWithAi(false);
+      }
       return;
     }
 
@@ -978,11 +1113,17 @@ export function ReportAgentPage({
           <div className="report-agent-header-actions">
             <span className="report-agent-save-pill">{saveLabel}</span>
             <Link to={meetingAiHref}>Meeting AI</Link>
-            <button onClick={handleExportPdf} type="button">
-              PDF로 내보내기
+            <button onClick={() => void handleDownloadReport("markdown")} type="button">
+              Markdown 다운로드
             </button>
-            <button className="primary" onClick={handleProjectDocumentSave} type="button">
-              프로젝트 문서로 저장
+            <button onClick={() => void handleDownloadReport("docx")} type="button">
+              DOCX 다운로드
+            </button>
+            <button onClick={() => void handleDownloadReport("pdf")} type="button">
+              PDF 다운로드
+            </button>
+            <button className="primary" onClick={() => void handleSaveReport()} type="button">
+              회의록 저장
             </button>
           </div>
         </header>
@@ -1177,17 +1318,18 @@ export function ReportAgentPage({
                 className="report-agent-chat-input"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  applyAgentPrompt(chatInput);
+                  void applyAgentPrompt(chatInput);
                 }}
               >
                 <input
                   aria-label="보고서 Agent 입력"
+                  disabled={isEditingReportWithAi}
                   onChange={(event) => setChatInput(event.target.value)}
                   placeholder="메시지를 입력하세요..."
                   type="text"
                   value={chatInput}
                 />
-                <button type="submit">→</button>
+                <button disabled={isEditingReportWithAi} type="submit">→</button>
               </form>
             </section>
 
@@ -1238,8 +1380,38 @@ export function ReportAgentPage({
                       ? "확정 중..."
                       : reportCandidate.status === "confirmed"
                         ? "공식 회의록 확정됨"
-                        : "프로젝트 문서로 확정"}
+                        : "공식 회의록으로 확정"}
                   </button>
+                </div>
+              ) : null}
+
+              {reportHistory.length ? (
+                <div className="report-agent-report-history">
+                  <strong>회의록 버전</strong>
+                  {reportHistory.map((report) => (
+                    <button
+                      className={report.id === selectedReportId ? "is-selected" : ""}
+                      key={report.id}
+                      onClick={() => void handleSelectReport(report)}
+                      type="button"
+                    >
+                      <span>v{report.version}</span>
+                      <span>{report.status.toLowerCase()}</span>
+                      {report.isCurrent ? <em>current</em> : null}
+                    </button>
+                  ))}
+                  {selectedReportDetail ? (
+                    <div className="report-agent-report-detail">
+                      <strong>v{selectedReportDetail.version} 본문</strong>
+                      <p>{selectedReportDetail.summary}</p>
+                      <pre>{selectedReportDetail.markdown || selectedReportDetail.summary}</pre>
+                      {selectedReportDetail.id !== currentReportId ? (
+                        <button disabled={isRestoringReport} onClick={() => void handleRestoreReport()} type="button">
+                          {isRestoringReport ? "복원 중..." : "이 version으로 새 초안 복원"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1305,6 +1477,7 @@ export function ReportAgentPage({
                           !canConfirmTaskCandidates
                           || candidate.status !== "candidate"
                           || confirmingTaskCandidateId === candidate.id
+                          || dismissingTaskCandidateId === candidate.id
                           || !candidate.title.trim()
                         }
                         onClick={() => handleRegisterTaskCandidate(candidate.id)}
@@ -1318,6 +1491,22 @@ export function ReportAgentPage({
                               ? "등록 제외됨"
                               : "칸반 등록 승인"}
                       </button>
+                      {candidate.status === "candidate" ? (
+                        <button
+                          disabled={
+                            !canConfirmTaskCandidates
+                            || confirmingTaskCandidateId === candidate.id
+                            || dismissingTaskCandidateId === candidate.id
+                          }
+                          onClick={() => handleDismissTaskCandidate(candidate.id)}
+                          type="button"
+                        >
+                          {dismissingTaskCandidateId === candidate.id ? "제외 중..." : "등록 제외"}
+                        </button>
+                      ) : null}
+                      {candidate.status === "registered" && spaceId ? (
+                        <Link to={`/project-overview?spaceId=${encodeURIComponent(spaceId)}`}>칸반에서 보기</Link>
+                      ) : null}
                     </div>
                   ))}
                 </div>

@@ -40,6 +40,18 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
+    Space updateSpace(String spaceId, String name, String description, Instant updatedAt) {
+        Space current = persistence.findSpace(spaceId).orElseThrow();
+        return persistence.saveSpace(current.updated(name, description, updatedAt));
+    }
+
+    @Override
+    void softDeleteSpace(String spaceId, Instant deletedAt) {
+        Space current = persistence.findSpace(spaceId).orElseThrow();
+        persistence.saveSpace(current.deleted(deletedAt));
+    }
+
+    @Override
     SpaceMember addSpaceMember(String spaceId, String userId, SpaceRole role, Instant joinedAt) {
         return persistence.saveSpaceMember(new SpaceMember("space-member-" + UUID.randomUUID(), spaceId, userId, role, joinedAt));
     }
@@ -92,8 +104,23 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
-    Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt) {
-        Meeting meeting = Meeting.scheduled("meeting-" + UUID.randomUUID(), spaceId, title, scheduledAt);
+    SpaceInvitation saveSpaceInvitation(SpaceInvitation invitation) {
+        return persistence.saveSpaceInvitation(invitation);
+    }
+
+    @Override
+    Optional<SpaceInvitation> findSpaceInvitationById(String spaceId, String invitationId) {
+        return persistence.findSpaceInvitation(spaceId, invitationId);
+    }
+
+    @Override
+    Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email) {
+        return persistence.findPendingSpaceInvitation(spaceId, email);
+    }
+
+    @Override
+    Meeting createMeeting(String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt) {
+        Meeting meeting = Meeting.scheduled("meeting-" + UUID.randomUUID(), spaceId, title, description, scheduledAt, scheduledEndAt);
         return persistence.saveMeeting(meeting, hashJoinCode(meeting.joinCode()));
     }
 
@@ -140,8 +167,8 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
-    Meeting updateMeeting(String meetingId, String title, OffsetDateTime scheduledAt, OffsetDateTime startedAt, OffsetDateTime endedAt, MeetingStatus status) {
-        return persistence.updateMeeting(meetingId, title, scheduledAt, startedAt, endedAt, status);
+    Meeting updateMeeting(String meetingId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt, OffsetDateTime startedAt, OffsetDateTime endedAt, MeetingStatus status) {
+        return persistence.updateMeeting(meetingId, title, description, scheduledAt, scheduledEndAt, startedAt, endedAt, status);
     }
 
     @Override
@@ -296,6 +323,21 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     @Override
     Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId) {
         return persistence.findTaskCardBySourceCandidateId(candidateId);
+    }
+
+    @Override
+    Optional<TaskCard> findTaskCardById(String spaceId, String taskId) {
+        return persistence.findTaskCardById(spaceId, taskId);
+    }
+
+    @Override
+    List<TaskCard> findTaskCards(String spaceId) {
+        return persistence.findTaskCards(spaceId);
+    }
+
+    @Override
+    void softDeleteTaskCard(String taskId, Instant deletedAt) {
+        persistence.softDeleteTaskCard(taskId, deletedAt);
     }
 
     @Override

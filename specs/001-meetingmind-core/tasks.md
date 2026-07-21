@@ -66,7 +66,7 @@
 | M032 | Backend PostgreSQL runtime 영속화 | Auth/Workspace/회의 산출물이 PostgreSQL에 유지되고 권한·확정 mutation 및 AI context 선필터가 DB transaction으로 검증된다. | T246-T253 |
 | M033 | 회의 CRUD PostgreSQL end-to-end | 회의 CRUD와 soft delete가 실제 PostgreSQL API 및 Frontend target 화면에 ACL과 canonical 상태 전이 기준으로 연결된다. | T254-T263 |
 | M034 | Grounded PostgreSQL RAG 통합 | 권한 scope가 강제된 pgvector retrieval, grounding, internal auth, embedding generation과 관측성을 구현한다. | T264-T276 |
-| M035 | 회의 채팅 텍스트 첨부파일 RAG | 텍스트 추출 가능한 회의 첨부파일을 권한·보존·출처 기준으로 RAG에 연결하고 이미지 처리는 후속으로 둔다. | T277-T284 |
+| M035 | 회의 채팅 텍스트 첨부파일 RAG (Deferred) | 다음 전달 단계에서 텍스트 추출 가능한 회의 첨부파일을 권한·보존·출처 기준으로 RAG에 연결한다. 이미지 처리는 후속으로 둔다. | T277-T284 |
 | M036 | Frontend Workspace 영속 데이터 복원 | 로그인 후 Space/Meeting/SpaceMember를 API에서 복원하고 API 실패가 mock 성공으로 보이지 않게 한다. | T285-T287 |
 | M037 | 회의 CRUD 프론트엔드 target 완성 | target Space의 회의 상세·초기 참여자·ACL·캘린더 mutation이 Backend 응답과 재조회 결과로 동작하고 mock/local state와 섞이지 않는다. | T288-T296 |
 | M038 | Workspace JPA 전환 | Auth JDBC 경계를 유지하면서 Workspace와 Backend 저장 AI artifact 도메인 모델 자체를 JPA entity로 전환하고 PostgreSQL/Flyway 통합 검증을 통과한다. | T297-T301 |
@@ -255,13 +255,13 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T145 | M019 | [x] | frontend/design | 사용자(Frontend 담당) | Codex | T047, T131 | `requirements/functional-requirements-detail.md`, `requirements/permissions.md`, `requirements/status-values.md`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/contracts/kanban-api.md`, `specs/001-meetingmind-core/plan.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md` | FR-RPT, FR-MBOT, FR-TASK 상세 요구와 현재 Report Agent/Meeting AI gap을 기준으로 meeting workspace 구현 계획을 작성한다. | `plan.md`에 Meeting Workspace Frontend Plan이 있고, M019 task가 Meeting AI/report/task candidate 단위로 분해되어 있다. |
 | T146 | M019 | [x] | frontend/types-api | 사용자(Frontend 담당) | Codex | T145 | `frontend/src/types.ts`, `frontend/src/api/workspace.ts`, `specs/001-meetingmind-core/contracts/meeting-api.md`, `specs/001-meetingmind-core/contracts/ai-api.md`, `specs/001-meetingmind-core/contracts/kanban-api.md`, `specs/001-meetingmind-core/implement.md` | Meeting AI chat, report candidate/list/confirm/update/download, task candidate extract/confirm type과 API client 경계를 추가한다. | legacy `WorkspaceData`와 분리된 source-aware AI/report/task candidate type과 client 함수가 추가되어 있다. |
-| T147 | M019 | [ ] | frontend/state | 사용자(Frontend 담당) | Codex | T146, T133 | `frontend/src/App.tsx`, `frontend/src/data/mockData.ts`, `frontend/src/types.ts`, `specs/001-meetingmind-core/implement.md` | meeting-scoped report candidate, draft, current confirmed report, task candidate local state를 분리한다. | candidate는 공식 report/task와 구분되고 meetingId/sourceIds가 유지된다. |
+| T147 | M019 | [x] | frontend/state | 사용자(Frontend 담당) | Codex | T146, T133 | `frontend/src/App.tsx`, `frontend/src/data/mockData.ts`, `frontend/src/types.ts`, `specs/001-meetingmind-core/implement.md` | meeting-scoped report candidate, draft, current confirmed report, task candidate local state를 분리한다. | candidate는 공식 report/task와 구분되고 meetingId/sourceIds가 유지된다. |
 | T148 | M019 | [x] | frontend/meeting-ai | 사용자(Frontend 담당) | Codex | T146, T147 | `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/api/workspace.ts`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | Meeting AI 화면을 단일 회의 source-aware chat shape로 정리한다. | `/api/meeting-ai/chat` shape를 사용하고 source 시간/발화자/결정 id와 unsupported 상태가 UI에 표시된다. |
 | T149 | M019 | [x] | frontend/report-candidate | 사용자(Frontend 담당) | Codex | T147 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/api/workspace.ts`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | AI 회의록 candidate 생성과 공식 report 구분 UI를 추가한다. | 생성 결과는 `CANDIDATE`로 표시되고 확정 전에는 current confirmed report로 취급되지 않는다. |
 | T150 | M019 | [x] | frontend/report-edit | 사용자(Frontend 담당) | Codex | T149 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | AI 대화 편집과 수동 편집을 draft state에 반영한다. | pending change apply/revert와 직접 편집 저장이 같은 draft에 반영되고 범위 밖 요청은 확인 필요/unsupported로 표시된다. |
-| T151 | M019 | [ ] | frontend/report-confirm-version | 사용자(Frontend 담당) | Codex | T150 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/App.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | 회의록 확정, current confirmed 표시, version 표시를 추가한다. | `CANDIDATE`/`DRAFT`만 확정 가능하고 확정 시 이전 current report는 current가 아닌 버전처럼 표시된다. |
-| T152 | M019 | [ ] | frontend/report-export | 사용자(Frontend 담당) | Codex | T151 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | 회의록 Markdown 내보내기 또는 다운로드 후보를 추가한다. | 현재 draft/current report 기준 Markdown export가 가능하고 PDF/DOCX는 backend gap으로 표시된다. |
-| T153 | M019 | [ ] | frontend/task-candidates | 사용자(Frontend 담당) | Codex | T147, T136 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/App.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | 태스크 후보 추출, 검토, 등록 전 편집, 칸반 등록 local flow를 추가한다. | `TaskCandidate`는 확정 전 칸반 카드가 아니며, 확정 시 `TaskCard.sourceCandidateId`가 유지된다. |
+| T151 | M019 | [x] | frontend/report-confirm-version | 사용자(Frontend 담당) | Codex | T150 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/App.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | 회의록 확정, current confirmed 표시, version 표시를 추가한다. | `CANDIDATE`/`DRAFT`만 확정 가능하고 확정 시 이전 current report는 current가 아닌 버전처럼 표시된다. |
+| T152 | M019 | [x] | frontend/report-export | 사용자(Frontend 담당) | Codex | T151 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | 회의록 Markdown 내보내기 또는 다운로드 후보를 추가한다. | 현재 draft/current report 기준 Markdown export가 가능하고 PDF/DOCX는 backend gap으로 표시된다. |
+| T153 | M019 | [x] | frontend/task-candidates | 사용자(Frontend 담당) | Codex | T147, T136 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx`, `frontend/src/App.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/implement.md` | 태스크 후보 추출, 검토, 등록 전 편집, 칸반 등록 local flow를 추가한다. | `TaskCandidate`는 확정 전 칸반 카드가 아니며, 확정 시 `TaskCard.sourceCandidateId`가 유지된다. |
 | T154 | M019 | [ ] | frontend/scope-safety | 사용자(Frontend 담당) | Codex | T148, T149, T153 | `frontend/**`, `specs/001-meetingmind-core/implement.md` | Meeting AI/report/task payload가 단일 meeting source만 사용하는지 negative case를 점검한다. | 다른 meeting/project source가 payload에 섞이지 않고 근거 없음은 unsupported/확인 불가로 표시된 결과가 기록되어 있다. |
 | T155 | M019 | [ ] | backend-ai-gap | 사용자(Frontend 담당) | Codex | T146, T154 | `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/analyze.md` | Meeting workspace 구현 중 확인한 backend/AI gap을 정리한다. | Backend 권한 필터 이후 context 조립, report controller, task candidate 저장/confirm, export 구현 gap이 후속 작업으로 기록되어 있다. |
 | T156 | M019 | [ ] | frontend/smoke | 사용자(Frontend 담당) | Codex | T148, T151, T153 | `frontend/**`, `specs/001-meetingmind-core/implement.md` | Meeting AI, Report Agent, task candidate, report export route 흐름을 수동 점검한다. | 주요 route 이동 결과와 발견 이슈 또는 미실행 사유가 `implement.md`에 기록되어 있다. |
@@ -454,19 +454,19 @@ M034는 T230을 shared contract, grounding, data, internal auth, backend scope, 
 | T271 | M034 | [x] | ai/embedding-worker | 사용자(AI 담당) | Codex | T268 | `ai/app/embedding_worker.py`, `ai/app/embedding_provider.py`, `ai/app/repository.py`, `ai/tests/**`, `compose.local.yml` | PostgreSQL job 선점, chunk/embedding 생성, retry/lease, 최신 generation 원자적 교체 worker를 구현한다. | STT segment별 중복 job 없이 trigger가 동작하고 실패 시 기존 active generation 유지, stale job 비활성, 최대 3회 retry가 검증된다. |
 | T272 | M034 | [x] | ai/pgvector-retriever | 사용자(AI 담당) | Codex | T267-T271 | `ai/app/rag.py`, `ai/app/repository.py`, `ai/app/main.py`, `ai/tests/**` | exact cosine 후보와 `pg_trgm` 후보를 RRF로 결합하고 Backend scope를 SQL에 강제한다. | Meeting 단일 회의, Project knowledge+allowed meeting union, active/completed generation, cross-space/meeting 차단과 topK가 PostgreSQL 통합 테스트로 검증된다. |
 | T273 | M034 | [x] | observability/ai | 사용자(AI 담당) | Codex | T265, T266, T271, T272 | `ai/app/observability.py`, `backend/src/main/java/com/meetingmind/demo/**`, `ai/tests/**`, `backend/src/test/**` | 원문 비노출 구조화 로그에 검색 지연, 근거 수, unsupported reason, citation 실패, job queue/실패 지표를 추가한다. | traceId와 필수 지표가 기록되고 질문/STT/답변/API key는 로그에 없으며 초기 알림 기준을 운영 문서에 남긴다. |
-| T274 | M034 | [ ] | frontend/unsupported | Frontend owner | TBD | T265 | `frontend/src/types.ts`, `frontend/src/api/workspace.ts`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx` | nullable `unsupportedReason`을 받아 근거 없음과 일시 오류를 구분해 표시한다. | 기존 응답과 하위 호환되고 unsupported reason별 메시지와 retry 가능 오류가 혼동되지 않는다. |
-| T275 | M034 | [ ] | verification/rag | Integration owner | TBD | T265-T274 | `ai/**`, `backend/**`, `frontend/**`, `specs/001-meetingmind-core/test-matrix.md`, `implement.md` | 한국어 근거 있음/없음 평가 질의와 Backend-to-AI-to-PostgreSQL 통합 검증을 수행한다. | false-supported 5% 이하 목표, 검색 p95 1초 목표, scope/citation/generation/internal-auth negative case와 전체 권장 검증 결과가 기록된다. |
+| T274 | M034 | [x] | frontend/unsupported | Frontend owner | Codex | T265 | `frontend/src/types.ts`, `frontend/src/pages/MeetingAiPage.tsx`, `frontend/src/pages/ProjectOverviewPage.tsx` | nullable `unsupportedReason`을 받아 근거 없음과 일시 오류를 구분해 표시한다. | `NO_EVIDENCE`, `LOW_RELEVANCE`, `MODEL_UNSUPPORTED`, `UNVERIFIED_OUTPUT`은 정상 200 grounded 결과로 표시하고 provider 오류는 기존 API error로 분리한다. |
+| T275 | M034 | [x] | verification/rag | Integration owner | Codex | T265-T274 | `ai/**`, `backend/**`, `frontend/**`, `specs/001-meetingmind-core/test-matrix.md`, `implement.md` | 한국어 근거 있음/없음 평가 질의와 Backend-to-AI-to-PostgreSQL 통합 검증을 수행한다. | 15개 근거 있음과 15개 근거 없음, 총 30개 opt-in Korean grounded 평가에서 false-supported 0%, supported answer/citation 정확도 100%, provider-inclusive p95 1,933.02 ms를 확인했다. Backend-to-AI HTTP gateway 경로도 별도 local server 테스트로 검증했다. |
 | T276 | M034 | [ ] | docs/closeout | Integration owner | TBD | T275 | `specs/001-meetingmind-core/tasks.md`, `implement.md`, `analyze.md`, `feature-implementation-comparison.md`, `.specify/memory/session-handoff.md` | T230/M034 완료 상태, 실제 성능값, 남은 위험과 운영 기준을 원본 문서에 반영한다. | 완료 task만 체크되고 실행 결과 또는 미실행 사유와 다음 shared milestone이 기록된다. |
 
 ### M035: Meeting Chat Text Attachment RAG
 
-M035는 아직 구현되지 않은 실시간 회의 채팅과 첨부파일 저장을 먼저 영속 도메인으로 만들고, 텍스트 추출 가능한 파일만 기존 RAG에 연결한다. 이미지와 image-only PDF는 이 milestone의 완료 범위가 아니다. M034 grounding은 M035와 독립적으로 먼저 진행한다.
+M035는 현재 전달 단계에서 제외한다. attachment 영속 모델, API 계약, 업로드 API, 텍스트 추출, retriever, Frontend, 통합 검증은 다음 단계에서 새로 계획한다. 이미지와 image-only PDF는 이 milestone의 완료 범위가 아니다.
 
 | ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T277 | M035 | [x] | decision/attachment-rag | 사용자(AI 담당) | Codex | T264 | `specs/001-meetingmind-core/clarify.md`, `plan.md`, `contracts/ai-api.md`, `tasks.md`, `implement.md`, `.specify/memory/session-handoff.md` | 첨부파일 RAG를 텍스트 임베딩 MVP와 이미지 확장 범위로 분리한다. | TXT/Markdown/텍스트 PDF만 1536차원 텍스트 embedding을 사용하고 visual embedding과 Vision 처리가 현재 범위에서 제외되어 있다. |
-| T278 | M035 | [ ] | contracts/meeting-attachment | Integration owner | TBD | T277 | `requirements/*`, `specs/001-meetingmind-core/contracts/*`, `data-model.md`, `erd.md`, `plan.md`, `tasks.md` | MeetingMessage/Attachment, 업로드·다운로드, 허용 MIME/용량, 보존, 권한, citation/page anchor와 embedding source 계약을 확정한다. | requirements, API, ERD, data model이 같은 상태·권한·삭제 규칙을 사용하고 이미지 확장 경계가 명시된다. |
-| T279 | M035 | [ ] | backend/meeting-attachment | Backend owner | TBD | T263, T278 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/main/resources/db/migration/**`, `backend/src/test/**` | 영속 MeetingMessage/Attachment와 권한 기반 업로드 완료·조회·삭제 API를 구현하고 READY 텍스트 파일의 embedding job을 생성한다. | 회의 접근권, MIME/크기, checksum, 삭제/보존 만료와 job 원자성이 Backend 테스트로 검증된다. |
+| T278 | M035 | [~] Deferred | contracts/meeting-attachment | Integration owner | Codex | T277 | `requirements/*`, `specs/001-meetingmind-core/contracts/*`, `data-model.md`, `erd.md`, `plan.md`, `tasks.md` | M035 재개 시 MeetingMessage/Attachment, 업로드·다운로드, 허용 MIME/용량, 보존, 권한, citation/page anchor와 embedding source 계약을 확정한다. | 현재는 계약 파일과 구현을 포함하지 않는다. 재개 전에 requirements, API, ERD, data model을 함께 확정한다. |
+| T279 | M035 | [~] Deferred | backend/meeting-attachment | Backend owner | Codex | T263, T278 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/main/resources/db/migration/**`, `backend/src/test/**` | M035 재개 후 최신 migration version부터 영속 MeetingMessage/Attachment와 extraction job 원자성을 구현한다. | 현재 schema와 테스트에는 attachment persistence가 없다. API·object storage·ACL·worker 검증을 포함한 별도 구현 계획이 필요하다. |
 | T280 | M035 | [ ] | frontend/meeting-chat | Frontend owner | TBD | T279 | `frontend/src/**` | 실시간 회의 채팅에 텍스트 메시지와 지원 파일 업로드·다운로드·처리 상태 UI를 연결한다. | 재접속 후 메시지가 유지되고 권한 오류, 업로드 실패, extraction pending/unsupported 상태가 구분된다. |
 | T281 | M035 | [ ] | ai/attachment-extraction | 사용자(AI 담당) | Codex | T271, T278, T279 | `ai/app/**`, `ai/tests/**` | TXT/Markdown/PDF 텍스트 extractor를 공통 결과로 정규화하고 attachment generation chunk를 생성한다. | 이미지·image-only PDF는 임베딩하지 않고 텍스트 파일의 파일명·페이지 anchor·content hash·실패 코드가 검증된다. |
 | T282 | M035 | [ ] | ai/attachment-retrieval | 사용자(AI 담당) | Codex | T270, T272, T281 | `ai/app/**`, `ai/tests/**`, `specs/001-meetingmind-core/contracts/ai-api.md` | `meetingAttachment` chunk를 Meeting/Project AI 권한 범위와 grounding allowlist에 연결한다. | 단일 meeting, allowed meeting, 삭제·보존 만료·권한 회수, 다른 회의 파일 차단과 citation이 통합 테스트로 검증된다. |
@@ -525,9 +525,136 @@ M038은 Auth JDBC를 변경하지 않고 Workspace와 Backend 저장 AI artifact
 | T298 | M038 | [x] | backend/jpa-entities | Backend owner | Codex | T297 | `backend/src/main/java/com/meetingmind/demo/domain/**` | Space/Meeting/ACL/Transcript/Report/Task/Knowledge/Audit 도메인 모델에 schema 일치 JPA mapping을 추가한다. | Auth entity 연관관계나 cascade 없이 대상 non-auth table mapping이 Hibernate validation을 통과한다. |
 | T299 | M038 | [x] | backend/jpa-store | Backend owner | Codex | T298 | `backend/src/main/java/com/meetingmind/demo/domain/**`, `backend/src/test/**` | JDBC WorkspaceStore를 도메인 엔티티 직접 영속 JPA 구현으로 도메인별 순차 교체한다. | record 변환 없이 기존 API, ACL, join code hash, report/task 확정과 audit transaction이 JPA 구현에서 동등하게 동작한다. |
 | T300 | M038 | [x] | backend/stt-persistence | STT owner, Backend owner | Codex | T299 | `backend/src/main/java/com/meetingmind/demo/**`, `backend/src/test/**` | STT session을 MeetingTranscript/TranscriptSegment persistence와 COMPLETED lifecycle에 연결한다. | JPA callback, ACL, speaker/segment 저장, Egress 자연 종료/중지 실패 lifecycle, 완료 transaction의 V12 embedding job과 실제 LiveKit-Cloud STT 전사 smoke를 검증했다. |
-| T301 | M038 | [~] | verification/jpa-rag | Integration owner | Codex | T299, T300, T275 | `backend/**`, `ai/**`, `specs/001-meetingmind-core/{test-matrix,implement}.md` | JPA persistence 이후 STT-to-RAG 및 권한·성능 회귀를 실행한다. | real PostgreSQL에서 restart/ACL/embedding/Meeting RAG와 deterministic local p95, LiveKit-Cloud STT E2E는 검증됐다. OpenAI 한국어 품질과 외부 provider latency 평가는 남아 있다. |
+| T301 | M038 | [x] | verification/jpa-rag | Integration owner | Codex | T299, T300, T275 | `backend/**`, `ai/**`, `specs/001-meetingmind-core/{test-matrix,implement}.md` | JPA persistence 이후 STT-to-RAG 및 권한·성능 회귀를 실행한다. | real PostgreSQL restart/ACL/embedding/Meeting RAG와 deterministic local p95, LiveKit-Cloud STT E2E, T275 OpenAI Korean grounded quality/provider latency 평가를 검증했다. |
 | T302 | M038 | [x] | integration/live-stt-target | Integration owner | Codex | T300 | `backend/src/main/java/com/meetingmind/demo/controller/{MeetingTranscriptionController,SttController,SttStreamController}.java`, `frontend/src/{api/workspace.ts,pages/LiveRoomPage.tsx,types.ts}`, `specs/001-meetingmind-core/{contracts/live-stt-api.md,tasks.md,implement.md}` | LiveRoom의 legacy STT start/stop/transcript polling을 ACL-protected target Meeting API로 전환하고, legacy HTTP controller를 명시 profile로 격리한다. | `PROCESSING` dialogue가 저장 segment를 반환하고, Frontend가 Authorization을 포함한 `/api/v1/meetings/{meetingId}` STT API만 호출하며 기본 runtime에서 `/api/stt/*`가 노출되지 않는 것을 검증했다. |
 | T303 | M038 | [x] | backend/legacy-livekit | Integration owner | Codex | T302 | `backend/src/main/java/com/meetingmind/demo/controller/LiveKitController.java`, `backend/src/test/java/com/meetingmind/demo/MeetingMindApplicationTest.java`, `specs/001-meetingmind-core/{contracts/live-stt-api.md,tasks.md,implement.md}` | 인증·회의 ACL이 없는 legacy LiveKit token controller를 기본 runtime에서 제외한다. | 기본 context에서 legacy `/api/livekit/token` controller가 없고 `legacy-livekit` 명시 profile에서만 등록되며 target token API 회귀를 통과했다. |
+
+### M039: Workspace Artifact CRUD API
+
+M039는 이미 존재하는 Frontend API client 계약을 실제 Core/BFF 영속 API로 완성한다. 화면의 local mock mutation 전환은 API 안정화 후 Frontend owner가 별도 수행한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T304 | M039 | [x] | contracts/data | Backend owner | Codex | T299 | `clarify.md`, `contracts/{space-api,kanban-api,meeting-api}.md`, `data-model.md`, `erd.md`, `V13__*.sql`, `V14__*.sql` | 초대 token, TaskCard soft delete, Space updatedAt, report draft version/Markdown export 경계를 확정한다. | token hash/7일/email binding, deletedAt, persisted Space updatedAt, report history와 unsupported PDF/DOCX가 계약·ERD·migration에 일치한다. |
+| T305 | M039 | [x] | backend/space-invitation | Backend owner | Codex | T304 | `backend/src/main/java/com/meetingmind/demo/{controller,domain,dto}/**` | Space update/delete와 이메일 바인딩 Space invitation 생성·수락·거절을 구현한다. | OWNER/ADMIN 수정·초대, OWNER 삭제, active meeting 삭제 차단, token/email 불일치 거부, 수락 membership 생성이 검증된다. |
+| T306 | M039 | [x] | backend/kanban | Backend owner | Codex | T304 | `backend/src/main/java/com/meetingmind/demo/{controller,domain,dto}/**` | 일반 TaskCard 생성/목록/수정/soft delete와 assignee/meeting scope 검증을 구현한다. | Space access, active SpaceMember assignee, task filter, deletedAt 제외가 검증된다. |
+| T307 | M039 | [x] | backend/report | Backend owner | Codex | T304 | `backend/src/main/java/com/meetingmind/demo/{controller,domain,dto}/**` | report 목록, immutable draft edit/version history, Markdown download를 구현한다. | meeting ACL, candidate 기본 제외, 새 DRAFT version, UTF-8 markdown attachment가 검증된다. |
+| T308 | M039 | [x] | bff/frontend-api | BFF owner | Codex | T305-T307 | `bff/**`, `frontend/src/{api,types}.ts` | BFF allowlist와 Frontend API response type을 target contract에 맞춘다. | Space detail을 포함한 route/method allowlist와 inviteToken type이 API contract와 일치한다. |
+| T309 | M039 | [x] | verification | Backend owner | Codex | T305-T308 | `backend/src/test/**`, `bff/src/test/**` | CRUD domain/BFF route 회귀를 실행한다. | Backend test, BFF test, Frontend unit/build, diff check가 통과한다. |
+| T310 | M039 | [x] | frontend/page-integration | Frontend owner | Codex | T308 | `frontend/src/{App.tsx,pages/{ProjectOverviewPage,TeamMembersPage,ReportAgentPage}.tsx}` | target Space의 project/task/invitation/report mutation을 API 결과 기준으로 전환한다. | target API 실패 시 화면 상태를 바꾸지 않고, project/task mutation은 재조회하며 invitation/report save/download가 Backend response를 사용한다. |
+| T311 | M039 | [x] | frontend/invitation-resolution | Frontend owner | Codex | T305, T308, T310 | `frontend/src/{App.tsx,pages/{TeamMembersPage,SpaceInvitationPage}.tsx,styles/app.css}`, `specs/001-meetingmind-core/{clarify.md,contracts/space-api.md,implement.md,tasks.md}` | 이메일 바인딩 Space invitation의 Browser 수락/거절과 로그인 복귀 흐름을 연결한다. | token은 URL fragment에만 보관되고, 인증된 수신자가 accept/decline API를 호출하며 결과 화면에서 Space 목록으로 이동할 수 있다. |
+| T312 | M039 | [x] | backend/task-acl | Backend owner | Codex | T306 | `backend/src/main/java/com/meetingmind/demo/{domain/WorkspaceDomainService.java,controller/TaskCardController.java}`, `backend/src/test/java/com/meetingmind/demo/domain/WorkspaceCrudServiceTest.java`, `specs/001-meetingmind-core/{contracts/kanban-api.md,implement.md,tasks.md}` | Space TaskCard는 유지하되 Meeting ACL이 없는 사용자에게 회의 source 식별자를 노출하지 않는다. | 동일 Space의 권한 없는 멤버가 `meetingId`와 `sourceCandidateId` 없이 카드를 받고, 관리자 또는 participant는 source 식별자를 받는 negative test가 통과한다. |
+| T313 | M039 | [x] | backend/invitation-jpa | Backend owner | Codex | T305 | `backend/src/main/java/com/meetingmind/demo/domain/{SpaceInvitation,JpaWorkspacePersistence,JpaWorkspaceStore}.java`, `backend/src/test/java/com/meetingmind/demo/domain/JdbcWorkspaceStoreIntegrationTest.java`, `specs/001-meetingmind-core/{implement.md,tasks.md}` | SpaceInvitation을 local/db profile의 JDBC delegate에서 분리해 Workspace JPA persistence로 전환한다. | invitation 생성·수락 후 JPA entity 상태와 SpaceMember 생성이 PostgreSQL integration test에서 검증된다. |
+| T314 | M039 | [x] | frontend/member-management | Frontend owner | Codex | T305, T308 | `frontend/src/{App.tsx,pages/TeamMembersPage.tsx}`, `specs/001-meetingmind-core/{implement.md,tasks.md}` | target Space의 멤버 역할 변경·제거·오너 이양을 local state가 아닌 Backend API 결과로 전환한다. | target Space에서 PATCH/DELETE/owner-transfer 성공 후 SpaceMember 목록을 재조회하고, API 실패 시 로컬 역할/멤버 상태가 바뀌지 않는다. |
+| T315 | M039 | [x] | integration/m039-persistence | Backend/BFF owner | Codex | T305-T308 | `backend/src/test/java/com/meetingmind/demo/domain/JdbcWorkspaceStoreIntegrationTest.java`, `bff/src/test/java/com/meetingmind/bff/proxy/BffProxyControllerTest.java`, `specs/001-meetingmind-core/{implement.md,tasks.md}` | PostgreSQL/JPA와 BFF proxy 기준으로 invitation, Task soft delete, report version 흐름을 회귀 검증한다. | 임시 PostgreSQL에서 JPA invitation 수락, Task deletedAt, 새 report DRAFT version이 검증되고 BFF Task DELETE route가 Core downstream으로 전달된다. |
+
+### M040: Calendar and Domain Dictionary Target Completion
+
+M040은 기존 Space/Meeting JPA 모델을 재사용해 캘린더 read model과 용어사전 CRUD/UI를 target Core-BFF-Frontend 경계로 완성한다. 첨부파일 채팅은 M035의 별도 shared contract와 object storage 경계를 유지한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T316 | M040 | [x] | calendar/core-bff-frontend | Integration owner | Codex | T285, T293 | `backend/src/main/java/**`, `backend/src/test/**`, `bff/**`, `frontend/src/{api,pages,styles}/**`, `contracts/space-api.md` | 기간·Space filter를 받는 ACL-filtered calendar events API와 BFF allowlist를 구현하고, Frontend calendar가 해당 응답을 조회하도록 전환한다. | 필수 기간/역순 기간은 `400`, Space member이지만 Meeting ACL이 없는 사용자는 일정이 없고, 생성 성공 뒤 해당 표시 기간을 재조회한다. |
+| T317 | M040 | [x] | domain-terms/core-bff-frontend | Integration owner | Codex | T278, T297 | `backend/src/main/java/**`, `backend/src/test/**`, `bff/**`, `frontend/src/{api,pages,components,styles}/**`, `contracts/knowledge-api.md` | Space DomainTerm 조회·등록·수정·archive API, BFF allowlist, 관리 화면을 구현한다. | MEMBER는 조회만 가능하고 OWNER/ADMIN만 mutation을 수행하며, 대소문자 무시 활성 중복을 `409`로 거부하고 archive/restore가 화면과 API에 반영된다. |
+| T318 | M040 | [x] | verification/docs | Integration owner | Codex | T316-T317 | `backend/**`, `bff/**`, `frontend/**`, `specs/001-meetingmind-core/{tasks,implement}.md` | 캘린더·용어사전 코드/계약/Frontend API 회귀를 검증하고 실제 구현 상태를 기록한다. | Backend service tests, BFF route test, Frontend API test/build가 통과하고 contracts와 allowlist가 일치한다. |
+
+### M041: Meeting Term Explanation Integration
+
+M041은 M040의 DomainTerm CRUD를 회의 자막 선택 기능으로 연결한다. 등록어는 Backend dictionary lookup으로 즉시 반환하고, 미등록어만 이미 ACL-filtered된 단일 meeting RAG 범위에서 설명한다.
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T319 | M041 | [x] | term-explain/core-ai-bff-frontend | Integration owner | Codex | T317, T301 | `backend/**`, `ai/**`, `bff/**`, `frontend/src/{api,pages,types,styles}/**`, `contracts/ai-api.md` | 회의 용어 설명 external/internal API, exact dictionary 우선 분기, BFF allowlist와 LiveRoom 선택 UI를 연결한다. | 등록어는 AI gateway를 호출하지 않고 glossary source로 반환하며, 미등록어는 단일 meeting transcript/decision RAG 근거가 있을 때만 LLM을 호출한다. 권한 거부는 gateway 호출 전 발생하고 선택한 자막의 설명 패널에 source/unsupported 상태가 표시된다. |
+
+### M042: Report History Safety and Term E2E
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T320 | M042 | [x] | frontend/e2e | Integration owner | Codex | T151, T319 | `frontend/src/pages/ReportAgentPage.tsx`, `frontend/e2e/auth-and-meeting-access.spec.ts`, `specs/001-meetingmind-core/{tasks,implement}.md` | 이력 회의록의 다운로드 선택과 편집 저장 대상을 분리하고, 회의 전환 시 candidate를 초기화한다. 등록 용어 설명의 Browser -> BFF -> Core 경로를 검증한다. | 이력 선택이 현재 편집 report ID나 로컬 본문을 바꾸지 않으며, candidate 없는 회의로 전환 시 이전 candidate가 남지 않는다. E2E에서 등록 용어가 `local-glossary`로 응답한다. |
+
+### M043: Task Candidate Dismissal
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T321 | M043 | [x] | contracts/core-bff-frontend | Integration owner | Codex | T195 | `backend/src/main/java/**`, `backend/src/test/**`, `bff/**`, `frontend/src/{api,pages}/**`, `specs/001-meetingmind-core/{contracts/kanban-api.md,tasks.md,implement.md}` | 후보 제외 상태 전이, Core/BFF route, 검토 화면 action을 연결한다. | 회의 편집 권한이 있는 active SpaceMember만 `CANDIDATE -> DISMISSED` 전이할 수 있고, 제외 후보는 확정할 수 없으며 UI에 제외 상태가 남는다. |
+
+### M044: Project Knowledge Management
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T322 | M044 | [x] | knowledge/core-bff-frontend | Integration owner | Codex | T301 | `backend/src/main/java/**`, `backend/src/test/**`, `bff/**`, `frontend/src/{App.tsx,api,pages,types,styles}/**`, `specs/001-meetingmind-core/{contracts/knowledge-api.md,tasks.md,implement.md}` | 공식 Project Knowledge 목록·상세·등록·수정·archive API와 관리 화면을 연결한다. | Space member는 공식 지식을 조회하고 source meeting metadata는 ACL에 맞춰 마스킹된다. OWNER/ADMIN만 생성·수정·archive하며, archive된 지식은 목록과 Project AI 후보에서 제외된다. |
+
+### M045: Report Version Preview and Restore
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T323 | M045 | [x] | report/core-bff-frontend | Integration owner | Codex | T307 | `backend/src/main/java/**`, `backend/src/test/**`, `bff/**`, `frontend/src/{api,pages,types,styles}/**`, `specs/001-meetingmind-core/{contracts/meeting-api.md,tasks.md,implement.md}` | 회의록 version 상세 조회와 과거 version 기반 새 draft 복원을 연결한다. | 과거 본문은 read ACL로 조회되며, 편집 권한자는 기존 version을 변경하지 않고 새 DRAFT version을 만들 수 있다. |
+
+### M046: Candidate TTL Enforcement
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T324 | M046 | [x] | report-task/domain-docs | Backend owner | Codex | Q-008, Q-009 | `backend/src/main/java/com/meetingmind/demo/domain/WorkspaceDomainService.java`, `backend/src/test/**`, `specs/001-meetingmind-core/{clarify,contracts/{meeting-api,kanban-api},data-model,erd,tasks,implement}.md` | AI 회의록·태스크 후보의 7일 확정 TTL을 결정하고 domain transition에서 강제한다. | 만료 candidate는 `409 CANDIDATE_EXPIRED`로 확정 및 후보 기반 draft 생성을 거부하며, 기존 후보·source 이력은 보존된다. |
+
+### M047: Dashboard Summary Target Integration
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T325 | M047 | [x] | dashboard/core-bff-frontend | Integration owner | Codex | T041, T305, T306 | `backend/src/main/java/**`, `backend/src/test/**`, `bff/**`, `frontend/src/{App.tsx,api,pages}/**`, `specs/{001-meetingmind-core/contracts/space-api.md,002-bff-auth-msa/contracts/bff-proxy-routes.md}` | 대시보드 요약 read model과 BFF allowlist, 실제 홈 화면 표시를 연결한다. | `GET /api/v1/dashboard`는 Space membership 및 Meeting ACL을 먼저 적용해 오늘 회의·최근 활동·미완료 태스크를 반환하며, 접근 불가 Meeting에 연결된 Task source는 마스킹된다. |
+
+### M048: Project AI Personal Conversation History
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T326 | M048 | [x] | core-ai-bff-frontend | Integration owner | Codex | T270, T272 | `backend/src/main/java/**`, `backend/src/main/resources/db/migration/V16__*.sql`, `ai/app/**`, `bff/**`, `frontend/src/{api,pages,types}/**`, `specs/001-meetingmind-core/{clarify,contracts/ai-api.md,data-model,erd,tasks,implement}.md` | Space+사용자별 Project AI 이력 저장·조회와 제한된 비신뢰 대화 문맥을 연결한다. | 활성 SpaceMember만 자신의 최신 50개 이력을 조회하고, 최근 10개만 다음 내부 AI 요청에 포함한다. 권한 scope/citation은 현재 Backend 검색 결과만 사용하며, 다른 사용자·게스트 이력은 노출·재사용되지 않는다. |
+
+### M049: Report AI Conversation Edit
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T327 | M049 | [x] | contracts/core-ai-bff-frontend | Integration owner | Codex | T174, T323 | `backend/**`, `ai/**`, `bff/**`, `frontend/src/{api,pages,types}/**`, `specs/001-meetingmind-core/{contracts/{meeting-api,ai-api}.md,tasks,implement}.md` | 대화 지시를 단일 회의 근거로 재검증한 새 report candidate로 만드는 AI 편집 경로를 구현한다. | edit 권한자가 `instruction`을 보내면 기존 report를 덮어쓰지 않는 새 `CANDIDATE`가 반환되고, 근거 부족·citation 검증 실패는 저장 없이 unsupported 처리된다. |
+
+### M050: Kanban Drag State Transition
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T328 | M050 | [x] | frontend/kanban | Frontend owner | Codex | T306 | `frontend/src/pages/ProjectOverviewPage.tsx`, `specs/001-meetingmind-core/{tasks,implement}.md` | 칸반 카드의 native drag-and-drop을 기존 상태 PATCH 흐름에 연결한다. | 카드를 다른 상태 컬럼에 놓으면 기존 `onMoveProjectTask` 경로로 상태를 저장하고, 상태 select는 키보드 대안으로 유지한다. |
+
+### M051: Kanban Labels and Priority
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T329 | M051 | [x] | contracts/backend/frontend | Integration owner | Codex | T306, T328 | `backend/src/main/java/**`, `backend/src/main/resources/db/migration/V17__*.sql`, `frontend/src/{App,pages,api,types}/**`, `specs/001-meetingmind-core/{contracts/kanban-api.md,data-model,erd,tasks,implement}.md` | 일반 칸반 카드에 우선순위와 라벨을 추가한다. | 조회·생성·수정 API와 화면이 `LOW/MEDIUM/HIGH`, 최대 10개 라벨을 일관되게 처리하고, PostgreSQL `text[]` round-trip과 입력 검증이 자동 테스트로 확인된다. |
+
+### M052: Meeting Schedule Details
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T330 | M052 | [x] | contracts/data/backend/frontend | Integration owner | Codex | T316 | `backend/**`, `frontend/src/{App,api,pages,types}/**`, `specs/001-meetingmind-core/{contracts/meeting-api.md,data-model,erd,tasks,implement}.md` | Meeting의 설명과 예정 종료 시각을 저장·조회·수정·캘린더 표시로 연결한다. | 생성/수정 시 종료 시각이 시작 이후인지 검증하고, 기존 실제 종료 `endedAt`과 분리된 `scheduledEndAt`이 목록·상세·calendar 응답과 UI에 일관되게 표시된다. |
+
+### M053: Report DOCX Export
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T331 | M053 | [x] | report/core-frontend | Integration owner | Codex | T307 | `backend/build.gradle`, `backend/src/main/java/**`, `frontend/src/pages/ReportAgentPage.tsx`, `specs/001-meetingmind-core/{contracts/meeting-api.md,tasks,implement}.md` | 회의록 DOCX 내보내기를 실제 다운로드로 연결한다. | 동일 Meeting ACL로 Markdown/DOCX를 다운로드한다. PDF는 후속 M055에서 별도 구현한다. |
+
+### M055: Report PDF Export
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T333 | M055 | [x] | report/core-frontend | Integration owner | Codex | T331 | `backend/{build.gradle,src/main/**}`, `frontend/src/{pages,api}/**`, `specs/001-meetingmind-core/{contracts/meeting-api.md,tasks,implement}.md` | 회의록 PDF 내보내기를 실제 다운로드로 연결한다. | 동일 Meeting ACL로 Markdown/DOCX/PDF를 다운로드하고, PDF는 OFL 한글 글꼴을 embed해 배포 서버 시스템 글꼴에 의존하지 않으며 한글 title/body 추출 테스트가 통과한다. |
+
+### M054: In-app Meeting Reminders
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T332 | M054 | [x] | frontend/calendar | Frontend owner | Codex | T330 | `frontend/src/pages/WorkspaceHomePage.tsx`, `frontend/src/styles/app.css`, `specs/001-meetingmind-core/{plan,tasks,implement}.md` | 현재 사용자에게 접근 가능한 향후 24시간 회의를 인앱 알림으로 표시한다. | 기존 ACL-filtered calendar API만 사용하고, 조회 실패는 캘린더 기능을 차단하지 않으며 알림 버튼에서 예정 회의를 확인할 수 있다. |
+
+### M056: Dashboard Latest Reports
+
+| ID | Milestone | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T334 | M056 | [x] | dashboard/core-frontend | Integration owner | Codex | M047 | `backend/src/{main,test}/**`, `frontend/src/{pages,types}/**`, `specs/001-meetingmind-core/{contracts/space-api.md,tasks,implement}.md` | 대시보드에 접근 가능한 최신 확정 회의록을 집계·표시한다. | Meeting ACL을 먼저 적용하고 current `CONFIRMED` report만 확정 시각 순 최대 5건 반환하며, private meeting과 이전/미확정 version이 노출되지 않는 테스트가 통과한다. |
 
 ## Verification
 
@@ -572,6 +699,13 @@ M038은 Auth JDBC를 변경하지 않고 Workspace와 Backend 저장 AI artifact
 - [x] V039 PostgreSQL RAG 통합 검증: PostgreSQL 16 임시 DB V1~V11→V12 migration/trigger/vector/trigram, AI worker generation swap와 Meeting/Project scope DB 통합, AI 60건, Backend 전체 test, Compose 기본/AI profile, `git diff --check`
 - [x] V040 Workspace 영속 데이터 복원 검증: Backend 전체 test, PostgreSQL `JdbcWorkspaceStoreIntegrationTest`, Frontend lint 오류 0건/unit 6건/build, Playwright Space/Meeting reload 및 생성 실패 2건, `git diff --check`
 - [x] V041 AI RAG 관측성 검증: AI compile 및 PostgreSQL 포함 62 tests, Backend 전체 test와 RequestTrace/gateway header, PostgreSQL migration/workspace integration, Compose 기본/AI profile, Frontend lint 오류 0건/unit 6건/build, Playwright 4건, `git diff --check`
+- [x] V042 Meeting term/report/calendar E2E 검증: Backend term gateway/ACL 및 report version test, BFF route test, Frontend API test/build, AI term test/compile, 격리 `18086/18087/5174` Playwright에서 DomainTerm 생성·수정·중복 `409`과 calendar events 조회를 Browser -> BFF -> Core로 확인
+- [x] V043 Report history safety 및 registered-term Browser-BFF-Core E2E 검증: Frontend unit 23건/build, 격리 `18086/18087/5174` Playwright에서 이력 다운로드 선택 분리 코드와 등록 DomainTerm `local-glossary` Browser -> BFF -> Core 응답 확인, `git diff --check`
+- [x] V044 Task candidate dismissal 검증: Backend service state/permission test, BFF route test, Frontend client/build, `git diff --check`
+- [x] V045 Project Knowledge CRUD 검증: Backend domain ACL/archive test, BFF route test, Frontend API test/build, `git diff --check`
+- [x] V046 Report version preview/restore 검증: Backend restore history test, BFF route test, Frontend API test/build, `git diff --check`
+- [x] V047 Candidate TTL 검증: Backend report/task 만료 candidate transition test, `git diff --check`
+- [x] V048 Dashboard summary 검증: Backend ACL/masking service test, BFF route test, Frontend cookie route unit/build, `git diff --check`
 
 ## Notes
 

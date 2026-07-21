@@ -3,16 +3,31 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import {
   addMeetingParticipant,
   createMeeting,
+  createProjectKnowledge,
+  createSpaceInvitation,
   createSpace,
+  createTask,
   deleteMeeting,
+  deleteProjectKnowledge,
+  deleteSpace,
+  deleteTask,
   fetchMeetingDetail,
+  fetchDashboardSummary,
   fetchMeetingParticipants,
   fetchLegacyWorkspaceSnapshot,
   fetchMeetings,
+  fetchProjectKnowledge,
   fetchSpaceMembers,
   fetchSpaces,
+  fetchTasks,
+  removeSpaceMember,
+  transferSpaceOwner,
   updateMeeting,
-  updateMeetingParticipant
+  updateMeetingParticipant,
+  updateProjectKnowledge,
+  updateSpaceMemberRole,
+  updateSpace,
+  updateTask
 } from "./api/workspace";
 import {
   bootstrapAuthSession,
@@ -31,16 +46,24 @@ import { MeetingAccessPage } from "./pages/MeetingAccessPage";
 import { ProjectOverviewPage } from "./pages/ProjectOverviewPage";
 import { ReportAgentPage } from "./pages/ReportAgentPage";
 import { TeamMembersPage } from "./pages/TeamMembersPage";
+import { DomainTermsPage } from "./pages/DomainTermsPage";
+import { SpaceInvitationPage } from "./pages/SpaceInvitationPage";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { mockData } from "./data/mockData";
 import type {
   MeetingDetailResponse,
   MeetingParticipantSummary,
   MeetingStatus,
+  ProjectKnowledgeItem,
   MeetingSummary,
+  CreateProjectKnowledgeRequest,
+  DashboardSummaryResponse,
   SpaceMemberSummary,
   SpaceSummary,
+  TaskCard,
+  TaskCardPriority,
   UpdateMeetingRequest,
+  UpdateProjectKnowledgeRequest,
   WorkspaceData
 } from "./types";
 
@@ -48,7 +71,9 @@ type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
 type WorkspaceDataSource = "workspace-api" | "workspace-api-partial" | "legacy-api" | "mock-fallback";
 type CreateMeetingPayload = {
   title?: string;
+  description?: string;
   scheduledAt?: string;
+  scheduledEndAt?: string;
   participantEmails?: string[];
 };
 type UpdateProjectPayload = {
@@ -70,6 +95,8 @@ type ProjectTaskState = {
   title: string;
   description: string;
   status: "TODO" | "IN_PROGRESS" | "DONE";
+  priority: TaskCardPriority;
+  labels: string[];
   assignee: string;
   dueDate: string;
   meetingKey: string | null;
@@ -90,6 +117,7 @@ function readSessionExpiredReturnTo(search: string): string | null {
   return returnTo;
 }
 type TeamMember = {
+  memberId?: string;
   userId?: string;
   name: string;
   email: string;
@@ -177,6 +205,8 @@ const initialProjectTasks: Record<string, ProjectTaskState[]> = {
       title: "ERD 수정안 문서화",
       description: "3회차 결정사항 기준으로 외래키와 권한 관계를 정리합니다.",
       status: "TODO",
+      priority: "MEDIUM",
+      labels: [],
       assignee: "김진수",
       dueDate: "2026-07-12",
       meetingKey: "FinPilot Renewal:#03",
@@ -187,6 +217,8 @@ const initialProjectTasks: Record<string, ProjectTaskState[]> = {
       title: "접근 제어 UI 설계",
       description: "회의 ACL role과 override 상태를 화면에 반영합니다.",
       status: "IN_PROGRESS",
+      priority: "MEDIUM",
+      labels: [],
       assignee: "박서윤",
       dueDate: "2026-07-15",
       meetingKey: "FinPilot Renewal:#03",
@@ -199,6 +231,8 @@ const initialProjectTasks: Record<string, ProjectTaskState[]> = {
       title: "운영 자동화 예외 케이스 정리",
       description: "관리자 권한별 승인 흐름과 실패 케이스를 문서화합니다.",
       status: "TODO",
+      priority: "MEDIUM",
+      labels: [],
       assignee: "정하늘",
       dueDate: "2026-07-18",
       meetingKey: "Campus Admin Assistant:#02",
@@ -277,6 +311,8 @@ function buildMeeting(projectName: string, description: string, count: number, p
     date: `${String(scheduledDate.getMonth() + 1).padStart(2, "0")}.${String(scheduledDate.getDate()).padStart(2, "0")}`,
     state: "예정",
     scheduledAt: scheduledDate.toISOString(),
+    scheduledEndAt: payload?.scheduledEndAt ?? new Date(scheduledDate.getTime() + 60 * 60 * 1000).toISOString(),
+    description: payload?.description?.trim() || null,
     durationMinutes: 60
   };
 }
@@ -320,6 +356,10 @@ function meetingStateStatus(state: ProjectMeeting["state"]): MeetingStatus | nul
 
 function toProjectMeeting(meeting: MeetingSummary, index: number): ProjectMeeting {
   const scheduledAt = new Date(meeting.scheduledAt);
+  const scheduledEndAt = new Date(meeting.scheduledEndAt);
+  const durationMinutes = !Number.isNaN(scheduledAt.getTime()) && !Number.isNaN(scheduledEndAt.getTime())
+    ? Math.max(1, Math.round((scheduledEndAt.getTime() - scheduledAt.getTime()) / 60_000))
+    : 60;
   return {
     id: meeting.id,
     index: `#${String(index + 1).padStart(2, "0")}`,
@@ -329,7 +369,9 @@ function toProjectMeeting(meeting: MeetingSummary, index: number): ProjectMeetin
       : `${String(scheduledAt.getMonth() + 1).padStart(2, "0")}.${String(scheduledAt.getDate()).padStart(2, "0")}`,
     state: meetingStatusLabel(meeting.status),
     scheduledAt: meeting.scheduledAt,
-    durationMinutes: 60,
+    scheduledEndAt: meeting.scheduledEndAt,
+    description: meeting.description,
+    durationMinutes,
     myRole: meeting.myRole
   };
 }
@@ -357,6 +399,7 @@ function toMeetingParticipantState(
 function mapSpaceMember(member: SpaceMemberSummary): TeamMember {
   const displayName = member.displayName?.trim() || member.email?.trim() || "이름 미등록 멤버";
   return {
+    memberId: member.id,
     userId: member.userId,
     name: displayName,
     email: member.email?.trim() || `unknown-${member.userId}@meetingmind.local`,
@@ -381,6 +424,28 @@ function mapWorkspaceSpace(space: SpaceSummary, meetingCount: number, memberCoun
   };
 }
 
+function mapTaskCard(
+  task: TaskCard,
+  projectName: string,
+  meetings: ProjectMeeting[],
+  members: TeamMember[]
+): ProjectTaskState {
+  const meeting = meetings.find((candidate) => candidate.id === task.meetingId);
+  const assignee = members.find((member) => member.userId === task.assigneeId);
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description ?? "상세 설명이 아직 작성되지 않았습니다.",
+    status: task.status,
+    priority: task.priority,
+    labels: task.labels,
+    assignee: assignee?.name ?? "미지정",
+    dueDate: task.dueDate ?? "",
+    meetingKey: meeting ? buildMeetingKey(projectName, meeting.index) : null,
+    sourceCandidateId: task.sourceCandidateId
+  };
+}
+
 function ProtectedRoute({
   children,
   loading,
@@ -398,14 +463,14 @@ function ProtectedRoute({
     if (!loading && !session) {
       onRequestLogin();
     }
-  }, [loading, location.pathname, location.search, onRequestLogin, session]);
+  }, [loading, location.hash, location.pathname, location.search, onRequestLogin, session]);
 
   if (loading) {
     return null;
   }
 
   if (!session) {
-    return <Navigate replace state={{ requestedPath: `${location.pathname}${location.search}` }} to="/" />;
+    return <Navigate replace state={{ requestedPath: `${location.pathname}${location.search}${location.hash}` }} to="/" />;
   }
 
   return <>{children}</>;
@@ -420,6 +485,7 @@ export function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [data, setData] = useState<WorkspaceData>(mockData);
   const [workspaceDataSource, setWorkspaceDataSource] = useState<WorkspaceDataSource>("mock-fallback");
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummaryResponse | null>(null);
   const [projectMeetings, setProjectMeetings] = useState<Record<string, ProjectMeeting[]>>(initialProjectMeetings);
   const [projectMembers, setProjectMembers] = useState<Record<string, TeamMember[]>>(initialProjectMembers);
   const [projectRequests, setProjectRequests] = useState<Record<string, JoinRequest[]>>(initialProjectRequests);
@@ -427,6 +493,7 @@ export function App() {
   const [latestMeetingInvites, setLatestMeetingInvites] = useState<Record<string, MeetingInviteMeta>>({});
   const [meetingParticipants, setMeetingParticipants] = useState<Record<string, MeetingParticipantState[]>>({});
   const [projectTasks, setProjectTasks] = useState<Record<string, ProjectTaskState[]>>(initialProjectTasks);
+  const [projectKnowledge, setProjectKnowledge] = useState<Record<string, ProjectKnowledgeItem[]>>({});
   const [projectAiSpaceIds, setProjectAiSpaceIds] = useState<string[]>([]);
   const [meetingMutationError, setMeetingMutationError] = useState("");
   const [meetingMutationLoading, setMeetingMutationLoading] = useState(false);
@@ -526,6 +593,36 @@ export function App() {
     return detailResults.every((result) => result.status === "fulfilled");
   }, []);
 
+  const refreshTargetTasks = useCallback(async (session: AuthSession, spaceId: string, projectName: string) => {
+    const response = await fetchTasks(session, spaceId);
+    setProjectTasks((previous) => ({
+      ...previous,
+      [projectName]: response.tasks.map((task) =>
+        mapTaskCard(task, projectName, projectMeetings[projectName] ?? [], projectMembers[projectName] ?? [])
+      )
+    }));
+  }, [projectMeetings, projectMembers]);
+
+  const refreshProjectKnowledge = useCallback(async (session: AuthSession, spaceId: string) => {
+    const response = await fetchProjectKnowledge(session, spaceId);
+    setProjectKnowledge((previous) => ({ ...previous, [spaceId]: response.items }));
+  }, []);
+
+  const refreshTargetMembers = useCallback(async (session: AuthSession, spaceId: string, projectName: string) => {
+    const response = await fetchSpaceMembers(session, spaceId);
+    const members = response.members.map(mapSpaceMember);
+    setProjectMembers((previous) => ({ ...previous, [projectName]: members }));
+    setData((previous) => ({
+      ...previous,
+      workspaceHome: {
+        ...previous.workspaceHome,
+        spaces: previous.workspaceHome.spaces.map((space) =>
+          space.id === spaceId ? { ...space, members: `멤버 ${members.length}명` } : space
+        )
+      }
+    }));
+  }, []);
+
   function handleAuthSuccess(session: AuthSession) {
     setAuthSession(session);
     setLatestMeetingInvites({});
@@ -560,6 +657,7 @@ export function App() {
     setAuthModalOpen(false);
     setData(mockData);
     setWorkspaceDataSource("mock-fallback");
+    setDashboardSummary(null);
     setProjectMeetings(initialProjectMeetings);
     setProjectMembers(initialProjectMembers);
     setProjectRequests(initialProjectRequests);
@@ -567,6 +665,7 @@ export function App() {
     setLatestMeetingInvites({});
     setMeetingParticipants({});
     setProjectTasks(initialProjectTasks);
+    setProjectKnowledge({});
     setProjectAiSpaceIds([]);
     setMeetingMutationError("");
     setMeetingMutationLoading(false);
@@ -614,6 +713,7 @@ export function App() {
     setProjectRequests((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
     setProjectInvites((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? buildInviteMeta(normalizedName) }));
     setProjectTasks((previous) => ({ ...previous, [normalizedName]: previous[normalizedName] ?? [] }));
+    setProjectKnowledge((previous) => ({ ...previous, [spaceId]: previous[spaceId] ?? [] }));
     setProjectAiSpaceIds((previous) => (previous.includes(spaceId) ? previous : [...previous, spaceId]));
 
     setData((previous) => {
@@ -638,18 +738,34 @@ export function App() {
     });
   }
 
-  function handleUpdateProject(spaceId: string, { name, description }: UpdateProjectPayload) {
+  async function handleUpdateProject(spaceId: string, { name, description }: UpdateProjectPayload): Promise<boolean> {
     const normalizedName = name.trim();
     if (!normalizedName) {
-      return;
+      return false;
     }
 
     const currentSpace = data.workspaceHome.spaces.find((space) => space.id === spaceId);
     if (!currentSpace) {
-      return;
+      return false;
     }
 
     const previousName = currentSpace.name;
+    if (projectAiSpaceIds.includes(spaceId)) {
+      if (!authSession) {
+        setMeetingMutationError("로그인이 필요합니다.");
+        return false;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await updateSpace(authSession, spaceId, { name: normalizedName, description: description.trim() || null });
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "프로젝트 정보를 수정하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+    }
 
     setData((previous) => ({
       ...previous,
@@ -719,12 +835,34 @@ export function App() {
         return next;
       });
     }
+    return true;
   }
 
-  function handleDeleteProject(spaceId: string) {
+  async function handleDeleteProject(spaceId: string): Promise<boolean> {
     const currentSpace = data.workspaceHome.spaces.find((space) => space.id === spaceId);
     if (!currentSpace) {
-      return;
+      return false;
+    }
+
+    if (projectAiSpaceIds.includes(spaceId)) {
+      if (!authSession) {
+        setMeetingMutationError("로그인이 필요합니다.");
+        return false;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        const result = await deleteSpace(authSession, spaceId);
+        if (!result.deleted) {
+          setMeetingMutationError("프로젝트를 삭제하지 못했습니다.");
+          return false;
+        }
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "프로젝트를 삭제하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
     }
 
     setData((previous) => ({
@@ -780,6 +918,7 @@ export function App() {
     });
 
     navigate("/spaces");
+    return true;
   }
 
   async function handleCreateMeeting(projectName: string, payload?: CreateMeetingPayload): Promise<boolean> {
@@ -790,8 +929,8 @@ export function App() {
 
     const usesTargetApi = projectAiSpaceIds.includes(targetSpace.id);
     if (usesTargetApi) {
-      if (!authSession || !payload?.title || !payload.scheduledAt) {
-        setMeetingMutationError("로그인과 회의 제목, 예정 일시가 필요합니다.");
+      if (!authSession || !payload?.title || !payload.scheduledAt || !payload.scheduledEndAt) {
+        setMeetingMutationError("로그인과 회의 제목, 예정 시작·종료 일시가 필요합니다.");
         return false;
       }
       const meetingTitle = payload.title;
@@ -811,7 +950,9 @@ export function App() {
       try {
         const created = await createMeeting(authSession, targetSpace.id, {
           title: meetingTitle,
+          description: payload.description,
           scheduledAt,
+          scheduledEndAt: payload.scheduledEndAt,
           participantUserIds
         });
         setLatestMeetingInvites((previous) => ({
@@ -983,11 +1124,17 @@ export function App() {
           return current;
         }
         const scheduledAt = updates.scheduledAt ?? current.scheduledAt;
+        const scheduledEndAt = updates.scheduledEndAt ?? current.scheduledEndAt;
         const date = scheduledAt ? new Date(scheduledAt) : null;
         return {
           ...current,
           title: updates.title ?? current.title,
+          description: updates.description ?? current.description,
           scheduledAt,
+          scheduledEndAt,
+          durationMinutes: scheduledAt && scheduledEndAt
+            ? Math.max(1, Math.round((new Date(scheduledEndAt).getTime() - new Date(scheduledAt).getTime()) / 60_000))
+            : current.durationMinutes,
           date: date
             ? `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`
             : current.date,
@@ -1014,7 +1161,7 @@ export function App() {
   async function handleUpdateMeetingDetails(
     projectName: string,
     meetingIndex: string,
-    updates: Pick<UpdateMeetingRequest, "title" | "scheduledAt">
+    updates: Pick<UpdateMeetingRequest, "title" | "description" | "scheduledAt" | "scheduledEndAt">
   ): Promise<boolean> {
     return handleUpdateMeeting(projectName, meetingIndex, updates);
   }
@@ -1135,10 +1282,43 @@ export function App() {
     return true;
   }
 
-  function handleCreateProjectTask(
+  async function handleCreateProjectTask(
     projectName: string,
     task: Omit<ProjectTaskState, "id" | "sourceCandidateId">
-  ) {
+  ): Promise<boolean> {
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    if (targetSpace && projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession) {
+        setMeetingMutationError("로그인이 필요합니다.");
+        return false;
+      }
+      const assigneeId = projectMembers[projectName]?.find((member) => member.name === task.assignee)?.userId ?? null;
+      const meetingKeyParts = task.meetingKey?.split(":") ?? [];
+      const meetingIndex = meetingKeyParts[meetingKeyParts.length - 1];
+      const meetingId = meetingIndex
+        ? projectMeetings[projectName]?.find((meeting) => meeting.index === meetingIndex)?.id ?? null
+        : null;
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await createTask(authSession, targetSpace.id, {
+          title: task.title,
+          description: task.description,
+          assigneeId,
+          dueDate: task.dueDate || null,
+          meetingId,
+          priority: task.priority,
+          labels: task.labels
+        });
+        await refreshTargetTasks(authSession, targetSpace.id, projectName);
+        return true;
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "칸반 카드를 생성하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+    }
     setProjectTasks((previous) => {
       const currentTasks = previous[projectName] ?? [];
       return {
@@ -1153,33 +1333,181 @@ export function App() {
         ]
       };
     });
+    return true;
   }
 
-  function handleMoveProjectTask(projectName: string, taskId: string, status: ProjectTaskState["status"]) {
-    setProjectTasks((previous) => ({
-      ...previous,
-      [projectName]: (previous[projectName] ?? []).map((task) => (task.id === taskId ? { ...task, status } : task))
-    }));
+  async function handleMoveProjectTask(projectName: string, taskId: string, status: ProjectTaskState["status"]): Promise<boolean> {
+    return handleUpdateProjectTask(projectName, taskId, { status });
   }
 
-  function handleUpdateProjectTask(
+  async function handleUpdateProjectTask(
     projectName: string,
     taskId: string,
-    updates: Pick<ProjectTaskState, "assignee" | "description" | "dueDate" | "status" | "title">
-  ) {
+    updates: Partial<Pick<ProjectTaskState, "assignee" | "description" | "dueDate" | "status" | "priority" | "labels" | "title">>
+  ): Promise<boolean> {
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    if (targetSpace && projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession) {
+        setMeetingMutationError("로그인이 필요합니다.");
+        return false;
+      }
+      const assigneeId = updates.assignee === undefined
+        ? undefined
+        : projectMembers[projectName]?.find((member) => member.name === updates.assignee)?.userId ?? null;
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await updateTask(authSession, targetSpace.id, taskId, {
+          title: updates.title,
+          description: updates.description,
+          assigneeId,
+          dueDate: updates.dueDate === undefined ? undefined : updates.dueDate || null,
+          status: updates.status,
+          priority: updates.priority,
+          labels: updates.labels
+        });
+        await refreshTargetTasks(authSession, targetSpace.id, projectName);
+        return true;
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "칸반 카드를 수정하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+    }
     setProjectTasks((previous) => ({
       ...previous,
-      [projectName]: (previous[projectName] ?? []).map((task) =>
-        task.id === taskId ? { ...task, ...updates } : task
-      )
+      [projectName]: (previous[projectName] ?? []).map((task) => (task.id === taskId ? { ...task, ...updates } : task))
     }));
+    return true;
   }
 
-  function handleDeleteProjectTask(projectName: string, taskId: string) {
+  async function handleDeleteProjectTask(projectName: string, taskId: string): Promise<boolean> {
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    if (targetSpace && projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession) {
+        setMeetingMutationError("로그인이 필요합니다.");
+        return false;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        const result = await deleteTask(authSession, targetSpace.id, taskId);
+        if (!result.deleted) {
+          setMeetingMutationError("칸반 카드를 삭제하지 못했습니다.");
+          return false;
+        }
+        await refreshTargetTasks(authSession, targetSpace.id, projectName);
+        return true;
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "칸반 카드를 삭제하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+    }
     setProjectTasks((previous) => ({
       ...previous,
       [projectName]: (previous[projectName] ?? []).filter((task) => task.id !== taskId)
     }));
+    return true;
+  }
+
+  async function handleCreateProjectKnowledge(
+    spaceId: string,
+    request: CreateProjectKnowledgeRequest
+  ): Promise<boolean> {
+    if (!authSession) {
+      setMeetingMutationError("로그인이 필요합니다.");
+      return false;
+    }
+    setMeetingMutationError("");
+    setMeetingMutationLoading(true);
+    try {
+      await createProjectKnowledge(authSession, spaceId, request);
+      await refreshProjectKnowledge(authSession, spaceId);
+      return true;
+    } catch (error) {
+      setMeetingMutationError(error instanceof Error ? error.message : "공식 지식을 등록하지 못했습니다.");
+      return false;
+    } finally {
+      setMeetingMutationLoading(false);
+    }
+  }
+
+  async function handleUpdateProjectKnowledge(
+    spaceId: string,
+    knowledgeId: string,
+    request: UpdateProjectKnowledgeRequest
+  ): Promise<boolean> {
+    if (!authSession) {
+      setMeetingMutationError("로그인이 필요합니다.");
+      return false;
+    }
+    setMeetingMutationError("");
+    setMeetingMutationLoading(true);
+    try {
+      await updateProjectKnowledge(authSession, spaceId, knowledgeId, request);
+      await refreshProjectKnowledge(authSession, spaceId);
+      return true;
+    } catch (error) {
+      setMeetingMutationError(error instanceof Error ? error.message : "공식 지식을 수정하지 못했습니다.");
+      return false;
+    } finally {
+      setMeetingMutationLoading(false);
+    }
+  }
+
+  async function handleDeleteProjectKnowledge(spaceId: string, knowledgeId: string): Promise<boolean> {
+    if (!authSession) {
+      setMeetingMutationError("로그인이 필요합니다.");
+      return false;
+    }
+    setMeetingMutationError("");
+    setMeetingMutationLoading(true);
+    try {
+      const result = await deleteProjectKnowledge(authSession, spaceId, knowledgeId);
+      if (!result.deleted) {
+        return false;
+      }
+      await refreshProjectKnowledge(authSession, spaceId);
+      return true;
+    } catch (error) {
+      setMeetingMutationError(error instanceof Error ? error.message : "공식 지식을 삭제하지 못했습니다.");
+      return false;
+    } finally {
+      setMeetingMutationLoading(false);
+    }
+  }
+
+  async function handleCreateSpaceInvitation(
+    spaceId: string,
+    email: string,
+    role: "ADMIN" | "MEMBER"
+  ): Promise<{ invitationId: string; inviteUrl: string; expiresAt: string }> {
+    if (!authSession) {
+      throw new Error("로그인이 필요합니다.");
+    }
+    if (!projectAiSpaceIds.includes(spaceId)) {
+      throw new Error("데모 Space에서는 이메일 초대를 생성할 수 없습니다.");
+    }
+    setMeetingMutationError("");
+    setMeetingMutationLoading(true);
+    try {
+      const invitation = await createSpaceInvitation(authSession, spaceId, { email, role });
+      const invitationPath = `/space-invitations/${encodeURIComponent(spaceId)}/${encodeURIComponent(invitation.invitationId)}`;
+      return {
+        invitationId: invitation.invitationId,
+        inviteUrl: `${window.location.origin}${invitationPath}#token=${encodeURIComponent(invitation.inviteToken)}`,
+        expiresAt: invitation.expiresAt
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Space 초대를 생성하지 못했습니다.";
+      setMeetingMutationError(message);
+      throw new Error(message);
+    } finally {
+      setMeetingMutationLoading(false);
+    }
   }
 
   function handleApproveJoinRequest(projectName: string, requestId: string) {
@@ -1218,11 +1546,31 @@ export function App() {
     }));
   }
 
-  function handleUpdateSpaceMemberRole(
+  async function handleUpdateSpaceMemberRole(
     projectName: string,
+    memberId: string | undefined,
     memberEmail: string,
     spaceRole: Exclude<TeamMember["spaceRole"], "OWNER">
-  ) {
+  ): Promise<boolean> {
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    if (targetSpace && projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession || !memberId) {
+        setMeetingMutationError("대상 멤버 정보를 확인할 수 없습니다.");
+        return false;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await updateSpaceMemberRole(authSession, targetSpace.id, memberId, { role: spaceRole });
+        await refreshTargetMembers(authSession, targetSpace.id, projectName);
+        return true;
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "멤버 역할을 변경하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
+    }
     setProjectMembers((previous) => ({
       ...previous,
       [projectName]: (previous[projectName] ?? []).map((member) =>
@@ -1231,12 +1579,41 @@ export function App() {
           : member
       )
     }));
+    return true;
   }
 
-  function handleRemoveSpaceMember(projectName: string, memberEmail: string) {
+  async function handleRemoveSpaceMember(
+    projectName: string,
+    memberId: string | undefined,
+    memberEmail: string
+  ): Promise<boolean> {
     const member = projectMembers[projectName]?.find((item) => item.email === memberEmail);
     if (!member || member.spaceRole === "OWNER") {
-      return;
+      return false;
+    }
+
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    if (targetSpace && projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession || !memberId) {
+        setMeetingMutationError("대상 멤버 정보를 확인할 수 없습니다.");
+        return false;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        const result = await removeSpaceMember(authSession, targetSpace.id, memberId);
+        if (!result.removed) {
+          setMeetingMutationError("멤버를 제거하지 못했습니다.");
+          return false;
+        }
+        await refreshTargetMembers(authSession, targetSpace.id, projectName);
+        return true;
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "멤버를 제거하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
     }
 
     setProjectMembers((previous) => {
@@ -1269,16 +1646,42 @@ export function App() {
       });
       return next;
     });
+    return true;
   }
 
-  function handleTransferProjectOwner(
+  async function handleTransferProjectOwner(
     projectName: string,
+    targetMemberId: string | undefined,
     targetMemberEmail: string,
     previousOwnerRole: Exclude<TeamMember["spaceRole"], "OWNER">,
     confirmation: string
-  ) {
+  ): Promise<boolean> {
     if (confirmation !== "TRANSFER OWNER") {
-      return;
+      return false;
+    }
+
+    const targetSpace = data.workspaceHome.spaces.find((space) => space.name === projectName);
+    if (targetSpace && projectAiSpaceIds.includes(targetSpace.id)) {
+      if (!authSession || !targetMemberId) {
+        setMeetingMutationError("새 owner 정보를 확인할 수 없습니다.");
+        return false;
+      }
+      setMeetingMutationError("");
+      setMeetingMutationLoading(true);
+      try {
+        await transferSpaceOwner(authSession, targetSpace.id, {
+          targetMemberId,
+          previousOwnerRole,
+          confirmation
+        });
+        await refreshTargetMembers(authSession, targetSpace.id, projectName);
+        return true;
+      } catch (error) {
+        setMeetingMutationError(error instanceof Error ? error.message : "Owner 권한을 이양하지 못했습니다.");
+        return false;
+      } finally {
+        setMeetingMutationLoading(false);
+      }
     }
 
     setProjectMembers((previous) => {
@@ -1305,6 +1708,7 @@ export function App() {
         })
       };
     });
+    return true;
   }
 
   useEffect(() => {
@@ -1318,9 +1722,10 @@ export function App() {
     let active = true;
 
     async function loadWorkspace() {
-      const [legacyResult, spacesResult] = await Promise.allSettled([
+      const [legacyResult, spacesResult, dashboardResult] = await Promise.allSettled([
         fetchLegacyWorkspaceSnapshot(session),
-        fetchSpaces(session)
+        fetchSpaces(session),
+        fetchDashboardSummary(session)
       ]);
       if (!active) {
         return;
@@ -1337,6 +1742,7 @@ export function App() {
 
       if (spacesResult.status === "rejected") {
         setData(baseData);
+        setDashboardSummary(null);
         setProjectAiSpaceIds([]);
         setWorkspaceDataSource(legacyData ? "legacy-api" : "mock-fallback");
         return;
@@ -1344,19 +1750,25 @@ export function App() {
 
       const resources = await Promise.all(
         spacesResult.value.spaces.map(async (space) => {
-          const [meetingsResult, membersResult] = await Promise.allSettled([
+          const [meetingsResult, membersResult, tasksResult, knowledgeResult] = await Promise.allSettled([
             fetchMeetings(session, space.id),
-            fetchSpaceMembers(session, space.id)
+            fetchSpaceMembers(session, space.id),
+            fetchTasks(session, space.id),
+            fetchProjectKnowledge(session, space.id)
           ]);
-          return { space, meetingsResult, membersResult };
+          return { space, meetingsResult, membersResult, tasksResult, knowledgeResult };
         })
       );
       if (!active) {
         return;
       }
 
-      const hasPartialFailure = resources.some(
-        ({ meetingsResult, membersResult }) => meetingsResult.status === "rejected" || membersResult.status === "rejected"
+      const hasPartialFailure = dashboardResult.status === "rejected" || resources.some(
+        ({ meetingsResult, membersResult, tasksResult, knowledgeResult }) =>
+          meetingsResult.status === "rejected"
+          || membersResult.status === "rejected"
+          || tasksResult.status === "rejected"
+          || knowledgeResult.status === "rejected"
       );
       if (resources.some(({ membersResult }) => membersResult.status === "rejected")) {
         setMeetingMutationError("일부 프로젝트의 멤버 목록을 불러오지 못했습니다. 참여자 지정 기능이 제한될 수 있습니다.");
@@ -1374,6 +1786,7 @@ export function App() {
           )
         }
       });
+      setDashboardSummary(dashboardResult.status === "fulfilled" ? dashboardResult.value : null);
       setProjectMeetings((previous) => {
         const next = { ...previous };
         resources.forEach(({ space, meetingsResult }) => {
@@ -1401,6 +1814,24 @@ export function App() {
                     status: "active"
                   }
                 ];
+        });
+        return next;
+      });
+      setProjectTasks((previous) => {
+        const next = { ...previous };
+        resources.forEach(({ space, meetingsResult, membersResult, tasksResult }) => {
+          const meetings = meetingsResult.status === "fulfilled" ? meetingsResult.value.meetings.map(toProjectMeeting) : [];
+          const members = membersResult.status === "fulfilled" ? membersResult.value.members.map(mapSpaceMember) : [];
+          next[space.name] = tasksResult.status === "fulfilled"
+            ? tasksResult.value.tasks.map((task) => mapTaskCard(task, space.name, meetings, members))
+            : [];
+        });
+        return next;
+      });
+      setProjectKnowledge((previous) => {
+        const next = { ...previous };
+        resources.forEach(({ space, knowledgeResult }) => {
+          next[space.id] = knowledgeResult.status === "fulfilled" ? knowledgeResult.value.items : [];
         });
         return next;
       });
@@ -1439,19 +1870,22 @@ export function App() {
           path="/spaces"
           element={
             <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
-              <WorkspaceHomePage
-                actionItems={data.meetingAi.actions}
-                currentUserEmail={authSession?.user.email ?? ""}
-                data={data.workspaceHome}
-                dataSource={workspaceDataSource}
-                meetingMutationError={meetingMutationError}
-                meetingMutationLoading={meetingMutationLoading || meetingReadLoading}
-                latestMeetingInvites={latestMeetingInvites}
-                onCreateMeeting={handleCreateMeeting}
-                onCreateProject={handleCreateProject}
-                projectMembers={projectMembers}
-                projectMeetings={projectMeetings}
-              />
+              {authSession ? (
+                <WorkspaceHomePage
+                  actionItems={data.meetingAi.actions}
+                  currentUserEmail={authSession.user.email}
+                  data={data.workspaceHome}
+                  dataSource={workspaceDataSource}
+                  dashboardSummary={dashboardSummary}
+                  meetingMutationError={meetingMutationError}
+                  meetingMutationLoading={meetingMutationLoading || meetingReadLoading}
+                  latestMeetingInvites={latestMeetingInvites}
+                  onCreateMeeting={handleCreateMeeting}
+                  onCreateProject={handleCreateProject}
+                  projectMembers={projectMembers}
+                  session={authSession}
+                />
+              ) : null}
             </ProtectedRoute>
           }
         />
@@ -1460,6 +1894,14 @@ export function App() {
           element={
             <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
               {authSession ? <MeetingAccessPage session={authSession} /> : null}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/space-invitations/:spaceId/:invitationId"
+          element={
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
+              {authSession ? <SpaceInvitationPage session={authSession} /> : null}
             </ProtectedRoute>
           }
         />
@@ -1496,12 +1938,16 @@ export function App() {
                 onDeleteProject={handleDeleteProject}
                 onCreateMeeting={handleCreateMeeting}
                 onCreateProject={handleCreateProject}
+                onCreateProjectKnowledge={handleCreateProjectKnowledge}
                 onUpdateProject={handleUpdateProject}
+                onUpdateProjectKnowledge={handleUpdateProjectKnowledge}
+                onDeleteProjectKnowledge={handleDeleteProjectKnowledge}
                 onAddMeetingParticipant={handleAddMeetingParticipant}
                 onCreateProjectTask={handleCreateProjectTask}
                 projectMeetings={projectMeetings}
                 projectMembers={projectMembers}
                 projectTasks={projectTasks}
+                projectKnowledge={projectKnowledge}
                 meetingParticipants={meetingParticipants}
                 onDeleteMeeting={handleDeleteMeeting}
                 onDeleteProjectTask={handleDeleteProjectTask}
@@ -1523,6 +1969,7 @@ export function App() {
                 inviteMeta={projectInvites}
                 onApproveRequest={handleApproveJoinRequest}
                 onCreateProject={handleCreateProject}
+                onCreateSpaceInvitation={handleCreateSpaceInvitation}
                 onRemoveMember={handleRemoveSpaceMember}
                 onRejectRequest={handleRejectJoinRequest}
                 onTransferOwner={handleTransferProjectOwner}
@@ -1531,6 +1978,22 @@ export function App() {
                 projectMembers={projectMembers}
                 spaces={data.workspaceHome.spaces}
               />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/terms"
+          element={
+            <ProtectedRoute loading={authBootstrapLoading} onRequestLogin={openAuthModal} session={authSession}>
+              {authSession ? (
+                <DomainTermsPage
+                  currentUserEmail={authSession.user.email}
+                  onCreateProject={handleCreateProject}
+                  projectMembers={projectMembers}
+                  session={authSession}
+                  spaces={data.workspaceHome.spaces}
+                />
+              ) : null}
             </ProtectedRoute>
           }
         />

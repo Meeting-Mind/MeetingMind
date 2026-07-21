@@ -13,19 +13,22 @@
 | Q-005 | Low | 보고서 파일 포맷은 Markdown, HTML, PDF, DOCX 중 무엇을 우선할까? | Report Agent 저장/다운로드 구현 방향을 결정한다. | Decided | Markdown을 우선한다. PDF/DOCX export는 후속 옵션으로 둔다. |
 | Q-006 | Medium | Target API Base URL은 `/api/v1`로 고정할까, 현재 prototype 경로와 병행할까? | Frontend client 구성과 Backend route migration 순서를 결정한다. | Open | |
 | Q-007 | Medium | 실제 오디오 업로드는 multipart 직접 업로드로 시작할까, presigned URL 방식을 우선할까? | 대용량 파일 처리, S3 연동, 보안 경계를 결정한다. | Open | |
-| Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
-| Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Open | |
+| Q-008 | Medium | AI 회의록 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-RPT-02~03의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Decided | 생성 시각부터 7일이다. 만료 후보는 확정하거나 후보 기반 편집으로 draft를 만들 수 없고, 이력과 근거는 보존한다. |
+| Q-009 | Medium | AI 태스크 candidate는 생성 후 얼마 동안 확정할 수 있는가? | FR-TASK-02의 만료 candidate 거부와 정리 작업 기준을 결정한다. | Decided | 생성 시각부터 7일이다. 만료 후보는 TaskCard로 확정할 수 없으며, 이력과 근거는 보존하고 제외 처리만 허용한다. |
 | Q-010 | High | pgvector embedding model과 차원 수는 무엇으로 고정할까? | `vector(n)` 타입과 HNSW/IVFFlat index는 차원 수가 확정되어야 안전하게 생성할 수 있다. | Decided | MVP는 `text-embedding-3-small`, 1536차원, cosine exact search를 사용한다. 권한 선필터 후 후보가 5,000개를 넘거나 검색 p95가 1초를 지속적으로 초과하면 HNSW를 검토하고 IVFFlat은 기본 선택에서 제외한다. |
 | Q-011 | Medium | 회의 채팅 첨부파일을 어떤 방식으로 검색할까? | 텍스트·PDF·이미지를 같은 vector schema에 섞으면 추출 방식과 모델 차원이 불명확해진다. | Decided | MVP는 TXT, Markdown, 텍스트 추출 가능한 PDF만 추출 텍스트를 `text-embedding-3-small`로 임베딩한다. 이미지 파일, 이미지 전용 PDF, visual embedding과 Vision 기반 답변은 확장 범위로 둔다. |
+| Q-012 | High | 회의 채팅 첨부파일을 어디에 저장하고 어떤 완료 경계를 둘까? | Browser가 object storage credential을 얻지 않으면서 checksum·권한·RAG 색인 원자성을 보장해야 한다. | Decided | 운영은 private S3, 로컬은 private MinIO로 둔다. Core/BFF control plane이 15분 단일 사용 presigned upload URL을 발급하고, Core가 object HEAD/checksum/MIME를 확인한 뒤에만 `PROCESSING`으로 전환한다. 기본 제한은 TXT/Markdown/PDF/PNG/JPEG, 10 MiB/file, 10 files/message다. |
+| Q-013 | Medium | Project AI 대화 이력은 어느 범위로 재사용할까? | 대화 맥락은 유지하되 다른 사용자·권한 변경 전의 검색 근거가 재사용되면 안 된다. | Decided | 이력은 `spaceId`와 인증 `userId`별로 저장·조회한다. UI는 최신 50개를 시간순으로 보이고, 다음 요청에는 최근 10개만 비신뢰 문맥으로 보낸다. 매 요청마다 Backend가 현재 Space/Meeting scope를 다시 계산하며, 이력은 RAG source나 citation이 될 수 없다. |
 
 ## Blocking Decisions
 
 - Q-006은 Target API route를 실제 구현하기 전에 결정해야 한다. 단, Auth API는 충돌 최소화를 위해 `/api/v1/auth/*`로 먼저 시작한다.
 - Q-007은 실제 STT 파일 업로드 구현 전에 결정해야 한다.
-- Q-008은 candidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태·권한·current 전이는 먼저 구현할 수 있다.
-- Q-009는 TaskCandidate 만료 검증과 정리 작업 구현 전에 결정해야 한다. 상태 전이와 중복 확정 방지는 먼저 구현할 수 있다.
+- Q-008, Q-009는 7일 TTL로 결정됐고 candidate 확정 차단은 구현됐다. 물리 삭제 또는 archive 정리 작업은 retention 정책과 별도 결정으로 둔다.
 - Q-010은 D-032로 결정했다. 실제 embedding 생성 전 `vector(1536)` forward migration과 한국어 검색 평가 기준을 적용한다.
 - Q-011은 D-037로 결정했다. 첨부파일 데이터/API 계약 전까지 이미지 처리와 visual vector schema를 추가하지 않는다.
+- Q-012는 D-044로 결정했다. actual object storage adapter, malware scanner와 V15 forward migration은 M035 구현 task에서 만든다.
+- Q-013은 M048에서 결정했다. Project AI 이력은 별도 권한을 만들지 않고 현재 active SpaceMember 검증을 재사용한다.
 
 ## Q-001 Authentication Options
 
@@ -98,3 +101,8 @@
 - D-039: 회의 채팅 첨부파일 RAG의 MVP는 텍스트 검색으로 제한한다. TXT, Markdown, 텍스트 추출 가능한 PDF는 정규화된 추출 텍스트를 기존 `text-embedding-3-small` 1536차원 공간에 저장한다. 이미지 파일과 이미지 전용 PDF는 검색 대상에서 제외하고 visual embedding, OCR/Vision 설명 생성, 원본 기반 멀티모달 답변은 별도 확장 milestone에서 결정한다.
 - D-040: Auth는 기존 JDBC `AuthStore`와 `users` 테이블 관리 경계를 유지한다. Workspace와 Backend가 저장하는 AI artifact의 도메인 모델 자체를 JPA entity로 전환하며, 별도 `*Entity`-record 변환 계층은 두지 않는다. 전환 중에도 Flyway만 schema owner이며 `ddl-auto=validate`를 사용한다. `user_id` 계열 FK는 Auth entity 연관관계가 아닌 scalar ID로 유지하고, pgvector 검색/worker의 `embedding_jobs`/`embedding_chunks`는 native SQL/JDBC 경계를 유지한다.
 - D-041: 목표 브라우저 인증과 MSA 전환에서는 D-005의 Frontend token 저장을 폐기한다. 별도 Web BFF의 Redis 서버 세션, 암호화 Token Vault와 내부 Auth Service 계약은 `../002-bff-auth-msa/**`를 우선한다. D-005는 현재 구현 설명과 제한된 rollback에만 유효하다.
+- D-042: Space invitation은 이메일 바인딩 private token으로 처리한다. token 원문은 SHA-256 hash만 저장하고 생성 권한자에게 생성 응답에서 한 번만 반환하며, 기본 만료는 7일이다. 수락은 인증 사용자 이메일과 token hash가 모두 일치할 때만 SpaceMember를 생성한다. TaskCard 삭제는 `deletedAt` soft delete로 보존하며, 회의록 수동 수정은 기존 version을 변경하지 않고 새 `DRAFT` version을 만든다. 회의록 export는 Markdown을 먼저 지원하고 PDF/DOCX는 별도 task까지 `501`로 명시한다.
+- D-043: Space invitation Browser link는 `/space-invitations/{spaceId}/{invitationId}#token={token}` 형식을 사용한다. token은 URL fragment에만 두어 HTTP request와 referrer에 전달하지 않고, 로그인 후에도 fragment를 보존해 accept/decline request body로만 전송한다.
+- D-044: 회의 채팅 첨부파일은 현재 전달 범위에서 제외한다. M035 재개 시 private S3-compatible object storage, 15분 단일 사용 presigned upload, completion 검증, 텍스트 추출과 `ATTACHMENT_READY` job, 삭제·만료 chunk 비활성화 정책을 별도 contract와 migration으로 확정한다.
+- D-045: Project AI 대화 이력은 `ProjectAiMessage`로 `(spaceId, userId)`별 저장한다. 목록은 최근 50개, prompt 문맥은 최근 10개 turn으로 제한한다. Backend는 chat과 history 조회 모두에서 current active SpaceMember를 다시 확인하며, AI는 이력을 비신뢰 대화 문맥으로만 사용하고 현재 검색 source와 citation을 유일한 근거로 취급한다.
+- D-046: 회의 채팅 텍스트 첨부파일 RAG(M035)는 이번 전달 범위에서 제외한다. upload API, extractor, retriever, frontend 및 통합 검증은 후속 단계에서 다시 계획한다.

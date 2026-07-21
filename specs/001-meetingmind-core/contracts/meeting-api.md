@@ -18,7 +18,7 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend history list
 
 ### Auth and Permissions
 
@@ -50,7 +50,9 @@ Space 내 접근 가능한 회의 목록을 조회한다.
       "id": "meeting-001",
       "spaceId": "space-001",
       "title": "Sprint Planning #12",
+      "description": "다음 스프린트 범위와 담당자를 확정합니다.",
       "scheduledAt": "2026-07-10T10:00:00+09:00",
+      "scheduledEndAt": "2026-07-10T11:00:00+09:00",
       "status": "SCHEDULED",
       "myRole": "HOST"
     }
@@ -102,7 +104,9 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 ```json
 {
   "title": "Sprint Planning #12",
+  "description": "다음 스프린트 범위와 담당자를 확정합니다.",
   "scheduledAt": "2026-07-10T10:00:00+09:00",
+  "scheduledEndAt": "2026-07-10T11:00:00+09:00",
   "participantUserIds": []
 }
 ```
@@ -111,6 +115,8 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 
 - `title`: required, blank 금지
 - `scheduledAt`: required, ISO-8601
+- `scheduledEndAt`: required, ISO-8601이며 `scheduledAt`보다 이후
+- `description`: optional, blank면 null
 - `participantUserIds`: optional, 운영상 초기 ACL 지정용이다. 일반 사용자 참여는 회의 생성 후 URL/코드 참가 신청을 사용한다. 대상은 기존 사용자여야 하며 SpaceMember가 아니면 회의 단독 `guest` participant로 등록한다.
 - 회의 생성 결과의 `joinCode` 또는 `joinUrl`은 이후 참가 신청에 사용한다.
 
@@ -1224,6 +1230,56 @@ None. 출력 형식은 우선 `markdown`으로 고정한다.
 - candidate는 `MeetingReport.CANDIDATE`로 임시 저장하지만 공식 report나 Project AI source로 취급하지 않는다.
 - 기존 AI prototype endpoint는 Frontend에서 직접 호출하지 않는다.
 
+## POST /api/v1/meetings/{meetingId}/reports/{reportId}/ai-edits
+
+사용자 편집 지시와 현재 단일 회의 근거를 사용해 기존 회의록을 바탕으로 한 새 `CANDIDATE` 버전을 만든다. 기존 report는 수정하지 않으며, 반환 candidate는 일반 생성 candidate와 같은 확인·확정 흐름을 사용한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR`
+
+### Data Scope
+
+- path의 `meetingId`에 속한 대상 `reportId`
+- 현재 meeting의 transcript와 current confirmed report의 decision/action source
+- 다른 meeting, Project Knowledge, Browser가 제공한 source는 AI context에 포함하지 않는다.
+
+### Request
+
+```json
+{
+  "instruction": "요약을 임원 보고용으로 두 문장으로 줄이고 표 형식은 유지해줘."
+}
+```
+
+### Validation
+
+- `instruction`은 trim 후 필수이며 최대 1,000자다.
+- 대상 report는 해당 meeting에 속하고 호출자는 회의 편집 권한을 가져야 한다.
+- AI는 기존 report 본문과 instruction을 비신뢰 편집 문맥으로만 사용한다. 수정된 사실의 근거와 `sourceIds`는 이번 요청의 single-meeting source에서만 선택한다.
+- 근거가 없거나 provider 응답의 citation이 검증되지 않으면 candidate를 저장하지 않고 `200 + unsupported=true`를 반환한다.
+
+### Response
+
+`POST /reports/generate`와 같은 `ReportCandidateGenerationResponse`다. `candidate`는 새 `CANDIDATE` version이며, 기존 report의 version/current 값은 바뀌지 않는다.
+
+### Errors
+
+- `400 INVALID_REQUEST`: instruction이 비어 있거나 길이 제한을 넘는다.
+- `403 MEETING_ACCESS_DENIED`: 편집 권한 없음.
+- `404 REPORT_NOT_FOUND`: report 없음 또는 path meeting과 불일치.
+- `503 AI_PROVIDER_UNAVAILABLE`: provider timeout, 연결 실패, structured output 오류.
+
+### Requirement Trace
+
+- FR-RPT-04: AI 대화 편집
+- FR-RPT-06: 새 version candidate와 이력 보존
+
 ## GET /api/v1/meetings/{meetingId}/reports
 
 회의록 목록 또는 현재 회의록을 조회한다.
@@ -1285,8 +1341,81 @@ None. 출력 형식은 우선 `markdown`으로 고정한다.
 
 ### Notes
 
-- 버전별 상세 조회가 필요하면 `GET /reports/{reportId}`를 추가한다.
+- 버전별 상세 조회는 `GET /reports/{reportId}`를 사용한다.
 - 회의당 `status=CONFIRMED`이고 `isCurrent=true`인 report는 최대 1개다.
+
+## GET /api/v1/meetings/{meetingId}/reports/{reportId}
+
+선택한 회의록 version의 원문과 source metadata를 조회한다.
+
+### Status
+
+- Implemented: Core API + BFF allowlist + Frontend history preview
+
+### Auth and Permissions
+
+- 인증 필요
+- 해당 회의 접근 권한 필요
+
+### Response
+
+```json
+{
+  "id": "report-001",
+  "meetingId": "meeting-001",
+  "status": "CONFIRMED",
+  "title": "Sprint Planning #12 회의록",
+  "summary": "권한 분리와 ERD 수정이 논의되었습니다.",
+  "markdown": "## 요약\n권한 분리와 ERD 수정이 논의되었습니다.",
+  "version": 1,
+  "isCurrent": false,
+  "createdAt": "2026-07-20T10:00:00Z",
+  "confirmedAt": "2026-07-20T10:10:00Z",
+  "sourceIds": ["segment-001"]
+}
+```
+
+### Errors
+
+- `403 MEETING_ACCESS_DENIED`: 회의록 접근 권한 없음
+- `404 REPORT_NOT_FOUND`: report 없음 또는 path meeting과 불일치
+
+## POST /api/v1/meetings/{meetingId}/reports/{reportId}/restore
+
+과거 회의록 version을 바탕으로 새 `DRAFT` version을 만든다. 기존 version은 변경하지 않는다.
+
+### Status
+
+- Implemented: Core API + BFF allowlist + Frontend history action
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 회의 `HOST`/`EDITOR`
+
+### Response
+
+```json
+{
+  "id": "report-003",
+  "status": "DRAFT",
+  "version": 3,
+  "sourceReportId": "report-001"
+}
+```
+
+### Errors
+
+- `403 MEETING_ACCESS_DENIED`: 복원 권한 없음
+- `404 REPORT_NOT_FOUND`: report 없음 또는 path meeting과 불일치
+
+### Audit
+
+- `REPORT_RESTORED`
+
+### Notes
+
+- 복원된 초안은 별도 version이므로 기존 확정 report의 `isCurrent`는 바뀌지 않는다.
 
 ## POST /api/v1/meetings/{meetingId}/reports/{reportId}/confirm
 
@@ -1294,7 +1423,7 @@ AI가 만든 `CANDIDATE` 회의록을 공식 회의록으로 확정한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend save action
 
 ### Auth and Permissions
 
@@ -1316,7 +1445,7 @@ None.
 - 새 report를 확정하면 기존 current confirmed report는 `isCurrent=false`가 된다.
 - 중복 확정은 `400 INVALID_REQUEST`로 거부한다.
 - 대상 report보다 높은 version이 존재하면 오래된 candidate 확정을 `409 REPORT_VERSION_CONFLICT`로 거부한다.
-- candidate 만료 검증은 `Q-008` 정책 결정 후 추가한다.
+- candidate는 생성 후 7일 안에만 확정할 수 있다. 만료되면 `409 CANDIDATE_EXPIRED`로 거부한다.
 
 ### Response
 
@@ -1411,7 +1540,7 @@ None.
 
 ### Notes
 
-- AI 대화형 수정은 AI API에서 후보를 만들고 이 endpoint로 저장한다.
+- AI 대화형 수정은 AI API에서 후보를 만들고 이 endpoint로 저장한다. 만료된 `CANDIDATE`를 source로 새 draft를 만드는 요청은 `409 CANDIDATE_EXPIRED`로 거부한다.
 
 ## GET /api/v1/meetings/{meetingId}/reports/{reportId}/download
 
@@ -1432,7 +1561,7 @@ None.
 
 ### Query
 
-- `format`: `markdown`, `pdf`, `docx`
+- `format`: `markdown`, `docx`, `pdf`를 지원한다.
 
 ### Validation
 
@@ -1459,4 +1588,4 @@ Binary file response.
 
 ### Notes
 
-- PDF/DOCX 생성 방식은 별도 구현 task에서 확정한다.
+- Markdown은 UTF-8 attachment로 내려준다. DOCX와 PDF는 서버가 보유한 report title과 Markdown(없으면 summary) 텍스트만 포함한다. PDF는 application resource의 `NanumGothic-Regular.ttf`를 embed하므로 배포 서버 시스템 폰트에 의존하지 않는다. 해당 글꼴과 SIL Open Font License 1.1 전문은 `backend/src/main/resources/fonts/`에 함께 둔다.

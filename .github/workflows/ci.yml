@@ -367,7 +367,15 @@ jobs:
           sudo install /tmp/gitleaks /usr/local/bin/gitleaks
 
       - name: Scan repository history
-        run: gitleaks git . --redact --no-banner
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gitleaks git . \
+              --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
+              --redact \
+              --no-banner
+          else
+            gitleaks git . --redact --no-banner
+          fi
 
   gate:
     name: CI Gate

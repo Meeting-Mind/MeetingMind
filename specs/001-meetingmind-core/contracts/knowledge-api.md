@@ -17,7 +17,7 @@ Space의 공식 Project Knowledge 목록을 조회한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend management screen
 
 ### Auth and Permissions
 
@@ -79,13 +79,51 @@ Space의 공식 Project Knowledge 목록을 조회한다.
 
 - 목록 조회는 embedding content 전체를 노출하지 않는다.
 
+## GET /api/v1/spaces/{spaceId}/knowledge/{knowledgeId}
+
+공식 Project Knowledge 원문을 조회한다. 수정 화면은 목록의 `contentPreview` 대신 이 응답을 사용한다.
+
+### Status
+
+- Implemented: Core API + BFF allowlist + Frontend management screen
+
+### Auth and Permissions
+
+- 인증 필요
+- Space 접근 권한 필요
+- `sourceMeetingId`는 사용자가 원본 회의 접근 권한을 가질 때만 반환한다.
+
+### Response
+
+```json
+{
+  "id": "knowledge-001",
+  "spaceId": "space-001",
+  "type": "manual",
+  "title": "권한 설계 메모",
+  "content": "Project AI는 공식 지식과 접근 가능한 회의만 검색한다.",
+  "sourceMeetingId": null,
+  "embeddingStatus": "COMPLETED",
+  "updatedAt": "2026-07-20T10:00:00Z"
+}
+```
+
+### Errors
+
+- `403 SPACE_ACCESS_DENIED`: Space 접근 권한 없음
+- `404 PROJECT_KNOWLEDGE_NOT_FOUND`: knowledge 없음 또는 archive됨
+
+### Notes
+
+- 상세 원문은 화면 편집을 위해서만 조회하며, Project AI 검색 범위는 `PUBLISHED` 상태로 별도 제한된다.
+
 ## POST /api/v1/spaces/{spaceId}/knowledge
 
 공식 Project Knowledge를 등록한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend management screen
 
 ### Auth and Permissions
 
@@ -154,7 +192,7 @@ Project Knowledge를 수정한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend management screen
 
 ### Auth and Permissions
 
@@ -219,7 +257,7 @@ Project Knowledge를 삭제 또는 비활성화한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend management screen
 
 ### Auth and Permissions
 
@@ -433,6 +471,7 @@ Space 용어사전 목록을 조회한다.
 - `400 INVALID_REQUEST`: 입력 검증 실패
 - `403 SPACE_ACCESS_DENIED`: 수정 권한 없음
 - `404 SPACE_NOT_FOUND`: Space 또는 term 없음
+- `409 INVALID_REQUEST`: 활성 용어명 중복
 
 ### Audit
 
@@ -453,7 +492,7 @@ Space 용어사전 목록을 조회한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend management screen
 
 ### Auth and Permissions
 

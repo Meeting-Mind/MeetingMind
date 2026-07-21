@@ -207,6 +207,18 @@
 - soft-deleted meeting은 관계형 조회와 AI context 선필터 단계에서 제외한다.
 - hard purge, restore, grace period는 M033 성공으로 간주하지 않고 후속 운영 정책으로 남긴다.
 
+## M035 Meeting Attachment RAG
+
+Deferred from the current delivery phase. The scenarios remain the acceptance baseline for the next phase and are not executed in this phase.
+
+| ID | Scenario | Given | Action | Expected | Source |
+| --- | --- | --- | --- | --- | --- |
+| AT-001 | private upload completion | active MeetingParticipant and issued upload session | allowed TXT object with matching checksum completes | attachment moves `PENDING_UPLOAD -> PROCESSING`, message may publish, extractor job is scheduled | POL-UPLOAD-01, NFR-SEC-06 |
+| AT-002 | unsupported visual file | allowed PNG or image-only PDF | object completes and extractor classifies source | file remains downloadable as `UNSUPPORTED`, no EmbeddingJob/Chunk is created | D-039, D-044 |
+| AT-003 | attachment RAG citation | `READY` text PDF attachment with page anchors | Meeting AI and authorized Project AI query | only scoped attachment chunk is eligible and response cites attachment/file/page anchor | FR-MBOT-01~03, NFR-AZ-01~04 |
+| AT-004 | ACL and deletion negative | same-Space user lacks active MeetingParticipant or attachment is deleted/expired | upload/list/download/RAG query | API denies user; deleted/expired attachment has no download URL or active chunk before provider call | NFR-AZ-03~05, NFR-DATA-01~04 |
+| AT-005 | checksum and MIME validation | upload metadata disagrees with stored object | complete endpoint | checksum/MIME/size error; message cannot reference attachment | NFR-SEC-06, POL-UPLOAD-01 |
+
 ## M038 STT-to-RAG PostgreSQL Flow
 
 | ID | Scenario | Given | Action | Expected | Source |
@@ -216,6 +228,8 @@
 | SR-003 | 전사 입력 RAG 정합성 | 200개 completed transcript segment | deterministic worker 실행 후 Meeting search 100회 | Meeting/Space scope가 일치하는 결과만 반환 | FR-MBOT-01~04, NFR-DATA-01~02 |
 | SR-004 | 로컬 검색 성능 | SR-003과 동일 데이터 | 100회 retrieval latency 측정 | deterministic provider 기준 p95 < 1초 | PERF-RAG-01 |
 | SR-005 | 외부 provider smoke | 실제 Clova secret, LiveKit egress, public callback URL | target transcription start -> audio -> stop -> dialogue | 실시간 provider callback, egress, target API를 포함한 실제 흐름 성공 | FR-CALL-01, FR-STT-01~05 |
+| SR-007 | OpenAI RAG provider 통합 | `RUN_OPENAI_RAG_INTEGRATION=true`, OpenAI key, Flyway V12 이상 PostgreSQL | 한국어 STT를 완료 처리하고 worker 색인 후 Project retrieval 실행 | vector(1536), allowed meeting만 반환, 빈 allowed/cross-space 차단, PostgreSQL hybrid retrieval p95 < 1초 | T275, PERF-RAG-01 |
+| SR-008 | Korean grounded provider 평가 | `RUN_OPENAI_GROUNDED_EVAL=true`, OpenAI key | 단일 회의 근거 있음 15건과 무관한 근거의 질문 15건을 internal Meeting AI handler로 평가 | false-supported <= 5%, supported answer/citation >= 95%, provider-inclusive p95를 기록 | T275, NFR-AI-01 |
 
 ### Pass Criteria
 
@@ -228,6 +242,8 @@
 - SR-001~SR-004: local PostgreSQL integration과 deterministic embedding provider로 통과했다. 200개 segment, 100회 Meeting retrieval에서 local p95는 `8.85 ms`였다.
 - SR-005: 48 kHz WebSocket -> resampler -> Cloud STT 경로에서 Korean PCM 전사 callback 65건을 확인했다. 별도 opt-in target smoke는 실제 Cloud callback -> JPA dialogue `COMPLETED` -> `TRANSCRIPT_COMPLETED` job 1건을 검증했다. valid LiveKit Cloud credential, 임시 ngrok callback, browser LiveKit client에서 published audio track의 Egress를 시작해 callback transcript 60건을 확인했다. Egress API는 `ws(s)` signalling URL을 `http(s)` API URL로 정규화한다.
 - SR-006: 기본 단위 test에서 target Egress WebSocket 종료가 `MeetingTranscript=COMPLETED`로 종결되는지, legacy 세션은 유지되는지, Egress stop 실패가 `FAILED` 종결과 `503 STT_PROVIDER_UNAVAILABLE`로 변환되는지 검증한다.
+- SR-007: `text-embedding-3-small` 실제 provider로 통과했다. 한국어 STT fixture의 worker 색인, `vector(1536)`, allowed meeting만 반환, 빈 allowed/cross-space 차단을 확인했고 PostgreSQL hybrid retrieval 100회 p95는 `14.98 ms`였다. provider chat 품질은 SR-008/T275에서 별도로 평가했다.
+- SR-008: `gpt-4.1-mini` 실제 provider로 2026-07-20에 30건을 실행했다. 근거 없음 15건의 false-supported는 `0%`, 근거 있음 15건의 supported answer/citation 정확도는 각각 `100%`, provider-inclusive p95는 `1,933.02 ms`였다. 이 평가는 provider를 포함하므로 SR-007의 PostgreSQL retrieval p95와 직접 비교하지 않는다.
 
 ## Minimum Implementation Order
 

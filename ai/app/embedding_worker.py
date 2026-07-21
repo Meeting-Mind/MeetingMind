@@ -4,6 +4,7 @@ import time
 from time import perf_counter
 
 from .embedding_provider import EmbeddingProvider, EmbeddingProviderError, OpenAIEmbeddingProvider
+from .config import get_env
 from .observability import bind_trace_id, elapsed_ms, log_event, reset_trace_id
 from .repository import EmbeddingJob, EmbeddingJobRepository, PostgresEmbeddingRepository
 
@@ -114,10 +115,10 @@ def normalize_failure_code(error: Exception) -> str:
 
 def main() -> None:
     logging.basicConfig(level=os.getenv("AI_LOG_LEVEL", "INFO"))
-    repository = PostgresEmbeddingRepository(os.getenv("AI_DATABASE_URL", ""))
+    repository = PostgresEmbeddingRepository(get_env("AI_DATABASE_URL", "") or "")
     provider = OpenAIEmbeddingProvider.from_environment()
-    poll_seconds = max(1, int(os.getenv("AI_EMBEDDING_POLL_SECONDS", "5")))
-    observation_seconds = max(5, int(os.getenv("AI_QUEUE_OBSERVATION_SECONDS", "60")))
+    poll_seconds = max(1, int(get_env("AI_EMBEDDING_POLL_SECONDS", "5") or "5"))
+    observation_seconds = max(5, int(get_env("AI_QUEUE_OBSERVATION_SECONDS", "60") or "60"))
     worker = EmbeddingWorker(repository, provider)
     next_observation_at = 0.0
 
