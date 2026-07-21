@@ -183,6 +183,53 @@ class TaskCandidateServiceTest {
     }
 
     @Test
+    void dismissTransitionsCandidateAndPreventsConfirmation() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner", "오너");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "회의", SCHEDULED_AT, List.of()
+        );
+        TaskCandidate candidate = context.workspace.saveTaskCandidate(
+                meeting.meeting().id(), owner.id(), "문서화", null, null, null, List.of("segment-1")
+        );
+
+        var dismissed = context.service.dismiss("Bearer access-token", meeting.meeting().id(), candidate.id());
+
+        assertThat(dismissed.status()).isEqualTo("DISMISSED");
+        assertThat(context.store.findTaskCandidateById(candidate.id())).get()
+                .extracting(TaskCandidate::status)
+                .isEqualTo(TaskCandidateStatus.DISMISSED);
+        assertThatThrownBy(() -> context.service.confirm(
+                "Bearer access-token", meeting.meeting().id(), candidate.id(),
+                new ConfirmTaskCandidateRequest("문서화", null, null, null, "TODO")
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+    }
+
+    @Test
+    void confirmRejectsExpiredCandidateWithoutCreatingTaskCard() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner", "오너");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "회의", SCHEDULED_AT, List.of()
+        );
+        TaskCandidate expired = context.store.saveTaskCandidate(new TaskCandidate(
+                "task-candidate-expired", meeting.meeting().id(), "만료 후보", null, null, null,
+                TaskCandidateStatus.CANDIDATE, List.of("segment-1"), owner.id(),
+                FIXED_CLOCK.instant().minus(java.time.Duration.ofDays(7)), null
+        ));
+
+        assertThatThrownBy(() -> context.service.confirm(
+                "Bearer access-token", meeting.meeting().id(), expired.id(),
+                new ConfirmTaskCandidateRequest("만료 후보", null, null, null, "TODO")
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.CONFLICT, "CANDIDATE_EXPIRED"));
+        assertThat(context.store.findTaskCardBySourceCandidateId(expired.id())).isEmpty();
+    }
+
+    @Test
     void confirmRejectsMeetingGuestEvenWhenGuestIsEditor() {
         TestContext context = newContext("user-guest");
         User owner = context.user("user-owner", "오너");

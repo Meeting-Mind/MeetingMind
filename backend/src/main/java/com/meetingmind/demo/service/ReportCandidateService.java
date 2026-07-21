@@ -45,6 +45,30 @@ public class ReportCandidateService {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
         meetingAccessPolicy.requireEditAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
         WorkspaceDomainService.MeetingAiContext context = workspaceDomainService.meetingAiContext(meetingId);
+        return generateCandidate(user, context, context.meeting().title() + " 회의록", null, null);
+    }
+
+    public ReportCandidateGenerationResponse edit(
+            String authorizationHeader,
+            String meetingId,
+            String reportId,
+            String instruction
+    ) {
+        AuthUserResponse user = authService.currentUser(authorizationHeader);
+        meetingAccessPolicy.requireEditAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
+        MeetingReport report = workspaceDomainService.meetingReportDetail(user.id(), meetingId, reportId);
+        WorkspaceDomainService.MeetingAiContext context = workspaceDomainService.meetingAiContext(meetingId);
+        String currentReportContent = hasText(report.markdown()) ? report.markdown() : report.summary();
+        return generateCandidate(user, context, report.title(), instruction.trim(), currentReportContent);
+    }
+
+    private ReportCandidateGenerationResponse generateCandidate(
+            AuthUserResponse user,
+            WorkspaceDomainService.MeetingAiContext context,
+            String title,
+            String instruction,
+            String currentReportMarkdown
+    ) {
         List<ReportAiGatewayRequest.SourceContext> requestSources = sourceRows(context);
         if (requestSources.isEmpty()) {
             return new ReportCandidateGenerationResponse(null, List.of(), true, "context-only");
@@ -56,7 +80,9 @@ public class ReportCandidateService {
                     context.meeting().id(),
                     context.meeting().title(),
                     "markdown",
-                    requestSources
+                    requestSources,
+                    instruction,
+                    currentReportMarkdown
             ));
         } catch (AiGatewayException exception) {
             throw new AuthorizationException(
@@ -94,9 +120,9 @@ public class ReportCandidateService {
             return new ReportCandidateGenerationResponse(null, List.of(), true, "context-only");
         }
         MeetingReport candidate = workspaceDomainService.saveReportCandidate(
-                meetingId,
+                context.meeting().id(),
                 user.id(),
-                context.meeting().title() + " 회의록",
+                title,
                 aiResponse.summary().trim(),
                 aiResponse.markdown().trim(),
                 decisionRows(aiResponse.decisions(), returnedSourceIds),

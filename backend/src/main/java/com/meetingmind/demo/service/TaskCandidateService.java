@@ -174,6 +174,19 @@ public class TaskCandidateService {
         return new ConfirmTaskCandidateResponse(result.taskCard().id(), result.candidate().id());
     }
 
+    public TaskCandidateResponse dismiss(
+            String authorizationHeader,
+            String meetingId,
+            String candidateId
+    ) {
+        AuthUserResponse user = authService.currentUser(authorizationHeader);
+        MeetingAccessPolicy.MeetingAccessContext accessContext =
+                workspaceDomainService.meetingAccessContext(meetingId, user.id());
+        meetingAccessPolicy.requireEditAccess(accessContext);
+        spaceAccessPolicy.requireSpaceAccess(accessContext.spaceContext());
+        return TaskCandidateResponse.from(workspaceDomainService.dismissTaskCandidate(user.id(), meetingId, candidateId));
+    }
+
     private Optional<TaskCandidate> saveCandidate(
             WorkspaceDomainService.TaskCandidateContext context,
             String createdBy,

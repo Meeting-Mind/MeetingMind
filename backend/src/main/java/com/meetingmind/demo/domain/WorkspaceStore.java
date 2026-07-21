@@ -19,6 +19,10 @@ public abstract class WorkspaceStore {
 
     abstract Optional<Space> findSpaceById(String spaceId);
 
+    abstract Space updateSpace(String spaceId, String name, String description, Instant updatedAt);
+
+    abstract void softDeleteSpace(String spaceId, Instant deletedAt);
+
     abstract SpaceMember addSpaceMember(String spaceId, String userId, SpaceRole role, Instant joinedAt);
 
     abstract Optional<SpaceMember> findSpaceMember(String spaceId, String userId);
@@ -43,7 +47,19 @@ public abstract class WorkspaceStore {
             SpaceRole previousOwnerRole
     );
 
-    abstract Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt);
+    abstract SpaceInvitation saveSpaceInvitation(SpaceInvitation invitation);
+
+    abstract Optional<SpaceInvitation> findSpaceInvitationById(String spaceId, String invitationId);
+
+    abstract Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email);
+
+    abstract Meeting createMeeting(
+            String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt
+    );
+
+    Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt) {
+        return createMeeting(spaceId, title, null, scheduledAt, scheduledAt.plusHours(1));
+    }
 
     abstract Optional<Meeting> findMeetingById(String meetingId);
 
@@ -60,7 +76,9 @@ public abstract class WorkspaceStore {
     abstract Meeting updateMeeting(
             String meetingId,
             String title,
+            String description,
             OffsetDateTime scheduledAt,
+            OffsetDateTime scheduledEndAt,
             OffsetDateTime startedAt,
             OffsetDateTime endedAt,
             com.meetingmind.demo.authz.MeetingStatus status
@@ -146,6 +164,12 @@ public abstract class WorkspaceStore {
     abstract List<TaskCandidate> findTaskCandidates(String meetingId);
 
     abstract TaskCard saveTaskCard(TaskCard taskCard);
+
+    abstract Optional<TaskCard> findTaskCardById(String spaceId, String taskId);
+
+    abstract List<TaskCard> findTaskCards(String spaceId);
+
+    abstract void softDeleteTaskCard(String taskId, Instant deletedAt);
 
     abstract Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId);
 

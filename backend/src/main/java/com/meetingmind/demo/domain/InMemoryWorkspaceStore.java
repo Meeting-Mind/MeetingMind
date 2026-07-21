@@ -22,6 +22,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     private final Map<String, User> usersById = new LinkedHashMap<>();
     private final Map<String, Space> spacesById = new LinkedHashMap<>();
     private final Map<String, SpaceMember> spaceMembersById = new LinkedHashMap<>();
+    private final Map<String, SpaceInvitation> spaceInvitationsById = new LinkedHashMap<>();
     private final Map<String, Meeting> meetingsById = new LinkedHashMap<>();
     private final Map<String, MeetingParticipant> meetingParticipantsById = new LinkedHashMap<>();
     private final Map<String, MeetingSpeaker> meetingSpeakersById = new LinkedHashMap<>();
@@ -57,7 +58,21 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     }
 
     synchronized Optional<Space> findSpaceById(String spaceId) {
-        return Optional.ofNullable(spacesById.get(spaceId));
+        return Optional.ofNullable(spacesById.get(spaceId)).filter(space -> space.deletedAt() == null);
+    }
+
+    @Override
+    synchronized Space updateSpace(String spaceId, String name, String description, Instant updatedAt) {
+        Space current = findSpaceById(spaceId).orElseThrow();
+        Space updated = current.updated(name, description, updatedAt);
+        spacesById.put(spaceId, updated);
+        return updated;
+    }
+
+    @Override
+    synchronized void softDeleteSpace(String spaceId, Instant deletedAt) {
+        Space current = findSpaceById(spaceId).orElseThrow();
+        spacesById.put(spaceId, current.deleted(deletedAt));
     }
 
     synchronized SpaceMember addSpaceMember(String spaceId, String userId, SpaceRole role, Instant joinedAt) {
@@ -156,12 +171,37 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return new OwnerTransferUpdate(newOwner, downgradedOwner);
     }
 
-    synchronized Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt) {
+    @Override
+    synchronized SpaceInvitation saveSpaceInvitation(SpaceInvitation invitation) {
+        spaceInvitationsById.put(invitation.id(), invitation);
+        return invitation;
+    }
+
+    @Override
+    synchronized Optional<SpaceInvitation> findSpaceInvitationById(String spaceId, String invitationId) {
+        return Optional.ofNullable(spaceInvitationsById.get(invitationId))
+                .filter(invitation -> invitation.spaceId().equals(spaceId));
+    }
+
+    @Override
+    synchronized Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email) {
+        return spaceInvitationsById.values().stream()
+                .filter(invitation -> invitation.spaceId().equals(spaceId))
+                .filter(invitation -> invitation.email().equalsIgnoreCase(email))
+                .filter(invitation -> invitation.status() == InvitationStatus.PENDING)
+                .findFirst();
+    }
+
+    synchronized Meeting createMeeting(
+            String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt
+    ) {
         Meeting meeting = Meeting.scheduled(
                 "meeting-" + UUID.randomUUID(),
                 spaceId,
                 title,
-                scheduledAt
+                description,
+                scheduledAt,
+                scheduledEndAt
         );
         meetingsById.put(meeting.id(), meeting);
         return meeting;
@@ -220,14 +260,16 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     synchronized Meeting updateMeeting(
             String meetingId,
             String title,
+            String description,
             OffsetDateTime scheduledAt,
+            OffsetDateTime scheduledEndAt,
             OffsetDateTime startedAt,
             OffsetDateTime endedAt,
             com.meetingmind.demo.authz.MeetingStatus status
     ) {
         Meeting current = findMeetingById(meetingId).orElseThrow();
         Meeting updated = new Meeting(
-                current.id(), current.spaceId(), title, scheduledAt, current.joinCode(), startedAt, endedAt,
+                current.id(), current.spaceId(), title, description, scheduledAt, scheduledEndAt, current.joinCode(), startedAt, endedAt,
                 status, current.failureReason(), current.retentionPolicy(), current.deletedAt(), current.deletedBy()
         );
         meetingsById.put(meetingId, updated);
@@ -243,7 +285,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     ) {
         Meeting current = meetingsById.get(meetingId);
         Meeting deleted = new Meeting(
-                current.id(), current.spaceId(), current.title(), current.scheduledAt(), current.joinCode(),
+                current.id(), current.spaceId(), current.title(), current.description(), current.scheduledAt(), current.scheduledEndAt(), current.joinCode(),
                 current.startedAt(), current.endedAt(), status, current.failureReason(), current.retentionPolicy(),
                 deletedAt, deletedBy
         );
@@ -491,6 +533,29 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return taskCard;
     }
 
+    @Override
+    synchronized Optional<TaskCard> findTaskCardById(String spaceId, String taskId) {
+        return Optional.ofNullable(taskCardsById.get(taskId))
+                .filter(task -> task.spaceId().equals(spaceId))
+                .filter(task -> task.deletedAt() == null);
+    }
+
+    @Override
+    synchronized List<TaskCard> findTaskCards(String spaceId) {
+        return taskCardsById.values().stream()
+                .filter(task -> task.spaceId().equals(spaceId))
+                .filter(task -> task.deletedAt() == null)
+                .toList();
+    }
+
+    @Override
+    synchronized void softDeleteTaskCard(String taskId, Instant deletedAt) {
+        TaskCard current = taskCardsById.get(taskId);
+        if (current != null && current.deletedAt() == null) {
+            taskCardsById.put(taskId, current.deleted(deletedAt));
+        }
+    }
+
     synchronized Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId) {
         return taskCardsById.values()
                 .stream()
@@ -507,6 +572,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return projectKnowledgeById.values()
                 .stream()
                 .filter(knowledge -> knowledge.spaceId().equals(spaceId))
+                .sorted(java.util.Comparator.comparing(ProjectKnowledge::updatedAt).reversed().thenComparing(ProjectKnowledge::id))
                 .toList();
     }
 

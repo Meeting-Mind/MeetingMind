@@ -8,7 +8,9 @@ public record MeetingListResponse(List<MeetingSummary> meetings) {
             String id,
             String spaceId,
             String title,
+            String description,
             String scheduledAt,
+            String scheduledEndAt,
             String status,
             String myRole
     ) {

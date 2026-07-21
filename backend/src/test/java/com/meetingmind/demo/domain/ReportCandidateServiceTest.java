@@ -128,6 +128,35 @@ class ReportCandidateServiceTest {
                 .satisfies(error -> assertAuthz(error, HttpStatus.SERVICE_UNAVAILABLE, "AI_PROVIDER_UNAVAILABLE"));
     }
 
+    @Test
+    void editCreatesANewCandidateAndSendsOnlySingleMeetingSources() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "Sprint Planning", SCHEDULED_AT, List.of()
+        );
+        MeetingSpeaker speaker = context.store.addMeetingSpeaker(meeting.meeting().id(), "S1", "김진수", FIXED_CLOCK.instant());
+        TranscriptSegment segment = context.store.addTranscriptSegment(
+                meeting.meeting().id(), speaker.id(), speaker.label(), speaker.displayName(),
+                1_000, 5_000, "권한 필터를 먼저 적용합니다.", "STT", 1
+        );
+        context.gateway.response = supportedResponse(segment.id());
+        ReportCandidateGenerationResponse original = context.service.generate("Bearer access-token", meeting.meeting().id());
+
+        ReportCandidateGenerationResponse edited = context.service.edit(
+                "Bearer access-token", meeting.meeting().id(), original.candidate().id(), "요약을 두 문장으로 줄여줘"
+        );
+
+        assertThat(edited.candidate()).isNotNull();
+        assertThat(edited.candidate().version()).isEqualTo(2);
+        assertThat(context.gateway.captured.instruction()).isEqualTo("요약을 두 문장으로 줄여줘");
+        assertThat(context.gateway.captured.currentReportMarkdown()).isEqualTo(original.candidate().markdown());
+        assertThat(context.gateway.captured.sources())
+                .allSatisfy(source -> assertThat(source.meetingId()).isEqualTo(meeting.meeting().id()));
+        assertThat(context.store.findMeetingReports(meeting.meeting().id())).hasSize(2);
+    }
+
     private static ReportAiGatewayResponse supportedResponse(String sourceId) {
         return new ReportAiGatewayResponse(
                 "권한 필터를 먼저 적용하기로 했습니다.",

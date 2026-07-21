@@ -36,6 +36,18 @@ public class ProjectKnowledge {
     public String approvedBy(){return approvedBy;} public KnowledgeStatus status(){return KnowledgeStatus.valueOf(status);}
     public EmbeddingStatus embeddingStatus(){return EmbeddingStatus.valueOf(embeddingStatus);} public String embeddingJobId(){return embeddingJobId;}
     public Instant createdAt(){return createdAt;} public Instant updatedAt(){return updatedAt;} public Instant deletedAt(){return deletedAt;}
+    public ProjectKnowledge updated(String title, String content, Instant updatedAt) {
+        return new ProjectKnowledge(
+                id, spaceId, type(), title, content, sourceMeetingId, approvedBy, KnowledgeStatus.PUBLISHED,
+                EmbeddingStatus.PENDING, null, createdAt, updatedAt, null
+        );
+    }
+    public ProjectKnowledge archived(Instant archivedAt) {
+        return new ProjectKnowledge(
+                id, spaceId, type(), title, content, sourceMeetingId, approvedBy, KnowledgeStatus.ARCHIVED,
+                embeddingStatus(), embeddingJobId, createdAt, archivedAt, archivedAt
+        );
+    }
     @Override public boolean equals(Object other){return other instanceof ProjectKnowledge value && Objects.equals(id,value.id);}
     @Override public int hashCode(){return Objects.hashCode(id);}
 }

@@ -54,8 +54,10 @@ public class MeetingController {
                 view.meeting().id(),
                 view.meeting().spaceId(),
                 view.meeting().title(),
+                view.meeting().description(),
                 view.meeting().status().name(),
                 view.meeting().scheduledAt().toString(),
+                view.meeting().scheduledEndAt().toString(),
                 view.meeting().startedAt() == null ? null : view.meeting().startedAt().toString(),
                 view.meeting().endedAt() == null ? null : view.meeting().endedAt().toString(),
                 view.myRole() == null ? null : view.myRole().name(),
@@ -80,10 +82,12 @@ public class MeetingController {
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
         var meeting = workspaceDomainService.updateMeeting(
-                user.id(), meetingId, request.title(), request.scheduledAt(), request.status()
+                user.id(), meetingId, request.title(), request.description(), request.scheduledAt(),
+                request.scheduledEndAt(), request.status()
         );
         return new UpdateMeetingResponse(
-                meeting.id(), meeting.title(), meeting.scheduledAt().toString(), meeting.status().name()
+                meeting.id(), meeting.title(), meeting.description(), meeting.scheduledAt().toString(),
+                meeting.scheduledEndAt().toString(), meeting.status().name()
         );
     }
 

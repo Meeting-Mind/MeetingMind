@@ -3,6 +3,7 @@ package com.meetingmind.demo.controller;
 import com.meetingmind.demo.dto.ConfirmTaskCandidateRequest;
 import com.meetingmind.demo.dto.ConfirmTaskCandidateResponse;
 import com.meetingmind.demo.dto.TaskCandidateGenerationResponse;
+import com.meetingmind.demo.dto.TaskCandidateResponse;
 import com.meetingmind.demo.dto.TaskCandidatesResponse;
 import com.meetingmind.demo.service.TaskCandidateService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -47,5 +48,14 @@ public class TaskCandidateController {
             @RequestBody ConfirmTaskCandidateRequest request
     ) {
         return taskCandidateService.confirm(authorizationHeader, meetingId, candidateId, request);
+    }
+
+    @PostMapping("/{meetingId}/task-candidates/{candidateId}/dismiss")
+    public TaskCandidateResponse dismiss(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId,
+            @PathVariable String candidateId
+    ) {
+        return taskCandidateService.dismiss(authorizationHeader, meetingId, candidateId);
     }
 }

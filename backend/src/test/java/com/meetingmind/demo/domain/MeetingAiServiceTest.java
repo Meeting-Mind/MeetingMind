@@ -15,6 +15,8 @@ import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.AiSource;
 import com.meetingmind.demo.dto.ai.BackendMeetingAiChatRequest;
 import com.meetingmind.demo.dto.ai.MeetingAiGatewayChatRequest;
+import com.meetingmind.demo.dto.ai.MeetingAiGatewayTermRequest;
+import com.meetingmind.demo.dto.ai.TermExplanationResponse;
 import com.meetingmind.demo.service.AiGatewayException;
 import com.meetingmind.demo.service.AiSearchScopeResolver;
 import com.meetingmind.demo.service.MeetingAiGatewayClient;
@@ -195,6 +197,11 @@ class MeetingAiServiceTest {
                     false,
                     "test-model"
             );
+        }
+
+        @Override
+        public TermExplanationResponse explainTerm(MeetingAiGatewayTermRequest request) {
+            throw new UnsupportedOperationException("Term explanation is not used by this test.");
         }
     }
 }

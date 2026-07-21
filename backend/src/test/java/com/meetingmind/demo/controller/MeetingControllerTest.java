@@ -80,11 +80,13 @@ class MeetingControllerTest {
 
         assertThat(detail.id()).isEqualTo(meeting.meeting().id());
         assertThat(detail.title()).isEqualTo("CRUD 회의");
+        assertThat(detail.scheduledEndAt()).isEqualTo(SCHEDULED_AT.plusHours(1).toString());
         assertThat(detail.scheduledAt()).isEqualTo(SCHEDULED_AT.toString());
         assertThat(detail.status()).isEqualTo("SCHEDULED");
         assertThat(detail.myRole()).isEqualTo("HOST");
         assertThat(detail.participants()).hasSize(1);
         assertThat(updated.title()).isEqualTo("수정된 회의");
+        assertThat(updated.scheduledEndAt()).isEqualTo(SCHEDULED_AT.plusHours(2).toString());
         assertThat(updated.status()).isEqualTo("SCHEDULED");
         assertThat(deleted.deleted()).isTrue();
     }
