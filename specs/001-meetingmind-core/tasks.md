@@ -706,6 +706,8 @@ M041은 M040의 DomainTerm CRUD를 회의 자막 선택 기능으로 연결한�
 - [x] V046 Report version preview/restore 검증: Backend restore history test, BFF route test, Frontend API test/build, `git diff --check`
 - [x] V047 Candidate TTL 검증: Backend report/task 만료 candidate transition test, `git diff --check`
 - [x] V048 Dashboard summary 검증: Backend ACL/masking service test, BFF route test, Frontend cookie route unit/build, `git diff --check`
+- [x] V049 LiveKit/STT/OpenAI smoke 검증: actual LiveKit `ListRooms` HTTP 200, `RUN_CLOVA_STT_SMOKE=true` 실제 CLOVA STT 전사/DB 저장/embedding job, `RUN_OPENAI_EMBEDDING_SMOKE=true`, `RUN_OPENAI_RAG_INTEGRATION=true` p95 `13.23 ms`, `RUN_OPENAI_GROUNDED_EVAL=true` false-supported `0%`, citation `100%`, provider-inclusive p95 `3,788.00 ms`
+- [x] V050 Secret Scan fixture policy 검증: `.gitleaks.toml`에 test-only fixture allowlist를 추가하고 `gitleaks git . --redact --no-banner` 전체 이력 70 commits scan 0건 통과
 
 ## Notes
 

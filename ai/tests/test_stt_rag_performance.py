@@ -39,8 +39,8 @@ class SttRagPerformanceIntegrationTest(unittest.TestCase):
             )
             connection.execute(
                 """
-                insert into meetings (id, space_id, title, scheduled_at)
-                values (%s, %s, 'STT RAG Meeting', now())
+                insert into meetings (id, space_id, title, scheduled_at, scheduled_end_at)
+                values (%s, %s, 'STT RAG Meeting', now(), now() + interval '1 hour')
                 """,
                 (meeting_id, space_id),
             )

@@ -121,6 +121,14 @@ class MigrationIntegrationTest {
                     assertThat(columns).containsExactly("deleted_at", "deleted_by", "description", "scheduled_end_at");
                 }
                 try (var rows = statement.executeQuery("""
+                        select scheduled_end_at = scheduled_at + interval '1 hour'
+                        from meetings
+                        where id = 'migration-meeting'
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getBoolean(1)).isTrue();
+                }
+                try (var rows = statement.executeQuery("""
                         select column_name
                         from information_schema.columns
                         where table_name = 'task_cards'

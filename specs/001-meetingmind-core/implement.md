@@ -641,6 +641,7 @@
 - 충돌은 `.gitignore`, `backend/build.gradle`, `tasks.md`에서 해결했다. PostgreSQL local/test profile과 CI dependency 고정, M030 data milestone과 M031 CI milestone을 모두 보존했다.
 - Gitleaks는 44개 커밋에서 `backend/.env` 4건, `ai/.env.example` 1건을 탐지했다. OpenAI key 규칙 3건과 generic API key 규칙 2건이며 secret 값과 전체 hash는 기록하지 않았다.
 - OpenAI/LiveKit 기존 credential은 공급자에서 폐기·재발급됐다. 여러 원격 공유 브랜치의 강제 재작성을 피하기 위해 폐기된 5건의 exact fingerprint만 `.gitleaksignore`에 등록하고 신규 secret 차단은 유지한다.
+- 2026-07-21: 반복되는 테스트 fixture false positive를 막기 위해 `.gitleaks.toml`에 좁은 allowlist를 추가했다. 허용 범위는 BFF 테스트용 fake `AUTH_USER_ID` UUID와 고정 dummy Token Vault key fixture에 한정하며, 실제 `.env`/provider secret은 계속 차단한다.
 
 ### Verification
 
@@ -657,6 +658,7 @@
 - Hardened: 모든 GitHub Action을 공식 major ref가 가리키는 commit SHA로 고정했다.
 - Initial remote result: PR #29의 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images는 성공했다. Secret Scan의 과거 5건 때문에 `CI Gate`만 연쇄 실패했다.
 - Passed: exact fingerprint 적용 후 PR #29 재실행에서 Backend, Frontend, AI, PostgreSQL Migration, Playwright, Container Images, Secret Scan과 최종 `CI Gate`가 모두 성공했다.
+- Passed: `.gitleaks.toml` fixture allowlist 적용 후 `gitleaks git . --redact --no-banner` 전체 이력 70 commits scan이 0건으로 통과했다.
 - Blocked: `main` branch protection API는 private repository의 현재 GitHub 요금제에서 `403 Upgrade to GitHub Pro or make this repository public`를 반환했다. Pro 업그레이드 또는 공개 전환 전에는 required `CI Gate`, PR-only, force-push/삭제 금지를 적용할 수 없다.
 
 ### Remaining Work
@@ -787,7 +789,7 @@
 
 - `RUN_OPENAI_GROUNDED_EVAL=true ./.venv/bin/python -m unittest tests.test_openai_grounded_evaluation`을 실제 OpenAI credential로 실행했다.
 - 평가기는 `BackendMeetingAiChatRequest`의 internal handler에 단일 회의 source를 전달한다. 근거 있음 15건은 실제 인용 source ID를, 근거 없음 15건은 무관한 source를 사용해 DB fallback 없이 evidence gate와 structured citation을 함께 검증한다.
-- 결과: false-supported `0%`, supported answer `100%`, citation 정확도 `100%`, provider-inclusive p95 `1,933.02 ms` (총 30건, 2026-07-20). 이 지연은 provider를 포함하며 SR-007의 PostgreSQL retrieval p95와 별도다.
+- 결과: false-supported `0%`, supported answer `100%`, citation 정확도 `100%`, provider-inclusive p95 `3,788.00 ms` (총 30건, 2026-07-21). 이 지연은 provider를 포함하며 SR-007의 PostgreSQL retrieval p95와 별도다.
 - Backend의 `HttpMeetingAiGatewayClientTest`는 Core가 service token과 request ID를 포함해 `/api/internal/meeting-ai/chat`을 호출하고 응답을 역직렬화하는 local HTTP integration을 검증한다. BFF public Meeting/Project AI route는 Core downstream으로만 프록시된다.
 
 ### T273 AI Observability
@@ -949,11 +951,13 @@
 ### Remaining Boundary
 
 - Auth는 계속 JDBC `AuthStore`를 사용한다. `WorkspaceStore`의 Space, Meeting/ACL, transcript, report/task, knowledge, audit는 `JpaWorkspaceStore`와 `JpaWorkspacePersistence`로 전환했고, vector retrieval/worker SQL은 JPA 대상이 아니다.
-- Cloud STT provider callback, target DB lifecycle, LiveKit Egress deployment E2E를 검증했다. OpenAI embedding provider의 실제 한국어 검색 품질과 외부 latency 평가는 별도 T301 잔여 작업이다.
+- Cloud STT provider callback, target DB lifecycle, LiveKit Egress deployment E2E와 OpenAI embedding/RAG provider smoke를 검증했다.
 - AI API와 embedding worker는 process 환경변수, `ai/.env`, 루트 `.env`, `backend/.env` 우선순위로 같은 설정을 읽고 `OPEN_AI_KEY`를 `OPENAI_API_KEY` 별칭으로 처리한다. 실제 OpenAI embedding 호출은 `RUN_OPENAI_EMBEDDING_SMOKE=true`일 때만 수행하는 별도 smoke test로 분리했다.
 - `RUN_OPENAI_RAG_INTEGRATION=true` opt-in test는 별도 migrated PostgreSQL에 한국어 STT fixture를 입력하고 실제 OpenAI worker로 색인한 뒤, vector 차원, Project allowed-meeting 범위, 빈 allowed/cross-space negative case, PostgreSQL hybrid retrieval p95를 확인한다. fixture는 검증 종료 시 삭제한다.
-- Passed: `RUN_OPENAI_RAG_INTEGRATION=true`로 전용 PostgreSQL 평가 DB에서 실제 `text-embedding-3-small` provider를 실행했다. 한국어 STT fixture가 worker를 통해 `vector(1536)`으로 저장되고, Project allowed meeting만 반환하며 빈 allowed list와 cross-space 검색이 차단됨을 확인했다. PostgreSQL hybrid retrieval 100회 p95는 `14.98 ms`였다. fixture와 임시 평가 DB는 검증 후 삭제했다.
-- Remaining: T275/T301의 30~50개 한국어 grounded 질의 false-supported 비율, citation 정확도, Backend-to-AI HTTP end-to-end 및 provider 호출을 포함한 별도 외부 latency 평가는 아직 측정하지 않았다.
+- Passed: `RUN_OPENAI_EMBEDDING_SMOKE=true`로 실제 OpenAI embedding 단건 호출이 통과했다.
+- Passed: `RUN_OPENAI_RAG_INTEGRATION=true`로 전용 PostgreSQL 평가 DB에서 실제 `text-embedding-3-small` provider를 실행했다. 한국어 STT fixture가 worker를 통해 `vector(1536)`으로 저장되고, Project allowed meeting만 반환하며 빈 allowed list와 cross-space 검색이 차단됨을 확인했다. PostgreSQL hybrid retrieval 100회 p95는 `13.23 ms`였다.
+- Passed: `RUN_OPENAI_GROUNDED_EVAL=true`로 한국어 grounded provider 평가가 통과했다. false-supported `0%`, supported answer `100%`, citation 정확도 `100%`, provider-inclusive p95 `3,788.00 ms`.
+- Remaining: Backend-to-AI HTTP end-to-end에서 provider 호출을 포함한 전체 사용자 흐름 latency 평가는 별도 운영 smoke로 남긴다.
 
 ### T299 Workspace JPA Persistence
 
@@ -977,10 +981,12 @@
 - Passed: 같은 Flyway V12 temporary database에서 `AI_TEST_DATABASE_URL=... python -m unittest discover -s tests`; 63 tests 통과. `test_stt_rag_performance`는 200개 STT segment -> worker -> Meeting scope retrieval 100회를 실행했고 deterministic provider 기준 local p95 `8.85 ms`를 기록했다.
 - Passed: `CLOVA_SPEECH_SECRET`로 Cloud STT gRPC 설정 handshake와 실제 Korean PCM 전사를 확인했다. 48 kHz WebSocket 입력을 server resampler가 16 kHz PCM으로 전달한 legacy smoke에서 65개의 `transcription` callback이 반환됐다. provider `responseType=["config"]` ACK는 전사 text가 아니므로 저장하지 않고, 마지막 PCM frame을 `epFlag=true`로 전송한 뒤 stream 종료를 기다리도록 client를 보정했다.
 - Passed: `RUN_CLOVA_STT_SMOKE=true` opt-in integration test에서 실제 16 kHz PCM을 Cloud STT client로 실시간 전송했다. 실제 callback이 JPA `TranscriptSegment`에 저장되고 target dialogue가 `COMPLETED`, `TRANSCRIPT_COMPLETED` embedding job이 정확히 1건인 것을 검증했다. 기본 `./gradlew test`에서는 비용과 secret 노출 방지를 위해 이 test가 skip된다.
+- Passed: 2026-07-21 `RUN_CLOVA_STT_SMOKE=true`로 macOS 한국어 TTS에서 만든 16 kHz PCM을 실제 CLOVA STT에 전송했고, `meetingmind_stt_smoke` 전용 DB에서 transcript `COMPLETED`, segment 저장, `TRANSCRIPT_COMPLETED` embedding job 1건을 재검증했다.
 - Passed: `git diff --check`.
 - Passed: actual LiveKit egress smoke. valid LiveKit Cloud credential과 임시 ngrok `PUBLIC_WS_BASE_URL` 환경에서 Chromium client가 audio track을 publish했고, target start가 Egress를 생성한 뒤 Cloud STT callback transcript 60건을 저장했다. Egress SDK에는 signalling용 `ws(s)` URL이 아닌 API용 `http(s)` URL이 필요하므로 `LiveKitEgressService`에서 이를 정규화하고 unit test로 고정했다.
+- Passed: 2026-07-21 실제 LiveKit Cloud credential로 RoomService `ListRooms` smoke가 HTTP 200을 반환했다. participant token은 출력하지 않고 요청 메모리에서만 생성했다.
 - Hardened: target Egress WebSocket 종료는 마지막 audio flush 후 `MeetingTranscript=COMPLETED`로 종결하고, legacy STT session은 수동 조회 호환을 위해 유지한다. Egress stop 실패는 `FAILED`로 종결한 뒤 `503 STT_PROVIDER_UNAVAILABLE`를 반환해 재시작을 막는 무한 `PROCESSING` 상태를 남기지 않는다. transcription 시작 시 `MEETING_TRANSCRIPTION_STARTED` audit event를 기록한다.
-- Not run: OpenAI embedding provider의 실제 한국어 retrieval quality 및 p95 latency. `T275`의 API key 기반 평가와 성능 측정이 선행되어야 T301을 완료할 수 있다.
+- Not run: Browser에서 LiveKit 입장부터 STT 종료, Meeting AI 질문까지 이어지는 전체 사용자 흐름 latency 측정은 별도 운영 smoke로 남긴다.
 
 ### T302 Live STT Target API Integration
 
