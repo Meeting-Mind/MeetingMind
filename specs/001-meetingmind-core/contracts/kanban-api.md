@@ -27,7 +27,7 @@ Space 칸반 카드 목록을 조회한다.
 ### Data Scope
 
 - Space scope
-- meeting source가 있는 task는 사용자가 접근 가능한 회의의 source metadata만 노출한다.
+- meeting source가 있는 task는 사용자가 접근 가능한 회의의 source metadata만 노출한다. 접근 권한이 없으면 카드 자체는 Space scope로 반환하되 `meetingId`와 `sourceCandidateId`는 `null`이다.
 
 ### Query
 
@@ -52,6 +52,8 @@ Space 칸반 카드 목록을 조회한다.
       "title": "ERD 수정안 문서화",
       "description": null,
       "status": "TODO",
+      "priority": "MEDIUM",
+      "labels": ["backend", "erd"],
       "assigneeId": "user-001",
       "dueDate": null,
       "sourceCandidateId": "candidate-001"
@@ -106,7 +108,9 @@ Space 칸반 카드 목록을 조회한다.
   "description": "회의에서 합의된 ERD 수정안을 정리한다.",
   "assigneeId": "user-001",
   "dueDate": null,
-  "meetingId": "meeting-001"
+  "meetingId": "meeting-001",
+  "priority": "HIGH",
+  "labels": ["backend", "erd"]
 }
 ```
 
@@ -115,6 +119,8 @@ Space 칸반 카드 목록을 조회한다.
 - `title`: required, blank 금지
 - `assigneeId`: optional SpaceMember
 - `meetingId`: optional, 접근 가능한 meeting
+- `priority`: optional `LOW`, `MEDIUM`, `HIGH`; 생략하면 `MEDIUM`
+- `labels`: optional 문자열 배열, 최대 10개, 각 trim 후 1~40자, 대소문자를 무시하고 중복 불가
 
 ### Response
 
@@ -170,7 +176,9 @@ Space 칸반 카드 목록을 조회한다.
   "description": "수정된 설명",
   "assigneeId": "user-001",
   "dueDate": "2026-07-12",
-  "status": "IN_PROGRESS"
+  "status": "IN_PROGRESS",
+  "priority": "HIGH",
+  "labels": ["backend", "erd"]
 }
 ```
 
@@ -179,6 +187,8 @@ Space 칸반 카드 목록을 조회한다.
 - `taskId`가 해당 Space에 속해야 한다.
 - `status`: `TODO`, `IN_PROGRESS`, `DONE`
 - `assigneeId`: optional SpaceMember
+- `priority`: optional `LOW`, `MEDIUM`, `HIGH`
+- `labels`: optional 문자열 배열. 제공되면 전체 교체하며 최대 10개, 각 1~40자, 대소문자 무시 중복을 허용하지 않는다.
 
 ### Response
 
@@ -186,6 +196,8 @@ Space 칸반 카드 목록을 조회한다.
 {
   "id": "task-001",
   "status": "IN_PROGRESS",
+  "priority": "HIGH",
+  "labels": ["backend", "erd"],
   "updatedAt": "2026-07-09T10:20:00+09:00"
 }
 ```
@@ -259,7 +271,7 @@ None.
 
 ### Notes
 
-- soft delete와 archive status 중 하나를 Data owner가 확정한다.
+- `TaskCard.deletedAt` soft delete를 사용한다. 일반 조회와 source candidate 중복 확정 검증은 삭제된 카드를 각각 제외/포함하는 목적에 맞춰 처리한다.
 
 ## POST /api/v1/meetings/{meetingId}/task-candidates/generate
 
@@ -345,7 +357,7 @@ None.
 ### Notes
 
 - 후보는 확정 전까지 칸반 카드가 아니다.
-- candidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
+- candidate는 생성 후 7일 안에만 확정할 수 있다. 만료되면 `409 CANDIDATE_EXPIRED`로 거부한다.
 
 ## GET /api/v1/meetings/{meetingId}/task-candidates
 
@@ -486,4 +498,57 @@ None.
 
 - 후보 하나에서 카드 하나만 생성되도록 unique 제약을 둔다.
 - 확정과 TaskCard 생성은 하나의 domain transition으로 처리하고 candidate 상태를 `CONFIRMED`로 변경한다.
-- candidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
+- candidate는 생성 후 7일 안에만 확정할 수 있다. 만료되면 `409 CANDIDATE_EXPIRED`로 거부한다.
+
+## POST /api/v1/meetings/{meetingId}/task-candidates/{candidateId}/dismiss
+
+태스크 후보를 칸반 등록 대상에서 제외한다.
+
+### Status
+
+- Implemented: Core API + BFF allowlist + Frontend review action
+
+### Auth and Permissions
+
+- 인증 필요
+- active SpaceMember 필요
+- `OWNER`/`ADMIN` 또는 해당 회의의 active `HOST`/`EDITOR`
+
+### Data Scope
+
+- Meeting scope
+- 후보와 근거는 보존하고 상태만 `DISMISSED`로 전환한다.
+
+### Request
+
+None.
+
+### Validation
+
+- candidate가 해당 meeting에 속해야 한다.
+- candidate는 `CANDIDATE` 상태여야 한다.
+
+### Response
+
+`GET /api/v1/meetings/{meetingId}/task-candidates`의 candidate item과 같은 형식으로 `status: "DISMISSED"`를 반환한다.
+
+### Errors
+
+- `400 INVALID_REQUEST`: 이미 확정 또는 제외된 candidate
+- `403 SPACE_ACCESS_DENIED`: active SpaceMember가 아님
+- `403 MEETING_ACCESS_DENIED`: 회의 편집 권한 없음
+- `404 MEETING_NOT_FOUND`: meeting 없음
+- `404 TASK_CANDIDATE_NOT_FOUND`: candidate 없음 또는 path meeting과 불일치
+
+### Audit
+
+- `TASK_CANDIDATE_DISMISSED`
+
+### Requirement Trace
+
+- FR-TASK-02: candidate별 제외
+
+### Notes
+
+- 제외된 candidate는 재활성화하지 않는다. 필요하면 새 후보를 생성한다.
+- 제외는 만료된 candidate에도 허용해 검토 이력을 정리할 수 있다. 만료 candidate의 TaskCard 확정은 `409 CANDIDATE_EXPIRED`로 거부한다.

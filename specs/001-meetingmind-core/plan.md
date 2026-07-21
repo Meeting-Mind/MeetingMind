@@ -79,6 +79,17 @@
 7. grounding 구현은 Backend persistence와 병렬 진행할 수 있다. vector migration, worker, retriever는 shared contract 이후 Data -> Backend -> AI 순서로 통합한다.
 8. 회의 채팅 첨부파일은 별도 도메인 계약 이후 텍스트 추출 결과만 같은 1536차원 공간에 저장한다. 이미지와 image-only PDF를 위한 visual embedding 또는 Vision 처리는 MVP schema와 M033 범위에 포함하지 않는다.
 
+### M035 Attachment Storage and RAG Plan
+
+This milestone is deferred from the current delivery phase. No attachment persistence migration or API contract is included in the current schema baseline. Do not start the API, extractor, retriever, frontend, or integration-test steps below in this phase.
+
+1. Data/Backend owner는 M035 재개 시점의 최신 Flyway version 다음에 `meeting_messages`, `meeting_attachments`, `attachment_chunk_anchors`와 `embedding_jobs.attachment_id`를 forward migration으로 추가한다. 기존 migration은 수정하지 않는다.
+2. Core는 active Meeting ACL을 확인한 뒤 private S3/MinIO presigned upload session을 만들고, complete 요청에서 HEAD/checksum/MIME/size를 재검증한다. object key, URL, file byte는 PostgreSQL과 audit payload에 저장하지 않는다.
+3. Backend는 verified attachment를 message에 게시하고 extraction queue를 만든다. `READY` 텍스트 추출과 attachment generation은 같은 transaction으로 연결하며 `UNSUPPORTED` visual/image-only 입력은 job을 만들지 않는다.
+4. AI owner는 TXT/Markdown/PDF extractor와 `meetingAttachment` chunk/anchor를 구현한다. Meeting/Project retriever는 existing scope SQL에 `READY`, non-deleted, non-expired filter를 추가하고 citation file/page anchor를 검증한다.
+5. Frontend owner는 message/file UI에서 upload, processing, unsupported, failed, download, delete를 구분한다. raw object URL은 UI state와 log에 보관하지 않는다.
+6. Integration owner는 AT-001~AT-005와 cross-meeting/retention/prompt-injection negative test를 실행한다.
+
 ## API Contracts
 
 - 기능별 target API 초안은 `contracts/README.md`에서 라우팅한다.
@@ -193,7 +204,7 @@ FR-DASH/FR-CAL 구현은 현재 prototype 경계를 숨기지 않는다. Backend
 - FR-DASH-04/05: 프로젝트 수정/삭제는 owner/admin 권한 UI affordance와 확인 절차를 먼저 구현한다. 현재 prototype은 local state/mock fallback으로 반영하고, target API는 `PATCH /api/v1/spaces/{spaceId}`, `DELETE /api/v1/spaces/{spaceId}`에 연결할 수 있게 client 경계를 둔다.
 - FR-CAL-01/02/03: 월/주/일 전환 가능한 캘린더 뷰를 추가하고 접근 가능한 회의 일정만 표시한다. 일정 클릭은 기존 회의 대기 또는 보고서 화면 라우팅 규칙을 재사용한다.
 - FR-CAL-04: 캘린더에서 회의 일정 생성은 `POST /api/v1/spaces/{spaceId}/meetings`와 같은 request shape를 사용한다. 현재 local state 생성은 제목/일시를 보존하도록 확장한다.
-- FR-CAL-05: 회의 알림은 아직 발송 backend가 없으므로 다가오는 회의 표시와 알림 준비 상태까지만 frontend에서 표현하고, 실제 발송은 후속 backend/notification task로 둔다.
+- FR-CAL-05: 외부 발송 backend 없이도 기존 ACL-filtered calendar API를 사용해 향후 24시간 회의를 인앱 알림으로 표시한다. push/email 등 비동기 발송은 별도 notification delivery task로 둔다.
 
 ### Implementation Slices
 

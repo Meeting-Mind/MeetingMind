@@ -50,6 +50,8 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `description`
 - `createdBy`
 - `createdAt`
+- `updatedAt`: Space 이름 또는 설명 수정 시각
+- `deletedAt`: soft delete 시각. 일반 목록과 접근 검증에서 제외한다.
 
 ### SpaceMember
 
@@ -64,7 +66,9 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `id`
 - `spaceId`
 - `title`
+- `description`: 일정 설명, null 가능
 - `scheduledAt`
+- `scheduledEndAt`: 캘린더용 예정 종료 시각. `scheduledAt`보다 이후여야 하며 실제 종료 시각 `endedAt`과 구분한다.
 - `startedAt`
 - `endedAt`
 - `status`: SCHEDULED, IN_PROGRESS, ENDED, CANCELED
@@ -132,6 +136,41 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `text`
 - `source`
 
+### MeetingMessage
+
+- `id`
+- `meetingId`
+- `authorUserId`: 작성자 User scalar ID
+- `text`: null 가능. attachment-only message는 null이고, text와 attachment가 모두 비어 있으면 안 된다.
+- `createdAt`
+- `deletedAt`: soft delete 시각. 기본 조회와 AI context에서는 제외한다.
+
+### Deferred: MeetingAttachment
+
+- `id`
+- `meetingId`
+- `messageId`: upload session·업로드 검증·추출 중에는 null일 수 있고, 게시 성공 뒤 같은 Meeting의 `MeetingMessage` FK로 설정한다.
+- `uploadedBy`: 업로드 session 생성자 User scalar ID
+- `originalFilename`: 제어문자를 제거한 표시 이름. storage key나 filesystem path로 사용하지 않는다.
+- `contentType`, `sizeBytes`, `sha256`
+- `objectKey`: private object storage의 opaque key. API response·audit·AI context에 노출하지 않는다.
+- `status`: `PENDING_UPLOAD`, `PROCESSING`, `READY`, `UNSUPPORTED`, `FAILED`, `DELETED`, `EXPIRED`
+- `extractionFailureCode`: provider raw error가 아닌 정규화된 코드. `UNSUPPORTED`/`FAILED`일 때만 사용한다.
+- `extractedTextObjectKey`: 추출 성공한 정규화 text의 private derived object key; DB에는 원문 추출 text를 중복 저장하지 않는다.
+- `extractedChars`, `retentionUntil`, `createdAt`, `uploadExpiresAt`, `completedAt`, `deletedAt`, `expiredAt`
+
+이 모델은 M035 재개 시 사용할 future draft다. 현재 Flyway schema, API, RAG source에는 포함하지 않는다. 원본 object는 private S3-compatible storage에만 두며, 완료 검증 전 attachment는 message에 연결할 수 없고, `READY` attachment만 RAG source가 된다. PNG/JPEG와 image-only PDF는 `UNSUPPORTED`로 공유/다운로드만 가능하다.
+
+### Deferred: AttachmentChunkAnchor
+
+- `id`
+- `chunkId`
+- `attachmentId`
+- `pageNumber`: TXT/Markdown이면 null, PDF text chunk면 1-based page
+- `charStart`, `charEnd`: extracted text 내 citation 범위
+
+이 테이블은 `EmbeddingChunk`와 attachment extract의 직접 관계다. `SourceReference`를 위한 범용 다형 FK를 만들지 않고, transcript의 `ChunkSourceSegment`와 별도로 위치 정보를 보존한다.
+
 ### MeetingReport
 
 - `id`
@@ -148,6 +187,8 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `isCurrent`: 회의당 현재 공식 CONFIRMED report는 하나만 true
 - `createdAt`
 - `confirmedAt`: `CONFIRMED` 전환 시각, 확정 전에는 null
+- 수동 수정은 기존 행을 바꾸지 않고 `DRAFT` 새 version을 생성해 이력을 보존한다.
+- `CANDIDATE`는 생성 후 7일 동안만 확정하거나 후보 기반 편집으로 새 `DRAFT`를 만들 수 있다. 만료 여부는 `createdAt`과 정책값으로 계산한다.
 
 ### TaskCandidate
 
@@ -172,10 +213,13 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `title`
 - `description`
 - `status`: TODO, IN_PROGRESS, DONE
+- `priority`: LOW, MEDIUM, HIGH. 일반 카드와 AI 후보 확정 카드의 기본값은 MEDIUM
+- `labels`: 순서가 유지되는 사용자 지정 문자열 목록. 카드당 최대 10개, 각 trim 후 1~40자이며 대소문자 무시 중복은 허용하지 않음
 - `assigneeId`: active SpaceMember 사용자 id, 미지정 시 null
 - `dueDate`
 - `createdAt`
 - `updatedAt`
+- `deletedAt`: 일반 카드 삭제 시 soft delete 시각. 기본 조회에서는 제외한다.
 
 ### ProjectKnowledge
 
@@ -192,6 +236,17 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `createdAt`
 - `updatedAt`
 - `deletedAt`: soft delete 또는 archive 추적 후보
+
+### ProjectAiMessage
+
+- `id`
+- `spaceId`
+- `userId`: 대화를 생성하고 조회할 인증 사용자
+- `role`: USER, ASSISTANT
+- `content`
+- `createdAt`
+
+Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개를 시간순으로 반환하고, 다음 AI 요청에는 최근 10개만 비신뢰 대화 문맥으로 전달한다. 이력은 RAG source나 citation이 아니므로 현재 요청의 권한 scope와 source allowlist를 대체할 수 없다.
 
 ### DomainTerm
 
@@ -226,12 +281,13 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `spaceId`
 - `projectKnowledgeId`: 지식 재색인 작업이면 required
 - `meetingId`: 회의 전사/보고서 재색인 작업이면 required
+- `attachmentId`: MeetingAttachment 색인 작업이면 required
 - `status`: PENDING, PROCESSING, COMPLETED, FAILED
 - `model`: 실제 embedding model 식별자
 - `dimension`: 생성 vector 차원
 - `generation`: 동일 source의 교체 세대
 - `attemptCount`
-- `triggerReason`: KNOWLEDGE_CHANGED, TRANSCRIPT_COMPLETED, SPEAKER_UPDATED, REPORT_CONFIRMED, FULL_REINDEX
+- `triggerReason`: KNOWLEDGE_CHANGED, TRANSCRIPT_COMPLETED, SPEAKER_UPDATED, REPORT_CONFIRMED, ATTACHMENT_READY, FULL_REINDEX
 - `contentHash`: 같은 source 내용의 중복 작업 회피와 stale generation 확인용 hash
 - `nextAttemptAt`: retry 가능한 다음 시각
 - `leaseExpiresAt`: worker 장애 시 작업을 다시 선점하기 위한 lease 만료 시각
@@ -253,25 +309,36 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `MeetingTranscript.meetingId`는 PK/FK이며 회의당 최대 하나다.
 - `MeetingTranscript.status=COMPLETED`이면 `completedAt`이 required이고, `FAILED`이면 `failureReason`이 required다.
 - `MeetingTranscript.retentionUntil`은 `Meeting.retentionPolicy=PERMANENT`이면 null이고 기간 보존이면 설정한다.
+- `MeetingMessage`는 `text is not null` 또는 연결된 active `MeetingAttachment`가 하나 이상이어야 한다.
+- `MeetingAttachment.meetingId`는 `MeetingMessage.meetingId`와 같아야 한다. `messageId`가 null인 attachment는 upload session·업로드 검증·추출 중이거나 게시되지 않은 완료 attachment일 수 있으며, 기본 message 목록에는 포함하지 않는다.
+- `MeetingAttachment.sha256`은 64-character lowercase hex이고 `(meetingId, sha256)`는 active attachment 기준 unique로 두어 같은 byte의 재업로드를 막는다.
+- `MeetingAttachment.status=READY`이면 `extractedTextObjectKey`와 `completedAt`이 required다. `UNSUPPORTED`/`FAILED`이면 `extractionFailureCode`가 required다. `DELETED`/`EXPIRED`는 download와 retrieval 대상이 아니다.
+- `MeetingAttachment.retentionUntil`은 Meeting의 retention policy에서 계산하며, `PERMANENT`이면 null이다.
+- `AttachmentChunkAnchor(chunkId, attachmentId, pageNumber, charStart, charEnd)`는 unique다.
 - `TranscriptSegment(meetingId, sequence)`은 unique다.
 - `MeetingReport(meetingId, version)`은 unique다.
 - `MeetingReport(meetingId)` 기준 `status=CONFIRMED and isCurrent=true`는 최대 1개다.
 - `MeetingReport.status=CANDIDATE`는 임시 저장되지만 기본 공식 회의록 조회와 Project AI source에서 제외한다.
 - AI가 근거 부족으로 `unsupported=true`를 반환한 결과는 `MeetingReport`로 저장하지 않는다.
 - `CANDIDATE` 또는 `DRAFT`만 `CONFIRMED`로 전환할 수 있고, 중복 확정은 거부한다.
+- MeetingReport `CANDIDATE`는 생성 후 7일이 지나면 확정 또는 후보 기반 draft 생성을 거부한다. 기존 이력과 근거 source는 보존한다.
 - 같은 meeting에 더 높은 version이 존재하면 오래된 candidate 확정을 거부한다.
 - 새 report를 확정할 때 기존 `CONFIRMED and isCurrent=true` report를 `isCurrent=false`로 전환하고 새 report만 `isCurrent=true`로 둔다.
 - `TaskCard.sourceCandidateId`는 nullable이지만 값이 있으면 unique다.
+- `TaskCard.priority`는 `LOW`, `MEDIUM`, `HIGH` 중 하나이며 기본값은 `MEDIUM`이다.
+- `TaskCard.labels`는 PostgreSQL `text[]`로 저장하고 application layer에서 최대 개수·문자 수·대소문자 무시 중복을 검증한다.
+- `TaskCard.deletedAt`이 null인 행만 일반 칸반 목록에 노출한다. AI candidate 중복 확정 검증은 삭제된 카드도 포함해 source uniqueness를 보존한다.
 - `TaskCandidate.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나다.
 - `TaskCandidate`는 AI가 반환한 source ID를 Backend canonical source allowlist로 필터링해 저장한다.
 - `TaskCandidate.CANDIDATE`만 TaskCard로 확정할 수 있고 확정과 카드 생성은 하나의 domain transition으로 처리한다.
 - `TaskCandidate.suggestedAssigneeId`와 `TaskCard.assigneeId`는 active SpaceMember만 허용한다.
 - TaskCandidate 생성/조회 응답의 담당자 선택지는 해당 Space의 active SpaceMember에서 파생하며 별도 entity로 저장하지 않는다.
-- TaskCandidate 만료 검증은 `Q-009` 정책 결정 후 추가한다.
+- TaskCandidate는 생성 후 7일 동안만 TaskCard로 확정할 수 있다. 만료 여부는 `createdAt`과 정책값으로 계산하며 별도 status를 추가하지 않는다.
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
+- `ProjectAiMessage(spaceId, userId, createdAt)` index는 사용자별 Space 대화 조회에 사용한다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
-- `EmbeddingJob`은 `projectKnowledgeId`와 `meetingId` 중 정확히 하나만 참조해야 한다.
-- `EmbeddingJob(projectKnowledgeId, generation)`과 `EmbeddingJob(meetingId, generation)`은 source별 unique다.
+- `EmbeddingJob`은 `projectKnowledgeId`, `meetingId`, `attachmentId` 중 정확히 하나만 참조해야 한다.
+- `EmbeddingJob(projectKnowledgeId, generation)`, `EmbeddingJob(meetingId, generation)`, `EmbeddingJob(attachmentId, generation)`은 source별 unique다.
 - 동일 source의 active `EmbeddingChunk`는 최신 완료 generation만 사용한다. 새 generation 완료 전에는 기존 active chunk를 유지한다.
 - embedding model은 `text-embedding-3-small`, 차원은 1536, 거리는 cosine으로 고정한다. MVP는 exact search를 사용하고 후보 5,000개 초과 또는 검색 p95 1초 지속 초과 시 HNSW를 검토한다.
 
@@ -300,7 +367,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - `projectId`: prototype에서는 `spaceId`와 같은 프로젝트 식별자로 취급 가능
 - `meetingId`: ProjectKnowledge-only chunk면 null 가능
 - `scope`: AI query mode가 아닌 source 소유 범위. `transcript`, `meetingSummary`, `decision`, `actionItem`, `report`는 `meeting`, `projectKnowledge`는 `project`
-- `sourceType`: `transcript`, `meetingSummary`, `decision`, `actionItem`, `report`, `projectKnowledge`, `glossary`
+- `sourceType`: `transcript`, `meetingSummary`, `decision`, `actionItem`, `report`, `meetingAttachment`, `projectKnowledge`, `glossary`
 - `sourceId`: 원본 segment/report/knowledge id
 - `sourceSegmentIds`: transcript window chunk가 포함한 segment id 목록
 - `title`: 회의명 또는 문서명
@@ -333,8 +400,8 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 ### RAG Scope Rules
 
 - 회의 중 용어 설명은 `glossary`, 현재 회의 transcript window, 현재 회의 decision/action/report chunk만 검색한다.
-- 회의별 챗봇은 단일 `meetingId`에 속한 chunk만 검색한다.
-- 프로젝트별 챗봇은 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk만 검색한다.
+- 회의별 챗봇은 단일 `meetingId`에 속한 chunk와 `READY` attachment chunk만 검색한다.
+- 프로젝트별 챗봇은 `ProjectKnowledge`와 권한 필터를 통과한 meeting chunk(READY attachment 포함)만 검색한다.
 - Backend는 active SpaceMember와 MeetingParticipant를 PostgreSQL 조회에서 선필터하고 AI 서버에는 `already_filtered` context와 `allowedMeetingIds`만 전달한다.
 - Meeting AI query mode는 `spaceId`, 단일 `meetingId`, `scope=meeting`을 모두 만족하는 chunk만 검색한다.
 - Project AI query mode는 같은 `spaceId`의 `scope=project/sourceType=projectKnowledge` chunk와 `allowedMeetingIds`에 포함된 `scope=meeting` chunk를 함께 검색한다.
@@ -356,7 +423,9 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - transcript segment마다 job을 만들지 않는다. `MeetingTranscript.status=COMPLETED`일 때 최초 meeting generation을 만든다.
 - 발화자명 또는 meeting title처럼 `embeddingText`에 포함되는 값이 바뀌면 meeting generation을 만든다. 일정, 권한, 참여자 변경은 재임베딩하지 않는다.
 - report candidate/draft 편집 중에는 job을 만들지 않고 current confirmed report가 바뀔 때 meeting generation을 만든다.
-- transcript 보존 만료와 meeting 삭제는 관련 transcript chunk와 source 연결을 즉시 제거한다.
+- attachment complete 후 extractor가 text를 만들면 `ATTACHMENT_READY` generation을 만든다. 같은 hash의 재시도는 최신 generation만 교체한다. 이미지·image-only PDF의 `UNSUPPORTED`는 job을 만들지 않는다.
+- attachment 삭제 또는 보존 만료는 physical object cleanup보다 먼저 관련 `EmbeddingChunk.isActive=false`와 `AttachmentChunkAnchor` 조회 제외를 같은 transaction으로 처리한다.
+- transcript/attachment 보존 만료와 meeting 삭제는 관련 chunk와 source 연결을 즉시 제거한다.
 - worker는 `PENDING` job을 `FOR UPDATE SKIP LOCKED`로 선점하고 lease 만료 작업을 재처리한다. retry는 최대 3회, 1분/5분/15분 간격을 기본값으로 둔다.
 - 새 generation 전환 transaction은 요청된 최신 generation인지 확인한 뒤 기존 active chunk를 replaced 처리하고 새 chunk만 active로 만든다.
 
@@ -372,6 +441,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - Project Knowledge 수정 시 embedding은 비동기 재생성한다. 기존 chunk는 유지하고 새 embedding chunk가 `COMPLETED`가 되면 교체한다.
 - 발화자 이름 수정은 회의 `HOST` 또는 `EDITOR` 권한이 있는 사용자만 수행한다.
 - transcript, report, summary 조회는 `MeetingParticipant` 권한 확인 후 허용한다.
+- MeetingMessage, MeetingAttachment 조회·download·upload도 같은 MeetingParticipant ACL을 사용한다. 업로드자는 자신의 attachment를, OWNER/ADMIN/active HOST는 모든 meeting attachment를 삭제할 수 있다.
 - AI 서버로 전달되는 transcript segment는 Backend 권한 필터 이후에 구성한다.
 - `MeetingParticipant.accessStatus=ACTIVE`만 회의 접근 권한으로 인정한다. `REVOKED`는 조회, 수정, LiveKit token, Meeting AI, Project AI meeting context 접근을 모두 차단한다.
 - SpaceMember 제거 시 같은 Space에 속한 `participantType=member` MeetingParticipant는 `participantType=guest`로 전환한다. 프로젝트 접근권 제거와 회의 접근권 revoke는 분리하며, 회의 접근 차단은 MeetingParticipant `REVOKED`로 처리한다.
@@ -389,3 +459,4 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - 음성 원본: 기본 장기 보관 없음
 - STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상. DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`이며 기본값은 `DAYS_30`이다. `legalHold=true`이면 자동 삭제를 보류한다.
 - 보고서/공식 지식: Space 정책에 따른 보존
+- 회의 채팅 첨부: Meeting의 retention policy를 상속한다. `DAYS_7`/`DAYS_30`이면 `retentionUntil`을 기록하고, `PERMANENT`이면 null이다. 삭제/만료 시 object URL 발급과 RAG 검색을 즉시 중단하고 physical cleanup은 retry 가능한 비동기 작업으로 남긴다.

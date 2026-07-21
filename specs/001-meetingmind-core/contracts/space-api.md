@@ -17,7 +17,7 @@
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend calendar query
 
 ### Auth and Permissions
 
@@ -143,7 +143,7 @@ Space 상세와 프로젝트 개요 데이터를 조회한다.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend dashboard summary display
 
 ### Auth and Permissions
 
@@ -402,7 +402,7 @@ None.
 
 ### Status
 
-- Target Backend
+- Implemented: Core API + BFF allowlist + Frontend dashboard summary display
 
 ### Auth and Permissions
 
@@ -425,9 +425,61 @@ None.
 
 ```json
 {
-  "todayMeetings": [],
-  "recentActivities": [],
-  "spaces": []
+  "todayMeetings": [
+    {
+      "id": "meeting-001",
+      "spaceId": "space-001",
+      "meetingId": "meeting-001",
+      "title": "Sprint Planning #12",
+      "startsAt": "2026-07-20T10:00:00+09:00",
+      "endsAt": "2026-07-20T11:00:00+09:00",
+      "status": "SCHEDULED"
+    }
+  ],
+  "recentActivities": [
+    {
+      "id": "task-001",
+      "spaceId": "space-001",
+      "title": "API 명세 정리 태스크 업데이트",
+      "occurredAt": "2026-07-20T09:00:00Z",
+      "type": "task"
+    }
+  ],
+  "spaces": [
+    {
+      "id": "space-001",
+      "name": "MeetingMind",
+      "description": "AI 회의 지식화 프로젝트",
+      "role": "OWNER",
+      "meetingCount": 12,
+      "updatedAt": "2026-07-20T09:00:00Z"
+    }
+  ],
+  "actionItems": [
+    {
+      "id": "task-001",
+      "spaceId": "space-001",
+      "meetingId": "meeting-001",
+      "title": "API 명세 정리",
+      "description": null,
+      "status": "TODO",
+      "assigneeId": null,
+      "dueDate": null,
+      "sourceCandidateId": null
+    }
+  ],
+  "latestReports": [
+    {
+      "id": "report-001",
+      "spaceId": "space-001",
+      "meetingId": "meeting-001",
+      "meetingTitle": "Sprint Planning #12",
+      "title": "Sprint Planning #12 회의록",
+      "summary": "스프린트 범위와 담당자를 확정했습니다.",
+      "version": 2,
+      "confirmedAt": "2026-07-20T10:30:00Z"
+    }
+  ]
 }
 ```
 
@@ -446,7 +498,10 @@ None.
 
 ### Notes
 
-- `recentActivities`는 감사 로그와 별도 read model로 둘 수 있다.
+- 오늘은 제품 시간대 `Asia/Seoul`을 기준으로 한다. `endsAt`은 Meeting의 예정 종료 시각 `scheduledEndAt`을 반환하며, 실제 회의 종료 시각 `endedAt`과 구분한다.
+- 최근 활동은 현재 권한이 확인된 Space 변경, Task 변경, 읽을 수 있는 회의록 생성으로 구성한다. 공통 audit-event read model은 후속 확장 경계다.
+- `actionItems`는 `DONE` 이외 카드 중 마감일·수정시각 순 상위 10건이다. 연결 Meeting을 읽을 수 없으면 `meetingId`, `sourceCandidateId`는 `null`이다.
+- `latestReports`는 Meeting ACL을 통과한 회의의 current `CONFIRMED` report만 확정 시각 내림차순 상위 5건으로 반환한다. `CANDIDATE`, `DRAFT`, 이전 버전 report는 포함하지 않는다.
 
 ## GET /api/v1/calendar/events
 
@@ -609,9 +664,10 @@ Space 초대 링크를 생성한다.
 
 ```json
 {
-  "invitationId": "invite-001",
+  "invitationId": "space-invitation-001",
   "status": "PENDING",
-  "expiresAt": "2026-07-16T10:00:00+09:00"
+  "expiresAt": "2026-07-16T10:00:00+09:00",
+  "inviteToken": "returned-only-once"
 }
 ```
 
@@ -631,8 +687,10 @@ Space 초대 링크를 생성한다.
 
 ### Notes
 
-- 초대 token 원문 저장 여부와 만료 기간은 정책 문서에 맞춘다.
+- token 원문은 SHA-256 hash만 저장하고 생성 응답에서 초대 권한이 있는 호출자에게 한 번만 반환한다. 만료 기간은 생성 시점부터 7일이다.
+- 수락/거절은 인증 사용자 이메일과 초대 이메일, token hash가 모두 일치해야 한다.
 - Space invitation은 수락 시 `SpaceMember`를 생성한다. 회의 단독 초대는 `meeting-api.md`의 Meeting invitation endpoint를 사용한다.
+- Browser 수락 링크는 `/space-invitations/{spaceId}/{invitationId}#token={token}`을 사용한다. token은 query가 아닌 fragment에 두며, Browser는 해당 fragment를 accept/decline body의 `token`으로만 전달한다.
 
 ## POST /api/v1/spaces/{spaceId}/invitations/{invitationId}/accept
 
@@ -728,7 +786,7 @@ Space 초대 링크를 생성한다.
 
 ```json
 {
-  "invitationId": "invite-001",
+  "invitationId": "space-invitation-001",
   "status": "DECLINED"
 }
 ```

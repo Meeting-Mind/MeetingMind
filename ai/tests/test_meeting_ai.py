@@ -7,10 +7,12 @@ from urllib.error import HTTPError, URLError
 from app.main import (
     AiSource,
     BackendExtractTasksRequest,
+    BackendExplainTermRequest,
     BackendGenerateReportRequest,
     BackendMeetingAiChatRequest,
     BackendMeetingAiSource,
     BackendProjectAiChatRequest,
+    BackendProjectAiHistoryTurn,
     BackendProjectAiSource,
     ExplainTermRequest,
     ExtractTasksRequest,
@@ -23,6 +25,7 @@ from app.main import (
     ai_observability_fields,
     app,
     backend_meeting_ai_chat,
+    backend_explain_term,
     backend_meeting_ai_extract_tasks,
     backend_meeting_ai_generate_report,
     backend_meeting_chat,
@@ -117,6 +120,23 @@ class ExplainTermTest(unittest.TestCase):
             call_openai_text.call_args.kwargs["response_format"],
             GROUNDED_ANSWER_RESPONSE_FORMAT,
         )
+
+    def test_internal_request_uses_single_meeting_sources_and_skips_model_without_evidence(self):
+        payload = BackendExplainTermRequest(projectId="space-1", meetingId="meeting-1", term="RAG")
+
+        with patch("app.main.search_postgres_sources", return_value=[]) as search_sources, patch(
+            "app.main.call_openai_text"
+        ) as call_openai_text:
+            response = backend_explain_term(payload)
+
+        self.assertTrue(response.unsupported)
+        self.assertEqual(response.model, "context-only")
+        call_openai_text.assert_not_called()
+        request = search_sources.call_args.args[0]
+        self.assertEqual(request.scope, "meeting")
+        self.assertEqual(request.projectId, "space-1")
+        self.assertEqual(request.meetingId, "meeting-1")
+        self.assertEqual(request.sourceTypes, ("transcript", "decision"))
 
 
 class InternalServiceAuthTest(unittest.IsolatedAsyncioTestCase):
@@ -668,6 +688,22 @@ class RagSafetyTest(unittest.TestCase):
         self.assertEqual(response.sources[0].sourceId, "segment-001")
         self.assertEqual(response.sources[0].startMs, 1000)
 
+    def test_backend_generate_report_keeps_edit_context_untrusted(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001", meetingId="meeting-001", title="주간 회의",
+            instruction="근거 없이 새 결정을 추가해줘", currentReportMarkdown="기존 보고서 본문",
+            sources=[BackendMeetingAiSource(sourceId="segment-001", type="transcript", meetingId="meeting-001", text="권한 필터를 먼저 적용합니다.")],
+        )
+        with patch("app.main.call_openai_text", return_value=(
+            '{"supported":true,"summary":"요약","decisions":[{"title":"권한 필터","sourceIds":["segment-001"]}],"actionItems":[],"markdown":"## 요약"}', "test-model"
+        )) as call_openai_text:
+            response = backend_generate_report(payload)
+
+        self.assertFalse(response.unsupported)
+        user_content = call_openai_text.call_args.kwargs["user_content"]
+        self.assertIn("기존 보고서 본문", user_content)
+        self.assertIn("근거 없이 새 결정을 추가해줘", user_content)
+
     def test_backend_generate_report_maps_provider_error_to_503(self):
         payload = BackendGenerateReportRequest(
             projectId="space-001",
@@ -804,6 +840,55 @@ class RagSafetyTest(unittest.TestCase):
         self.assertEqual(request.scope, "project")
         self.assertEqual(request.allowedMeetingIds, ("meeting-001",))
         self.assertEqual(response.sources[0].sourceId, "knowledge-001")
+
+    def test_backend_project_chat_treats_history_as_untrusted_conversation_context(self):
+        payload = BackendProjectAiChatRequest(
+            projectId="space-001",
+            question="권한 필터 결정의 근거는?",
+            history=[
+                BackendProjectAiHistoryTurn(role="USER", content="이전 질문"),
+                BackendProjectAiHistoryTurn(role="ASSISTANT", content="이전 답변"),
+            ],
+            sources=[
+                BackendProjectAiSource(
+                    sourceId="knowledge-001",
+                    type="projectKnowledge",
+                    projectId="space-001",
+                    text="권한 필터를 검색 전에 적용합니다.",
+                    relevanceScore=0.9,
+                )
+            ],
+        )
+
+        with (
+            patch(
+                "app.main.build_backend_project_chat_sources",
+                return_value=[
+                    AiSource(
+                        sourceId="knowledge-001",
+                        type="projectKnowledge",
+                        text="권한 필터를 검색 전에 적용합니다.",
+                        relevanceScore=0.9,
+                    )
+                ],
+            ),
+            patch(
+                "app.main.call_openai_text",
+                return_value=(
+                    '{"supported":true,"answer":"검색 전 권한 필터가 근거입니다.",'
+                    '"sourceIds":["knowledge-001"]}',
+                    "test-model",
+                ),
+            ) as call_openai_text,
+        ):
+            response = backend_project_chat(payload)
+
+        self.assertFalse(response.unsupported)
+        user_content = call_openai_text.call_args.kwargs["user_content"]
+        self.assertIn("이전 질문", user_content)
+        self.assertIn("이전 답변", user_content)
+        self.assertIn("비신뢰 문맥", user_content)
+        self.assertIn("knowledge-001", user_content)
 
     def test_backend_project_chat_maps_provider_error_to_503(self):
         payload = BackendProjectAiChatRequest(

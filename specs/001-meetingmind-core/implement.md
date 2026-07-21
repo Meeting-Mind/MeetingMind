@@ -780,8 +780,15 @@
 ### Remaining Boundary
 
 - legacy STT streaming session/file은 아직 `meeting_transcripts.status=COMPLETED`를 JDBC로 기록하지 않는다. DB trigger/worker는 준비됐지만 실제 회의 종료 이벤트 연결은 STT owner와 통합해야 한다.
-- T274 Frontend `unsupportedReason`, T263 실제 provider 기반 정확도·성능·Backend-to-AI HTTP 검증이 남아 있다.
+- Frontend Meeting/Project AI는 `unsupportedReason`을 근거 부족/관련도 부족/근거 검증 실패로 표시하고, provider 오류는 기존 API error로 분리한다. 실제 provider 기반 정확도·성능·Backend-to-AI HTTP 검증 결과는 T275에 기록했다.
 - M034 attachment RAG는 MeetingMessage/Attachment 계약과 Backend 저장이 완료된 뒤 진행한다.
+
+### T275 Korean Grounded Provider Evaluation
+
+- `RUN_OPENAI_GROUNDED_EVAL=true ./.venv/bin/python -m unittest tests.test_openai_grounded_evaluation`을 실제 OpenAI credential로 실행했다.
+- 평가기는 `BackendMeetingAiChatRequest`의 internal handler에 단일 회의 source를 전달한다. 근거 있음 15건은 실제 인용 source ID를, 근거 없음 15건은 무관한 source를 사용해 DB fallback 없이 evidence gate와 structured citation을 함께 검증한다.
+- 결과: false-supported `0%`, supported answer `100%`, citation 정확도 `100%`, provider-inclusive p95 `1,933.02 ms` (총 30건, 2026-07-20). 이 지연은 provider를 포함하며 SR-007의 PostgreSQL retrieval p95와 별도다.
+- Backend의 `HttpMeetingAiGatewayClientTest`는 Core가 service token과 request ID를 포함해 `/api/internal/meeting-ai/chat`을 호출하고 응답을 역직렬화하는 local HTTP integration을 검증한다. BFF public Meeting/Project AI route는 Core downstream으로만 프록시된다.
 
 ### T273 AI Observability
 
@@ -797,6 +804,11 @@
 - Passed: Compose 기본/AI profile config, Frontend lint 오류 0건/unit 6건/build, Playwright 4건, `git diff --check`.
 - Not run: 실제 OpenAI credential을 사용하는 과금 E2E, 한국어 평가 질의와 검색 p95 측정, 운영 모니터링 시스템의 실제 alert 발화. T275에서 수행한다.
 
+### T274 Frontend Unsupported Reason
+
+- Meeting AI와 Project AI 응답 타입은 nullable `unsupportedReason`을 보존한다. `NO_EVIDENCE`, `LOW_RELEVANCE`, `MODEL_UNSUPPORTED`, `UNVERIFIED_OUTPUT`은 정상 grounded 결과로 구분해 보여주며, HTTP provider 오류는 기존 error state로 유지한다.
+- Passed: `cd frontend && npm run test -- --run && npm run build`, `git diff --check`.
+
 ## M035 Meeting Chat Text Attachment RAG Preparation
 
 ### Decision
@@ -808,7 +820,7 @@
 ### Document Impact
 
 - Updated: `clarify.md`, `plan.md`, `contracts/ai-api.md`, `tasks.md`, shared handoff.
-- Deferred: Attachment API, ERD, data model과 requirements 변경은 T266 shared contract에서 함께 처리한다.
+- Deferred: Attachment API, ERD, data model과 requirements 변경은 T278 shared contract에서 함께 처리한다.
 - M034 impact: 기존 grounding과 pgvector 기반 구현은 그대로 진행할 수 있으며 이미지 vector 컬럼이나 모델은 V12에 추가하지 않는다.
 
 ### Verification
@@ -816,6 +828,13 @@
 - Passed: 현재 LiveRoom, embedding chunk/job schema, 업로드 요구사항과 권한 문서의 선행 경계 비교.
 - Passed: `git diff --check`, Q-011/D-039 반영 검색, T277-T284 task ID 중복 검사.
 - Not run: code tests. 이번 변경은 첨부파일 검색 정책과 후속 task 준비만 포함한다.
+
+### T278 Attachment Contract and Storage Domain
+
+- M035 attachment storage/RAG 설계와 구현은 현재 전달 범위에서 제외했다. 이전 future draft는 재개 시점의 요구사항, 최신 migration version, storage provider 정책을 기준으로 다시 확정한다.
+- Meeting ACL이 upload/list/download/RAG에 그대로 적용된다. 삭제·보존 만료·Meeting soft delete는 chunk를 먼저 inactive 처리하고 object cleanup은 retry 가능한 비동기로 남긴다. Project AI는 Backend가 전달한 `allowedMeetingIds` 안의 READY attachment만 검색한다.
+- Updated: `requirements/{glossary,permissions,policies,status-values}.md`, `clarify.md` D-044/Q-012, API contract index/new attachment contract, AI contract, ERD/data model/test matrix/tasks.
+- Verification: `git diff --check` pending after the full worktree verification. No production code, migration, or object storage credential was added; T279-T283 implement the contract and run AT-001~AT-005.
 
 ## M036 Frontend Workspace Persistence Hydration
 
@@ -931,6 +950,10 @@
 
 - Auth는 계속 JDBC `AuthStore`를 사용한다. `WorkspaceStore`의 Space, Meeting/ACL, transcript, report/task, knowledge, audit는 `JpaWorkspaceStore`와 `JpaWorkspacePersistence`로 전환했고, vector retrieval/worker SQL은 JPA 대상이 아니다.
 - Cloud STT provider callback, target DB lifecycle, LiveKit Egress deployment E2E를 검증했다. OpenAI embedding provider의 실제 한국어 검색 품질과 외부 latency 평가는 별도 T301 잔여 작업이다.
+- AI API와 embedding worker는 process 환경변수, `ai/.env`, 루트 `.env`, `backend/.env` 우선순위로 같은 설정을 읽고 `OPEN_AI_KEY`를 `OPENAI_API_KEY` 별칭으로 처리한다. 실제 OpenAI embedding 호출은 `RUN_OPENAI_EMBEDDING_SMOKE=true`일 때만 수행하는 별도 smoke test로 분리했다.
+- `RUN_OPENAI_RAG_INTEGRATION=true` opt-in test는 별도 migrated PostgreSQL에 한국어 STT fixture를 입력하고 실제 OpenAI worker로 색인한 뒤, vector 차원, Project allowed-meeting 범위, 빈 allowed/cross-space negative case, PostgreSQL hybrid retrieval p95를 확인한다. fixture는 검증 종료 시 삭제한다.
+- Passed: `RUN_OPENAI_RAG_INTEGRATION=true`로 전용 PostgreSQL 평가 DB에서 실제 `text-embedding-3-small` provider를 실행했다. 한국어 STT fixture가 worker를 통해 `vector(1536)`으로 저장되고, Project allowed meeting만 반환하며 빈 allowed list와 cross-space 검색이 차단됨을 확인했다. PostgreSQL hybrid retrieval 100회 p95는 `14.98 ms`였다. fixture와 임시 평가 DB는 검증 후 삭제했다.
+- Remaining: T275/T301의 30~50개 한국어 grounded 질의 false-supported 비율, citation 정확도, Backend-to-AI HTTP end-to-end 및 provider 호출을 포함한 별도 외부 latency 평가는 아직 측정하지 않았다.
 
 ### T299 Workspace JPA Persistence
 
@@ -979,5 +1002,137 @@
 
 ## BFF/Auth Architecture Evolution Reference
 
+## M042 Report History Safety and Term E2E
+
+### Changes
+
+- 회의록 이력의 선택 상태를 편집/저장 대상 `currentReportId`와 분리했다. 이력 항목은 Markdown 다운로드 대상으로만 선택하며, 선택으로 로컬 보고서 본문이나 저장 대상이 바뀌지 않는다.
+- meetingId가 바뀌면 candidate, 이력, 선택 report 상태를 함께 초기화하고, 새 회의의 candidate 조회 결과가 비어 있으면 이전 candidate를 명시적으로 제거한다.
+- Playwright에서 로그인된 Browser가 BFF를 거쳐 등록 DomainTerm 설명 endpoint를 호출하고 `local-glossary` 응답을 받는 경로를 추가했다. 등록어 경로는 AI gateway가 없어도 성공해야 한다.
+
+### Verification
+
+- Passed: `cd frontend && npm run test`; 4 files, 23 tests.
+- Passed: `cd frontend && npm run build`; 기존 500 kB 초과 bundle warning만 유지됐다.
+- Passed: `PLAYWRIGHT_BACKEND_PORT=18086 PLAYWRIGHT_BFF_PORT=18087 PLAYWRIGHT_FRONTEND_PORT=5174 npm run test:e2e -- --grep 'calendar and domain dictionary mutations'`; 등록어 수정 후 Browser가 BFF -> Core 용어 설명 endpoint에서 `local-glossary` 응답을 받았다.
+- Passed: `git diff --check`.
+
+## M039 Workspace Artifact CRUD API
+
+- 2026-07-20: Space 상세 조회, 수정/삭제, Space invitation, 일반 TaskCard CRUD, report 목록/수정/이력/Markdown download를 Core API와 BFF allowlist에 연결했다. Space 상세는 active SpaceMember와 Meeting ACL로 upcoming meeting, confirmed report, open TaskCard를 선필터한다. Space 삭제와 TaskCard 삭제는 soft delete이며, 진행 중 회의가 있는 Space 삭제는 거부한다. invitation token 원문은 SHA-256 hash만 저장하고 생성 응답에서 한 번만 반환하며, 초대 이메일과 인증 이메일이 일치해야 수락할 수 있다. report 수동 수정은 기존 version을 변경하지 않고 새 `DRAFT` version을 만든다.
+- 2026-07-20: PDF/DOCX export는 생성 방식을 아직 결정하지 않아 `501 REPORT_EXPORT_NOT_SUPPORTED`로 명시했고, 현재는 UTF-8 Markdown attachment만 지원한다. ReportAgent는 다운로드 Blob과 선택한 format으로 파일명을 만들며, ProjectOverview의 project/task mutation, TeamMembers의 이메일 초대 생성, ReportAgent의 report save/download는 target Space에서 Backend response를 사용한다. mock fallback Space는 기존 local UX를 유지한다.
+- 2026-07-20: 리뷰 보완으로 `V15__add_space_updated_at.sql`을 추가해 Space PATCH 응답의 `updatedAt`을 영속화했다. PostgreSQL migration integration test는 V13~V15 적용과 `task_cards.deleted_at`, `spaces.updated_at`을 검증한다. Verification: `cd backend && ./gradlew test`, `cd bff && ./gradlew test`, `cd frontend && npm run build`, `git diff --check` 통과.
+- 2026-07-20: Browser Space invitation 수락/거절 화면을 추가했다. 초대 생성은 `/space-invitations/{spaceId}/{invitationId}#token={token}` 링크를 복사하며, token은 로그인 복귀 경로에도 fragment로만 보존된다. 수락 화면은 fragment를 읽은 뒤 주소창에서 즉시 제거하고 authenticated accept/decline request body로만 전송한다. Backend API/schema 변경은 없다.
+- 2026-07-20: Space TaskCard 조회는 카드의 Space scope를 유지하되, 연결된 Meeting을 읽을 수 없는 사용자의 `meetingId`와 `sourceCandidateId`를 `null`로 마스킹한다. 이를 통해 meeting source metadata가 Space 권한만으로 노출되지 않도록 했다.
+- 2026-07-20: `SpaceInvitation`도 Workspace JPA 경계로 전환했다. `local`/`db` profile의 `JpaWorkspaceStore`는 invitation 생성·조회·상태 변경을 `JpaWorkspacePersistence`로 직접 처리하며 더 이상 JDBC delegate에 위임하지 않는다.
+- 2026-07-20: TeamMembers의 role 변경, 멤버 제거, owner transfer는 target Space에서 기존 BFF API를 호출한 뒤 `GET /spaces/{spaceId}/members`로 목록을 재조회한다. API 실패 시 target Space의 local member state를 변경하지 않으며 데모 Space만 기존 local UX를 유지한다.
+- 2026-07-20: PostgreSQL/JPA integration test는 invitation 수락 뒤 `SpaceInvitation=ACCEPTED`와 `SpaceMember` 생성을, Task 삭제 뒤 `deletedAt`과 active 조회 제외를, report 수정 뒤 새 `DRAFT` version을 확인한다. BFF proxy test는 Task DELETE route가 Core downstream으로 전달되는 것을 확인한다.
+- Verification: `cd backend && ./gradlew test`, `cd bff && BFF_REDIS_INTEGRATION=true BFF_REDIS_PORT=6380 ./gradlew test`, `cd frontend && npm run test -- --run && npm run build`, `git diff --check`.
+- 2026-07-20: Frontend API client는 Space invitation/member role/Task create-update-delete/report PATCH를 same-origin BFF cookie와 CSRF token으로만 보내고 Browser Authorization header를 만들지 않는 것을 unit test로 고정했다. Playwright는 실제 Browser→BFF→Core에서 invitation 생성, member role 변경, Task 생성/삭제 성공을 확인했고, report PATCH allowlist는 인증된 BFF 세션에서 Core `404 MEETING_NOT_FOUND`까지 전달됨을 확인했다. 실제 report 수정 성공은 transcript와 AI candidate fixture가 필요한 별도 AT/report lifecycle 통합 환경에서 검증한다.
+
+## M040 Calendar and Domain Dictionary Target Completion
+
+- 2026-07-20: `GET /api/v1/calendar/events`를 Core와 BFF allowlist에 추가했다. 요청은 필수 ISO-8601 `from`/`to`와 선택 `spaceId`를 받고, Space membership 확인 뒤 각 Meeting의 ACL을 다시 적용한다. 종료 시각은 Meeting의 `scheduledEndAt`을 반환하며 실제 회의 종료 `endedAt`과 구분한다. Frontend calendar는 현재 월/주/일 표시 범위와 선택 Space로 API를 조회하며, 일정 생성 성공 뒤 같은 범위를 다시 읽는다.
+- 2026-07-20: Space-scoped DomainTerm CRUD를 Core JPA/in-memory store profile, BFF allowlist, `/terms` 관리 화면에 연결했다. 조회는 Space member, 등록·수정·archive/restore는 OWNER/ADMIN으로 제한한다. 활성 용어는 trim 및 대소문자 무시 unique 제약을 사용하고, 변경은 `DOMAIN_TERM_CHANGED` audit event로 남긴다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.CalendarServiceTest --tests com.meetingmind.demo.domain.DomainTermServiceTest --tests com.meetingmind.demo.controller.SpaceControllerTest`, `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`, `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build` passed. Frontend build has the existing >500 kB chunk-size warning only.
+- 2026-07-20: 격리된 Playwright runtime(`Backend 18086`, `BFF 18087`, `Frontend 5174`)에서 owner가 DomainTerm을 생성·수정하고 duplicate `409` 오류를 확인했다. 같은 Browser session이 `GET /api/v1/calendar/events`를 BFF 경유로 조회하고 생성된 meeting을 캘린더에 표시하는 것을 검증했다.
+
+## M041 Meeting Term Explanation Integration
+
+- 2026-07-20: `POST /api/v1/meetings/{meetingId}/terms/explain`을 추가했다. Backend는 인증과 Meeting ACL을 먼저 검증한 뒤 현재 meeting의 Space에서 active DomainTerm을 exact case-insensitive lookup한다. 등록어는 `local-glossary` source를 즉시 반환해 AI gateway/LLM을 호출하지 않는다.
+- 2026-07-20: 미등록어는 내부 `POST /api/internal/meeting-ai/explain-term`에 Space/Meeting scope와 term만 전달한다. AI는 해당 single meeting의 PostgreSQL RAG `transcript`/`decision` source에서 evidence gate를 통과할 때만 provider를 호출하며, 근거가 없으면 `unsupported=true`로 끝낸다.
+- 2026-07-20: LiveRoom의 하드코딩 STT keyword 목록을 제거했다. 자막에서 120자 이하 텍스트를 선택하면 용어 설명 패널이 source 또는 unsupported 상태를 표시한다. 응답 경쟁 상태는 request id로 차단한다.
+- 2026-07-20: ReportAgent는 candidate와 공식 report history를 별도로 조회해 candidate 확정 뒤 version/current 목록을 갱신하고, 선택한 version을 Markdown으로 다운로드한다. 태스크 후보는 title/description/assignee/dueDate 검토 뒤 TaskCard confirm API로 등록하며, 성공 후 해당 Space 칸반으로 이동할 수 있다.
+- Verification: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai.ExplainTermTest && ./.venv/bin/python -m compileall app tests`; `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.WorkspaceCrudServiceTest --tests com.meetingmind.demo.domain.MeetingTermExplanationServiceTest --tests com.meetingmind.demo.service.HttpMeetingAiGatewayClientTest`; `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `PLAYWRIGHT_BACKEND_PORT=18086 PLAYWRIGHT_BFF_PORT=18087 PLAYWRIGHT_FRONTEND_PORT=5174 npm run test:e2e -- --grep 'calendar and domain dictionary mutations'`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M043 Task Candidate Dismissal
+
+- 2026-07-20: `POST /api/v1/meetings/{meetingId}/task-candidates/{candidateId}/dismiss`를 추가했다. active SpaceMember이면서 해당 회의 편집 권한이 있는 사용자만 같은 meeting의 `CANDIDATE`를 `DISMISSED`로 전이할 수 있다. 후보와 sourceIds는 보존하며 확정 또는 기존 제외 후보는 다시 전이할 수 없다.
+- Core는 `TASK_CANDIDATE_DISMISSED` audit event를 남기고, BFF route allowlist와 ReportAgent의 `등록 제외` action을 연결했다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.TaskCandidateServiceTest`; `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M044 Project Knowledge Management
+
+- 2026-07-20: 기존 `ProjectKnowledge` JPA 모델과 pgvector 재색인 trigger를 재사용해 Space-scoped 목록, 상세, 등록, 수정, archive API를 추가했다. 목록은 `PUBLISHED`와 `deletedAt=null`만 반환하고 title/content keyword 및 type filter를 지원한다. source meeting metadata는 별도 Meeting ACL을 통과한 사용자에게만 보인다.
+- OWNER/ADMIN만 등록·수정·archive할 수 있다. 등록과 수정은 `PENDING` embedding 상태로 전환되어 PostgreSQL trigger가 비동기 job을 생성하며, archive는 이력을 보존하고 Project AI 후보에서 제거한다. Frontend는 목록 preview만으로 수정하지 않고 detail endpoint로 원문을 읽은 후 저장한다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.WorkspaceDomainServiceTest`; `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M045 Report Version Preview and Restore
+
+- 2026-07-20: report version 상세 조회와 restore endpoint를 추가했다. restore는 과거 행을 수정하지 않고 해당 title, summary, markdown, decision, action item을 복사한 새 `DRAFT` version을 만든다. 기존 current confirmed report는 유지한다.
+- ReportAgent는 version을 선택하면 상세 Markdown을 별도 preview로 읽고, 현재 편집 대상이 아닌 과거 version만 새 초안으로 복원할 수 있다. history 선택은 현재 editor state를 바꾸지 않는다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.WorkspaceCrudServiceTest`; `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M046 Candidate TTL Enforcement
+
+- 2026-07-20: Q-008/Q-009를 생성 시각 기준 7일로 결정했다. 만료된 MeetingReport `CANDIDATE`는 확정하거나 그 후보에서 새 draft를 만들 수 없고, 만료된 TaskCandidate는 TaskCard로 확정할 수 없다. 두 경우 모두 `409 CANDIDATE_EXPIRED`를 반환한다.
+- 별도 `EXPIRED` status나 물리 삭제는 추가하지 않았다. 후보, 근거 source, 생성 이력은 보존하며 태스크 후보 제외는 만료 후에도 허용한다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.TaskCandidateServiceTest --tests com.meetingmind.demo.domain.WorkspaceCrudServiceTest`; `git diff --check` passed.
+
+## M047 Dashboard Summary Target Integration
+
+- 2026-07-20: `GET /api/v1/dashboard`를 추가했다. 사용자 Space membership을 먼저 확인하고, 각 Space의 Meeting ACL을 통과한 회의만 오늘(`Asia/Seoul`) 집계와 회의록 활동에 사용한다. 미완료 TaskCard는 Space scope로 집계하되 연결 Meeting을 읽을 수 없으면 source 식별자를 마스킹한다.
+- 최근 활동은 현재 영속 read model에서 신뢰할 수 있는 Space 변경, Task 변경, 읽을 수 있는 회의록 생성 시각으로만 구성한다. 모든 audit event를 조회하는 별도 read model은 추가하지 않았다.
+- BFF allowlist와 Frontend 대시보드 홈을 연결했다. target summary가 실패할 때는 기존 홈 mock/legacy summary를 유지하며, target API 부분 실패로 표시한다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.WorkspaceDomainServiceTest`; `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M048 Project AI Personal Conversation History
+
+- 2026-07-20: `ProjectAiMessage`와 V16 migration으로 Project AI 대화를 Space+사용자 단위로 저장한다. 성공한 chat의 USER/ASSISTANT 쌍만 저장하며 `GET /api/v1/spaces/{spaceId}/ai/history`는 active SpaceMember 자신의 최신 50개만 시간순으로 반환한다.
+- 다음 Project AI 요청은 최근 10개 turn을 비신뢰 대화 문맥으로만 AI에 전달한다. Backend는 요청마다 현재 Space/Meeting 접근 범위를 다시 계산하고, AI는 이력을 source/citation 또는 권한 판단 근거로 쓰지 않도록 strict prompt를 적용한다.
+- BFF Core allowlist와 ProjectOverview 초기 이력 조회를 연결했다. history read 실패는 새 채팅을 막지 않으며, gateway/provider 실패는 이력을 저장하지 않는다.
+- Verification: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai && ./.venv/bin/python -m compileall app tests`; `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.ProjectAiServiceTest --tests com.meetingmind.demo.MigrationIntegrationTest`; `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M049 Report AI Conversation Edit
+
+- 2026-07-20: `POST /api/v1/meetings/{meetingId}/reports/{reportId}/ai-edits`를 추가했다. 편집 권한을 먼저 확인한 뒤 대상 report가 현재 meeting에 속하는지 검증하고, 기존 report를 수정하지 않는 새 `CANDIDATE` version을 생성한다. 본문이 없는 기존 report는 summary를 비신뢰 편집 문맥으로 사용한다.
+- Backend는 현재 meeting transcript와 confirmed report의 decision/action만 AI source로 조립한다. AI는 `instruction`과 기존 report 본문을 비신뢰 문맥으로 분리하며, 새 사실과 citation은 이번 single-meeting source에서만 검증한다. 근거 또는 검증된 citation이 없으면 candidate를 저장하지 않는다.
+- BFF Core allowlist와 ReportAgent 대화 입력을 연결했다. Frontend API client는 same-origin cookie와 CSRF token만 사용하며 Browser Authorization header를 보내지 않는다.
+- Verification: `cd backend && ./gradlew cleanTest test --tests com.meetingmind.demo.domain.ReportCandidateServiceTest`; `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai && ./.venv/bin/python -m compileall app tests`; `cd bff && ./gradlew cleanTest test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M050 Kanban Drag State Transition
+
+- 2026-07-20: ProjectOverview의 TaskCard를 browser native drag-and-drop으로 상태 컬럼 사이에 이동할 수 있게 했다. drop은 새 상태일 때만 기존 `onMoveProjectTask` callback을 호출하므로, target Space에서는 기존 BFF/Core `PATCH /spaces/{spaceId}/tasks/{taskId}` 권한·입력 검증 경로를 그대로 사용한다.
+- 기존 상태 select를 제거하지 않아 pointer를 사용할 수 없는 사용자는 동일한 상태 변경을 계속 수행할 수 있다. Task 편집 중인 카드는 draggable을 끈다.
+- Verification: `cd frontend && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M051 Kanban Labels and Priority
+
+- 2026-07-20: 일반 TaskCard에 `LOW`, `MEDIUM`, `HIGH` 우선순위와 문자열 라벨 목록을 추가했다. 기존 카드와 입력 생략 시 `MEDIUM`/빈 목록을 사용한다.
+- 2026-07-20: `V17__add_task_card_priority_labels.sql`은 `task_cards.priority`와 PostgreSQL `text[] labels`를 추가한다. JPA와 JDBC store 모두 우선순위·라벨을 저장하고 조회하며, create/update 입력은 최대 10개, trim 후 1~40자, 대소문자 무시 중복 불가를 검증한다.
+- 2026-07-20: GET/POST/PATCH TaskCard 계약과 ProjectOverview 편집 화면을 갱신했다. 기존 native drag-and-drop은 status만 변경하고, priority와 labels는 카드 편집에서 수정한다.
+- Verification: `cd backend && ./gradlew cleanTest test --tests com.meetingmind.demo.domain.WorkspaceCrudServiceTest`; `CI_POSTGRES_URL=jdbc:postgresql://localhost:5434/meetingmind_v17_verify CI_POSTGRES_USER=meetingmind CI_POSTGRES_PASSWORD=meetingmind_local ./gradlew cleanTest test --tests com.meetingmind.demo.MigrationIntegrationTest --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M052 Meeting Schedule Details
+
+- 2026-07-20: `Meeting`에 nullable `description`과 필수 `scheduledEndAt`을 추가했다. `scheduledEndAt`은 실제 회의 종료 시각인 `endedAt`과 별도 필드로 유지하며, V18 migration은 기존 행에 시작 시각 + 1시간을 backfill하고 DB check constraint로 종료 시각이 시작 이후임을 보장한다.
+- 생성·수정 API, 목록·상세·calendar 응답, JPA/JDBC/in-memory store와 ProjectOverview 생성·수정 폼을 같은 계약으로 갱신했다. 서버는 시작/종료 범위를 검증하고, 기존 내부 생성·수정 호출은 호환성을 위해 1시간 기본 종료 시각을 사용한다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.controller.SpaceControllerTest --tests com.meetingmind.demo.controller.MeetingControllerTest --tests com.meetingmind.demo.domain.CalendarServiceTest --tests com.meetingmind.demo.domain.WorkspaceDomainServiceTest`; `CI_POSTGRES_URL=jdbc:postgresql://localhost:5434/meetingmind_v18_verify CI_POSTGRES_USER=meetingmind CI_POSTGRES_PASSWORD=meetingmind_local ./gradlew cleanTest test --tests com.meetingmind.demo.MigrationIntegrationTest --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build`; `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M053 Report DOCX Export
+
+- 2026-07-20: 기존 report download ACL과 BFF route를 재사용해 `format=docx`를 지원했다. DOCX는 서버가 보유한 report title과 Markdown(없으면 summary) 텍스트만 생성하며, Browser는 same-origin BFF cookie 경로로 Blob을 내려받는다.
+- Apache POI `poi-ooxml`은 DOCX 생성에만 사용했다. 당시 PDF는 배포 가능한 한글 폰트 번들·라이선스와 렌더링 전략이 없어 `501 REPORT_EXPORT_NOT_SUPPORTED`을 반환했으며, 이후 M055에서 OFL 글꼴을 embed하는 방식으로 구현했다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.controller.MeetingReportControllerTest --tests com.meetingmind.demo.controller.MeetingControllerTest --tests com.meetingmind.demo.domain.CalendarServiceTest --tests com.meetingmind.demo.domain.WorkspaceDomainServiceTest`; `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M054 In-app Meeting Reminders
+
+- 2026-07-20: WorkspaceHome의 상단 알림 버튼이 기존 `GET /api/v1/calendar/events`를 향후 24시간 범위로 별도 조회해 `SCHEDULED` 회의 최대 5개를 표시한다. 새 notification 저장소나 권한 우회는 만들지 않았고, API가 적용하는 Space membership과 Meeting ACL 결과만 사용한다.
+- 알림 조회 실패는 화면의 캘린더·대시보드 흐름을 막지 않으며 빈 알림 상태로 처리한다. push/email 같은 비동기 외부 발송은 delivery provider, 수신 동의, 재시도·중복 방지 정책이 필요한 별도 범위다.
+- Verification: `cd frontend && npm run test -- --run src/api/workspace.test.ts && npm run build` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M055 Report PDF Export
+
+- 2026-07-20: `format=pdf`를 기존 Meeting ACL download endpoint와 BFF route에 추가했다. PDFBox가 `NanumGothic-Regular.ttf`를 PDF에 embed하므로 운영 이미지와 개발 시스템 글꼴에 의존하지 않는다. 글꼴 원본과 SIL Open Font License 1.1 전문은 `backend/src/main/resources/fonts/`에 포함한다.
+- Frontend Report Agent에서 같은 cookie-authenticated Blob 경로로 PDF 다운로드를 제공하며, Markdown은 `.md`, DOCX/PDF는 대응 확장자로 저장한다.
+- Verification: `MeetingReportControllerTest`가 PDF magic header, attachment filename, 한글 제목과 본문의 PDF text extraction을 확인한다. `frontend/src/api/workspace.test.ts`가 PDF BFF route 요청을 확인한다.
+
+## M056 Dashboard Latest Reports
+
+- 2026-07-20: `GET /api/v1/dashboard`에 `latestReports`를 추가했다. 사용자에게 현재 접근 가능한 meeting만 먼저 계산한 뒤, 각 meeting의 current `CONFIRMED` report만 확정 시각 내림차순 최대 5건으로 집계한다. candidate, draft, 이전 version은 대시보드 최신 보고서에 포함하지 않는다.
+- WorkspaceHome은 최신 확정 회의록의 제목, 원본 회의, version, 확정일을 표시하고 해당 Report Agent로 이동한다. target summary가 없을 때는 빈 상태를 표시하며 mock 보고서를 최신 확정본으로 위장하지 않는다.
+- Verification: `WorkspaceDomainServiceTest`는 private meeting report의 owner-only 노출을, `DashboardControllerTest`는 API field mapping을 검증한다.
+
 - 2026-07-16: Core의 `sessionStorage + Bearer` Auth는 현재 구현과 제한된 rollback을 위한 legacy compatibility로 분류했다. 목표 Browser-BFF/Auth Service, Redis session, encrypted Token Vault, AWS EKS/LiveKit Cloud 설계와 구현 작업은 `../002-bff-auth-msa/**`에서 관리한다. 이 기록 변경은 Core code/schema를 수정하거나 기존 migration을 되돌리지 않는다.
 - 2026-07-18: `../002-bff-auth-msa` T035에서 Core 요청 경로에 deterministic legacy/target access resolver를 연결했다. target 검증 실패는 legacy로 재시도하지 않고, 유효 target UUID `sub`는 V13 `users.auth_user_id`로 기존 문자열 업무 User를 찾는다. BFF 전용 `/internal/v1/users/projection`은 target Core JWT subject, deterministic resource ID와 workload identity를 모두 검증해 신규 User를 멱등 upsert한다. V13 필드만 사용하므로 migration/ERD 관계 추가는 없으며 Backend 전체 테스트, 실제 PostgreSQL projection insert/update/conflict와 bootJar를 검증했다.
+- 2026-07-21: 사용자 결정으로 회의 채팅 텍스트 첨부파일 RAG(M035)를 이번 전달 범위에서 제외했다. upload API, extractor, retriever, Frontend, AT-001~AT-005 검증은 후속 단계에서 다시 계획한다.

@@ -2,6 +2,7 @@ package com.meetingmind.demo.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +22,7 @@ import com.meetingmind.demo.service.AiGatewayException;
 import com.meetingmind.demo.service.AiSearchScopeResolver;
 import com.meetingmind.demo.service.ProjectAiGatewayClient;
 import com.meetingmind.demo.service.ProjectAiService;
+import com.meetingmind.demo.service.InMemoryProjectAiHistoryStore;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -70,6 +72,7 @@ class ProjectAiServiceTest {
         assertThat(context.gateway.captured.projectId()).isEqualTo(space.space().id());
         assertThat(context.gateway.captured.question()).isEqualTo("권한 정책은?");
         assertThat(context.gateway.captured.allowedMeetingIds()).containsExactly(allowedMeeting.meeting().id());
+        assertThat(context.gateway.captured.history()).isEmpty();
     }
 
     @Test
@@ -94,6 +97,9 @@ class ProjectAiServiceTest {
         ))
                 .isInstanceOf(AuthorizationException.class)
                 .satisfies(error -> assertAuthz(error, HttpStatus.FORBIDDEN, "SPACE_ACCESS_DENIED"));
+        assertThatThrownBy(() -> context.service.history("Bearer access-token", space.space().id()))
+                .isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.FORBIDDEN, "SPACE_ACCESS_DENIED"));
         assertThat(context.gateway.captured).isNull();
     }
 
@@ -111,6 +117,61 @@ class ProjectAiServiceTest {
         ))
                 .isInstanceOf(AuthorizationException.class)
                 .satisfies(error -> assertAuthz(error, HttpStatus.SERVICE_UNAVAILABLE, "AI_PROVIDER_UNAVAILABLE"));
+        assertThat(context.history.find(space.space().id(), owner.id(), 50)).isEmpty();
+    }
+
+    @Test
+    void historyIsPersistedPerSpaceAndUserAfterSuccessfulChat() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+
+        context.service.chat("Bearer access-token", space.space().id(), new BackendProjectAiChatRequest("질문"));
+
+        assertThat(context.service.history("Bearer access-token", space.space().id()))
+                .extracting(ProjectAiMessage::role, ProjectAiMessage::content)
+                .containsExactly(tuple("USER", "질문"), tuple("ASSISTANT", "응답"));
+    }
+
+    @Test
+    void chatSendsOnlyTheCurrentUsersRecentHistoryAsUntrustedContext() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        context.history.append(space.space().id(), owner.id(), "USER", "첫 질문", FIXED_CLOCK.instant());
+        context.history.append(space.space().id(), owner.id(), "ASSISTANT", "첫 답변", FIXED_CLOCK.instant().plusSeconds(1));
+
+        context.service.chat("Bearer access-token", space.space().id(), new BackendProjectAiChatRequest("다음 질문"));
+
+        assertThat(context.gateway.captured.history())
+                .extracting(ProjectAiGatewayChatRequest.HistoryTurn::role, ProjectAiGatewayChatRequest.HistoryTurn::content)
+                .containsExactly(tuple("USER", "첫 질문"), tuple("ASSISTANT", "첫 답변"));
+    }
+
+    @Test
+    void chatLimitsContextToTheCurrentUsersTenMostRecentMessages() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        User anotherUser = context.user("user-another");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), anotherUser.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        for (int index = 1; index <= 11; index++) {
+            context.history.append(
+                    space.space().id(),
+                    owner.id(),
+                    "USER",
+                    "owner-" + index,
+                    FIXED_CLOCK.instant().plusSeconds(index)
+            );
+        }
+        context.history.append(space.space().id(), anotherUser.id(), "USER", "other-user", FIXED_CLOCK.instant().plusSeconds(12));
+
+        context.service.chat("Bearer access-token", space.space().id(), new BackendProjectAiChatRequest("다음 질문"));
+
+        assertThat(context.gateway.captured.history()).hasSize(10);
+        assertThat(context.gateway.captured.history())
+                .extracting(ProjectAiGatewayChatRequest.HistoryTurn::content)
+                .containsExactly("owner-2", "owner-3", "owner-4", "owner-5", "owner-6", "owner-7", "owner-8", "owner-9", "owner-10", "owner-11");
     }
 
     private TestContext newContext(String authUserId) {
@@ -122,15 +183,17 @@ class ProjectAiServiceTest {
         SpaceAccessPolicy spaceAccessPolicy = new SpaceAccessPolicy();
         WorkspaceDomainService workspace = new WorkspaceDomainService(store, spaceAccessPolicy, FIXED_CLOCK);
         FakeProjectAiGateway gateway = new FakeProjectAiGateway();
+        InMemoryProjectAiHistoryStore history = new InMemoryProjectAiHistoryStore();
         ProjectAiService service = new ProjectAiService(
                 authService,
                 new AiSearchScopeResolver(
                         workspace,
                         new MeetingAccessPolicy(spaceAccessPolicy)
                 ),
-                gateway
+                gateway,
+                history
         );
-        return new TestContext(store, workspace, gateway, service);
+        return new TestContext(store, workspace, gateway, history, service);
     }
 
     private MeetingReport report(String id, String meetingId, String summary) {
@@ -180,6 +243,7 @@ class ProjectAiServiceTest {
             InMemoryWorkspaceStore store,
             WorkspaceDomainService workspace,
             FakeProjectAiGateway gateway,
+            InMemoryProjectAiHistoryStore history,
             ProjectAiService service
     ) {
         User user(String id) {
