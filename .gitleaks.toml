@@ -1,0 +1,29 @@
+title = "MeetingMind secret scan policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "BFF test-only Auth UUID fixtures are stable fake identifiers, not credentials."
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''^bff/src/test/java/.+\.java$''',
+]
+regexes = [
+  '''AUTH_USER_ID\s*=\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"''',
+]
+
+[[allowlists]]
+description = "BFF test-only local Token Vault key fixture is a fixed dummy AES key."
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''^bff/src/test/java/.+\.java$''',
+  '''^bff/src/test/resources/application-test\.yml$''',
+  '''^frontend/playwright\.config\.ts$''',
+  '''^scripts/bff-backend-compat-e2e\.sh$''',
+]
+regexes = [
+  '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=''',
+]

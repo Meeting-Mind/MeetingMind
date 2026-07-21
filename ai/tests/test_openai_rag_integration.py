@@ -168,7 +168,10 @@ def insert_fixture(
         for meeting_id, title, segments in meetings:
             speaker_id = f"speaker-{meeting_id}"
             connection.execute(
-                "insert into meetings (id, space_id, title, scheduled_at) values (%s, %s, %s, now())",
+                """
+                insert into meetings (id, space_id, title, scheduled_at, scheduled_end_at)
+                values (%s, %s, %s, now(), now() + interval '1 hour')
+                """,
                 (meeting_id, space_id, title),
             )
             connection.execute(
