@@ -19,13 +19,19 @@ export type AuthSession = {
   session: AuthSessionView;
 };
 
+export type AuthBootstrap = {
+  session: AuthSession | null;
+  accountManagementAvailable: boolean;
+};
+
 type AuthSessionBootstrap = {
   authenticated: boolean;
   user: AuthUser | null;
   session: AuthSessionView | null;
+  accountManagementAvailable?: boolean;
 };
 
-export async function bootstrapAuthSession(): Promise<AuthSession | null> {
+export async function bootstrapAuthSession(): Promise<AuthBootstrap> {
   const response = await fetch("/api/v1/auth/session", {
     credentials: "same-origin",
     headers: { Accept: "application/json" }
@@ -35,13 +41,17 @@ export async function bootstrapAuthSession(): Promise<AuthSession | null> {
   }
 
   const payload = (await response.json()) as Partial<AuthSessionBootstrap>;
+  const accountManagementAvailable = payload.accountManagementAvailable === true;
   if (payload.authenticated === false && payload.user == null && payload.session == null) {
-    return null;
+    return { session: null, accountManagementAvailable };
   }
   if (payload.authenticated !== true || !isAuthUser(payload.user) || !isSessionView(payload.session)) {
     throw new Error("세션 확인 응답이 올바르지 않습니다.");
   }
-  return { user: payload.user, session: payload.session };
+  return {
+    session: { user: payload.user, session: payload.session },
+    accountManagementAvailable
+  };
 }
 
 export async function signupWithPassword({
@@ -89,6 +99,105 @@ export async function logoutCurrentSession(): Promise<void> {
   resetCsrfToken();
 }
 
+export async function logoutAllSessions({
+  password,
+  googleCredential
+}: {
+  password?: string;
+  googleCredential?: string;
+} = {}): Promise<void> {
+  await noContentAuthRequest("/api/v1/auth/logout-all", { password, googleCredential }, "모든 기기 로그아웃");
+}
+
+export async function changeCurrentPassword({
+  currentPassword,
+  newPassword
+}: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<void> {
+  await noContentAuthRequest("/api/v1/auth/password", { currentPassword, newPassword }, "비밀번호 변경");
+}
+
+export async function withdrawCurrentAccount({
+  confirmation,
+  password,
+  googleCredential
+}: {
+  confirmation: "DELETE";
+  password?: string;
+  googleCredential?: string;
+}): Promise<void> {
+  await noContentAuthRequest(
+    "/api/v1/auth/withdrawal",
+    { confirmation, password, googleCredential },
+    "계정 탈퇴"
+  );
+}
+
+export async function updateCurrentProfile(displayName: string): Promise<AuthUser> {
+  const response = await bffFetch("/api/v1/auth/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName })
+  });
+  if (!response.ok) {
+    if (response.status === 403) {
+      resetCsrfToken();
+    }
+    const message = await readErrorMessage(response);
+    throw new Error(message || `프로필 수정 요청 실패 (${response.status})`);
+  }
+  const user = (await response.json()) as unknown;
+  if (!isAuthUser(user)) {
+    throw new Error("프로필 수정 응답이 올바르지 않습니다.");
+  }
+  resetCsrfToken();
+  return user;
+}
+
+export async function updateCurrentProfileImage(image: File): Promise<AuthUser> {
+  const body = new FormData();
+  body.append("image", image, image.name);
+  const response = await bffFetch("/api/v1/auth/profile-image", {
+    method: "POST",
+    body
+  });
+  if (!response.ok) {
+    if (response.status === 403) {
+      resetCsrfToken();
+    }
+    const message = await readErrorMessage(response);
+    throw new Error(message || `프로필 사진 업로드 실패 (${response.status})`);
+  }
+  const user = (await response.json()) as unknown;
+  if (!isAuthUser(user)) {
+    throw new Error("프로필 사진 응답이 올바르지 않습니다.");
+  }
+  resetCsrfToken();
+  return user;
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  const response = await bffFetch("/api/v1/auth/password-reset-requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email })
+  });
+  if (response.status !== 202) {
+    if (response.status === 403) {
+      resetCsrfToken();
+    }
+    const message = await readErrorMessage(response);
+    throw new Error(message || `비밀번호 재설정 요청 실패 (${response.status})`);
+  }
+  resetCsrfToken();
+}
+
+export async function confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+  await noContentAuthRequest("/api/v1/auth/password-resets", { token, newPassword }, "비밀번호 재설정");
+}
+
 async function authRequest(path: string, body: Record<string, string | boolean>): Promise<AuthSession> {
   const response = await bffFetch(
     path,
@@ -115,6 +224,26 @@ async function authRequest(path: string, body: Record<string, string | boolean>)
   }
   resetCsrfToken();
   return { user: payload.user, session: payload.session };
+}
+
+async function noContentAuthRequest(
+  path: string,
+  body: Record<string, string | undefined>,
+  action: string
+): Promise<void> {
+  const response = await bffFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (response.status !== 204) {
+    if (response.status === 403) {
+      resetCsrfToken();
+    }
+    const message = await readErrorMessage(response);
+    throw new Error(message || `${action} 요청 실패 (${response.status})`);
+  }
+  resetCsrfToken();
 }
 
 function isAuthUser(value: unknown): value is AuthUser {

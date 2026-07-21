@@ -53,6 +53,11 @@ public class BffRequestMetricsFilter extends OncePerRequestFilter {
             case "/api/v1/auth/google" -> "google";
             case "/api/v1/auth/session" -> "session";
             case "/api/v1/auth/logout" -> "logout";
+            case "/api/v1/auth/logout-all" -> "logout_all";
+            case "/api/v1/auth/password-reset-requests" -> "password_reset_request";
+            case "/api/v1/auth/password-resets" -> "password_reset";
+            case "/api/v1/auth/password" -> "password_change";
+            case "/api/v1/auth/profile" -> "profile_update";
             default -> "protected";
         };
     }

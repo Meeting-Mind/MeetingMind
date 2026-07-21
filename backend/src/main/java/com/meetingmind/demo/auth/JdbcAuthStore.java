@@ -68,8 +68,13 @@ public class JdbcAuthStore implements AuthStore {
 
     @Override
     public AuthUser createUser(String email, String displayName, String pictureUrl, Instant now) {
+        return createUserWithId("user-" + UUID.randomUUID(), email, displayName, pictureUrl, now);
+    }
+
+    @Override
+    public AuthUser createUserWithId(String userId, String email, String displayName, String pictureUrl, Instant now) {
         AuthUser user = new AuthUser(
-                "user-" + UUID.randomUUID(),
+                userId,
                 AuthStore.normalizeEmail(email),
                 displayName,
                 pictureUrl,
@@ -91,6 +96,26 @@ public class JdbcAuthStore implements AuthStore {
                 timestamp(user.lastLoginAt())
         );
         return user;
+    }
+
+    @Override
+    public AuthUser updateUserProfile(String userId, String displayName, String pictureUrl, Instant now) {
+        AuthUser current = findUserById(userId).orElseThrow();
+        if (jdbc.update(
+                "update users set display_name = ?, picture_url = ? where id = ?",
+                displayName,
+                pictureUrl,
+                userId) != 1) {
+            throw new IllegalStateException("사용자 프로필을 갱신하지 못했습니다.");
+        }
+        return new AuthUser(
+                current.id(),
+                current.email(),
+                displayName,
+                pictureUrl,
+                current.status(),
+                current.createdAt(),
+                current.lastLoginAt());
     }
 
     @Override

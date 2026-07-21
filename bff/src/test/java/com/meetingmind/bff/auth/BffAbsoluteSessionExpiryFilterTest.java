@@ -33,6 +33,8 @@ class BffAbsoluteSessionExpiryFilterTest {
         filter.doFilter(request, response, (filteredRequest, filteredResponse) -> continued.set(true));
 
         assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentType()).isEqualTo("application/json");
+        assertThat(response.getContentAsString()).contains("\"code\":\"SESSION_INVALID\"");
         assertThat(continued).isFalse();
         verify(tokenVault).delete(tokenBundleId);
     }

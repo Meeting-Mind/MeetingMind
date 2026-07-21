@@ -21,12 +21,19 @@
 | Q-015 | High | BFF와 내부 서비스 간 workload 인증은 mTLS, client credential, 서명 요청 중 무엇인가? | private network 침해 시 내부 endpoint 오용을 방지한다. | Decided | mTLS와 SPIFFE workload identity를 사용하고 NetworkPolicy, public ingress 차단, 목적지·principal allowlist를 함께 적용한다. 제품 선택은 Q-012/T040에서 한다. |
 | Q-016 | High | 모든 기기 로그아웃의 최근 인증 허용 시간과 재인증 UX는 무엇인가? | 탈취된 BFF 세션이 다른 정상 기기까지 폐기하는 것을 막고 local/Google 사용자의 재인증 방식을 일관되게 정한다. | Decided | 최근 인증 10분을 허용하고 초과 시 local은 비밀번호, Google은 새 ID credential을 재검증한다. Auth revoke-all이 durable하게 기록된 뒤 성공 처리한다. |
 | Q-017 | High | Auth Service가 revoke-all의 사용자 소유권을 어떤 값으로 독립 검증할까? | `userId`만 신뢰하면 내부 BFF 침해나 결합 오류가 다른 사용자의 모든 세션을 폐기할 수 있다. | Decided | BFF가 서버 세션의 `currentAuthSessionId`와 `userId`, `authenticatedAt`을 함께 보내고 Auth Service가 AuthSession 소유자 결합과 최근 10분을 재검증한다. 브라우저 입력은 전달하지 않는다. |
+| Q-018 | High | UUID Auth User와 기존 Core `users.id varchar(64)`를 어떤 기준으로 연결할까? | 기존 Core ID는 `user-<uuid>` 형식이며 Space, Meeting, ACL 등 모든 소유권 FK가 이를 참조한다. 이메일만으로 전환하면 로그인 subject와 기존 데이터 소유자가 달라지거나 계정 병합 오류가 날 수 있다. | Decided | Auth UUID를 canonical identity로 유지하고 Core가 immutable `auth_user_mappings` projection을 소유한다. 신규 Core ID는 `user-<auth UUID>`로 결정하고, 기존 계정은 검증된 migration manifest로만 연결한다. 이메일 기반 자동 병합, Auth DB 직접 조회, browser가 mapping을 지정하는 방식은 금지한다. |
+| Q-019 | High | 비밀번호 재설정 메일의 delivery provider, 1회 token TTL·요청 rate limit은 무엇인가? | FR-AUTH-11은 이메일 소유 확인과 1회성·시간 제한 token을 요구한다. provider/TTL/abuse limit 없이 reset API를 노출하면 전달 불능이나 계정 enumeration·메일 폭주를 안전하게 처리할 수 없다. | Decided | Auth Service의 delivery port를 통해 운영 mail provider를 연결한다. reset token은 hash만 저장하는 1회성 15분 token이며, 계정당 시간당 3회·IP당 시간당 10회로 제한한다. 존재하지 않는 이메일도 동일한 `202` 응답을 반환한다. |
+| Q-020 | High | local 비밀번호 변경 시 세션 처리와 Google-only 계정 정책은 무엇인가? | FR-AUTH-12는 현재 비밀번호 검증과 최근 3회 재사용 금지를 요구하고, 소셜 전용 계정의 변경 가능 여부를 별도 정책으로 남긴다. | Decided | 현재 local 비밀번호를 검증하고 최근 3회와 다른 값만 허용한다. 성공 시 현재 세션을 포함한 모든 AuthSession을 revoke한다. Google-only 계정은 local credential 추가 flow가 구현되기 전까지 비밀번호 변경을 거부한다. |
+| Q-021 | Medium | 프로필 사진의 저장소, 허용 MIME/최대 크기와 삭제 책임은 무엇인가? | FR-AUTH-13은 이미지 형식·크기 제한과 즉시 반영을 요구하지만 object storage와 validation 기준이 없다. | Decided | Browser는 BFF에 multipart로 올리고 Auth의 storage port가 opaque object key를 저장한다. JPEG, PNG, WebP만 허용하고 매직 바이트와 declared MIME를 함께 검증하며 최대 5 MiB로 제한한다. 새 이미지 DB 반영 뒤 이전 object를 삭제하고, 실패 시 새 object를 정리한다. |
+| Q-022 | High | 계정 탈퇴 시 Space owner, 회의 기록·감사 데이터와 사용자 식별자를 어떻게 처리할까? | FR-AUTH-17/NFR-COMP-02는 소유 프로젝트·보존 의무와 비식별 보존을 정책으로 처리해야 한다. 단순 Auth User 비활성화는 Core 소유권·과거 보고서 작성자·감사를 불일치시킨다. | Decided | 최근 인증 뒤 BFF가 Core에 subject-bound withdrawal reservation을 먼저 만든다. Core는 활성 Space OWNER를 차단하고, `PREPARED` 중인 사용자의 새 Space 생성·OWNER 이양도 거부한다. BFF는 Auth disable 성공 뒤에만 Core reservation을 `COMPLETED`로 확정한다. 30일 뒤 Core가 표시 이름·사진만 익명화하며 회의록/감사/업무 기록의 author reference는 보존한다. Auth disable 전 실패는 BFF가 reservation을 취소하고, 완료 확인을 잃어도 `PREPARED` reservation은 익명화하지 않는다. |
 
 ## Blocking Decisions
 
 - Q-009, Q-010, Q-015는 T030에서 결정됐다. Auth Service runtime은 이 계약을 구현하는 T031~T035 순서를 따른다.
 - Q-016은 결정됐지만 모든 기기 로그아웃은 Auth revoke-all과 revoke event를 구현하는 T032 이후 T024에서 노출한다.
 - Q-017은 T032에서 계약·runtime에 반영한다. 이미 폐기된 동일 요청의 멱등 재시도를 위해 current AuthSession row의 소유자 결합은 유지하되 신규 active session 폐기는 최근 인증 검증을 계속 요구한다.
+- Q-018은 결정됐다. T034는 Core projection migration, 기존 identity manifest 검증, reconciliation/rollback을 구현한 뒤 T035로 진행한다.
+- Q-019~Q-022는 결정됐다. T025가 계약·데이터 모델·테스트 기준을 반영한 뒤 T026/T027로 진행한다. 운영 mail/object storage provider 선택은 adapter configuration으로 분리하며 raw secret이나 image는 Git에 저장하지 않는다.
 - Q-011~Q-013은 로컬/CI 구현을 막지 않지만 운영 EKS 프로비저닝과 출시 승인을 막는다.
 
 ## Decisions

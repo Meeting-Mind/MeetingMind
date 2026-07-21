@@ -9,17 +9,26 @@ import com.meetingmind.demo.authz.ParticipantType;
 import com.meetingmind.demo.authz.SpaceAccessPolicy;
 import com.meetingmind.demo.authz.SpaceRole;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -32,22 +41,25 @@ public class WorkspaceDomainService {
     private final SpaceAccessPolicy spaceAccessPolicy;
     private final MeetingAccessPolicy meetingAccessPolicy;
     private final Clock clock;
+    private final OwnerAssignmentGuard ownerAssignmentGuard;
 
     @Autowired
     public WorkspaceDomainService(
             WorkspaceStore store,
             SpaceAccessPolicy spaceAccessPolicy,
-            MeetingAccessPolicy meetingAccessPolicy
+            MeetingAccessPolicy meetingAccessPolicy,
+            ObjectProvider<OwnerAssignmentGuard> ownerAssignmentGuardProvider
     ) {
-        this(store, spaceAccessPolicy, meetingAccessPolicy, Clock.systemUTC());
+        this(store, spaceAccessPolicy, meetingAccessPolicy, Clock.systemUTC(),
+                ownerAssignmentGuardProvider.getIfAvailable(OwnerAssignmentGuard::allowAll));
     }
 
     public WorkspaceDomainService(WorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy) {
-        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), Clock.systemUTC());
+        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), Clock.systemUTC(), OwnerAssignmentGuard.allowAll());
     }
 
     WorkspaceDomainService(WorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy, Clock clock) {
-        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), clock);
+        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), clock, OwnerAssignmentGuard.allowAll());
     }
 
     WorkspaceDomainService(
@@ -56,10 +68,21 @@ public class WorkspaceDomainService {
             MeetingAccessPolicy meetingAccessPolicy,
             Clock clock
     ) {
+        this(store, spaceAccessPolicy, meetingAccessPolicy, clock, OwnerAssignmentGuard.allowAll());
+    }
+
+    WorkspaceDomainService(
+            WorkspaceStore store,
+            SpaceAccessPolicy spaceAccessPolicy,
+            MeetingAccessPolicy meetingAccessPolicy,
+            Clock clock,
+            OwnerAssignmentGuard ownerAssignmentGuard
+    ) {
         this.store = store;
         this.spaceAccessPolicy = spaceAccessPolicy;
         this.meetingAccessPolicy = meetingAccessPolicy;
         this.clock = clock;
+        this.ownerAssignmentGuard = ownerAssignmentGuard;
     }
 
     @Transactional
@@ -126,6 +149,7 @@ public class WorkspaceDomainService {
     @Transactional
     public SpaceCreationResult createSpace(String actorUserId, String name, String description) {
         requireUser(actorUserId);
+        ownerAssignmentGuard.requireOwnerAssignmentAllowed(actorUserId);
         validateRequired(name, "Space 이름은 필수입니다.");
         Instant now = Instant.now(clock);
         Space space = store.createSpace(name.trim(), blankToNull(description), actorUserId, now);
@@ -387,6 +411,7 @@ public class WorkspaceDomainService {
         if (target.userId().equals(actorUserId)) {
             throw invalidRequest("자기 자신에게 OWNER를 이양할 수 없습니다.");
         }
+        ownerAssignmentGuard.requireOwnerAssignmentAllowed(target.userId());
 
         WorkspaceStore.OwnerTransferUpdate update = store.transferOwner(
                 currentOwner.id(),

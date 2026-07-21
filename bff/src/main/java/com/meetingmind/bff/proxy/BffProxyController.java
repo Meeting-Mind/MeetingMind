@@ -45,6 +45,7 @@ public class BffProxyController {
                 body);
         ProxyResponse response = tokenManager.execute(
                 request,
+                route.service(),
                 authorization -> downstreamClient.execute(route.service(), proxyRequest, authorization));
         HttpHeaders responseHeaders = new HttpHeaders();
         if (response.contentType() != null) {
@@ -55,6 +56,9 @@ public class BffProxyController {
         }
         if (response.etag() != null && !response.etag().isBlank()) {
             responseHeaders.set(HttpHeaders.ETAG, response.etag());
+        }
+        if (response.contentDisposition() != null && !response.contentDisposition().isBlank()) {
+            responseHeaders.set(HttpHeaders.CONTENT_DISPOSITION, response.contentDisposition());
         }
         return new ResponseEntity<>(response.body(), responseHeaders, response.status());
     }

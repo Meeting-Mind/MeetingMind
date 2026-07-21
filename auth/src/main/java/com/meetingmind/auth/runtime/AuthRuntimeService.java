@@ -29,6 +29,9 @@ class AuthRuntimeService {
 
     private final JdbcAuthRepository repository;
     private final PasswordSupport passwords;
+    private final PasswordResetTokenSupport passwordResetTokens;
+    private final PasswordResetDelivery passwordResetDelivery;
+    private final ProfileImageStorage profileImageStorage;
     private final RefreshTokenSupport refreshTokens;
     private final GoogleCredentialVerifier googleVerifier;
     private final AccessTokenIssuer accessTokenIssuer;
@@ -40,6 +43,9 @@ class AuthRuntimeService {
     AuthRuntimeService(
             JdbcAuthRepository repository,
             PasswordSupport passwords,
+            PasswordResetTokenSupport passwordResetTokens,
+            PasswordResetDelivery passwordResetDelivery,
+            ProfileImageStorage profileImageStorage,
             RefreshTokenSupport refreshTokens,
             GoogleCredentialVerifier googleVerifier,
             AccessTokenIssuer accessTokenIssuer,
@@ -50,6 +56,9 @@ class AuthRuntimeService {
     ) {
         this.repository = repository;
         this.passwords = passwords;
+        this.passwordResetTokens = passwordResetTokens;
+        this.passwordResetDelivery = passwordResetDelivery;
+        this.profileImageStorage = profileImageStorage;
         this.refreshTokens = refreshTokens;
         this.googleVerifier = googleVerifier;
         this.accessTokenIssuer = accessTokenIssuer;
@@ -78,14 +87,16 @@ class AuthRuntimeService {
                         null,
                         now
                 );
+                String passwordHash = passwords.hash(request.password());
                 repository.insertIdentity(
                         UUID.randomUUID(),
                         user.id(),
                         "LOCAL",
                         email,
-                        passwords.hash(request.password()),
+                        passwordHash,
                         now
                 );
+                repository.insertPasswordHistory(user.id(), passwordHash, now);
                 return issueSession(user, deviceLabel(request.clientContext()), now, traceId, "SIGNUP_SUCCESS");
             });
         } catch (DataIntegrityViolationException exception) {
@@ -313,51 +324,211 @@ class AuthRuntimeService {
     }
 
     void revokeAll(AuthApiModels.RevokeAllRequest request, String traceId) {
-        Instant now = Instant.now(clock);
-        if (request.authenticatedAt().isBefore(now.minus(properties.recentAuthWindow()))
-                || request.authenticatedAt().isAfter(now.plus(FUTURE_AUTHENTICATION_SKEW))) {
-            throw AuthRuntimeException.unauthorized(
-                    "RECENT_AUTH_REQUIRED",
-                    "모든 기기 로그아웃에는 최근 인증이 필요합니다."
-            );
-        }
+        Instant now = requireRecentAuthentication(request.authenticatedAt());
         transactions.executeWithoutResult(status -> {
-            AuthModels.Session current = repository.findSessionForUpdate(
-                    request.currentAuthSessionId()
-            ).orElseThrow(() -> AuthRuntimeException.forbidden(
-                    "AUTH_SESSION_SUBJECT_MISMATCH",
-                    "인증 세션과 사용자가 일치하지 않습니다."
-            ));
-            if (!current.userId().equals(request.userId())) {
-                throw AuthRuntimeException.forbidden(
-                        "AUTH_SESSION_SUBJECT_MISMATCH",
-                        "인증 세션과 사용자가 일치하지 않습니다."
-                );
-            }
-            List<AuthModels.Session> activeSessions = repository.findActiveSessionsForUpdate(
-                    request.userId(),
-                    now
-            );
-            for (AuthModels.Session session : activeSessions) {
-                if (repository.revokeSession(
-                        session,
-                        "ALL_DEVICE_LOGOUT",
-                        now,
-                        denyUntil(now),
-                        traceId
-                )) {
-                    repository.insertAudit(
-                            session.userId(),
-                            session.id(),
-                            "SESSION_REVOKED",
-                            "ALL_DEVICE_LOGOUT",
-                            now,
-                            traceId,
-                            Map.of("scope", "ALL_DEVICES")
-                    );
-                }
-            }
+            requireSessionSubject(request.currentAuthSessionId(), request.userId());
+            revokeAllUserSessions(request.userId(), "ALL_DEVICE_LOGOUT", now, traceId);
         });
+    }
+
+    void reauthenticate(AuthApiModels.ReauthenticateRequest request, String traceId) {
+        transactions.executeWithoutResult(status -> {
+            Instant now = Instant.now(clock);
+            AuthModels.Session session = requireCurrentSession(request.currentAuthSessionId(), request.userId(), now);
+            AuthModels.User user = repository.findUserByIdForUpdate(request.userId()).orElseThrow(
+                    AuthRuntimeService::invalidCredentials
+            );
+            if (!user.isActive()) {
+                throw invalidCredentials();
+            }
+            if (hasText(request.password())) {
+                AuthModels.Identity identity = repository.findIdentityForUserForUpdate(user.id(), "LOCAL")
+                        .orElseThrow(AuthRuntimeService::invalidCredentials);
+                if (!passwords.matches(request.password(), identity.passwordHash())) {
+                    throw invalidCredentials();
+                }
+                repository.touchIdentityAndUser(identity, now);
+            } else {
+                AuthModels.GoogleUser googleUser = googleVerifier.verify(request.googleCredential());
+                AuthModels.Identity identity = repository.findIdentityForUserForUpdate(user.id(), "GOOGLE")
+                        .orElseThrow(AuthRuntimeService::invalidCredentials);
+                if (!identity.providerUserId().equals(googleUser.providerUserId())) {
+                    throw invalidCredentials();
+                }
+                repository.touchIdentityAndUser(identity, now);
+            }
+            repository.insertAudit(user.id(), session.id(), "REAUTHENTICATION_SUCCESS", null, now, traceId, Map.of());
+        });
+    }
+
+    AuthApiModels.AcceptedResponse requestPasswordReset(
+            AuthApiModels.PasswordResetRequest request,
+            String traceId
+    ) {
+        if (!passwordResetDelivery.isAvailable()) {
+            return new AuthApiModels.AcceptedResponse(true);
+        }
+        String email = JdbcAuthRepository.canonicalEmail(request.email());
+        try {
+            transactions.executeWithoutResult(status -> {
+                AuthModels.User user = repository.findUserByEmail(email).orElse(null);
+                if (user == null || !user.isActive()
+                        || repository.findIdentityForUserForUpdate(user.id(), "LOCAL").isEmpty()) {
+                    return;
+                }
+                Instant now = Instant.now(clock);
+                Instant hourlyWindow = now.minus(Duration.ofHours(1));
+                repository.lockPasswordResetRateLimits(user.id(), request.requestIpPrefix());
+                if (repository.countPasswordResetRequestsForUser(user.id(), hourlyWindow) >= 3
+                        || repository.countPasswordResetRequestsForIp(request.requestIpPrefix(), hourlyWindow) >= 10) {
+                    return;
+                }
+                String token = passwordResetTokens.issue();
+                Instant expiresAt = now.plus(Duration.ofMinutes(15));
+                repository.insertPasswordResetToken(
+                        UUID.randomUUID(),
+                        user.id(),
+                        passwordResetTokens.hash(token),
+                        request.requestIpPrefix(),
+                        now,
+                        expiresAt
+                );
+                passwordResetDelivery.deliver(user, token, expiresAt);
+                repository.insertAudit(user.id(), null, "PASSWORD_RESET_REQUESTED", null, now, traceId, Map.of());
+            });
+        } catch (RuntimeException exception) {
+            LOGGER.warn("password_reset_request_not_delivered trace_id={}", traceId);
+        }
+        return new AuthApiModels.AcceptedResponse(true);
+    }
+
+    void resetPassword(AuthApiModels.PasswordResetConfirmRequest request, String traceId) {
+        validateNewPassword(request.newPassword());
+        transactions.executeWithoutResult(status -> {
+            Instant now = Instant.now(clock);
+            AuthModels.PasswordResetState state = repository.findPasswordResetStateForUpdate(
+                    passwordResetTokens.hash(request.token())
+            ).orElseThrow(AuthRuntimeService::invalidPasswordResetToken);
+            if (!state.token().isUsable(now) || !state.user().isActive()) {
+                throw invalidPasswordResetToken();
+            }
+            AuthModels.Identity localIdentity = repository.findIdentityForUserForUpdate(state.user().id(), "LOCAL")
+                    .orElseThrow(AuthRuntimeService::invalidPasswordResetToken);
+            rejectPasswordReuse(state.user().id(), request.newPassword());
+            if (!repository.consumePasswordResetToken(state.token().id(), now)) {
+                throw invalidPasswordResetToken();
+            }
+            String passwordHash = passwords.hash(request.newPassword());
+            repository.updateLocalPassword(localIdentity.id(), passwordHash, now);
+            repository.insertPasswordHistory(state.user().id(), passwordHash, now);
+            revokeAllUserSessions(state.user().id(), "PASSWORD_RESET", now, traceId);
+            repository.insertAudit(state.user().id(), null, "PASSWORD_RESET_SUCCESS", null, now, traceId, Map.of());
+        });
+    }
+
+    void changePassword(AuthApiModels.PasswordChangeRequest request, String traceId) {
+        validateNewPassword(request.newPassword());
+        transactions.executeWithoutResult(status -> {
+            Instant now = Instant.now(clock);
+            requireCurrentSession(request.currentAuthSessionId(), request.userId(), now);
+            AuthModels.User user = repository.findUserByIdForUpdate(request.userId()).orElseThrow(
+                    AuthRuntimeService::invalidCredentials
+            );
+            AuthModels.Identity localIdentity = repository.findIdentityForUserForUpdate(user.id(), "LOCAL")
+                    .orElseThrow(() -> AuthRuntimeException.conflict(
+                            "LOCAL_CREDENTIAL_REQUIRED",
+                            "local 비밀번호가 설정된 계정만 비밀번호를 변경할 수 있습니다."
+                    ));
+            if (!user.isActive() || !passwords.matches(request.currentPassword(), localIdentity.passwordHash())) {
+                throw invalidCredentials();
+            }
+            rejectPasswordReuse(user.id(), request.newPassword());
+            String passwordHash = passwords.hash(request.newPassword());
+            repository.updateLocalPassword(localIdentity.id(), passwordHash, now);
+            repository.insertPasswordHistory(user.id(), passwordHash, now);
+            revokeAllUserSessions(user.id(), "PASSWORD_CHANGED", now, traceId);
+            repository.insertAudit(user.id(), null, "PASSWORD_CHANGED", null, now, traceId, Map.of());
+        });
+    }
+
+    AuthApiModels.UserView updateProfile(AuthApiModels.ProfileUpdateRequest request, String traceId) {
+        return transactions.execute(status -> {
+            Instant now = Instant.now(clock);
+            AuthModels.User existing = repository.findUserByIdForUpdate(request.userId()).orElseThrow(
+                    AuthRuntimeService::invalidCredentials
+            );
+            if (!existing.isActive()) {
+                throw invalidCredentials();
+            }
+            AuthModels.User user = repository.updateProfile(request.userId(), request.displayName(), now);
+            repository.insertAudit(user.id(), null, "PROFILE_UPDATED", null, now, traceId, Map.of());
+            return userView(user);
+        });
+    }
+
+    AuthApiModels.UserView updateProfileImage(
+            UUID userId,
+            String declaredContentType,
+            byte[] bytes,
+            String traceId) {
+        ProfileImageValidator.ValidatedImage image = ProfileImageValidator.validate(declaredContentType, bytes);
+        if (!profileImageStorage.isAvailable()) {
+            throw AuthRuntimeException.serviceUnavailable(
+                    "PROFILE_IMAGE_STORAGE_UNAVAILABLE",
+                    "프로필 사진 저장소를 사용할 수 없습니다.");
+        }
+        AuthModels.User existing = repository.findUserById(userId).orElseThrow(AuthRuntimeService::invalidCredentials);
+        if (!existing.isActive()) {
+            throw invalidCredentials();
+        }
+        String newKey = profileImageStorage.store(userId, image);
+        AuthModels.User updated;
+        try {
+            updated = transactions.execute(status -> {
+                AuthModels.User current = repository.findUserByIdForUpdate(userId).orElseThrow(
+                        AuthRuntimeService::invalidCredentials);
+                if (!current.isActive()) {
+                    throw invalidCredentials();
+                }
+                Instant now = Instant.now(clock);
+                AuthModels.User user = repository.updateProfileImage(userId, newKey, now);
+                repository.insertAudit(user.id(), null, "PROFILE_IMAGE_UPDATED", null, now, traceId, Map.of());
+                return user;
+            });
+        } catch (RuntimeException exception) {
+            deleteBestEffort(newKey);
+            throw exception;
+        }
+        if (profileImageStorage.isManagedKey(existing.pictureUrl())) {
+            deleteBestEffort(existing.pictureUrl());
+        }
+        return userView(updated);
+    }
+
+    void withdraw(AuthApiModels.WithdrawalRequest request, String traceId) {
+        Instant now = requireRecentAuthentication(request.authenticatedAt());
+        String deletedProfileImage = transactions.execute(status -> {
+            requireCurrentSession(request.currentAuthSessionId(), request.userId(), now);
+            AuthModels.User user = repository.findUserByIdForUpdate(request.userId())
+                    .orElseThrow(AuthRuntimeService::invalidCredentials);
+            if (repository.disableUser(request.userId(), now)) {
+                revokeAllUserSessions(request.userId(), "ACCOUNT_WITHDRAWAL", now, traceId);
+                repository.insertAudit(request.userId(), null, "ACCOUNT_WITHDRAWAL", null, now, traceId, Map.of());
+                return user.pictureUrl();
+            }
+            return null;
+        });
+        if (profileImageStorage.isManagedKey(deletedProfileImage)) {
+            deleteBestEffort(deletedProfileImage);
+        }
+    }
+
+    private void deleteBestEffort(String objectKey) {
+        try {
+            profileImageStorage.delete(objectKey);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("profile_image_delete_failed");
+        }
     }
 
     private AuthApiModels.TokenResponse issueSession(
@@ -458,6 +629,76 @@ class AuthRuntimeService {
         return now.plus(properties.accessDenyWindow());
     }
 
+    private AuthModels.Session requireCurrentSession(UUID authSessionId, UUID userId, Instant now) {
+        AuthModels.Session session = requireSessionSubject(authSessionId, userId);
+        if (session.isRevoked() || session.isExpired(now)) {
+            throw subjectMismatch();
+        }
+        return session;
+    }
+
+    private AuthModels.Session requireSessionSubject(UUID authSessionId, UUID userId) {
+        AuthModels.Session session = repository.findSessionForUpdate(authSessionId).orElseThrow(
+                AuthRuntimeService::subjectMismatch
+        );
+        if (!session.userId().equals(userId)) {
+            throw subjectMismatch();
+        }
+        return session;
+    }
+
+    private void revokeAllUserSessions(UUID userId, String reason, Instant now, String traceId) {
+        for (AuthModels.Session session : repository.findActiveSessionsForUpdate(userId, now)) {
+            if (repository.revokeSession(session, reason, now, denyUntil(now), traceId)) {
+                repository.insertAudit(
+                        session.userId(),
+                        session.id(),
+                        "SESSION_REVOKED",
+                        reason,
+                        now,
+                        traceId,
+                        Map.of("scope", "ALL_DEVICES")
+                );
+            }
+        }
+    }
+
+    private Instant requireRecentAuthentication(Instant authenticatedAt) {
+        Instant now = Instant.now(clock);
+        if (authenticatedAt.isBefore(now.minus(properties.recentAuthWindow()))
+                || authenticatedAt.isAfter(now.plus(FUTURE_AUTHENTICATION_SKEW))) {
+            throw AuthRuntimeException.unauthorized(
+                    "RECENT_AUTH_REQUIRED",
+                    "최근 인증이 필요합니다."
+            );
+        }
+        return now;
+    }
+
+    private void validateNewPassword(String password) {
+        if (!passwords.isValid(password)) {
+            throw AuthRuntimeException.badRequest("INVALID_REQUEST", PasswordSupport.POLICY_MESSAGE);
+        }
+    }
+
+    private void rejectPasswordReuse(UUID userId, String candidate) {
+        if (repository.findRecentPasswordHashes(userId, 3).stream().anyMatch(hash -> passwords.matches(candidate, hash))) {
+            throw AuthRuntimeException.badRequest(
+                    "PASSWORD_REUSE_FORBIDDEN",
+                    "최근 3개의 비밀번호는 다시 사용할 수 없습니다."
+            );
+        }
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static AuthApiModels.UserView userView(AuthModels.User user) {
+        return new AuthApiModels.UserView(
+                user.id(), user.email(), user.displayName(), user.pictureUrl(), user.status());
+    }
+
     private static String deviceLabel(AuthApiModels.ClientContext context) {
         if (context == null || context.deviceLabel() == null || context.deviceLabel().isBlank()) {
             return null;
@@ -495,6 +736,20 @@ class AuthRuntimeService {
         return AuthRuntimeException.unauthorized(
                 "INVALID_CREDENTIALS",
                 "이메일 또는 비밀번호가 올바르지 않습니다."
+        );
+    }
+
+    private static AuthRuntimeException invalidPasswordResetToken() {
+        return AuthRuntimeException.badRequest(
+                "PASSWORD_RESET_TOKEN_INVALID",
+                "비밀번호 재설정 링크가 유효하지 않습니다."
+        );
+    }
+
+    private static AuthRuntimeException subjectMismatch() {
+        return AuthRuntimeException.forbidden(
+                "AUTH_SESSION_SUBJECT_MISMATCH",
+                "인증 세션과 사용자가 일치하지 않습니다."
         );
     }
 

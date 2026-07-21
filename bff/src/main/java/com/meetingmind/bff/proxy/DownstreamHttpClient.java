@@ -88,6 +88,7 @@ public class DownstreamHttpClient {
                             response.getHeaders().getContentType(),
                             response.getHeaders().getCacheControl(),
                             response.getHeaders().getETag(),
+                            response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION),
                             response.getBody().readAllBytes());
                 } catch (IOException exception) {
                     throw new DownstreamCallFailure();

@@ -4,6 +4,8 @@ import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -13,6 +15,22 @@ public class AuthService {
     private final PasswordHasher passwordHasher;
     private final AuthTokenService tokenService;
     private final GoogleCredentialVerifier googleCredentialVerifier;
+    private final TargetAuthUserResolver targetAuthUserResolver;
+
+    @Autowired
+    public AuthService(
+            AuthStore store,
+            PasswordHasher passwordHasher,
+            AuthTokenService tokenService,
+            GoogleCredentialVerifier googleCredentialVerifier,
+            ObjectProvider<TargetAuthUserResolver> targetAuthUserResolverProvider
+    ) {
+        this.store = store;
+        this.passwordHasher = passwordHasher;
+        this.tokenService = tokenService;
+        this.googleCredentialVerifier = googleCredentialVerifier;
+        this.targetAuthUserResolver = targetAuthUserResolverProvider.getIfAvailable();
+    }
 
     public AuthService(
             AuthStore store,
@@ -24,6 +42,7 @@ public class AuthService {
         this.passwordHasher = passwordHasher;
         this.tokenService = tokenService;
         this.googleCredentialVerifier = googleCredentialVerifier;
+        this.targetAuthUserResolver = null;
     }
 
     @Transactional
@@ -106,6 +125,9 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public AuthUserResponse currentUser(String authorizationHeader) {
+        if (targetAuthUserResolver != null && targetAuthUserResolver.supports(authorizationHeader)) {
+            return targetAuthUserResolver.resolve(authorizationHeader);
+        }
         String userId = tokenService.resolveSubject(authorizationHeader);
         return store.findUserById(userId)
                 .map(AuthUserResponse::from)

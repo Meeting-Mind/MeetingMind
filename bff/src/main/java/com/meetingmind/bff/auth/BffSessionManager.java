@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,10 +22,18 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.session.FindByIndexNameSessionRepository;
+import org.springframework.session.Session;
+import org.springframework.session.SessionRepository;
 import org.springframework.stereotype.Service;
 
 @Service
 public class BffSessionManager {
+
+    private static final Set<String> LEGACY_DOWNSTREAM_AUDIENCES = Set.of(
+            "meetingmind-core", "meetingmind-ai", "meetingmind-livekit");
 
     private final TokenVault tokenVault;
     private final CompatibilityAuthClient compatibilityAuthClient;
@@ -34,7 +43,10 @@ public class BffSessionManager {
     private final Clock clock;
     private final String issuer;
     private final String audience;
+    private final SessionRepository<Session> sessionRepository;
+    private final boolean accountManagementAvailable;
 
+    @Autowired
     public BffSessionManager(
             TokenVault tokenVault,
             CompatibilityAuthClient compatibilityAuthClient,
@@ -42,8 +54,87 @@ public class BffSessionManager {
             SecurityContextRepository securityContextRepository,
             BffSessionLifetimePolicy lifetimePolicy,
             Clock clock,
-            @Value("${meetingmind.bff.compat-auth.issuer}") String issuer,
-            @Value("${meetingmind.bff.compat-auth.audience}") String audience) {
+            @Value("${meetingmind.bff.auth.issuer:meetingmind-core-legacy}") String issuer,
+            @Value("${meetingmind.bff.compat-auth.audience}") String audience,
+            @Value("${meetingmind.bff.auth.mode:legacy}") String authMode,
+            ObjectProvider<SessionRepository> sessionRepositoryProvider) {
+        this(
+                tokenVault,
+                compatibilityAuthClient,
+                sessionAuthenticationStrategy,
+                securityContextRepository,
+                lifetimePolicy,
+                clock,
+                issuer,
+                audience,
+                sessionRepository(sessionRepositoryProvider.getIfAvailable()),
+                "target".equals(authMode)
+        );
+    }
+
+    BffSessionManager(
+            TokenVault tokenVault,
+            CompatibilityAuthClient compatibilityAuthClient,
+            SessionAuthenticationStrategy sessionAuthenticationStrategy,
+            SecurityContextRepository securityContextRepository,
+            BffSessionLifetimePolicy lifetimePolicy,
+            Clock clock,
+            String issuer,
+            String audience) {
+        this(
+                tokenVault,
+                compatibilityAuthClient,
+                sessionAuthenticationStrategy,
+                securityContextRepository,
+                lifetimePolicy,
+                clock,
+                issuer,
+                audience,
+                (SessionRepository<Session>) null,
+                false
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private static SessionRepository<Session> sessionRepository(SessionRepository repository) {
+        return repository == null ? null : (SessionRepository<Session>) repository;
+    }
+
+    BffSessionManager(
+            TokenVault tokenVault,
+            CompatibilityAuthClient compatibilityAuthClient,
+            SessionAuthenticationStrategy sessionAuthenticationStrategy,
+            SecurityContextRepository securityContextRepository,
+            BffSessionLifetimePolicy lifetimePolicy,
+            Clock clock,
+            String issuer,
+            String audience,
+            SessionRepository<Session> sessionRepository) {
+        this(
+                tokenVault,
+                compatibilityAuthClient,
+                sessionAuthenticationStrategy,
+                securityContextRepository,
+                lifetimePolicy,
+                clock,
+                issuer,
+                audience,
+                sessionRepository,
+                false
+        );
+    }
+
+    BffSessionManager(
+            TokenVault tokenVault,
+            CompatibilityAuthClient compatibilityAuthClient,
+            SessionAuthenticationStrategy sessionAuthenticationStrategy,
+            SecurityContextRepository securityContextRepository,
+            BffSessionLifetimePolicy lifetimePolicy,
+            Clock clock,
+            String issuer,
+            String audience,
+            SessionRepository<Session> sessionRepository,
+            boolean accountManagementAvailable) {
         if (issuer == null || issuer.isBlank() || audience == null || audience.isBlank()) {
             throw new IllegalStateException("compatibility auth issuer and audience are required");
         }
@@ -55,6 +146,8 @@ public class BffSessionManager {
         this.clock = clock;
         this.issuer = issuer;
         this.audience = audience;
+        this.sessionRepository = sessionRepository;
+        this.accountManagementAvailable = accountManagementAvailable;
     }
 
     public BffAuthenticatedResponse establish(
@@ -67,11 +160,12 @@ public class BffSessionManager {
         Duration absoluteLifetime =
                 rememberMe ? lifetimePolicy.rememberAbsolute() : lifetimePolicy.standardAbsolute();
         Instant absoluteExpiresAt = now.plus(absoluteLifetime);
-        UUID authSessionId = UUID.randomUUID();
+        UUID authSessionId = tokens.authSessionId() == null ? UUID.randomUUID() : tokens.authSessionId();
         UUID tokenBundleId = UUID.randomUUID();
         boolean bundleCreated = false;
 
         try {
+            compatibilityAuthClient.projectUser(tokens);
             Instant accessExpiresAt = now.plusSeconds(tokens.expiresIn());
             Instant backendRefreshExpiresAt = now.plusSeconds(tokens.refreshExpiresIn());
             Instant vaultExpiresAt = backendRefreshExpiresAt.isBefore(absoluteExpiresAt)
@@ -85,8 +179,9 @@ public class BffSessionManager {
                     accessExpiresAt,
                     vaultExpiresAt,
                     issuer,
-                    Set.of(audience),
-                    Set.of());
+                    tokenAudiences(tokens),
+                    Set.of(),
+                    tokenAccesses(tokens, accessExpiresAt));
             tokenVault.create(tokenBundleId, payload);
             bundleCreated = true;
 
@@ -137,7 +232,7 @@ public class BffSessionManager {
                 || authentication == null
                 || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof BffAuthUser user)) {
-            return BffSessionBootstrapResponse.unauthenticated();
+            return BffSessionBootstrapResponse.unauthenticated(accountManagementAvailable);
         }
 
         Object userId = session.getAttribute(BffSessionAttributes.USER_ID);
@@ -151,18 +246,18 @@ public class BffSessionManager {
                 || !(absoluteExpiry instanceof Instant absoluteExpiresAt)
                 || !(rememberMe instanceof Boolean remember)) {
             invalidate(session, tokenBundleId);
-            return BffSessionBootstrapResponse.unauthenticated();
+            return BffSessionBootstrapResponse.unauthenticated(accountManagementAvailable);
         }
 
         Instant now = clock.instant();
         if (!absoluteExpiresAt.isAfter(now)) {
             invalidate(session, tokenBundleId);
-            return BffSessionBootstrapResponse.unauthenticated();
+            return BffSessionBootstrapResponse.unauthenticated(accountManagementAvailable);
         }
         Instant idleExpiresAt = minimum(
                 now.plusSeconds(session.getMaxInactiveInterval()), absoluteExpiresAt);
         return BffSessionBootstrapResponse.authenticated(
-                user, new BffSessionView(absoluteExpiresAt, idleExpiresAt, remember));
+                user, new BffSessionView(absoluteExpiresAt, idleExpiresAt, remember), accountManagementAvailable);
     }
 
     public void invalidateCurrentSession(HttpServletRequest request) {
@@ -172,6 +267,53 @@ public class BffSessionManager {
             return;
         }
         invalidate(session, session.getAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID));
+    }
+
+    /** Invalidates every browser session indexed under one Auth user after account-wide revocation. */
+    @SuppressWarnings("unchecked")
+    public void invalidateUserSessions(String userId) {
+        if (userId == null || userId.isBlank()
+                || !(sessionRepository instanceof FindByIndexNameSessionRepository<?> indexedRepository)) {
+            return;
+        }
+        FindByIndexNameSessionRepository<Session> indexed =
+                (FindByIndexNameSessionRepository<Session>) indexedRepository;
+        Map<String, Session> sessions = indexed.findByIndexNameAndIndexValue(
+                FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME,
+                userId);
+        for (Session session : sessions.values()) {
+            Object tokenBundleId = session.getAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID);
+            if (tokenBundleId instanceof UUID bundleId) {
+                try {
+                    tokenVault.delete(bundleId);
+                } catch (RuntimeException ignored) {
+                    // The session is still removed; an orphaned ciphertext expires at its fixed TTL.
+                }
+            }
+            try {
+                sessionRepository.deleteById(session.getId());
+            } catch (RuntimeException ignored) {
+                // A later request can only use this session if the distributed store failed to delete it.
+            }
+        }
+    }
+
+    public void updateCurrentUser(
+            BffAuthUser user,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        HttpSession session = request.getSession(false);
+        if (session == null || !user.id().equals(session.getAttribute(BffSessionAttributes.USER_ID))) {
+            throw BffAuthException.of(
+                    HttpStatus.UNAUTHORIZED,
+                    "SESSION_INVALID",
+                    "로그인이 만료되었습니다. 다시 로그인해 주세요.");
+        }
+        Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(user, null, List.of());
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authentication);
+        SecurityContextHolder.setContext(context);
+        securityContextRepository.saveContext(context, request, response);
     }
 
     private void cleanupFailedEstablishment(
@@ -216,5 +358,21 @@ public class BffSessionManager {
 
     private Instant minimum(Instant first, Instant second) {
         return first.isBefore(second) ? first : second;
+    }
+
+    private Set<String> tokenAudiences(LegacyAuthTokenResponse tokens) {
+        return tokens.accessTokens().isEmpty() ? LEGACY_DOWNSTREAM_AUDIENCES : tokens.accessTokens().keySet();
+    }
+
+    private Map<String, TokenBundlePayload.AccessToken> tokenAccesses(
+            LegacyAuthTokenResponse tokens,
+            Instant accessExpiresAt) {
+        if (!tokens.accessTokens().isEmpty()) {
+            return tokens.accessTokens();
+        }
+        return LEGACY_DOWNSTREAM_AUDIENCES.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+                audience -> audience,
+                audience -> new TokenBundlePayload.AccessToken(tokens.accessToken(), accessExpiresAt)
+        ));
     }
 }

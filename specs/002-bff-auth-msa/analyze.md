@@ -39,11 +39,14 @@
 | Low | revoke-all이 `userId`와 BFF 최근 인증 주장만 받으면 Auth DB가 현재 session 소유자 결합을 독립 확인할 수 없다. | BFF 결합 버그나 침해가 다른 사용자의 모든 AuthSession 폐기로 확대될 수 있다. | `currentAuthSessionId`와 `userId`를 함께 받고 AuthSession owner, 최근 10분과 최대 60초 미래 skew를 변경 전에 검증한다. | Q-017, `auth-service-api.md`, `AuthRuntimeService` | T032 Verified |
 | Low | T033 전 임시 signer를 넣으면 HMAC/로컬 private key가 운영 계약으로 굳거나 test token이 image에 포함될 수 있다. | Resource validator 계약과 키 수명 경계가 갈라지고 서명키가 container에 노출될 수 있다. | production `AccessTokenIssuer`는 fail-closed port로 두고 test source signer로만 T032 DB/API를 검증하며 signer 부재 시 transaction rollback을 확인한다. | D-019, `auth/**` | T033 Resolved; KMS-only runtime adapter/JWKS/validator verified |
 | Low | JWKS rotation 순서가 운영자 기억에만 의존하면 새 `kid`가 validator cache에 없거나 이전 token이 overlap 전에 실패할 수 있다. | 정상 rotation 중 이미 발급된 access가 최대 10분 내인데도 거부되거나 Auth 장애 격리가 깨질 수 있다. | key ring이 정기 rotation의 5분 선게시와 1시간 이전 key overlap을 시작 시 검증하고 unknown `kid` 1회 refresh/fail-closed를 자동 테스트한다. | `auth/**`, target validator, `auth-service-api.md` | T033 Verified; 90일 운영 경보는 T045 |
+| High | Core는 `user-<uuid>` 문자열 ID와 다수의 업무 FK를 사용하지만 Auth Service는 UUID subject를 발급한다. | 이메일만으로 cutover하면 기존 Space·Meeting·ACL 소유권이 다른 JWT subject에 연결되거나 account merge 오류가 발생할 수 있다. | Auth UUID canonical + Core immutable `auth_user_mappings` projection을 사용한다. 이메일 자동 병합을 금지하고 legacy manifest, reconciliation, rollback을 T034에서 검증한다. | `clarify.md` Q-018, `data-model.md`, `tasks.md` T034 | Decision complete; implementation in progress |
+| High | password reset/change, profile image, withdrawal의 provider·보존·소유권 정책이 비어 있었다. | 이메일 인증을 우회하거나 token/image 원문을 저장하고, 탈퇴 뒤 Core ownership과 감사 데이터를 불일치시킬 수 있다. | reset 15분/3 per account/10 per IP, 전체 session revoke, 5 MiB image validation, 단독 owner 차단/30일 anonymization으로 고정했다. T025 contract와 schema를 적용한 뒤 T026/T027 runtime을 구현한다. | `requirements/policies.md`, `clarify.md` Q-019~022, contracts/data model/tasks | Decision complete; implementation in progress |
 
 ## Recommendation
 
-1. T024는 T032 revoke-all 계약이 완료됐으므로 BFF 최근 인증/재인증과 Frontend 모든 기기 로그아웃 UI를 연결할 수 있다.
-2. T034에서 User/AuthIdentity/AuthSession forward-only 이전과 reconciliation/rollback 경계를 구현한 뒤 T035에서 T033 validator를 Core dual validation에 연결한다.
-3. Q-011~Q-013을 결정하기 전 EKS production 리소스를 생성하지 않는다.
-4. T023 runbook의 7일 관측 window와 guardrail을 실제 배포 지표로 통과한 뒤 compatibility 경로 제거를 승인한다.
-5. Auth Service 추출 뒤 도메인 분리는 EKS 관측 근거를 확보하고 별도 spec으로 진행한다.
+1. T034에서 `auth_user_mappings` migration, legacy manifest 검증과 reconciliation/rollback 경계를 구현한다.
+2. T025 contract/schema를 반영해 T026 Auth account runtime을 구현한다.
+3. T035에서 BFF/Auth cutover와 T033 validator의 Core dual validation을 연결한 뒤 T024/T027의 re-authentication, logout-all, account UI를 구현한다.
+4. Q-011~Q-013을 결정하기 전 EKS production 리소스를 생성하지 않는다.
+5. T023 runbook의 7일 관측 window와 guardrail을 실제 배포 지표로 통과한 뒤 compatibility 경로 제거를 승인한다.
+6. Auth Service 추출 뒤 도메인 분리는 EKS 관측 근거를 확보하고 별도 spec으로 진행한다.

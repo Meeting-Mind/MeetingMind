@@ -1,13 +1,19 @@
 package com.meetingmind.bff.auth;
 
 import java.io.Serializable;
+import java.security.Principal;
 
 public record BffAuthUser(
         String id,
         String email,
         String displayName,
         String pictureUrl,
-        String status) implements Serializable {
+        String status) implements Serializable, Principal {
+
+    @Override
+    public String getName() {
+        return id;
+    }
 
     static BffAuthUser from(LegacyAuthUser user) {
         return new BffAuthUser(

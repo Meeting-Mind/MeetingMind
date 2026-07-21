@@ -78,4 +78,4 @@ Runtime role 이름은 migration 계약과 일치하는 `meetingmind_auth_app`�
 ./gradlew test bootJar
 ```
 
-실제 PostgreSQL 검증은 `AUTH_DB_INTEGRATION=true`와 `AUTH_TEST_POSTGRES_*` 환경변수를 사용한다. CI는 local/Google 인증, refresh 회전·reuse family 폐기, 현재/전체 세션 revoke, subject/recent-auth negative case, 원문 비저장과 outbox를 실행한다. T033 단위 테스트는 KMS request/key metadata, 필수 JWT claim/signature, JWKS ETag/workload allowlist, 정기/emergency rotation과 old/new overlap을 검증한다.
+실제 PostgreSQL 검증은 `AUTH_DB_INTEGRATION=true`와 `AUTH_TEST_POSTGRES_*` 환경변수를 사용한다. CI는 V1~V3 migration, local/Google 인증, refresh 회전·reuse family 폐기, 현재/전체 세션 revoke, subject/recent-auth negative case, 원문 비저장과 outbox를 실행한다. T033 단위 테스트는 KMS request/key metadata, 필수 JWT claim/signature, JWKS ETag/workload allowlist, 정기/emergency rotation과 old/new overlap을 검증한다.

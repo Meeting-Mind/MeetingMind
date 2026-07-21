@@ -38,6 +38,25 @@ services:
       timeout: 3s
       retries: 10
 
+  meetingmind-object-storage:
+    profiles: ["auth"]
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: meetingmind-minio-local
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AUTH_PROFILE_IMAGE_STORAGE_ACCESS_KEY:-meetingmind-local}
+      MINIO_ROOT_PASSWORD: ${AUTH_PROFILE_IMAGE_STORAGE_SECRET_KEY:-meetingmind-local-secret}
+    ports:
+      - "${AUTH_PROFILE_IMAGE_STORAGE_PORT:-9000}:9000"
+      - "${AUTH_PROFILE_IMAGE_STORAGE_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - meetingmind-object-storage-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   meetingmind-redis:
     image: redis:7-alpine
     container_name: meetingmind-redis-local
@@ -84,10 +103,20 @@ services:
       AUTH_SIGNING_ISSUER: ${AUTH_SIGNING_ISSUER:-https://auth.meetingmind.internal}
       AUTH_SIGNING_KEY_RING_JSON: ${AUTH_SIGNING_KEY_RING_JSON:-}
       AUTH_JWKS_SPIFFE_PRINCIPALS: ${AUTH_JWKS_SPIFFE_PRINCIPALS:-spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-core,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-ai,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-livekit}
+      AUTH_PROFILE_IMAGE_STORAGE_ENABLED: ${AUTH_PROFILE_IMAGE_STORAGE_ENABLED:-true}
+      AUTH_PROFILE_IMAGE_STORAGE_BUCKET: ${AUTH_PROFILE_IMAGE_STORAGE_BUCKET:-meetingmind-profile-images}
+      AUTH_PROFILE_IMAGE_STORAGE_REGION: ${AUTH_PROFILE_IMAGE_STORAGE_REGION:-us-east-1}
+      AUTH_PROFILE_IMAGE_STORAGE_ENDPOINT: ${AUTH_PROFILE_IMAGE_STORAGE_ENDPOINT:-http://meetingmind-object-storage:9000}
+      AUTH_PROFILE_IMAGE_STORAGE_ACCESS_KEY: ${AUTH_PROFILE_IMAGE_STORAGE_ACCESS_KEY:-meetingmind-local}
+      AUTH_PROFILE_IMAGE_STORAGE_SECRET_KEY: ${AUTH_PROFILE_IMAGE_STORAGE_SECRET_KEY:-meetingmind-local-secret}
+      AUTH_PROFILE_IMAGE_STORAGE_PATH_STYLE_ACCESS: ${AUTH_PROFILE_IMAGE_STORAGE_PATH_STYLE_ACCESS:-true}
+      AUTH_PROFILE_IMAGE_STORAGE_CREATE_BUCKET_IF_MISSING: ${AUTH_PROFILE_IMAGE_STORAGE_CREATE_BUCKET_IF_MISSING:-true}
     ports:
       - "${AUTH_SERVER_PORT:-8082}:8082"
     depends_on:
       meetingmind-auth-db:
+        condition: service_healthy
+      meetingmind-object-storage:
         condition: service_healthy
 
   meetingmind-ai-worker:
@@ -108,5 +137,6 @@ volumes:
   meetingmind-postgres-data:
   meetingmind-auth-postgres-data:
   meetingmind-redis-data:
+  meetingmind-object-storage-data:
 
 # docker compose -f compose.local.yml up -d

@@ -1,6 +1,7 @@
 package com.meetingmind.bff.config;
 
 import com.meetingmind.bff.auth.BffAbsoluteSessionExpiryFilter;
+import com.meetingmind.bff.auth.BffAuthErrorWriter;
 import com.meetingmind.bff.tokenvault.TokenVault;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -14,7 +15,6 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
@@ -45,7 +45,9 @@ public class BffSecurityConfiguration {
                                         "/api/v1/auth/login",
                                         "/api/v1/auth/google",
                                         "/api/v1/auth/session",
-                                        "/api/v1/auth/logout")
+                                        "/api/v1/auth/logout",
+                                        "/api/v1/auth/password-reset-requests",
+                                        "/api/v1/auth/password-resets")
                                 .permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session
@@ -88,7 +90,7 @@ public class BffSecurityConfiguration {
     }
 
     private AuthenticationEntryPoint authenticationEntryPoint() {
-        return new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED);
+        return (request, response, exception) -> BffAuthErrorWriter.writeSessionInvalid(response);
     }
 
     private AccessDeniedHandler accessDeniedHandler() {

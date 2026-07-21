@@ -34,7 +34,15 @@ public class InMemoryAuthStore implements AuthStore {
 
     @Override
     public synchronized AuthUser createUser(String email, String displayName, String pictureUrl, Instant now) {
-        String userId = "user-" + UUID.randomUUID();
+        return createUserWithId("user-" + UUID.randomUUID(), email, displayName, pictureUrl, now);
+    }
+
+    @Override
+    public synchronized AuthUser createUserWithId(
+            String userId, String email, String displayName, String pictureUrl, Instant now) {
+        if (usersById.containsKey(userId) || userIdByEmail.containsKey(AuthStore.normalizeEmail(email))) {
+            throw new IllegalStateException("사용자가 이미 존재합니다.");
+        }
         AuthUser user = new AuthUser(
                 userId,
                 AuthStore.normalizeEmail(email),
@@ -47,6 +55,24 @@ public class InMemoryAuthStore implements AuthStore {
         usersById.put(user.id(), user);
         userIdByEmail.put(user.email(), user.id());
         return user;
+    }
+
+    @Override
+    public synchronized AuthUser updateUserProfile(String userId, String displayName, String pictureUrl, Instant now) {
+        AuthUser current = usersById.get(userId);
+        if (current == null) {
+            throw new IllegalStateException("사용자를 찾을 수 없습니다.");
+        }
+        AuthUser updated = new AuthUser(
+                current.id(),
+                current.email(),
+                displayName,
+                pictureUrl,
+                current.status(),
+                current.createdAt(),
+                current.lastLoginAt());
+        usersById.put(updated.id(), updated);
+        return updated;
     }
 
     @Override

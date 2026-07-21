@@ -9,7 +9,7 @@
 | BFF Session Redis | Web BFF | opaque session, 사용자/인증 세션/Token Bundle 참조, expiry | access/refresh 원문, 업무 권한 원본 |
 | BFF Token Vault | Web BFF | KMS 경계로 암호화된 access/refresh bundle | 평문 token index/log, 비밀번호 |
 | Auth PostgreSQL | Auth Service | User, AuthIdentity, AuthSession, refresh hash/revoke, 감사 이벤트 | refresh 원문, Space/Meeting RBAC |
-| Resource PostgreSQL | 각 Resource Service | 서비스 소유 업무 데이터와 최신 RBAC/ACL | BFF 세션, refresh token |
+| Resource PostgreSQL | 각 Resource Service | 서비스 소유 업무 데이터, 최신 RBAC/ACL, Auth UUID projection | BFF 세션, refresh token, Auth DB 직접 조회 |
 
 운영에서는 store별 계정과 최소 권한을 분리한다. 로컬 개발은 같은 PostgreSQL/Redis 인스턴스의 논리 분리를 허용하지만 다른 서비스의 table/key를 직접 읽지 않는다.
 
@@ -68,6 +68,16 @@ T032 runtime은 local `passwordHash`에 BCrypt만 사용하고 refresh `tokenHas
 - `lastLoginAt`
 
 Auth Service가 소유한다. Resource Service는 필요한 사용자 projection만 API/event로 동기화하며 Auth DB를 직접 조회하지 않는다.
+
+### CoreAuthUserMapping
+
+- `authUserId`: Auth Service `User.id` UUID. Core의 target access token `sub`와 일치한다.
+- `coreUserId`: 기존 `users.id varchar(64)`를 참조하는 immutable Core identity.
+- `source`: `AUTH_PROJECTION`, `LEGACY_MANIFEST`, `MANUAL_RECONCILIATION` 중 하나다.
+- `sourceVersion`: projection event 또는 reconciliation manifest version. 재처리 때 같은 mapping을 검증할 때 사용한다.
+- `mappedAt`
+
+Core PostgreSQL의 `auth_user_mappings`가 소유한다. 신규 사용자의 `coreUserId`는 `user-<authUserId>`로 결정한다. 기존 Core 사용자는 검증된 manifest가 같은 Auth UUID를 지정할 때만 mapping row를 만들며, 이메일 일치만으로 연결하지 않는다. mapping의 `authUserId`와 `coreUserId`는 생성 뒤 수정하지 않는다. 잘못된 mapping은 update가 아니라 해당 사용자 cutover 중단, 새 reconciliation record, 명시적 운영 승인으로 처리한다. Core `users` projection의 displayName/pictureUrl은 immutable mapping과 별개로 Auth profile 수정 성공 뒤 BFF의 인증된 projection 호출로 갱신하며, email이 달라지면 갱신하지 않고 conflict로 중단한다.
 
 ### AuthIdentity
 
@@ -145,6 +155,7 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 - User 1:N AuthSession.
 - AuthSession 1:N AuthRefreshCredential. 한 AuthSession은 하나의 family와 최대 하나의 active leaf를 가진다.
 - AuthSession 1:N AuthOutboxEvent.
+- Auth User 1:1 CoreAuthUserMapping. 이 관계는 API/event projection이며 cross-database foreign key가 아니다.
 - AuthSession 1:N BffSession을 허용하되 정상 웹 흐름은 기기/브라우저 로그인당 1:1을 목표로 한다.
 - BffSession 1:1 active TokenBundle.
 - 현재 세션 로그아웃은 BffSession, TokenBundle, 연결 AuthSession을 폐기한다.
@@ -171,6 +182,7 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 - 이미 사용된 refresh 재사용은 같은 transaction에서 AuthSession/family revoke와 outbox insert까지 완료해야 한다.
 - revoke/expiry된 AuthSession에서는 새 access/refresh를 발급하지 않는다.
 - raw access/refresh/password/Google credential은 로그, audit, analytics, tracing에 포함하지 않는다.
+- target JWT의 `sub`는 Core action 전에 `auth_user_mappings`로 resolve해야 한다. mapping이 없거나 비활성 Core user와 연결되면 fail closed한다.
 
 ## Retention and Deletion
 
@@ -181,6 +193,10 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 - AuthOutboxEvent: publish 완료 뒤 운영 감사·재처리 정책 기간 동안 보존하고 backlog/실패 event는 삭제하지 않는다.
 - Google credential: 검증 요청 범위 밖으로 보존하지 않는다.
 - User 비활성화/삭제 시 모든 AuthSession을 revoke하고 BFF 정리 event를 발행한다.
+- PasswordResetToken: raw token은 delivery 요청 범위를 벗어나 저장하지 않고 hash, user reference, 만료시각, 사용시각, 요청 IP prefix만 저장한다. 만료는 15분, 동일 user는 시간당 3회, 동일 IP prefix는 시간당 10회다.
+- PasswordHistory: password hash 이력은 감사/보존 정책에 따라 저장하되, 변경·재설정 시 최근 3개만 재사용 검증에 사용한다. 원문은 저장하지 않는다.
+- Profile image: object storage에는 opaque key만 남기며 database에는 공개 URL 또는 key의 파생 URL만 저장한다. Auth Service만 `profile-images/<authUserId>/<random>` key를 생성·저장·삭제하고 BFF는 browser multipart를 검증·전달할 뿐 bucket credential을 갖지 않는다. 로컬은 MinIO, 운영은 AWS S3의 같은 S3 API를 사용한다. JPEG/PNG/WebP, 매직 바이트 및 declared MIME 일치, 최대 5 MiB를 Auth와 BFF에서 모두 강제한다.
+- Withdrawal: Auth user는 즉시 `DISABLED`가 되고 sessions를 revoke하며 Auth `pictureUrl`을 비운 뒤 managed profile image object를 best-effort 삭제한다. Core의 `account_withdrawal_reservations`는 `auth_user_id`와 immutable Core user mapping, `PREPARED|COMPLETED|CANCELLED` 상태, 만료 및 anonymize 시각을 저장한다. `PREPARED`는 단독 활성 Space OWNER를 차단하고 새 Space 생성·OWNER 이양도 막지만, Auth disable 성공 전에는 익명화를 예약하지 않는다. `COMPLETED`만 30일 뒤 표시 이름·사진을 익명화하며 회의록·감사·업무 record의 author ID는 삭제하지 않는다.
 
 ## Migration Notes
 
@@ -192,3 +208,4 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 5. 기존 refresh row를 새 AuthSession/credential lineage로 추측 변환하지 않는다. 재로그인 또는 명시적 session migration으로 전환한다.
 6. Phase 1 TokenBundle schema v1은 legacy access를 `meetingmind-legacy`로만 해석한다. Auth Service 로그인/refresh 성공 시 schema v2 audience별 bundle로 원자 교체하며 v1 token을 신규 Resource Service audience로 복제하지 않는다.
 7. Core/Auth dual validation 기간이 끝난 뒤에만 legacy issuer와 token endpoint를 제거한다.
+8. T034는 `auth_user_mappings` forward-only table을 먼저 추가한다. 기존 mapping은 Auth UUID, Core ID, source/version을 포함한 검증 manifest로만 적재하며 이메일 기반 upsert를 사용하지 않는다. rollback은 mapping table을 제거하지 않고 target issuer traffic을 legacy로 drain하고 manifest reconciliation을 중지하는 방식으로 한다.

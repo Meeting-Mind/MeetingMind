@@ -50,6 +50,20 @@ meetingmind:
       allowed-principals: ${AUTH_BFF_SPIFFE_PRINCIPALS:spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff}
       jwks-principals: ${AUTH_JWKS_SPIFFE_PRINCIPALS:spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-core,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-ai,spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-livekit}
       allow-test-header: false
+    withdrawal-reconciliation:
+      enabled: ${AUTH_WITHDRAWAL_RECONCILIATION_ENABLED:false}
+      core-base-url: ${AUTH_WITHDRAWAL_RECONCILIATION_CORE_BASE_URL:}
+      fixed-delay: ${AUTH_WITHDRAWAL_RECONCILIATION_FIXED_DELAY:30s}
+      test-workload-principal: ${AUTH_WITHDRAWAL_RECONCILIATION_TEST_WORKLOAD_PRINCIPAL:}
+    profile-image-storage:
+      enabled: ${AUTH_PROFILE_IMAGE_STORAGE_ENABLED:false}
+      bucket: ${AUTH_PROFILE_IMAGE_STORAGE_BUCKET:}
+      region: ${AUTH_PROFILE_IMAGE_STORAGE_REGION:us-east-1}
+      endpoint: ${AUTH_PROFILE_IMAGE_STORAGE_ENDPOINT:}
+      access-key: ${AUTH_PROFILE_IMAGE_STORAGE_ACCESS_KEY:}
+      secret-key: ${AUTH_PROFILE_IMAGE_STORAGE_SECRET_KEY:}
+      path-style-access: ${AUTH_PROFILE_IMAGE_STORAGE_PATH_STYLE_ACCESS:false}
+      create-bucket-if-missing: ${AUTH_PROFILE_IMAGE_STORAGE_CREATE_BUCKET_IF_MISSING:false}
 
 management:
   endpoints:

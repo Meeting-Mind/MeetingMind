@@ -30,7 +30,8 @@ class WorkloadIdentityFilterTest {
                         Duration.ofSeconds(1),
                         Duration.ofHours(1)
                 ),
-                new AuthRuntimeProperties.Workload(Set.of(principal), Set.of(principal), true)
+                new AuthRuntimeProperties.Workload(Set.of(principal), Set.of(principal), true),
+                new AuthRuntimeProperties.WithdrawalReconciliation(false, "", Duration.ofSeconds(30), "")
         );
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("prod");
@@ -65,7 +66,8 @@ class WorkloadIdentityFilterTest {
                         Duration.ofSeconds(1),
                         Duration.ofHours(1)
                 ),
-                new AuthRuntimeProperties.Workload(Set.of(bff), Set.of(core), true)
+                new AuthRuntimeProperties.Workload(Set.of(bff), Set.of(core), true),
+                new AuthRuntimeProperties.WithdrawalReconciliation(false, "", Duration.ofSeconds(30), "")
         );
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("test");

@@ -41,3 +41,10 @@ Google Sheets 상태값 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | MeetingJoinRequest | 거절 | REJECTED | HOST 또는 OWNER/ADMIN override가 신청을 거절한 상태. | 거절 처리 후 | meeting_join_requests.status | FR-MREG-02 |
 | MeetingParticipant | 활성 | ACTIVE | 사용자가 해당 회의에 접근 가능한 상태. | 참가 신청 승인 또는 수동 ACL 부여 시 기본 상태 | meeting_participants.access_status | FR-MREG-02, FR-MREG-07, FR-ACL-01 |
 | MeetingParticipant | 회수 | REVOKED | 사용자의 해당 회의 접근이 회수된 상태. | 회의 권한을 명시적으로 회수할 때 전환 | meeting_participants.access_status | FR-ACL-02 |
+| MeetingAttachment | 업로드 대기 | PENDING_UPLOAD | 서버가 단일 사용 upload URL과 메타데이터 행을 만들었지만 object 검증 전이다. | upload session 생성 직후, 완료 또는 만료 전까지 | meeting_attachments.status | FR-CALL-01, POL-UPLOAD-01 |
+| MeetingAttachment | 처리 중 | PROCESSING | object checksum/MIME 검증을 통과했고 텍스트 추출이 진행 중이다. | complete 성공 후 READY, UNSUPPORTED, FAILED로 전이 | meeting_attachments.status | NFR-DATA-01 |
+| MeetingAttachment | 준비됨 | READY | 지원 형식의 텍스트 추출이 성공해 RAG 색인 대상이 되었다. | extractor 성공 및 ATTACHMENT_READY job 생성 후 | meeting_attachments.status | FR-MBOT-01, NFR-AZ-01 |
+| MeetingAttachment | 미지원 | UNSUPPORTED | 파일 공유는 가능하지만 텍스트 추출/색인을 지원하지 않는다. | 이미지, image-only PDF 또는 미지원 추출 결과 | meeting_attachments.status | POL-UPLOAD-01 |
+| MeetingAttachment | 추출 실패 | FAILED | 검증된 파일의 텍스트 추출 또는 source 준비가 실패했다. | retry, 삭제 또는 만료 가능 | meeting_attachments.status | NFR-AVAIL-02 |
+| MeetingAttachment | 삭제 | DELETED | 사용자 또는 권한자가 삭제해 다운로드와 RAG에서 즉시 제외됐다. | 명시 삭제 시 terminal 상태 | meeting_attachments.status | NFR-DATA-01 |
+| MeetingAttachment | 만료 | EXPIRED | Meeting 보존 기간 만료로 object와 RAG에서 제외됐다. | retention worker가 만료 시 terminal 상태 | meeting_attachments.status | NFR-DATA-04 |

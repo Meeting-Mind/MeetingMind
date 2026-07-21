@@ -40,7 +40,7 @@ class BffTokenManagerTest {
 
     private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
     private static final String LOCAL_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
-    private static final String USER_ID = "user-id";
+    private static final String USER_ID = "0a5b7c1e-5d75-4dc0-a10e-a330d0583930";
 
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final InMemoryStore store = new InMemoryStore();
@@ -87,6 +87,7 @@ class BffTokenManagerTest {
 
         assertThat(authorization).isEqualTo("Bearer refreshed-access-secret");
         assertThat(authClient.refreshCalls).hasValue(1);
+        assertThat(authClient.projectUserCalls).hasValue(1);
         assertThat(meterRegistry.get("meetingmind.bff.refresh")
                         .tag("outcome", "success")
                         .counter()
@@ -221,6 +222,67 @@ class BffTokenManagerTest {
         assertThat(fixture.session().isInvalid()).isTrue();
     }
 
+    @Test
+    void logoutAllUsesOnlyServerSessionReferencesWhenRecentAuthenticationExists() {
+        SessionFixture fixture = sessionFixture(900);
+
+        tokenManager.logoutAll(fixture.request(), null);
+
+        assertThat(authClient.reauthenticateCalls).hasValue(0);
+        assertThat(authClient.revokeAllCalls).hasValue(1);
+        assertThat(fixture.session().isInvalid()).isTrue();
+    }
+
+    @Test
+    void logoutAllRequiresAndUsesOneReauthenticationCredentialAfterTheWindowExpires() {
+        SessionFixture fixture = sessionFixture(900);
+        fixture.session().setAttribute(BffSessionAttributes.AUTHENTICATED_AT, NOW.minus(Duration.ofMinutes(11)));
+
+        tokenManager.logoutAll(fixture.request(), new BrowserAuthRequests.LogoutAll("Password-123!", null));
+
+        assertThat(authClient.reauthenticateCalls).hasValue(1);
+        assertThat(authClient.revokeAllCalls).hasValue(1);
+        assertThat(fixture.session().isInvalid()).isTrue();
+    }
+
+    @Test
+    void rejectedPasswordChangeKeepsTheCurrentBffSession() {
+        SessionFixture fixture = sessionFixture(900);
+        authClient.changePasswordFailure = BffAuthException.of(
+                HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "현재 비밀번호를 확인해 주세요.");
+
+        assertThatThrownBy(() -> tokenManager.changePassword(
+                        fixture.request(), new BrowserAuthRequests.PasswordChange("wrong", "Password-456!")))
+                .isInstanceOf(BffAuthException.class)
+                .extracting(exception -> ((BffAuthException) exception).code())
+                .isEqualTo("INVALID_CREDENTIALS");
+
+        assertThat(fixture.session().isInvalid()).isFalse();
+    }
+
+    @Test
+    void successfulPasswordChangeInvalidatesTheCurrentBffSession() {
+        SessionFixture fixture = sessionFixture(900);
+
+        tokenManager.changePassword(
+                fixture.request(), new BrowserAuthRequests.PasswordChange("Password-123!", "Password-456!"));
+
+        assertThat(fixture.session().isInvalid()).isTrue();
+    }
+
+    @Test
+    void profileUpdateProjectsTheAuthProfileWithTheCurrentCoreAudienceToken() {
+        SessionFixture fixture = sessionFixture(900);
+        authClient.profileUpdateUser = new BffAuthUser(USER_ID, "user@example.com", "Updated", null, "ACTIVE");
+
+        BffAuthUser updated = tokenManager.updateProfile(
+                fixture.request(), new BrowserAuthRequests.ProfileUpdate("Updated"));
+
+        assertThat(updated.displayName()).isEqualTo("Updated");
+        assertThat(authClient.projectedUser).isEqualTo(updated);
+        assertThat(authClient.projectedAuthorization).isEqualTo("Bearer initial-access-secret");
+    }
+
     private SessionFixture sessionFixture(long accessLifetimeSeconds) {
         UUID authSessionId = UUID.randomUUID();
         UUID bundleId = UUID.randomUUID();
@@ -247,6 +309,7 @@ class BffTokenManagerTest {
         session.setAttribute(BffSessionAttributes.AUTH_SESSION_ID, authSessionId);
         session.setAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID, bundleId);
         session.setAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT, NOW.plus(Duration.ofHours(12)));
+        session.setAttribute(BffSessionAttributes.AUTHENTICATED_AT, NOW);
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setSession(session);
         request.addHeader("User-Agent", "JUnit");
@@ -317,12 +380,19 @@ class BffTokenManagerTest {
 
         private final AtomicInteger refreshCalls = new AtomicInteger();
         private final AtomicInteger revokeCalls = new AtomicInteger();
+        private final AtomicInteger reauthenticateCalls = new AtomicInteger();
+        private final AtomicInteger revokeAllCalls = new AtomicInteger();
+        private final AtomicInteger projectUserCalls = new AtomicInteger();
         private final CountDownLatch refreshEntered = new CountDownLatch(1);
         private final CountDownLatch allowRefresh = new CountDownLatch(1);
         private volatile boolean blockRefresh;
         private volatile RuntimeException refreshFailure;
+        private volatile RuntimeException changePasswordFailure;
+        private volatile BffAuthUser profileUpdateUser;
         private volatile String revokedAccessToken;
         private volatile String revokedRefreshToken;
+        private volatile BffAuthUser projectedUser;
+        private volatile String projectedAuthorization;
 
         @Override
         public LegacyAuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
@@ -370,6 +440,42 @@ class BffTokenManagerTest {
             revokeCalls.incrementAndGet();
             revokedAccessToken = accessToken;
             revokedRefreshToken = refreshToken;
+        }
+
+        @Override
+        public void reauthenticate(UUID authSessionId, UUID userId, String password, String googleCredential) {
+            reauthenticateCalls.incrementAndGet();
+        }
+
+        @Override
+        public void projectUser(LegacyAuthTokenResponse tokens) {
+            projectUserCalls.incrementAndGet();
+        }
+
+        @Override
+        public void revokeAll(UUID authSessionId, UUID userId, Instant authenticatedAt) {
+            revokeAllCalls.incrementAndGet();
+        }
+
+        @Override
+        public void changePassword(UUID authSessionId, UUID userId, String currentPassword, String newPassword) {
+            if (changePasswordFailure != null) {
+                throw changePasswordFailure;
+            }
+        }
+
+        @Override
+        public BffAuthUser updateProfile(UUID userId, String displayName) {
+            if (profileUpdateUser == null) {
+                throw new UnsupportedOperationException();
+            }
+            return profileUpdateUser;
+        }
+
+        @Override
+        public void projectProfile(BffAuthUser user, String tokenType, String coreAccessToken) {
+            projectedUser = user;
+            projectedAuthorization = tokenType + " " + coreAccessToken;
         }
     }
 }

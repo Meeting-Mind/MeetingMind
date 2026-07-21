@@ -11,7 +11,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -74,6 +73,6 @@ public final class BffAbsoluteSessionExpiryFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        response.sendError(HttpStatus.UNAUTHORIZED.value());
+        BffAuthErrorWriter.writeSessionInvalid(response);
     }
 }

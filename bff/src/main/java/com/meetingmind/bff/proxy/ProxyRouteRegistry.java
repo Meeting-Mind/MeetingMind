@@ -12,27 +12,54 @@ public class ProxyRouteRegistry {
     private static final String UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
     private static final String SPACE_ID = "space-" + UUID;
     private static final String SPACE_MEMBER_ID = "space-member-" + UUID;
+    private static final String SPACE_INVITATION_ID = "space-invitation-" + UUID;
+    private static final String TERM_ID = "term-" + UUID;
+    private static final String KNOWLEDGE_ID = "knowledge-" + UUID;
     private static final String MEETING_ID = "meeting-" + UUID;
     private static final String MEETING_PARTICIPANT_ID = "meeting-participant-" + UUID;
     private static final String JOIN_REQUEST_ID = "join-request-" + UUID;
     private static final String REPORT_ID = "report-" + UUID;
+    private static final String TASK_ID = "task-" + UUID;
     private static final String TASK_CANDIDATE_ID = "task-candidate-" + UUID;
     private static final String SPACES = "/api/v1/spaces";
+    private static final String DASHBOARD = "/api/v1/dashboard";
+    private static final String CALENDAR_EVENTS = "/api/v1/calendar/events";
     private static final String SPACE = SPACES + "/" + SPACE_ID;
     private static final String MEETINGS = "/api/v1/meetings";
     private static final String MEETING = MEETINGS + "/" + MEETING_ID;
 
     private final List<ProxyRoute> routes = List.of(
+            route(HttpMethod.GET, DASHBOARD, DownstreamService.CORE),
             route(HttpMethod.GET, SPACES, DownstreamService.CORE),
+            route(HttpMethod.GET, CALENDAR_EVENTS, DownstreamService.CORE),
             route(HttpMethod.POST, SPACES, DownstreamService.CORE),
+            route(HttpMethod.PATCH, SPACE, DownstreamService.CORE),
+            route(HttpMethod.DELETE, SPACE, DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/members", DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/invitations", DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/invitations/" + SPACE_INVITATION_ID + "/accept", DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/invitations/" + SPACE_INVITATION_ID + "/decline", DownstreamService.CORE),
             route(HttpMethod.PATCH, SPACE + "/members/" + SPACE_MEMBER_ID, DownstreamService.CORE),
             route(HttpMethod.DELETE, SPACE + "/members/" + SPACE_MEMBER_ID, DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/owner-transfer", DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/project-ai/context-candidates", DownstreamService.CORE),
-            route(HttpMethod.POST, SPACE + "/ai/chat", DownstreamService.AI),
+            route(HttpMethod.GET, SPACE + "/knowledge", DownstreamService.CORE),
+            route(HttpMethod.GET, SPACE + "/knowledge/" + KNOWLEDGE_ID, DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/knowledge", DownstreamService.CORE),
+            route(HttpMethod.PATCH, SPACE + "/knowledge/" + KNOWLEDGE_ID, DownstreamService.CORE),
+            route(HttpMethod.DELETE, SPACE + "/knowledge/" + KNOWLEDGE_ID, DownstreamService.CORE),
+            route(HttpMethod.GET, SPACE + "/tasks", DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/tasks", DownstreamService.CORE),
+            route(HttpMethod.PATCH, SPACE + "/tasks/" + TASK_ID, DownstreamService.CORE),
+            route(HttpMethod.DELETE, SPACE + "/tasks/" + TASK_ID, DownstreamService.CORE),
+            route(HttpMethod.GET, SPACE + "/terms", DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/terms", DownstreamService.CORE),
+            route(HttpMethod.PATCH, SPACE + "/terms/" + TERM_ID, DownstreamService.CORE),
+            route(HttpMethod.DELETE, SPACE + "/terms/" + TERM_ID, DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/ai/chat", DownstreamService.CORE),
+            route(HttpMethod.GET, SPACE + "/ai/history", DownstreamService.CORE),
             route(HttpMethod.POST, MEETINGS + "/join-requests", DownstreamService.CORE),
             route(HttpMethod.GET, MEETING, DownstreamService.CORE),
             route(HttpMethod.PATCH, MEETING, DownstreamService.CORE),
@@ -46,10 +73,18 @@ public class ProxyRouteRegistry {
             route(HttpMethod.GET, MEETING + "/dialogue", DownstreamService.CORE),
             route(HttpMethod.GET, MEETING + "/task-candidates", DownstreamService.CORE),
             route(HttpMethod.POST, MEETING + "/task-candidates/" + TASK_CANDIDATE_ID + "/confirm", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/task-candidates/" + TASK_CANDIDATE_ID + "/dismiss", DownstreamService.CORE),
             route(HttpMethod.POST, MEETING + "/reports/" + REPORT_ID + "/confirm", DownstreamService.CORE),
-            route(HttpMethod.POST, MEETING + "/ai/chat", DownstreamService.AI),
-            route(HttpMethod.POST, MEETING + "/reports/generate", DownstreamService.AI),
-            route(HttpMethod.POST, MEETING + "/task-candidates/generate", DownstreamService.AI),
+            route(HttpMethod.POST, MEETING + "/reports/" + REPORT_ID + "/ai-edits", DownstreamService.CORE),
+            route(HttpMethod.GET, MEETING + "/reports", DownstreamService.CORE),
+            route(HttpMethod.GET, MEETING + "/reports/" + REPORT_ID, DownstreamService.CORE),
+            route(HttpMethod.PATCH, MEETING + "/reports/" + REPORT_ID, DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/reports/" + REPORT_ID + "/restore", DownstreamService.CORE),
+            route(HttpMethod.GET, MEETING + "/reports/" + REPORT_ID + "/download", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/ai/chat", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/terms/explain", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/reports/generate", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/task-candidates/generate", DownstreamService.CORE),
             route(HttpMethod.POST, MEETING + "/livekit-token", DownstreamService.LIVEKIT),
             route(HttpMethod.POST, MEETING + "/transcription/start", DownstreamService.LIVEKIT),
             route(HttpMethod.POST, MEETING + "/transcription/" + UUID + "/stop", DownstreamService.LIVEKIT));

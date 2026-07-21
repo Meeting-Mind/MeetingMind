@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -50,24 +51,26 @@ class BffProxyControllerTest {
     @SuppressWarnings("unchecked")
     void proxiesAnAllowedRouteThroughTheTokenManager() throws Exception {
         doAnswer(invocation -> {
-                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(1);
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
                     return call.execute("Bearer internal-access");
                 })
                 .when(tokenManager)
-                .execute(any(), any(AuthorizedDownstreamCall.class));
+                .execute(any(), any(DownstreamService.class), any(AuthorizedDownstreamCall.class));
         when(downstreamClient.execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access")))
                 .thenReturn(new ProxyResponse(
                         HttpStatus.OK,
                         MediaType.APPLICATION_JSON,
                         "no-store",
                         "\"v1\"",
+                        "attachment; filename=meeting-report.md",
                         "{\"items\":[]}".getBytes(StandardCharsets.UTF_8)));
 
         mvc.perform(get("/api/v1/spaces").queryParam("cursor", "next"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"items\":[]}"))
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-                .andExpect(header().string(HttpHeaders.ETAG, "\"v1\""));
+                .andExpect(header().string(HttpHeaders.ETAG, "\"v1\""))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=meeting-report.md"));
 
         ArgumentCaptor<ProxyRequest> request = ArgumentCaptor.forClass(ProxyRequest.class);
         verify(downstreamClient).execute(
@@ -92,9 +95,55 @@ class BffProxyControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void proxiesTaskDeleteRouteThroughTheCoreService() throws Exception {
+        String spaceId = "space-" + java.util.UUID.randomUUID();
+        String taskId = "task-" + java.util.UUID.randomUUID();
+        doAnswer(invocation -> {
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
+                    return call.execute("Bearer internal-access");
+                })
+                .when(tokenManager)
+                .execute(any(), any(DownstreamService.class), any(AuthorizedDownstreamCall.class));
+        when(downstreamClient.execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access")))
+                .thenReturn(new ProxyResponse(HttpStatus.OK, MediaType.APPLICATION_JSON, null, null, null,
+                        "{\"deleted\":true}".getBytes(StandardCharsets.UTF_8)));
+
+        mvc.perform(delete("/api/v1/spaces/" + spaceId + "/tasks/" + taskId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value(true));
+
+        verify(downstreamClient).execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void proxiesMeetingAiRouteThroughTheCoreService() throws Exception {
+        String meetingId = "meeting-" + java.util.UUID.randomUUID();
+        doAnswer(invocation -> {
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
+                    return call.execute("Bearer internal-access");
+                })
+                .when(tokenManager)
+                .execute(any(), any(DownstreamService.class), any(AuthorizedDownstreamCall.class));
+        when(downstreamClient.execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access")))
+                .thenReturn(new ProxyResponse(HttpStatus.OK, MediaType.APPLICATION_JSON, null, null, null,
+                        "{\"answer\":\"회의 근거입니다.\",\"sources\":[],\"unsupported\":false,\"model\":\"test\"}"
+                                .getBytes(StandardCharsets.UTF_8)));
+
+        mvc.perform(post("/api/v1/meetings/" + meetingId + "/ai/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"무엇을 결정했나요?\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value("회의 근거입니다."));
+
+        verify(downstreamClient).execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access"));
+    }
+
+    @Test
     void returnsTheServiceSpecificCommonErrorShape() throws Exception {
         String meetingId = "meeting-" + java.util.UUID.randomUUID();
-        when(tokenManager.execute(any(), any()))
+        when(tokenManager.execute(any(), any(DownstreamService.class), any(AuthorizedDownstreamCall.class)))
                 .thenThrow(BffProxyException.unavailable(DownstreamService.AI));
 
         mvc.perform(post("/api/v1/meetings/" + meetingId + "/ai/chat")

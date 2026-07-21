@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { loginWithGoogle, loginWithPassword, signupWithPassword, type AuthSession } from "../auth/session";
 
 type GoogleCredentialResponse = {
@@ -55,11 +56,13 @@ function parseCredential(credential: string): GoogleAuthUser | null {
 }
 
 export function GoogleLoginModal({
+  accountManagementAvailable,
   isOpen,
   notice,
   onClose,
   onSuccess
 }: {
+  accountManagementAvailable: boolean;
   isOpen: boolean;
   notice?: string;
   onClose: () => void;
@@ -218,6 +221,9 @@ export function GoogleLoginModal({
           <button className="auth-modal-submit" disabled={loading} type="submit">
             {mode === "signup" ? "계정 만들기" : "로그인"}
           </button>
+          {mode === "login" && accountManagementAvailable ? (
+            <Link className="auth-password-reset-link" to="/password-reset">비밀번호를 잊으셨나요?</Link>
+          ) : null}
         </form>
 
         {!clientId ? (

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -163,6 +164,74 @@ class BffAuthControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(tokenManager).logout(any());
+    }
+
+    @Test
+    void logoutAllRequiresCsrfAndKeepsCredentialsOutOfTheBrowserSessionContract() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout-all")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/auth/logout-all")
+                        .with(csrf())
+                        .with(user("user-id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"Password-123!\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(tokenManager).logoutAll(any(), any());
+    }
+
+    @Test
+    void passwordResetEndpointsArePublicButCsrfProtected() throws Exception {
+        when(tokenManager.requestPasswordReset(any(), any())).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/auth/password-reset-requests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@example.com\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/auth/password-reset-requests")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@example.com\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.accepted").value(true));
+
+        mockMvc.perform(post("/api/v1/auth/password-resets")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"mmpr_example\",\"newPassword\":\"Password-456!\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(tokenManager).requestPasswordReset(any(), any());
+        verify(tokenManager).resetPassword(any());
+    }
+
+    @Test
+    void authenticatedAccountChangesDoNotTakeUserOrSessionIdsFromTheBrowser() throws Exception {
+        BffAuthUser updated = new BffAuthUser("user-id", "user@example.com", "Updated", null, "ACTIVE");
+        when(tokenManager.updateProfile(any(), any())).thenReturn(updated);
+
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .with(csrf())
+                        .with(user("user-id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Password-123!\",\"newPassword\":\"Password-456!\"}"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/auth/profile")
+                        .with(csrf())
+                        .with(user("user-id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Updated\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Updated"));
+
+        verify(tokenManager).changePassword(any(), any());
+        verify(tokenManager).updateProfile(any(), any());
+        verify(sessionManager).updateCurrentUser(eq(updated), any(), any());
     }
 
     @TestConfiguration(proxyBeanMethods = false)

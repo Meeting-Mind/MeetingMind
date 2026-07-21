@@ -1,6 +1,10 @@
 package com.meetingmind.bff.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.bff.config.BffSessionLifetimePolicy;
@@ -17,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +32,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.session.FindByIndexNameSessionRepository;
+import org.springframework.session.MapSession;
+import org.springframework.session.Session;
+import org.springframework.session.SessionRepository;
 
 class BffSessionManagerTest {
 
@@ -78,6 +87,8 @@ class BffSessionManagerTest {
         assertThat(request.getAttribute(SessionCookieConfiguration.COOKIE_MAX_AGE_REQUEST_ATTRIBUTE))
                 .isNull();
         assertThat(storedTokens.accessToken()).isEqualTo("legacy-access-secret");
+        assertThat(storedTokens.accessTokenFor("meetingmind-livekit").token())
+                .isEqualTo("legacy-access-secret");
         assertThat(storedTokens.refreshToken()).isEqualTo("legacy-refresh-secret");
         assertThat(objectMapper.writeValueAsString(authenticated))
                 .doesNotContain("legacy-access-secret")
@@ -109,6 +120,58 @@ class BffSessionManagerTest {
         assertThat(bootstrap.authenticated()).isTrue();
         assertThat(bootstrap.user().id()).isEqualTo("user-id");
         assertThat(bootstrap.session().expiresAt()).isEqualTo(NOW.plus(Duration.ofHours(12)));
+    }
+
+    @Test
+    void invalidatesEveryIndexedSessionAndItsTokenBundleForAnAccountWideRevocation() {
+        UUID authSessionId = UUID.randomUUID();
+        UUID tokenBundleId = UUID.randomUUID();
+        tokenVault.create(tokenBundleId, new TokenBundlePayload(
+                authSessionId,
+                "access-secret",
+                "refresh-secret",
+                "Bearer",
+                NOW.plus(Duration.ofMinutes(10)),
+                NOW.plus(Duration.ofDays(14)),
+                "meetingmind-auth",
+                java.util.Set.of("meetingmind-core"),
+                java.util.Set.of()));
+        MapSession browserSession = new MapSession();
+        browserSession.setAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID, tokenBundleId);
+        FindByIndexNameSessionRepository<Session> indexed = indexedRepository(browserSession);
+        BffSessionManager indexedManager = manager(indexed);
+
+        indexedManager.invalidateUserSessions("user-id");
+
+        verify(indexed).deleteById(browserSession.getId());
+        assertThatThrownBy(() -> tokenVault.read(tokenBundleId, authSessionId))
+                .isInstanceOf(TokenVaultException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private FindByIndexNameSessionRepository<Session> indexedRepository(Session session) {
+        FindByIndexNameSessionRepository<Session> repository = mock(FindByIndexNameSessionRepository.class);
+        when(repository.findByIndexNameAndIndexValue(
+                FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME,
+                "user-id")).thenReturn(Map.of(session.getId(), session));
+        return repository;
+    }
+
+    private BffSessionManager manager(SessionRepository<Session> sessionRepository) {
+        return new BffSessionManager(
+                tokenVault,
+                new NoOpCompatibilityClient(),
+                new ChangeSessionIdAuthenticationStrategy(),
+                new HttpSessionSecurityContextRepository(),
+                new BffSessionLifetimePolicy(
+                        Duration.ofMinutes(60),
+                        Duration.ofHours(12),
+                        Duration.ofDays(7),
+                        Duration.ofDays(14)),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                "meetingmind-core-legacy",
+                "meetingmind-core",
+                sessionRepository);
     }
 
     private MockHttpServletRequest requestWithAnonymousSession() {

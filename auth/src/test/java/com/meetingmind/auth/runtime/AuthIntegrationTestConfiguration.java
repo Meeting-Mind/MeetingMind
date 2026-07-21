@@ -39,6 +39,12 @@ public class AuthIntegrationTestConfiguration {
         };
     }
 
+    @Bean
+    @Primary
+    PasswordResetDeliveryRecorder passwordResetDeliveryRecorder() {
+        return new PasswordResetDeliveryRecorder();
+    }
+
     private AccessTokenIssuer.IssuedAccessToken token(
             String audience,
             java.util.UUID userId,

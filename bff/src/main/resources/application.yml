@@ -22,6 +22,11 @@ spring:
     timeout: ${BFF_SESSION_IDLE_TIMEOUT:60m}
     redis:
       namespace: meetingmind:bff:session
+      repository-type: indexed
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
 
 meetingmind:
   bff:
@@ -45,6 +50,11 @@ meetingmind:
       base-url: ${BFF_BACKEND_BASE_URL:http://127.0.0.1:8080}
       issuer: ${BFF_COMPAT_AUTH_ISSUER:meetingmind-core-legacy}
       audience: ${BFF_COMPAT_AUTH_AUDIENCE:meetingmind-core}
+    auth:
+      mode: ${BFF_AUTH_MODE:legacy}
+      base-url: ${BFF_AUTH_BASE_URL:http://127.0.0.1:8082}
+      issuer: ${BFF_AUTH_ISSUER:meetingmind-core-legacy}
+      test-workload-principal: ${BFF_AUTH_TEST_WORKLOAD_PRINCIPAL:}
     token-manager:
       access-expiry-skew: 30s
       lock-namespace: ${BFF_TOKEN_REFRESH_LOCK_NAMESPACE:meetingmind:bff:token-refresh-lock}

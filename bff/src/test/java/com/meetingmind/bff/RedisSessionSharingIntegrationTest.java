@@ -2,6 +2,10 @@ package com.meetingmind.bff;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.meetingmind.bff.auth.BffAuthUser;
+import com.meetingmind.bff.auth.BffSessionAttributes;
+import com.meetingmind.bff.auth.BffSessionManager;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -9,9 +13,16 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
+import org.springframework.session.FindByIndexNameSessionRepository;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 
 @EnabledIfEnvironmentVariable(named = "BFF_REDIS_INTEGRATION", matches = "true")
 class RedisSessionSharingIntegrationTest {
+
+    private static final String AUTH_USER_ID = "0a5b7c1e-5d75-4dc0-a10e-a330d0583930";
 
     @Test
     void sharesSessionAcrossApplicationInstances() {
@@ -32,6 +43,46 @@ class RedisSessionSharingIntegrationTest {
             assertThat(loaded.<String>getAttribute("sourceInstance")).isEqualTo("first");
             secondRepository.deleteById(created.getId());
         }
+    }
+
+    @Test
+    void invalidatesEveryRedisSessionIndexedForOneAuthUser() {
+        String namespace = "meetingmind:bff:logout-all:" + UUID.randomUUID();
+
+        try (ConfigurableApplicationContext context = application(namespace)) {
+            SessionRepository<Session> repository = sessionRepository(context);
+            Session first = authenticatedSession(repository);
+            Session second = authenticatedSession(repository);
+            assertThat(repository).isInstanceOf(FindByIndexNameSessionRepository.class);
+            assertThat(indexed(repository).findByIndexNameAndIndexValue(
+                    FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME,
+                    AUTH_USER_ID)).containsKeys(first.getId(), second.getId());
+
+            context.getBean(BffSessionManager.class).invalidateUserSessions(AUTH_USER_ID);
+
+            assertThat(repository.findById(first.getId())).isNull();
+            assertThat(repository.findById(second.getId())).isNull();
+        }
+    }
+
+    private Session authenticatedSession(SessionRepository<Session> repository) {
+        Session session = repository.createSession();
+        SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                new BffAuthUser(AUTH_USER_ID, "member@meetingmind.test", "Member", null, "ACTIVE"),
+                null,
+                java.util.List.of()));
+        session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
+        session.setAttribute(BffSessionAttributes.USER_ID, AUTH_USER_ID);
+        session.setAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID, UUID.randomUUID());
+        session.setAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT, Instant.now().plusSeconds(600));
+        repository.save(session);
+        return session;
+    }
+
+    @SuppressWarnings("unchecked")
+    private FindByIndexNameSessionRepository<Session> indexed(SessionRepository<Session> repository) {
+        return (FindByIndexNameSessionRepository<Session>) repository;
     }
 
     private ConfigurableApplicationContext application(String namespace) {

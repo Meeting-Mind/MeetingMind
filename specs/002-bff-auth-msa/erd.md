@@ -6,6 +6,7 @@
 erDiagram
   USER ||--o{ AUTH_IDENTITY : authenticates_with
   USER ||--o{ AUTH_SESSION : owns
+  USER ||--|| CORE_AUTH_USER_MAPPING : projects_to
   AUTH_SESSION ||--o{ AUTH_REFRESH_CREDENTIAL : rotates
   AUTH_SESSION ||--o{ BFF_SESSION : backs
   BFF_SESSION ||--|| TOKEN_BUNDLE : references
@@ -32,6 +33,14 @@ erDiagram
     string passwordHash
     datetime createdAt
     datetime lastUsedAt
+  }
+
+  CORE_AUTH_USER_MAPPING {
+    uuid authUserId PK
+    string coreUserId UK
+    string source
+    long sourceVersion
+    datetime mappedAt
   }
 
   AUTH_SESSION {
@@ -123,7 +132,7 @@ flowchart LR
   Redis["BFF Session Redis\nBFF_SESSION"]
   Vault["BFF Token Vault\nTOKEN_BUNDLE ciphertext"]
   AuthDb["Auth PostgreSQL\nUSER / AUTH_IDENTITY / AUTH_SESSION\nAUTH_REFRESH_CREDENTIAL / SESSION_AUDIT / AUTH_OUTBOX_EVENT"]
-  ResourceDb["Resource-owned DB\nSpace / Meeting / ACL"]
+  ResourceDb["Resource-owned DB\nCoreAuthUserMapping / Space / Meeting / ACL"]
 
   Redis -. "opaque references only" .-> Vault
   Redis -. "authSessionId/userId only" .-> AuthDb
@@ -134,4 +143,4 @@ flowchart LR
 - BFF는 Auth DB를 직접 읽지 않고 내부 API를 사용한다.
 - Resource Service는 Auth DB나 Redis를 직접 읽지 않는다.
 - 현재 Core Prototype ERD의 `AUTH_SESSION.refreshTokenHash`는 legacy schema이며 이 목표 ERD로 점진 대체한다.
-- T031 물리 table은 각각 `auth_users`, `auth_identities`, `auth_sessions`, `auth_refresh_credentials`, `session_audits`, `auth_outbox_events`다. Auth runtime role은 업무 table의 `SELECT/INSERT/UPDATE`, 감사 table의 `SELECT/INSERT`만 수행하고 `DELETE`, schema/Flyway history를 소유하지 않는다.
+- T031/T026 물리 table은 각각 `auth_users`, `auth_identities`, `auth_sessions`, `auth_refresh_credentials`, `auth_password_history`, `auth_password_reset_tokens`, `session_audits`, `auth_outbox_events`다. V3는 `auth_users.disabled_at`, `withdrawal_requested_at`도 추가한다. T034 Core projection table은 `auth_user_mappings`이며 `auth_user_id` UUID와 legacy `users.id`를 1:1 immutable하게 연결한다. V20 Core `account_withdrawal_reservations`는 이 mapping과 Core `users`를 고정해 `PREPARED|COMPLETED|CANCELLED` 탈퇴 saga와 30일 익명화 시각을 보관한다. Auth runtime role은 업무 table의 `SELECT/INSERT/UPDATE`, 감사 table의 `SELECT/INSERT`만 수행하고 `DELETE`, schema/Flyway history를 소유하지 않는다.

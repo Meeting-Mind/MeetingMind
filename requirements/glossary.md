@@ -31,6 +31,8 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | 회의 | 회의 게스트 | MeetingGuest | 특정 회의에 명시적으로 초대되어 해당 회의에만 접근 권한을 가진 사용자. SpaceMember가 아닐 수 있다. | MeetingParticipant로 관리되며 Space 전체 권한은 갖지 않는다. | meeting_participants, invitations | SpaceMember/일반 멤버와 혼용 금지 | FR-MREG-03, FR-ACL-01 |
 | 회의 | 회의방 | MeetingRoom | 실시간 오디오/비디오 연결이 이루어지는 LiveKit/WebRTC 공간. | Meeting의 실시간 연결 표현. 회의 데이터 자체는 Meeting이다. | meeting_rooms 또는 providerRoomName | Meeting과 혼용 금지 | FR-CALL-01~06 |
 | 회의 | 회의 상태 | MeetingStatus | 회의의 진행 상태. 예정, 진행 중, 종료, 취소 등을 표현한다. | Meeting에 속한다. | meetings.status | TaskStatus와 혼용 금지 | FR-MREG-06 |
+| 회의 | 회의 채팅 메시지 | MeetingMessage | 회의 참여자가 남긴 영속 텍스트와 첨부 연결 단위. | Meeting에 속하고 0개 이상의 MeetingAttachment를 가진다. | meeting_messages, /meetings/{meetingId}/messages | 알림/전사와 혼용 금지 | FR-CALL-01 |
+| 회의 | 회의 첨부파일 | MeetingAttachment | 회의 채팅에서 공유한 private object storage 파일과 추출/RAG 상태 메타데이터. | MeetingMessage에 게시되며, 텍스트 추출 성공 시 EmbeddingJob/EmbeddingChunk의 원천이 된다. | meeting_attachments, /meetings/{meetingId}/attachments | object URL/임베딩 청크와 혼용 금지 | FR-CALL-01, FR-MBOT-01 |
 | 음성/STT | 발화자 | MeetingSpeaker | 전사에서 발화 단위를 말한 사람으로 식별된 주체. User와 1:1이 아닐 수 있다. | TranscriptSegment가 speaker를 참조한다. | meeting_speakers, speakerId | Participant/User와 무조건 동일시 금지 | FR-STT-02, FR-STT-04 |
 | 음성/STT | 다이알로그 | Dialogue | 화면에 표시되는 발화 흐름의 사용자 친화적 표현. | 여러 TranscriptSegment로 구성될 수 있다. | UI 용어. 저장 모델은 TranscriptSegment 권장 | Transcript와 혼용 주의 | FR-STT-03, FR-STT-05 |
 | 음성/STT | 전사 | Transcript | 회의 음성에서 생성된 텍스트 전체 산출물. | Meeting에 속하며 여러 TranscriptSegment로 구성된다. | transcripts 또는 meetings.transcript_status | 회의록/Summary와 혼용 금지 | FR-STT-01, NFR-DATA-04 |

@@ -8,6 +8,7 @@ public record ProxyResponse(
         MediaType contentType,
         String cacheControl,
         String etag,
+        String contentDisposition,
         byte[] body) {
 
     public ProxyResponse {

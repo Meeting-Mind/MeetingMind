@@ -14,11 +14,22 @@ import {
   updateMeeting,
   updateMeetingParticipant
 } from "./api/workspace";
-import { bootstrapAuthSession, logoutCurrentSession, type AuthSession } from "./auth/session";
+import {
+  bootstrapAuthSession,
+  changeCurrentPassword,
+  logoutAllSessions,
+  logoutCurrentSession,
+  withdrawCurrentAccount,
+  updateCurrentProfile,
+  updateCurrentProfileImage,
+  type AuthSession,
+  type AuthUser
+} from "./auth/session";
 import { subscribeToSessionInvalid } from "./auth/sessionInvalidation";
 import { AuthSessionControls } from "./components/AuthSessionControls";
 import { GoogleLoginModal } from "./components/GoogleLoginModal";
 import { LandingPage } from "./pages/LandingPage";
+import { PasswordResetPage } from "./pages/PasswordResetPage";
 import { LiveMeetingPage } from "./pages/LiveMeetingPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { MeetingAiPage } from "./pages/MeetingAiPage";
@@ -411,6 +422,7 @@ export function App() {
   const navigate = useNavigate();
   const sessionExpiredReturnTo = readSessionExpiredReturnTo(location.search);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [accountManagementAvailable, setAccountManagementAvailable] = useState(false);
   const [authBootstrapLoading, setAuthBootstrapLoading] = useState(true);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [data, setData] = useState<WorkspaceData>(mockData);
@@ -431,14 +443,16 @@ export function App() {
   useEffect(() => {
     let active = true;
     void bootstrapAuthSession()
-      .then((session) => {
+      .then((bootstrap) => {
         if (active) {
-          setAuthSession(session);
+          setAuthSession(bootstrap.session);
+          setAccountManagementAvailable(bootstrap.accountManagementAvailable);
         }
       })
       .catch(() => {
         if (active) {
           setAuthSession(null);
+          setAccountManagementAvailable(false);
         }
       })
       .finally(() => {
@@ -540,8 +554,7 @@ export function App() {
     }
   }
 
-  async function handleLogout() {
-    await logoutCurrentSession();
+  function clearAuthenticatedView() {
     setAuthSession(null);
     setAuthModalOpen(false);
     setData(mockData);
@@ -557,6 +570,41 @@ export function App() {
     setMeetingMutationError("");
     setMeetingMutationLoading(false);
     setMeetingReadLoading(false);
+  }
+
+  async function handleLogout() {
+    await logoutCurrentSession();
+    clearAuthenticatedView();
+    window.location.replace("/");
+  }
+
+  async function handleLogoutAll(credentials: { password?: string; googleCredential?: string }) {
+    await logoutAllSessions(credentials);
+    clearAuthenticatedView();
+    window.location.replace("/");
+  }
+
+  async function handlePasswordChange(passwords: { currentPassword: string; newPassword: string }) {
+    await changeCurrentPassword(passwords);
+    clearAuthenticatedView();
+    window.location.replace("/");
+  }
+
+  async function handleProfileUpdate(displayName: string): Promise<AuthUser> {
+    const user = await updateCurrentProfile(displayName);
+    setAuthSession((previous) => (previous ? { ...previous, user } : previous));
+    return user;
+  }
+
+  async function handleProfileImageUpdate(image: File): Promise<AuthUser> {
+    const user = await updateCurrentProfileImage(image);
+    setAuthSession((previous) => (previous ? { ...previous, user } : previous));
+    return user;
+  }
+
+  async function handleWithdrawal(credentials: { password?: string; googleCredential?: string }) {
+    await withdrawCurrentAccount({ confirmation: "DELETE", ...credentials });
+    clearAuthenticatedView();
     window.location.replace("/");
   }
 
@@ -1421,6 +1469,7 @@ export function App() {
     <>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/password-reset" element={<PasswordResetPage />} />
         <Route
           path="/spaces"
           element={
@@ -1537,8 +1586,20 @@ export function App() {
           }
         />
       </Routes>
-      {authSession ? <AuthSessionControls onLogout={handleLogout} session={authSession} /> : null}
+      {authSession ? (
+        <AuthSessionControls
+          accountManagementAvailable={accountManagementAvailable}
+          onChangePassword={handlePasswordChange}
+          onLogout={handleLogout}
+          onLogoutAll={handleLogoutAll}
+          onProfileUpdate={handleProfileUpdate}
+          onProfileImageUpdate={handleProfileImageUpdate}
+          session={authSession}
+          onWithdraw={handleWithdrawal}
+        />
+      ) : null}
       <GoogleLoginModal
+        accountManagementAvailable={accountManagementAvailable}
         isOpen={authModalOpen}
         notice={sessionExpiredReturnTo ? SESSION_EXPIRED_NOTICE : undefined}
         onClose={handleAuthModalClose}

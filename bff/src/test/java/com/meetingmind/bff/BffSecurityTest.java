@@ -62,7 +62,9 @@ class BffSecurityTest {
     void rejectsProtectedRequestWithoutAuthenticationInsteadOfRedirecting() throws Exception {
         mockMvc.perform(get("/test/protected"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
     }
 
     @Test

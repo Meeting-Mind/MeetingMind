@@ -13,6 +13,10 @@ public interface AuthStore {
 
     AuthUser createUser(String email, String displayName, String pictureUrl, Instant now);
 
+    AuthUser createUserWithId(String userId, String email, String displayName, String pictureUrl, Instant now);
+
+    AuthUser updateUserProfile(String userId, String displayName, String pictureUrl, Instant now);
+
     AuthUser touchLogin(AuthUser user, Instant now);
 
     AuthIdentity saveIdentity(

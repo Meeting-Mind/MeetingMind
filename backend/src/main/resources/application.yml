@@ -18,6 +18,15 @@ spring:
 meetingmind:
   ai:
     service-token: ${AI_INTERNAL_SERVICE_TOKEN:}
+  core-auth:
+    target:
+      enabled: ${CORE_AUTH_TARGET_ENABLED:false}
+      issuer: ${CORE_AUTH_TARGET_ISSUER:https://auth.meetingmind.internal}
+      jwks-uri: ${CORE_AUTH_TARGET_JWKS_URI:http://127.0.0.1:8082/.well-known/jwks.json}
+      jwks-request-timeout: ${CORE_AUTH_TARGET_JWKS_REQUEST_TIMEOUT:2s}
+    outbox:
+      auth-principal: ${CORE_AUTH_OUTBOX_AUTH_PRINCIPAL:spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-auth}
+      allow-test-header: ${CORE_AUTH_OUTBOX_ALLOW_TEST_HEADER:false}
 
 ---
 spring:

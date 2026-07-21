@@ -15,13 +15,14 @@
 - T015에서 현재 Backend의 실제 `/api/v1/*` method/path만 허용하는 proxy, Core/AI/LiveKit별 JDK HTTP timeout, queue 없는 bulkhead와 연속 실패 circuit breaker를 추가했다. 업무 proxy는 T014 Token Manager를 통과한다.
 - T016에서 CSRF가 적용된 현재 세션 logout과 실제 Redis·현재 Backend 프로세스 compatibility E2E를 추가했다. Browser 응답/Redis/로그 token scan, 강제 선제 refresh, logout 후 이전 cookie 재사용 차단과 멱등성을 CI에서 검증한다.
 - T020에서 Frontend의 token 저장·Bearer 구성을 제거하고 `/api/v1/auth/session` bootstrap, same-origin cookie와 공통 CSRF 요청 준비를 적용했다. Vite는 `/api`를 BFF로만 proxy하며 Playwright는 Backend+BFF+Redis+Frontend 전체 경계를 실행한다.
-- T021에서 현재 세션 로그아웃 control과 `/api/v1/auth/logout` CSRF 호출을 연결했다. 성공 시 인증·사용자별 화면 상태를 초기화하고 랜딩으로 이동하며, 네트워크 실패 시 서버 세션을 추측해 지우지 않고 로그인 상태와 재시도 오류를 유지한다. 모든 기기 로그아웃은 T030의 최근 10분/재인증 계약과 T032 Auth revoke-all 구현 이후 T024에서 연결한다.
+- T021에서 현재 세션 로그아웃 control과 `/api/v1/auth/logout` CSRF 호출을 연결했다. 성공 시 인증·사용자별 화면 상태를 초기화하고 랜딩으로 이동하며, 네트워크 실패 시 서버 세션을 추측해 지우지 않고 로그인 상태와 재시도 오류를 유지한다. 모든 기기 로그아웃은 T030의 최근 10분/재인증 계약, T032 Auth revoke-all 구현, T034/T035의 실제 AuthSession cutover 이후 T024에서 연결한다.
 - T022에서 업무 API와 LiveKit/auth 요청이 사용하는 공통 BFF fetch가 `401 SESSION_INVALID` body만 전역 세션 만료로 발행하도록 연결했다. 만료 시 현재 same-origin 경로를 검증해 보존하고 랜딩 document를 새로 로드한 뒤 재로그인 안내를 표시하며, 성공 로그인 후 해당 경로로 복귀한다. `INVALID_CREDENTIALS` 등 다른 `401`은 로컬 요청 오류로만 처리한다.
 - T023에서 Browser traffic 수용 여부를 readiness로 drain하는 rollout flag와 login/refresh/logout/session/proxy 저카디널리티 metric을 추가했다. 5%→25%→50%→100% 단계별 guardrail과 7일 rollback window를 runbook에 고정하고, 위반 시 같은 cookie/Redis/Token Vault 계약의 안정 BFF release로 traffic만 복원하도록 했다.
 - T030에서 AuthSession별 1회용 refresh family, KMS RSA-2048 `RS256` audience별 10분 JWT/JWKS, durable `sid` revoke event와 mTLS SPIFFE workload identity를 확정했다. 모든 기기 로그아웃은 최근 10분 인증 또는 local/Google 재인증 뒤 수행한다.
 - T031에서 독립 Auth Service/비루트 Docker image와 전용 PostgreSQL을 추가했다. Flyway V1 스키마와 기존 migration을 변경하지 않는 V2 최소 권한 축소, DB 포함 readiness/DB 제외 liveness를 실제 PostgreSQL·Compose·권한 negative test로 검증했다. 인증 endpoint runtime은 T032 전까지 노출하지 않는다.
 - T032에서 Web BFF workload 전용 internal signup/login/Google/refresh/revoke/revoke-all, BCrypt/HMAC 저장 경계, 1회용 refresh lineage/reuse family 폐기, 감사와 transactional outbox producer를 구현했다. direct certificate SPIFFE SAN을 기본으로 검증하고 local/test header는 운영 profile에서 강제로 무시한다. KMS signer가 없는 runtime은 발급 transaction 전체를 rollback하며 T033 전까지 임시 JWT를 만들지 않는다.
 - T033은 KMS key ID만 가진 rotation key ring, `RAW` RS256 KMS 서명, 내부 JWKS와 5분 ETag cache Resource validator를 구현한다. 정기 교체 설정은 5분 선게시와 1시간 이전 key overlap을 시작 시 강제하고 침해 대응만 명시적 emergency mode로 예외 처리한다. Core 요청 경로의 legacy/new dual validation 활성화는 T035까지 보류한다.
+- FR-AUTH-11~13,17의 password reset/change, profile, withdrawal은 T025에서 mail delivery·password/session·image storage·data retention 정책을 확정한 뒤 T026 Auth runtime과 T027 BFF/Frontend로 구현한다. T026 1차는 reset/password/profile display name/withdrawal Auth transaction을 구현했고, delivery provider·image storage·Core owner blocker는 T027/T035에 남는다. legacy/Core와 Auth Service에 같은 계정 기능을 이중 구현하지 않으며, Browser 경로는 T035 AuthSession cutover 뒤에만 Auth Service를 사용한다.
 - T036은 CI에서 발견된 BFF/Auth의 수정 가능한 Jackson/Tomcat 취약점을 Backend의 검증된 안전 버전으로 정렬하고, 고정 테스트 키에 대한 Gitleaks 오탐을 커밋·파일·규칙·라인 fingerprint 단위로만 예외 처리한다.
 - LiveKit client/server token 연동은 있으나 목표 운영 provider는 LiveKit Cloud로 확정됐다.
 
@@ -133,9 +134,12 @@ flowchart LR
   - `GET /api/v1/auth/session`
   - `POST /api/v1/auth/logout`
   - `POST /api/v1/auth/logout-all`
+  - `POST /api/v1/auth/password-reset-requests|password-resets|password|withdrawal`
+  - `PATCH /api/v1/auth/profile`, `POST /api/v1/auth/profile-image`
   - public `/auth/refresh`는 목표 계약에 없다.
 - BFF-Auth: `contracts/auth-service-api.md`
-  - `/internal/v1/auth/signup|login|google|refresh|revoke|revoke-all`
+  - `/internal/v1/auth/signup|login|google|refresh|revoke|revoke-all|re-authenticate`
+  - `/internal/v1/auth/password-reset-requests|password-resets|password|withdrawal|profile`
   - `GET /.well-known/jwks.json`
 - Auth revoke event: `contracts/auth-revocation-event.md`
   - Auth DB revoke와 outbox를 한 트랜잭션으로 커밋한다.
@@ -153,6 +157,7 @@ flowchart LR
 - AuthRefreshCredential: 1회용 rotation hash, `familyId`와 `replacementId` lineage.
 - AuthOutboxEvent: session revoke를 durable하게 발행하기 위한 transactional outbox.
 - User/AuthIdentity: Auth Service 소유로 이동한다.
+- CoreAuthUserMapping: Core가 `auth_user_id UUID`와 기존 `users.id`를 immutable 1:1 projection으로 소유한다. 신규 Core ID는 `user-<auth UUID>`이고 legacy mapping은 검증 manifest만 적재한다.
 - SessionAudit: login/logout/revoke/reuse/security event만 영속 감사하고 token 원문은 저장하지 않는다.
 
 ## Security and Permissions
@@ -167,6 +172,7 @@ flowchart LR
 - Secrets: EKS workload는 정적 AWS key 대신 workload IAM을 사용하고 secret/KMS 권한을 최소화한다.
 - Authorization: BFF 인증과 Resource Service RBAC/ACL을 분리하고 MeetingMind 헌법의 AI 권한 선필터를 유지한다.
 - Logout: revoke가 실패해도 BFF 로컬 세션/쿠키는 삭제하되 실패를 감사·재처리 대상으로 남긴다.
+- Account lifecycle: reset token은 hash만 15분 저장하고 account/IP rate limit을 적용한다. password 변경·reset은 전체 session revoke, profile image는 BFF multipart/opaque object key, withdrawal은 단독 Space OWNER 차단과 30일 anonymization을 적용한다.
 
 ## Resilience and Failure Behavior
 
@@ -221,9 +227,10 @@ flowchart LR
 5. Frontend를 BFF session으로 전환하고 token 저장/header/public refresh 경로를 제거한다.
 6. current/all-device logout과 expiry/refresh 회귀를 검증한다.
 7. T030 refresh/JWT/revoke/workload 계약에 따라 Auth Service를 추출한다.
-8. Core가 Auth JWKS로 access를 로컬 검증하고 기존 Auth package 호환 경로를 종료한다.
-9. EKS에 BFF/Auth/Core/AI를 독립 배포하고 Redis/RDS/KMS/ingress를 연결한다.
-10. 장애·부하 관측 결과를 기준으로 Realtime/Meeting/Workspace를 순차 추출한다.
+8. Core `auth_user_mappings`와 검증 manifest로 Auth UUID를 legacy Core ID에 연결하고 Core가 Auth JWKS로 access를 로컬 검증한다.
+9. BFF/Auth cutover 뒤 account lifecycle과 logout-all을 tokenless Browser 계약으로 연결하고 기존 Auth package 호환 경로를 종료한다.
+10. EKS에 BFF/Auth/Core/AI를 독립 배포하고 Redis/RDS/KMS/ingress를 연결한다.
+11. 장애·부하 관측 결과를 기준으로 Realtime/Meeting/Workspace를 순차 추출한다.
 
 ## Test Plan
 

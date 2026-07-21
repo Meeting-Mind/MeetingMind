@@ -4,10 +4,10 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Target Internal Contract; T032 credential/session/revoke and T033 KMS/JWKS/validator complete, BFF/Core cutover pending T035 |
+| Status | Target Internal Contract; T032 credential/session/revoke and T033 KMS/JWKS/validator complete, T026 account runtime in progress, BFF/Core cutover pending T035 |
 | Owner | Auth Service |
 | Base path | `/internal/v1/auth` |
-| Consumers | Web BFF only for login/refresh/revoke; Resource Services for JWKS only |
+| Consumers | Web BFF only for login/refresh/revoke/account lifecycle; Resource Services for JWKS only |
 | Related data model | User, AuthIdentity, AuthSession, AuthRefreshCredential, AuthOutboxEvent, SessionAudit |
 
 ## Boundary Rules
@@ -179,6 +179,44 @@
 - `currentAuthSessionId`와 `userId`는 BFF 서버 세션에서만 가져오며 브라우저 값을 전달하지 않는다. Auth Service는 해당 AuthSession row의 `userId` 결합과 `authenticatedAt`이 현재 기준 10분 이내이고 60초 이상 미래가 아닌지 다시 검증한다.
 - 결합 불일치는 `403 AUTH_SESSION_SUBJECT_MISMATCH`, 최근 인증 미충족은 `401 RECENT_AUTH_REQUIRED`로 거부하며 어떤 세션도 변경하지 않는다.
 - 사용자 소유의 각 active AuthSession을 revoke하고 session별 `AuthSessionRevokedV1` outbox를 같은 트랜잭션에 기록한 뒤 응답한다.
+
+## Account Lifecycle Endpoints
+
+아래 endpoint는 Web BFF workload만 호출한다. `userId`와 `currentAuthSessionId`는 BFF server session에서 파생하며 browser가 다른 사용자나 session ID를 지정할 수 없다.
+
+- Auth Runtime은 V3 migration으로 reset hash/expiry/use state, password history, disabled/withdrawal timestamps를 저장한다.
+- reset delivery는 `PasswordResetDelivery` infrastructure port로만 수행한다. provider가 구성되지 않은 환경은 새 token을 만들거나 전달하지 않고도 동일한 `202 {"accepted":true}`를 반환해 계정 존재와 provider 상태를 노출하지 않는다.
+- profile image object storage와 Core owner blocker/anonymization은 Auth DB의 책임이 아니며 T027/T035의 BFF/Core 경계에서 완료한다.
+
+### POST /internal/v1/auth/re-authenticate
+
+`currentAuthSessionId`, `userId`, `password` 또는 `googleCredential` 중 정확히 하나를 받는다. AuthSession subject binding을 검증하고 성공 시 `204`; BFF만 자신의 `authenticatedAt`을 갱신한다. mismatch는 `403 AUTH_SESSION_SUBJECT_MISMATCH`, 실패는 `401 INVALID_CREDENTIALS` 또는 `401 GOOGLE_CREDENTIAL_INVALID`다.
+
+### POST /internal/v1/auth/password-reset-requests
+
+`email`, `requestIpPrefix`를 받으며 항상 `202 {"accepted":true}`를 반환한다. active local account만 1회성 15분 reset token을 configured delivery adapter에 전달한다. raw token은 hash 이외 저장·로그·감사 metadata에 남기지 않는다. 계정당 시간당 3회, IP prefix당 시간당 10회를 넘으면 새 token/delivery 없이 동일 응답을 반환한다.
+
+### POST /internal/v1/auth/password-resets
+
+`token`, `newPassword`를 받는다. 유효 token은 단일 transaction에서 consumed 처리, password history 갱신, 모든 AuthSession `PASSWORD_RESET` revoke와 outbox insert를 완료한다. invalid/expired/used token은 `400 PASSWORD_RESET_TOKEN_INVALID`다.
+
+### POST /internal/v1/auth/password
+
+`currentAuthSessionId`, `userId`, `currentPassword`, `newPassword`를 받는다. 현재 local credential과 subject binding을 검증하고 최근 3 password hash 재사용은 `400 PASSWORD_REUSE_FORBIDDEN`, Google-only user는 `409 LOCAL_CREDENTIAL_REQUIRED`다. 성공 시 password history를 갱신하고 전체 AuthSession을 `PASSWORD_CHANGED`로 revoke한다.
+
+### PATCH /internal/v1/auth/profile
+
+`userId`, `displayName`을 받고 본인 profile을 수정해 `200 User`를 반환한다. profile image upload의 object lifecycle은 Auth storage port가 처리하고 opaque key 또는 파생 URL만 `pictureUrl`에 저장한다.
+
+### POST /internal/v1/auth/profile-image
+
+`multipart/form-data`의 `userId`와 `image`를 Web BFF workload만 보낸다. Auth는 declared MIME와 magic byte가 일치하는 JPEG/PNG/WebP, 최대 5 MiB만 수락한다. 새 S3-compatible object를 저장한 뒤 같은 transaction으로 `pictureUrl` opaque key를 반영하고, commit 뒤 이전 managed object만 best-effort로 삭제한다. BFF나 browser는 bucket credential, object key, 삭제 대상을 지정하지 않는다.
+
+### POST /internal/v1/auth/withdrawal
+
+Auth Service는 재인증된 user를 `DISABLED`로 바꾸고 모든 session을 `ACCOUNT_WITHDRAWAL`로 revoke한다. BFF는 Core audience token으로 withdrawal reservation을 먼저 준비하며 blocker가 있으면 이 endpoint를 호출하지 않는다. Auth disable 성공 뒤에만 BFF가 Core completion을 호출해 30일 anonymization을 확정한다.
+
+정상 Core completion의 응답을 BFF가 잃어도 Auth는 `ACCOUNT_WITHDRAWAL` session-revocation outbox를 통해 Core `/internal/v1/core/account-withdrawal/reconcile`로 재조정한다. 이 호출은 Auth workload mTLS identity만 허용하고, Core reservation이 이미 `COMPLETED`인 경우 멱등 성공한다. 예약이 없거나 전달이 실패하면 outbox는 publish 완료로 표시되지 않아 재시도한다. Auth Service는 이 경로에서도 Core DB를 직접 조회하거나 Core 사용자 표시 정보를 변경하지 않는다.
 
 ## T032/T033 Delivery Boundary
 

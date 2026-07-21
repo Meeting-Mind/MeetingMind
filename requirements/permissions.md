@@ -27,6 +27,9 @@
 | 도메인 용어 사전 조회 | O | O | O | O, 해당 회의만 |
 | 해당 회의 STT 원문 열람 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
 | 해당 회의 STT 원문 다운로드 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
+| 해당 회의 채팅·첨부파일 조회/다운로드 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
+| 해당 회의 채팅 메시지·첨부파일 업로드 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
+| 해당 회의 첨부파일 삭제 | O | O | O, 본인 업로드만 | O, 본인 업로드만 |
 | STT 보관 정책 설정 | O | X | X | X |
 | 해당 회의 AI 보고서 열람 | O | O | O, 회의 권한 필요 | O, 해당 회의만 |
 | 해당 회의 AI 보고서 편집 | O | O | O, EDITOR/HOST 필요 | O, 해당 회의의 EDITOR/HOST만 |
@@ -48,6 +51,7 @@
 - MeetingParticipant 직접 추가는 OWNER/ADMIN/active HOST의 운영상 ACL 조정에만 사용하고 일반적인 신규 참여 흐름으로 노출하지 않는다.
 - Project Knowledge는 `SpaceMember`인 오너/관리자/일반 멤버가 조회할 수 있으며, 회의 게스트는 기본 접근할 수 없다.
 - 회의 참여자로 지정되는 즉시 해당 회의에 대한 STT, AI 보고서, Meeting AI 접근 권한이 부여된다.
+- 채팅 메시지와 첨부파일도 Meeting ACL과 같은 단일 회의 범위를 사용한다. 업로드자는 자신의 attachment를 삭제할 수 있고, OWNER/ADMIN 또는 active HOST는 운영상 삭제 override를 가진다.
 - MeetingParticipant 권한이 해제되면 해당 회의 데이터와 AI 컨텍스트 접근도 즉시 차단된다.
 - SpaceMember 제거는 프로젝트 전체 접근권을 제거한다. 기존 MeetingParticipant가 남아 있으면 해당 회의 범위 접근은 유지되고, 회의 접근 차단은 MeetingParticipant revoke로 처리한다.
 - 회의 산출물 열람은 VIEWER 이상이 가능하지만, AI 보고서 편집과 발화자 이름 수정은 EDITOR/HOST 또는 Space OWNER/ADMIN override 권한이 필요하다.

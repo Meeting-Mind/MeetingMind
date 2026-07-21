@@ -7,7 +7,7 @@ public record AuthUserResponse(
         String pictureUrl,
         String status
 ) {
-    static AuthUserResponse from(AuthUser user) {
+    public static AuthUserResponse from(AuthUser user) {
         return new AuthUserResponse(user.id(), user.email(), user.displayName(), user.pictureUrl(), user.status());
     }
 }

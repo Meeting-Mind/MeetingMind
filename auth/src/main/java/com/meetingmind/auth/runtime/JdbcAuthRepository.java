@@ -45,12 +45,30 @@ class JdbcAuthRepository {
                 """, USER_MAPPER, canonicalEmail(email)));
     }
 
+    Optional<AuthModels.User> findUserByIdForUpdate(UUID userId) {
+        return first(jdbc.query("""
+                select id, email, display_name, picture_url, status, created_at, updated_at, last_login_at
+                from auth_users
+                where id = ?
+                for update
+                """, USER_MAPPER, userId));
+    }
+
     Optional<AuthModels.Identity> findIdentity(String provider, String providerUserId) {
         return first(jdbc.query("""
                 select id, user_id, provider, provider_user_id, password_hash, created_at, last_used_at
                 from auth_identities
                 where provider = ? and provider_user_id = ?
                 """, IDENTITY_MAPPER, provider, providerUserId));
+    }
+
+    Optional<AuthModels.Identity> findIdentityForUserForUpdate(UUID userId, String provider) {
+        return first(jdbc.query("""
+                select id, user_id, provider, provider_user_id, password_hash, created_at, last_used_at
+                from auth_identities
+                where user_id = ? and provider = ?
+                for update
+                """, IDENTITY_MAPPER, userId, provider));
     }
 
     AuthModels.User insertUser(
@@ -151,6 +169,135 @@ class JdbcAuthRepository {
                 timestamp(now),
                 userId
         );
+    }
+
+    AuthModels.User updateProfile(UUID userId, String displayName, Instant now) {
+        return jdbc.queryForObject("""
+                update auth_users
+                set display_name = ?, updated_at = ?
+                where id = ? and status = 'ACTIVE'
+                returning id, email, display_name, picture_url, status, created_at, updated_at, last_login_at
+                """, USER_MAPPER, displayName.trim(), timestamp(now), userId);
+    }
+
+    AuthModels.User updateProfileImage(UUID userId, String pictureUrl, Instant now) {
+        return jdbc.queryForObject("""
+                update auth_users
+                set picture_url = ?, updated_at = ?
+                where id = ? and status = 'ACTIVE'
+                returning id, email, display_name, picture_url, status, created_at, updated_at, last_login_at
+                """, USER_MAPPER, pictureUrl, timestamp(now), userId);
+    }
+
+    boolean disableUser(UUID userId, Instant now) {
+        return jdbc.update("""
+                update auth_users
+                set status = 'DISABLED', picture_url = null, disabled_at = ?, withdrawal_requested_at = ?, updated_at = ?
+                where id = ? and status = 'ACTIVE'
+                """, timestamp(now), timestamp(now), timestamp(now), userId) == 1;
+    }
+
+    void updateLocalPassword(UUID identityId, String passwordHash, Instant now) {
+        if (jdbc.update("""
+                update auth_identities
+                set password_hash = ?, last_used_at = ?
+                where id = ? and provider = 'LOCAL'
+                """, passwordHash, timestamp(now), identityId) != 1) {
+            throw new IllegalStateException("local credential을 갱신할 수 없습니다.");
+        }
+    }
+
+    void insertPasswordHistory(UUID userId, String passwordHash, Instant now) {
+        jdbc.update("""
+                insert into auth_password_history (id, user_id, password_hash, created_at)
+                values (?, ?, ?, ?)
+                """, UUID.randomUUID(), userId, passwordHash, timestamp(now));
+    }
+
+    List<String> findRecentPasswordHashes(UUID userId, int limit) {
+        return jdbc.query("""
+                select password_hash
+                from auth_password_history
+                where user_id = ?
+                order by created_at desc, id desc
+                limit ?
+                """, (rows, rowNumber) -> rows.getString(1), userId, limit);
+    }
+
+    int countPasswordResetRequestsForUser(UUID userId, Instant since) {
+        Integer count = jdbc.queryForObject("""
+                select count(*)
+                from auth_password_reset_tokens
+                where user_id = ? and created_at >= ?
+                """, Integer.class, userId, timestamp(since));
+        return count == null ? 0 : count;
+    }
+
+    void lockPasswordResetRateLimits(UUID userId, String requestIpPrefix) {
+        advisoryLock("PASSWORD_RESET_ACCOUNT:" + userId);
+        if (requestIpPrefix != null && !requestIpPrefix.isBlank()) {
+            advisoryLock("PASSWORD_RESET_IP:" + requestIpPrefix);
+        }
+    }
+
+    int countPasswordResetRequestsForIp(String requestIpPrefix, Instant since) {
+        if (requestIpPrefix == null || requestIpPrefix.isBlank()) {
+            return 0;
+        }
+        Integer count = jdbc.queryForObject("""
+                select count(*)
+                from auth_password_reset_tokens
+                where request_ip_prefix = ? and created_at >= ?
+                """, Integer.class, requestIpPrefix, timestamp(since));
+        return count == null ? 0 : count;
+    }
+
+    void insertPasswordResetToken(
+            UUID tokenId,
+            UUID userId,
+            String tokenHash,
+            String requestIpPrefix,
+            Instant now,
+            Instant expiresAt
+    ) {
+        jdbc.update("""
+                insert into auth_password_reset_tokens (
+                    id, user_id, token_hash, request_ip_prefix, created_at, expires_at, used_at
+                ) values (?, ?, ?, ?, ?, ?, null)
+                """, tokenId, userId, tokenHash, emptyToNull(requestIpPrefix), timestamp(now), timestamp(expiresAt));
+    }
+
+    Optional<AuthModels.PasswordResetState> findPasswordResetStateForUpdate(String tokenHash) {
+        return first(jdbc.query("""
+                select
+                    t.id as token_id,
+                    t.user_id as token_user_id,
+                    t.token_hash,
+                    t.request_ip_prefix,
+                    t.created_at as token_created_at,
+                    t.expires_at as token_expires_at,
+                    t.used_at,
+                    u.id as user_id,
+                    u.email,
+                    u.display_name,
+                    u.picture_url,
+                    u.status,
+                    u.created_at as user_created_at,
+                    u.updated_at as user_updated_at,
+                    u.last_login_at
+                from auth_password_reset_tokens t
+                join auth_users u on u.id = t.user_id
+                where t.token_hash = ?
+                for update of t, u
+                """, JdbcAuthRepository::mapPasswordResetState, tokenHash));
+    }
+
+    boolean consumePasswordResetToken(UUID tokenId, Instant now) {
+        return jdbc.update("""
+                update auth_password_reset_tokens
+                set used_at = ?
+                where id = ? and used_at is null
+                """, timestamp(now), tokenId) == 1;
     }
 
     void insertSessionAndCredential(
@@ -291,6 +438,38 @@ class JdbcAuthRepository {
         return true;
     }
 
+    List<WithdrawalOutboxEvent> findUnpublishedWithdrawalEvents(int limit) {
+        return jdbc.query("""
+                select id, payload ->> 'userId' as user_id
+                from auth_outbox_events
+                where published_at is null
+                  and event_type = 'AUTH_SESSION_REVOKED'
+                  and payload ->> 'reason' = 'ACCOUNT_WITHDRAWAL'
+                order by created_at, id
+                limit ?
+                """, (rows, rowNumber) -> new WithdrawalOutboxEvent(
+                rows.getObject("id", UUID.class),
+                rows.getObject("user_id", UUID.class)
+        ), limit);
+    }
+
+    void markOutboxPublished(UUID eventId, Instant now) {
+        jdbc.update("""
+                update auth_outbox_events
+                set published_at = ?
+                where id = ? and published_at is null
+                """, timestamp(now), eventId);
+    }
+
+    void recordOutboxDeliveryFailure(UUID eventId, String errorCode) {
+        jdbc.update("""
+                update auth_outbox_events
+                set attempt_count = attempt_count + 1,
+                    last_error_code = ?
+                where id = ? and published_at is null
+                """, errorCode, eventId);
+    }
+
     void insertAudit(
             UUID userId,
             UUID authSessionId,
@@ -413,6 +592,29 @@ class JdbcAuthRepository {
         return new AuthModels.RefreshState(credential, session, user);
     }
 
+    private static AuthModels.PasswordResetState mapPasswordResetState(ResultSet rows, int rowNumber) throws SQLException {
+        AuthModels.PasswordResetToken token = new AuthModels.PasswordResetToken(
+                rows.getObject("token_id", UUID.class),
+                rows.getObject("token_user_id", UUID.class),
+                rows.getString("token_hash"),
+                rows.getString("request_ip_prefix"),
+                instant(rows, "token_created_at"),
+                instant(rows, "token_expires_at"),
+                nullableInstant(rows, "used_at")
+        );
+        AuthModels.User user = new AuthModels.User(
+                rows.getObject("user_id", UUID.class),
+                rows.getString("email"),
+                rows.getString("display_name"),
+                rows.getString("picture_url"),
+                rows.getString("status"),
+                instant(rows, "user_created_at"),
+                instant(rows, "user_updated_at"),
+                nullableInstant(rows, "last_login_at")
+        );
+        return new AuthModels.PasswordResetState(token, user);
+    }
+
     private static Instant instant(ResultSet rows, String column) throws SQLException {
         return rows.getTimestamp(column).toInstant();
     }
@@ -430,11 +632,28 @@ class JdbcAuthRepository {
         return values.stream().findFirst();
     }
 
+    private static String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
     private static String json(Map<String, ?> values) {
         try {
             return OBJECT_MAPPER.writeValueAsString(values);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("감사 payload 생성에 실패했습니다.", exception);
         }
+    }
+
+    private void advisoryLock(String scope) {
+        jdbc.query(
+                "select pg_advisory_xact_lock(hashtextextended(?, 0))",
+                rows -> {
+                    // PostgreSQL advisory lock 함수는 void를 반환하므로 결과값을 읽지 않는다.
+                },
+                scope
+        );
+    }
+
+    record WithdrawalOutboxEvent(UUID eventId, UUID userId) {
     }
 }

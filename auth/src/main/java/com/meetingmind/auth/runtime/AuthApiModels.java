@@ -77,6 +77,67 @@ final class AuthApiModels {
     ) {
     }
 
+    record ReauthenticateRequest(
+            @NotNull UUID currentAuthSessionId,
+            @NotNull UUID userId,
+            @Size(max = 128) String password,
+            @Size(max = 8192) String googleCredential
+    ) {
+        @jakarta.validation.constraints.AssertTrue(message = "password 또는 googleCredential 중 하나가 필요합니다.")
+        boolean hasExactlyOneCredential() {
+            return (password != null && !password.isBlank()) ^ (googleCredential != null && !googleCredential.isBlank());
+        }
+
+        @Override
+        public String toString() {
+            return "ReauthenticateRequest[redacted]";
+        }
+    }
+
+    record PasswordResetRequest(
+            @NotBlank @Email @Size(max = 320) String email,
+            @Size(max = 64) String requestIpPrefix
+    ) {
+    }
+
+    record PasswordResetConfirmRequest(
+            @NotBlank @Pattern(regexp = "mmpr_[A-Za-z0-9_-]{43}") String token,
+            @NotBlank @Size(max = 128) String newPassword
+    ) {
+        @Override
+        public String toString() {
+            return "PasswordResetConfirmRequest[token=REDACTED, newPassword=REDACTED]";
+        }
+    }
+
+    record PasswordChangeRequest(
+            @NotNull UUID currentAuthSessionId,
+            @NotNull UUID userId,
+            @NotBlank @Size(max = 128) String currentPassword,
+            @NotBlank @Size(max = 128) String newPassword
+    ) {
+        @Override
+        public String toString() {
+            return "PasswordChangeRequest[redacted]";
+        }
+    }
+
+    record ProfileUpdateRequest(
+            @NotNull UUID userId,
+            @NotBlank @Size(max = 200) String displayName
+    ) {
+    }
+
+    record WithdrawalRequest(
+            @NotNull UUID currentAuthSessionId,
+            @NotNull UUID userId,
+            @NotNull Instant authenticatedAt
+    ) {
+    }
+
+    record AcceptedResponse(boolean accepted) {
+    }
+
     record TokenResponse(
             List<AccessTokenView> accessTokens,
             String refreshToken,

@@ -23,7 +23,8 @@ public record AuthRuntimeProperties(
         @NotNull Duration recentAuthWindow,
         @NotNull Duration accessDenyWindow,
         @Valid @NotNull Google google,
-        @Valid @NotNull Workload workload
+        @Valid @NotNull Workload workload,
+        @Valid @NotNull WithdrawalReconciliation withdrawalReconciliation
 ) {
     public AuthRuntimeProperties {
         if (refreshTtl != null && (refreshTtl.isNegative() || refreshTtl.isZero())) {
@@ -67,6 +68,18 @@ public record AuthRuntimeProperties(
                     : jwksPrincipals.stream().map(String::trim).filter(value -> !value.isBlank()).collect(
                             java.util.stream.Collectors.toUnmodifiableSet()
                     );
+        }
+    }
+
+    public record WithdrawalReconciliation(
+            boolean enabled,
+            String coreBaseUrl,
+            @NotNull Duration fixedDelay,
+            String testWorkloadPrincipal
+    ) {
+        public WithdrawalReconciliation {
+            coreBaseUrl = coreBaseUrl == null ? "" : coreBaseUrl.trim();
+            testWorkloadPrincipal = testWorkloadPrincipal == null ? "" : testWorkloadPrincipal.trim();
         }
     }
 }

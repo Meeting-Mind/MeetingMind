@@ -4,7 +4,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Target Internal Contract; T032 transactional producer-complete, transport/consumers pending T045 |
+| Status | Target Internal Contract; T032 transactional producer complete, Core withdrawal reconciliation consumer complete, generic transport/consumers pending T045 |
 | Producer | Auth Service transactional outbox |
 | Consumers | Web BFF, Core, AI, LiveKit adapter and future Resource Services |
 | Delivery | At-least-once, partition/ordering key `authSessionId` |
@@ -35,7 +35,7 @@ Access JWT는 10분 동안 Resource Service가 Auth Service 동기 조회 없이
 
 - `eventId`: 전역 유일 식별자. consumer idempotency key로 사용한다.
 - `authSessionId`: JWT `sid`와 동일한 논리 AuthSession UUID다.
-- `reason`: `CURRENT_LOGOUT`, `ALL_DEVICE_LOGOUT`, `USER_DISABLED`, `REFRESH_REUSE`, `ADMIN_REVOKE`, `EXPIRED` 중 하나다.
+- `reason`: `CURRENT_LOGOUT`, `ALL_DEVICE_LOGOUT`, `PASSWORD_CHANGED`, `PASSWORD_RESET`, `ACCOUNT_WITHDRAWAL`, `USER_DISABLED`, `REFRESH_REUSE`, `ADMIN_REVOKE`, `EXPIRED` 중 하나다.
 - `denyUntil`: 폐기 시점에 존재할 수 있는 access의 최대 만료 시점이다. 기본은 `occurredAt + 10분 + 60초 clock skew`이며 더 늦은 실제 발급 만료가 있으면 그 값을 사용한다.
 - token, refresh hash, email, IP, User-Agent와 업무 권한은 event에 넣지 않는다.
 
@@ -65,4 +65,6 @@ Access JWT는 10분 동안 Resource Service가 Auth Service 동기 조회 없이
 
 ## Implementation Boundary
 
-T032는 이 계약의 unpublished outbox row를 AuthSession revoke와 원자 기록한다. 메시지 제품, publisher의 publish 완료 갱신·재시도·경보와 consumer 구현은 T045에서 선택한다. 어떤 제품을 선택해도 이 payload, at-least-once/idempotency, Auth DB transaction과 10분 TTL+60초 skew의 bounded-risk 의미를 바꾸지 않는다.
+T032는 이 계약의 unpublished outbox row를 AuthSession revoke와 원자 기록한다. `ACCOUNT_WITHDRAWAL` reason은 예외적으로 Auth scheduler가 Core의 내부 reconciliation endpoint에 직접 at-least-once 전달한다. Core는 Auth workload mTLS identity를 확인하고 `authUserId` 기준으로 `PREPARED` 또는 `CANCELLED` withdrawal reservation을 `COMPLETED`로 멱등 전환한다. 성공한 event만 `publishedAt`을 기록하고, 네트워크/HTTP 실패는 `attemptCount`와 오류 코드만 남겨 재시도한다.
+
+그 외 revoke event의 메시지 제품, publisher 완료 갱신·재시도·경보와 Resource Service denylist consumer는 T045에서 선택한다. 어떤 제품을 선택해도 이 payload, at-least-once/idempotency, Auth DB transaction과 10분 TTL+60초 skew의 bounded-risk 의미를 바꾸지 않는다.

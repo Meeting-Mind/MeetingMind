@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.auth.runtime.AuthIntegrationTestConfiguration;
+import com.meetingmind.auth.runtime.PasswordResetDeliveryRecorder;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -70,7 +71,10 @@ class AuthPostgresIntegrationTest {
             int port = ((ServletWebServerApplicationContext) context).getWebServer().getPort();
             assertHealth(port, "liveness");
             assertHealth(port, "readiness");
-            evidence = assertRuntimeApiContracts(port);
+            evidence = assertRuntimeApiContracts(
+                    port,
+                    context.getBean(PasswordResetDeliveryRecorder.class)
+            );
         }
 
         assertMigratedSchemaAndPrivileges(url, migrationUser, migrationPassword, runtimeUser);
@@ -90,9 +94,13 @@ class AuthPostgresIntegrationTest {
         );
     }
 
-    private RuntimeEvidence assertRuntimeApiContracts(int port) throws Exception {
+    private RuntimeEvidence assertRuntimeApiContracts(
+            int port,
+            PasswordResetDeliveryRecorder passwordResetDelivery
+    ) throws Exception {
         String email = "runtime-" + UUID.randomUUID() + "@meetingmind.test";
         String password = "Password-123!";
+        String resetPassword = "Password-456!";
 
         HttpResponse<String> noPrincipal = post(port, "/internal/v1/auth/login", """
                 {"email":"%s","password":"%s"}
@@ -215,6 +223,30 @@ class AuthPostgresIntegrationTest {
                 """.formatted(secondAllDeviceSessionId, secondAllDeviceRefresh), BFF_PRINCIPAL);
         assertError(allDeviceRefresh, 401, "AUTH_SESSION_REVOKED");
 
+        HttpResponse<String> resetRequest = post(port, "/internal/v1/auth/password-reset-requests", """
+                {"email":"%s","requestIpPrefix":"203.0.113.0/24"}
+                """.formatted(email), BFF_PRINCIPAL);
+        assertThat(resetRequest.statusCode()).isEqualTo(202);
+        assertThat(OBJECT_MAPPER.readTree(resetRequest.body()).path("accepted").asBoolean()).isTrue();
+        String resetToken = passwordResetDelivery.takeToken();
+        assertThat(resetToken).matches("mmpr_[A-Za-z0-9_-]{43}");
+
+        assertThat(post(port, "/internal/v1/auth/password-resets", """
+                {"token":"%s","newPassword":"%s"}
+                """.formatted(resetToken, resetPassword), BFF_PRINCIPAL).statusCode()).isEqualTo(204);
+        assertError(post(port, "/internal/v1/auth/password-resets", """
+                {"token":"%s","newPassword":"Password-789!"}
+                """.formatted(resetToken), BFF_PRINCIPAL), 400, "PASSWORD_RESET_TOKEN_INVALID");
+
+        JsonNode resetLogin = tokenResponse(post(port, "/internal/v1/auth/login", """
+                {"email":"%s","password":"%s"}
+                """.formatted(email, resetPassword), BFF_PRINCIPAL));
+        assertThat(resetLogin.path("user").path("id").asText()).isEqualTo(userId.toString());
+        assertThat(post(port, "/internal/v1/auth/revoke", """
+                {"authSessionId":"%s","reason":"CURRENT_LOGOUT"}
+                """.formatted(resetLogin.path("authSessionId").asText()), BFF_PRINCIPAL).statusCode())
+                .isEqualTo(204);
+
         return new RuntimeEvidence(
                 email,
                 googleCredential,
@@ -331,6 +363,8 @@ class AuthPostgresIntegrationTest {
                 assertThat(rows.getString(1)).isEqualTo("1");
                 assertThat(rows.next()).isTrue();
                 assertThat(rows.getString(1)).isEqualTo("2");
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getString(1)).isEqualTo("3");
                 assertThat(rows.next()).isFalse();
             }
 
@@ -348,6 +382,8 @@ class AuthPostgresIntegrationTest {
                 List<String> expected = List.of(
                         "auth_identities",
                         "auth_outbox_events",
+                        "auth_password_history",
+                        "auth_password_reset_tokens",
                         "auth_refresh_credentials",
                         "auth_sessions",
                         "auth_users",

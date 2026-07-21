@@ -81,6 +81,23 @@ final class AuthModels {
     record RefreshState(Credential credential, Session session, User user) {
     }
 
+    record PasswordResetToken(
+            UUID id,
+            UUID userId,
+            String tokenHash,
+            String requestIpPrefix,
+            Instant createdAt,
+            Instant expiresAt,
+            Instant usedAt
+    ) {
+        boolean isUsable(Instant now) {
+            return usedAt == null && expiresAt.isAfter(now);
+        }
+    }
+
+    record PasswordResetState(PasswordResetToken token, User user) {
+    }
+
     record GoogleUser(
             String providerUserId,
             String email,
