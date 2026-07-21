@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, NavLink } from "react-router-dom";
 
-type SidebarItem = "none" | "catalog" | "project" | "members";
+type SidebarItem = "none" | "catalog" | "project" | "members" | "terms";
 type CreateProjectPayload = {
   name: string;
   description: string;
@@ -39,6 +39,22 @@ function buildTeamMembersHref(projectName?: string, spaceId?: string) {
   return `/team-members?${params.toString()}`;
 }
 
+function buildTermsHref(projectName?: string, spaceId?: string) {
+  if (!projectName && !spaceId) {
+    return "/terms";
+  }
+
+  const params = new URLSearchParams();
+  if (spaceId) {
+    params.set("spaceId", spaceId);
+  }
+  if (projectName) {
+    params.set("project", projectName);
+  }
+
+  return `/terms?${params.toString()}`;
+}
+
 export function WorkspaceSidebar({
   activeItem,
   projectName,
@@ -58,6 +74,7 @@ export function WorkspaceSidebar({
 }) {
   const projectHref = buildProjectOverviewHref(projectName, spaceId);
   const teamMembersHref = buildTeamMembersHref(projectName, spaceId);
+  const termsHref = buildTermsHref(projectName, spaceId);
   const primaryItem = mode === "project" ? "project" : "catalog";
   const contextText = contextOverride ?? (mode === "project" ? projectName : "3회차 진행중");
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
@@ -127,6 +144,10 @@ export function WorkspaceSidebar({
               <span>팀 멤버</span>
             </NavLink>
           )}
+          <NavLink className={`workspace-catalog-nav-item ${activeItem === "terms" ? "active" : ""}`} to={termsHref}>
+            <span className={`workspace-catalog-nav-icon ${activeItem === "terms" ? "active" : ""}`} />
+            <span>용어사전</span>
+          </NavLink>
           <NavLink className="workspace-catalog-nav-item" to="/meeting-access">
             <span className="workspace-catalog-nav-icon" />
             <span>회의 참가</span>

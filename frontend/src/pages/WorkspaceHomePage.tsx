@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { fetchCalendarEvents } from "../api/workspace";
+import type { AuthSession } from "../auth/session";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
-import type { WorkspaceData } from "../types";
+import type { CalendarEvent as ApiCalendarEvent, DashboardSummaryResponse, MeetingStatus, WorkspaceData } from "../types";
 
-type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
 type WorkspaceDataSource = "workspace-api" | "workspace-api-partial" | "legacy-api" | "mock-fallback";
 type CalendarView = "month" | "week" | "day";
-type CalendarEvent = {
+type DisplayCalendarEvent = {
   id: string;
   spaceId: string;
-  meetingId?: string;
+  meetingId: string;
   projectName: string;
   title: string;
-  round: string;
   startsAt: Date;
   state: string;
 };
@@ -69,33 +69,43 @@ function buildProjectOverviewHref(space: WorkspaceData["workspaceHome"]["spaces"
   return `/project-overview?${params.toString()}`;
 }
 
-function buildMeetingDestination(space: WorkspaceData["workspaceHome"]["spaces"][number], meeting: ProjectMeeting) {
+function meetingStatusLabel(status: MeetingStatus) {
+  if (status === "IN_PROGRESS") {
+    return "진행 중";
+  }
+  if (status === "ENDED") {
+    return "완료";
+  }
+  if (status === "CANCELED") {
+    return "취소";
+  }
+  return "예정";
+}
+
+function buildMeetingDestination(space: WorkspaceData["workspaceHome"]["spaces"][number], meeting: DisplayCalendarEvent) {
   const path = meeting.state === "예정" ? "/live-meeting" : "/report-agent";
   const params = new URLSearchParams({
     spaceId: space.id,
     project: space.name,
-    meetingId: meeting.id ?? meeting.index,
+    meetingId: meeting.meetingId,
     meeting: meeting.title,
-    round: meeting.index.replace("#", "")
+    round: ""
   });
-  if (meeting.id) {
-    params.set("meetingId", meeting.id);
-  }
-
   return `${path}?${params.toString()}`;
 }
 
-function parseMeetingDate(meeting: ProjectMeeting, fallbackIndex: number) {
-  if (meeting.scheduledAt) {
-    return new Date(meeting.scheduledAt);
-  }
-
-  const [month, day] = meeting.date.split(".").map((value) => Number(value));
-  if (!month || !day) {
-    return new Date(2026, 6, 10 + fallbackIndex);
-  }
-
-  return new Date(2026, month - 1, day, 10 + (fallbackIndex % 5), 0);
+function buildReportDestination(
+  space: WorkspaceData["workspaceHome"]["spaces"][number],
+  report: DashboardSummaryResponse["latestReports"][number]
+) {
+  const params = new URLSearchParams({
+    spaceId: space.id,
+    project: space.name,
+    meetingId: report.meetingId,
+    meeting: report.meetingTitle,
+    round: ""
+  });
+  return `/report-agent?${params.toString()}`;
 }
 
 function formatDateLabel(date: Date) {
@@ -135,22 +145,33 @@ function buildCalendarDays(view: CalendarView, selectedDate: Date) {
   return Array.from({ length: daysInMonth }, (_, index) => new Date(monthStart.getFullYear(), monthStart.getMonth(), index + 1));
 }
 
-function buildCalendarEvents(
-  spaces: WorkspaceData["workspaceHome"]["spaces"],
-  projectMeetings: Record<string, ProjectMeeting[]>
-) {
-  return spaces.flatMap((space) =>
-    (projectMeetings[space.name] ?? []).map((meeting, index) => ({
-      id: meeting.id ?? `${space.id}-${meeting.index}`,
-      spaceId: space.id,
-      meetingId: meeting.id,
+function buildCalendarEvents(spaces: WorkspaceData["workspaceHome"]["spaces"], events: ApiCalendarEvent[]): DisplayCalendarEvent[] {
+  return events.flatMap((event) => {
+    const startsAt = new Date(event.startsAt);
+    const space = spaces.find((candidate) => candidate.id === event.spaceId);
+    if (Number.isNaN(startsAt.getTime()) || !space) {
+      return [];
+    }
+    return [{
+      id: event.id,
+      spaceId: event.spaceId,
+      meetingId: event.meetingId,
       projectName: space.name,
-      title: meeting.title,
-      round: meeting.index.replace("#", ""),
-      startsAt: parseMeetingDate(meeting, index),
-      state: meeting.state
-    }))
-  );
+      title: event.title,
+      startsAt,
+      state: meetingStatusLabel(event.status)
+    }];
+  });
+}
+
+function calendarQueryRange(view: CalendarView, selectedDate: Date) {
+  const days = buildCalendarDays(view, selectedDate);
+  const first = days[0] ?? selectedDate;
+  const last = days[days.length - 1] ?? selectedDate;
+  return {
+    from: new Date(first.getFullYear(), first.getMonth(), first.getDate()).toISOString(),
+    to: new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59, 999).toISOString()
+  };
 }
 
 export function WorkspaceHomePage({
@@ -158,28 +179,30 @@ export function WorkspaceHomePage({
   currentUserEmail,
   data,
   dataSource,
+  dashboardSummary,
   latestMeetingInvites,
   meetingMutationError,
   meetingMutationLoading = false,
   onCreateMeeting,
   onCreateProject,
   projectMembers,
-  projectMeetings
+  session
 }: {
   actionItems: WorkspaceData["meetingAi"]["actions"];
   currentUserEmail: string;
   data: WorkspaceData["workspaceHome"];
   dataSource: WorkspaceDataSource;
+  dashboardSummary: DashboardSummaryResponse | null;
   latestMeetingInvites: Record<string, MeetingInviteMeta>;
   meetingMutationError?: string;
   meetingMutationLoading?: boolean;
   onCreateMeeting?: (
     projectName: string,
-    payload?: { title?: string; scheduledAt?: string; participantEmails?: string[] }
+    payload?: { title?: string; description?: string; scheduledAt?: string; scheduledEndAt?: string; participantEmails?: string[] }
   ) => Promise<boolean>;
   onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
   projectMembers: Record<string, ProjectMemberOption[]>;
-  projectMeetings: Record<string, ProjectMeeting[]>;
+  session: AuthSession;
 }) {
   useEffect(() => {
     document.body.className = "app-theme";
@@ -195,12 +218,21 @@ export function WorkspaceHomePage({
   const [selectedDate, setSelectedDate] = useState(REFERENCE_DATE);
   const [calendarSpaceId, setCalendarSpaceId] = useState("all");
   const [meetingTitle, setMeetingTitle] = useState("");
+  const [meetingDescription, setMeetingDescription] = useState("");
   const [meetingSpaceId, setMeetingSpaceId] = useState(data.spaces[0]?.id ?? "");
   const [meetingDateTime, setMeetingDateTime] = useState("2026-07-10T10:00");
+  const [meetingEndDateTime, setMeetingEndDateTime] = useState("2026-07-10T11:00");
   const [meetingParticipantEmails, setMeetingParticipantEmails] = useState<string[]>([]);
+  const [calendarApiEvents, setCalendarApiEvents] = useState<ApiCalendarEvent[]>([]);
+  const [meetingReminders, setMeetingReminders] = useState<ApiCalendarEvent[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState("");
+  const [calendarReloadKey, setCalendarReloadKey] = useState(0);
+  const [remindersOpen, setRemindersOpen] = useState(false);
   const totalMeetings = getTotalMeetings(data.spaces);
   const totalMembers = data.spaces.reduce((total, space) => total + parseMemberCount(space.members), 0);
-  const calendarEvents = useMemo(() => buildCalendarEvents(data.spaces, projectMeetings), [data.spaces, projectMeetings]);
+  const calendarRange = useMemo(() => calendarQueryRange(calendarView, selectedDate), [calendarView, selectedDate]);
+  const calendarEvents = useMemo(() => buildCalendarEvents(data.spaces, calendarApiEvents), [calendarApiEvents, data.spaces]);
 
   useEffect(() => {
     if (!meetingSpaceId && data.spaces[0]?.id) {
@@ -211,6 +243,61 @@ export function WorkspaceHomePage({
   useEffect(() => {
     setMeetingParticipantEmails([]);
   }, [meetingSpaceId]);
+
+  useEffect(() => {
+    let active = true;
+    setCalendarLoading(true);
+    setCalendarError("");
+    void fetchCalendarEvents(session, {
+      from: calendarRange.from,
+      to: calendarRange.to,
+      spaceId: calendarSpaceId === "all" ? undefined : calendarSpaceId
+    })
+      .then((response) => {
+        if (active) {
+          setCalendarApiEvents(response.events);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setCalendarApiEvents([]);
+          setCalendarError(loadError instanceof Error ? loadError.message : "회의 일정을 불러오지 못했습니다.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setCalendarLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [calendarRange.from, calendarRange.to, calendarReloadKey, calendarSpaceId, session]);
+
+  useEffect(() => {
+    let active = true;
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    void fetchCalendarEvents(session, { from: now.toISOString(), to: tomorrow.toISOString() })
+      .then((response) => {
+        if (active) {
+          setMeetingReminders(
+            response.events
+              .filter((event) => event.status === "SCHEDULED" && new Date(event.startsAt).getTime() >= now.getTime())
+              .sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime())
+              .slice(0, 5)
+          );
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMeetingReminders([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [calendarReloadKey, session]);
 
   const filteredSpaces = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -258,18 +345,22 @@ export function WorkspaceHomePage({
     event.preventDefault();
     const targetSpace = data.spaces.find((space) => space.id === meetingSpaceId);
     const trimmedTitle = meetingTitle.trim();
-    if (!targetSpace || !trimmedTitle || !meetingDateTime || !onCreateMeeting || meetingMutationLoading) {
+    if (!targetSpace || !trimmedTitle || !meetingDateTime || !meetingEndDateTime || !onCreateMeeting || meetingMutationLoading) {
       return;
     }
 
     const created = await onCreateMeeting?.(targetSpace.name, {
       title: trimmedTitle,
+      description: meetingDescription,
       scheduledAt: new Date(meetingDateTime).toISOString(),
+      scheduledEndAt: new Date(meetingEndDateTime).toISOString(),
       participantEmails: meetingParticipantEmails
     });
     if (created) {
       setMeetingTitle("");
+      setMeetingDescription("");
       setMeetingParticipantEmails([]);
+      setCalendarReloadKey((value) => value + 1);
     }
   }
 
@@ -287,6 +378,32 @@ export function WorkspaceHomePage({
   const latestMeetingInvite = calendarMeetingSpace
     ? latestMeetingInvites[calendarMeetingSpace.name] ?? null
     : null;
+  const dashboardRecent = dashboardSummary
+    ? dashboardSummary.recentActivities.map((activity) => ({
+        title: activity.title,
+        meta: new Date(activity.occurredAt).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })
+      }))
+    : data.recent;
+  const dashboardActionItems = dashboardSummary
+    ? dashboardSummary.actionItems.map((task) => ({
+        title: task.title,
+        meta: task.dueDate ? `마감 ${task.dueDate}` : "마감일 미정"
+      }))
+    : actionItems;
+  const dashboardLatestReports = dashboardSummary?.latestReports ?? [];
+  const todayMeeting = dashboardSummary?.todayMeetings[0] ?? null;
+  const todaySpace = todayMeeting ? data.spaces.find((space) => space.id === todayMeeting.spaceId) : null;
+  const todayMeetingHref = todayMeeting && todaySpace
+    ? buildMeetingDestination(todaySpace, {
+        id: todayMeeting.id,
+        spaceId: todayMeeting.spaceId,
+        meetingId: todayMeeting.meetingId,
+        projectName: todaySpace.name,
+        title: todayMeeting.title,
+        startsAt: new Date(todayMeeting.startsAt),
+        state: meetingStatusLabel(todayMeeting.status)
+      })
+    : null;
 
   return (
     <div className="workspace-catalog-shell workspace-catalog-home-shell">
@@ -303,8 +420,30 @@ export function WorkspaceHomePage({
                   ? "API snapshot"
                   : "Mock fallback"}
           </div>
-          <div className="workspace-catalog-top-actions" aria-hidden="true">
-            <button className="workspace-catalog-icon-button">🔔</button>
+          <div className="workspace-catalog-top-actions">
+            <div className="workspace-meeting-reminders">
+              <button
+                aria-expanded={remindersOpen}
+                aria-label={`회의 알림 ${meetingReminders.length}건`}
+                className="workspace-catalog-icon-button"
+                onClick={() => setRemindersOpen((open) => !open)}
+                title="회의 알림"
+                type="button"
+              >
+                🔔
+              </button>
+              {remindersOpen ? (
+                <div className="workspace-meeting-reminder-panel" role="status">
+                  <strong>다가오는 회의</strong>
+                  {meetingReminders.length ? meetingReminders.map((event) => (
+                    <div key={`reminder-${event.id}`}>
+                      <span>{formatTimeLabel(new Date(event.startsAt))}</span>
+                      <span>{event.title}</span>
+                    </div>
+                  )) : <p>향후 24시간 내 예정 회의가 없습니다.</p>}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -326,7 +465,7 @@ export function WorkspaceHomePage({
           </article>
           <article>
             <span>최근 활동</span>
-            <strong>{data.recent.length}건</strong>
+            <strong>{dashboardRecent.length}건</strong>
             <p>오늘 확인할 업데이트</p>
           </article>
         </section>
@@ -336,12 +475,15 @@ export function WorkspaceHomePage({
             <div className="workspace-dashboard-section-head">
               <div>
                 <span>Today</span>
-                <strong>{data.todayMeeting.title}</strong>
+                <strong>{todayMeeting?.title ?? "오늘 예정된 회의 없음"}</strong>
               </div>
-              <Link to={data.todayMeeting.href}>회의 대기실</Link>
+              {todayMeetingHref ? <Link to={todayMeetingHref}>회의 열기</Link> : null}
             </div>
-            <p>{data.todayMeeting.project} · {data.todayMeeting.time} · {data.todayMeeting.attendees}</p>
-            <p>{data.todayMeeting.note}</p>
+            {todayMeeting && todaySpace ? (
+              <p>{todaySpace.name} · {formatTimeLabel(new Date(todayMeeting.startsAt))} · {meetingStatusLabel(todayMeeting.status)}</p>
+            ) : (
+              <p>접근 가능한 오늘 회의가 없습니다.</p>
+            )}
           </div>
 
           <div className="workspace-dashboard-activity">
@@ -351,7 +493,7 @@ export function WorkspaceHomePage({
                 <strong>최근 활동</strong>
               </div>
             </div>
-            {data.recent.map((item) => (
+            {dashboardRecent.map((item) => (
               <div key={`${item.title}-${item.meta}`} className="workspace-dashboard-activity-row">
                 <strong>{item.title}</strong>
                 <span>{item.meta}</span>
@@ -369,12 +511,37 @@ export function WorkspaceHomePage({
             <Link to="/project-overview">프로젝트 개요</Link>
           </div>
           <div className="workspace-action-summary-list">
-            {actionItems.map((item) => (
+            {dashboardActionItems.map((item) => (
               <div key={`${item.title}-${item.meta}`} className="workspace-action-summary-row">
                 <strong>{item.title}</strong>
                 <span>{item.meta}</span>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="workspace-action-summary">
+          <div className="workspace-dashboard-section-head">
+            <div>
+              <span>Latest Reports</span>
+              <strong>최신 확정 회의록</strong>
+            </div>
+          </div>
+          <div className="workspace-action-summary-list">
+            {dashboardLatestReports.length ? dashboardLatestReports.map((report) => {
+              const space = data.spaces.find((candidate) => candidate.id === report.spaceId);
+              const content = <>
+                <strong>{report.title}</strong>
+                <span>{report.meetingTitle} · v{report.version} · {new Date(report.confirmedAt).toLocaleDateString("ko-KR")}</span>
+              </>;
+              return space ? (
+                <Link key={report.id} className="workspace-action-summary-row" to={buildReportDestination(space, report)}>
+                  {content}
+                </Link>
+              ) : (
+                <div key={report.id} className="workspace-action-summary-row">{content}</div>
+              );
+            }) : <p className="workspace-action-summary-empty">확정된 회의록이 없습니다.</p>}
           </div>
         </section>
 
@@ -470,7 +637,12 @@ export function WorkspaceHomePage({
             </select>
             <input
               aria-label="캘린더 기준 날짜"
-              onChange={(event) => setSelectedDate(new Date(event.target.value))}
+              onChange={(event) => {
+                const nextDate = new Date(event.target.value);
+                if (!Number.isNaN(nextDate.getTime())) {
+                  setSelectedDate(nextDate);
+                }
+              }}
               type="date"
               value={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`}
             />
@@ -485,9 +657,8 @@ export function WorkspaceHomePage({
                   {dayEvents.length ? (
                     dayEvents.map((event) => {
                       const space = data.spaces.find((item) => item.id === event.spaceId);
-                      const meeting = projectMeetings[event.projectName]?.find((item) => (item.id ?? `${event.spaceId}-${item.index}`) === event.id);
-                      return space && meeting ? (
-                        <Link key={event.id} to={buildMeetingDestination(space, meeting)}>
+                      return space ? (
+                        <Link key={event.id} to={buildMeetingDestination(space, event)}>
                           <strong>{formatTimeLabel(event.startsAt)} {event.title}</strong>
                           <small>{event.projectName} · {event.state}</small>
                         </Link>
@@ -500,6 +671,9 @@ export function WorkspaceHomePage({
               );
             })}
           </div>
+
+          {calendarLoading ? <p className="workspace-calendar-status">회의 일정을 불러오는 중입니다.</p> : null}
+          {calendarError ? <p className="workspace-calendar-status error" role="alert">{calendarError}</p> : null}
 
           <div className="workspace-calendar-bottom">
             <div className="workspace-calendar-upcoming">
@@ -543,6 +717,20 @@ export function WorkspaceHomePage({
                 type="datetime-local"
                 value={meetingDateTime}
               />
+              <input
+                aria-label="회의 종료 일시"
+                disabled={!canCreateCalendarMeeting || meetingMutationLoading}
+                onChange={(event) => setMeetingEndDateTime(event.target.value)}
+                type="datetime-local"
+                value={meetingEndDateTime}
+              />
+              <textarea
+                aria-label="회의 설명"
+                disabled={!canCreateCalendarMeeting || meetingMutationLoading}
+                onChange={(event) => setMeetingDescription(event.target.value)}
+                placeholder="회의 설명"
+                value={meetingDescription}
+              />
               <select
                 aria-label="회의 초기 참여자"
                 disabled={!canCreateCalendarMeeting || meetingMutationLoading}
@@ -558,7 +746,7 @@ export function WorkspaceHomePage({
                   <option key={`calendar-member-${member.email}`} value={member.email}>{member.name}</option>
                 ))}
               </select>
-              <button disabled={!canCreateCalendarMeeting || meetingMutationLoading || !meetingTitle.trim() || !meetingSpaceId || !meetingDateTime} type="submit">
+              <button disabled={!canCreateCalendarMeeting || meetingMutationLoading || !meetingTitle.trim() || !meetingSpaceId || !meetingDateTime || !meetingEndDateTime} type="submit">
                 {meetingMutationLoading ? "저장 중" : "일정 추가"}
               </button>
               {meetingMutationError ? <div className="meeting-ai-error">{meetingMutationError}</div> : null}

@@ -52,7 +52,9 @@ export interface ProjectOverviewMeeting {
   title: string;
   date: string;
   state: string;
+  description?: string | null;
   scheduledAt?: ApiDateTime;
+  scheduledEndAt?: ApiDateTime;
   durationMinutes?: number;
   myRole?: MeetingRole | null;
 }
@@ -68,6 +70,8 @@ export type ParticipantAccessStatus = "ACTIVE" | "REVOKED";
 export type TranscriptStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type MeetingReportStatus = "CANDIDATE" | "DRAFT" | "CONFIRMED";
 export type TaskCardStatus = "TODO" | "IN_PROGRESS" | "DONE";
+export type TaskCardPriority = "LOW" | "MEDIUM" | "HIGH";
+export type DomainTermStatus = "ACTIVE" | "ARCHIVED";
 export type AiSourceType =
   | "transcript"
   | "meetingSummary"
@@ -88,6 +92,39 @@ export interface SpaceSummary {
 
 export interface SpaceListResponse {
   spaces: SpaceSummary[];
+}
+
+export interface DomainTerm {
+  id: string;
+  term: string;
+  definition: string;
+  status: DomainTermStatus;
+  updatedAt: ApiDateTime;
+}
+
+export interface DomainTermListResponse {
+  terms: DomainTerm[];
+}
+
+export interface CreateDomainTermRequest {
+  term: string;
+  definition: string;
+}
+
+export interface UpdateDomainTermRequest {
+  term?: string;
+  definition?: string;
+  status?: DomainTermStatus;
+}
+
+export interface DomainTermMutationResponse {
+  id: string;
+  status: DomainTermStatus;
+  updatedAt: ApiDateTime;
+}
+
+export interface DeleteDomainTermResponse {
+  deleted: boolean;
 }
 
 export interface CreateSpaceRequest {
@@ -123,7 +160,9 @@ export interface MeetingSummary {
   id: string;
   spaceId: string;
   title: string;
+  description: string | null;
   scheduledAt: ApiDateTime;
+  scheduledEndAt: ApiDateTime;
   status: MeetingStatus;
   myRole: MeetingRole | null;
 }
@@ -136,8 +175,10 @@ export interface MeetingDetailResponse {
   id: string;
   spaceId: string;
   title: string;
+  description: string | null;
   status: MeetingStatus;
   scheduledAt: ApiDateTime;
+  scheduledEndAt: ApiDateTime;
   startedAt: ApiDateTime | null;
   endedAt: ApiDateTime | null;
   myRole: MeetingRole | null;
@@ -146,14 +187,18 @@ export interface MeetingDetailResponse {
 
 export interface UpdateMeetingRequest {
   title?: string;
+  description?: string;
   scheduledAt?: ApiDateTime;
+  scheduledEndAt?: ApiDateTime;
   status?: MeetingStatus;
 }
 
 export interface UpdateMeetingResponse {
   id: string;
   title: string;
+  description: string | null;
   scheduledAt: ApiDateTime;
+  scheduledEndAt: ApiDateTime;
   status: MeetingStatus;
 }
 
@@ -255,7 +300,9 @@ export interface MeetingDetail extends MeetingSummary {
 
 export interface CreateMeetingRequest {
   title: string;
+  description?: string;
   scheduledAt: ApiDateTime;
+  scheduledEndAt: ApiDateTime;
   participantUserIds?: string[];
 }
 
@@ -341,6 +388,8 @@ export interface TaskCard {
   title: string;
   description: string | null;
   status: TaskCardStatus;
+  priority: TaskCardPriority;
+  labels: string[];
   assigneeId: string | null;
   dueDate: ApiDate | null;
   sourceCandidateId: string | null;
@@ -356,6 +405,8 @@ export interface CreateTaskCardRequest {
   assigneeId?: string | null;
   dueDate?: ApiDate | null;
   meetingId?: string | null;
+  priority?: TaskCardPriority;
+  labels?: string[];
 }
 
 export interface CreateTaskCardResponse {
@@ -369,11 +420,15 @@ export interface UpdateTaskCardRequest {
   assigneeId?: string | null;
   dueDate?: ApiDate | null;
   status?: TaskCardStatus;
+  priority?: TaskCardPriority;
+  labels?: string[];
 }
 
 export interface UpdateTaskCardResponse {
   id: string;
   status: TaskCardStatus;
+  priority: TaskCardPriority;
+  labels: string[];
   updatedAt: ApiDateTime;
 }
 
@@ -403,6 +458,7 @@ export interface CreateSpaceInvitationResponse {
   invitationId: string;
   status: InvitationStatus;
   expiresAt: ApiDateTime;
+  inviteToken: string;
 }
 
 export interface ResolveSpaceInvitationResponse {
@@ -461,6 +517,16 @@ export interface DashboardSummaryResponse {
   recentActivities: DashboardRecentActivity[];
   spaces: SpaceSummary[];
   actionItems: TaskCard[];
+  latestReports: Array<{
+    id: string;
+    spaceId: string;
+    meetingId: string;
+    meetingTitle: string;
+    title: string;
+    summary: string;
+    version: number;
+    confirmedAt: ApiDateTime;
+  }>;
 }
 
 export interface AiSource {
@@ -482,11 +548,72 @@ export interface ProjectKnowledgeContext {
   text: string;
 }
 
+export type ProjectKnowledgeType = "report" | "decision" | "manual" | "external";
+
+export interface ProjectKnowledgeItem {
+  id: string;
+  spaceId: string;
+  type: ProjectKnowledgeType;
+  title: string;
+  contentPreview: string;
+  sourceMeetingId: string | null;
+  embeddingStatus: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+  updatedAt: ApiDateTime;
+}
+
+export interface ProjectKnowledgeListResponse {
+  items: ProjectKnowledgeItem[];
+}
+
+export interface ProjectKnowledgeDetailResponse {
+  id: string;
+  spaceId: string;
+  type: ProjectKnowledgeType;
+  title: string;
+  content: string;
+  sourceMeetingId: string | null;
+  embeddingStatus: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+  updatedAt: ApiDateTime;
+}
+
+export interface CreateProjectKnowledgeRequest {
+  type: ProjectKnowledgeType;
+  title: string;
+  content: string;
+  sourceMeetingId?: string | null;
+}
+
+export interface UpdateProjectKnowledgeRequest {
+  title?: string;
+  content?: string;
+}
+
+export interface ProjectKnowledgeMutationResponse {
+  id: string;
+  status: "PUBLISHED" | "ARCHIVED";
+  embeddingStatus: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+  embeddingJobId: string | null;
+  updatedAt: ApiDateTime;
+}
+
+export interface DeleteProjectKnowledgeResponse {
+  deleted: boolean;
+}
+
 export interface ProjectAiChatRequest {
   projectId: string;
   question: string;
   projectKnowledge: ProjectKnowledgeContext[];
   meetings: ProjectAiMeetingContext[];
+}
+
+export interface ProjectAiHistoryResponse {
+  messages: Array<{
+    id: string;
+    role: "USER" | "ASSISTANT";
+    content: string;
+    createdAt: ApiDateTime;
+  }>;
 }
 
 export interface MeetingAiChatRequest {
@@ -503,8 +630,25 @@ export interface AiChatResponse {
   answer: string;
   sources: AiSource[];
   unsupported: boolean;
+  unsupportedReason: UnsupportedReason | null;
   model: string;
 }
+
+export interface TermExplanationResponse {
+  term: string;
+  explanation: string;
+  sourceType: "glossary" | "transcript" | "decision" | "none";
+  sources: AiSource[];
+  unsupported: boolean;
+  unsupportedReason: UnsupportedReason | null;
+  model: string;
+}
+
+export type UnsupportedReason =
+  | "NO_EVIDENCE"
+  | "LOW_RELEVANCE"
+  | "MODEL_UNSUPPORTED"
+  | "UNVERIFIED_OUTPUT";
 
 export interface ReportCandidateDecision {
   id: string;
@@ -590,6 +734,27 @@ export interface UpdateReportResponse {
   id: string;
   status: "DRAFT";
   version: number;
+}
+
+export interface ReportDetailResponse {
+  id: string;
+  meetingId: string;
+  status: "CANDIDATE" | "DRAFT" | "CONFIRMED";
+  title: string;
+  summary: string;
+  markdown: string | null;
+  version: number;
+  isCurrent: boolean;
+  createdAt: ApiDateTime;
+  confirmedAt: ApiDateTime | null;
+  sourceIds: string[];
+}
+
+export interface RestoreReportResponse {
+  id: string;
+  status: "DRAFT";
+  version: number;
+  sourceReportId: string;
 }
 
 export type ReportDownloadFormat = "markdown" | "pdf" | "docx";

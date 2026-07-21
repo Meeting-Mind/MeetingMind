@@ -398,3 +398,176 @@ test("meeting detail participant ACL is loaded and mutated through the project U
     ])
   );
 });
+
+test("calendar and domain dictionary mutations use the Browser to BFF to Core path", async ({ page, request }) => {
+  const owner = await signup(request, "calendar-terms-owner");
+  const authorization = { Authorization: `Bearer ${owner.accessToken}` };
+  const spaceName = `CI calendar terms ${Date.now()}`;
+  const term = "CI-RAG";
+
+  const spaceResponse = await request.post(apiPath("/api/v1/spaces"), {
+    data: { name: spaceName, description: "Calendar and Domain Dictionary E2E verification" },
+    headers: authorization
+  });
+  expect(spaceResponse.ok()).toBeTruthy();
+  const space = (await spaceResponse.json()) as { id: string };
+
+  const meetingResponse = await request.post(apiPath(`/api/v1/spaces/${space.id}/meetings`), {
+    data: {
+      title: "CI calendar target meeting",
+      scheduledAt: "2030-04-03T14:00:00+09:00",
+      participantUserIds: []
+    },
+    headers: authorization
+  });
+  expect(meetingResponse.ok()).toBeTruthy();
+  const meeting = (await meetingResponse.json()) as { id: string };
+
+  await loginThroughBff(
+    page,
+    owner,
+    `/terms?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`
+  );
+  await expect(page.getByRole("heading", { name: "용어사전" })).toBeVisible();
+
+  const createTermResponse = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().endsWith(`/api/v1/spaces/${space.id}/terms`)
+  );
+  const createForm = page.locator(".domain-terms-create");
+  await createForm.getByRole("textbox").nth(0).fill(term);
+  await createForm.getByRole("textbox").nth(1).fill("회의별 검색 증거를 연결하는 테스트 용어입니다.");
+  await createForm.getByRole("button", { name: "용어 등록" }).click();
+  expect((await createTermResponse).ok()).toBeTruthy();
+
+  const termRow = page.locator(".domain-term-row").filter({ hasText: term });
+  await expect(termRow).toContainText("회의별 검색 증거를 연결하는 테스트 용어입니다.");
+  await termRow.getByRole("button", { name: "수정" }).click();
+  await termRow.getByLabel("수정할 용어 설명").fill("수정된 Domain Dictionary 설명입니다.");
+  const updateTermResponse = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && response.url().includes(`/api/v1/spaces/${space.id}/terms/`)
+  );
+  await termRow.getByRole("button", { name: "저장" }).click();
+  expect((await updateTermResponse).ok()).toBeTruthy();
+  await expect(termRow).toContainText("수정된 Domain Dictionary 설명입니다.");
+
+  const termExplanation = await page.evaluate(async ({ meetingId, term }) => {
+    const csrf = await fetch("/api/v1/auth/csrf", { credentials: "same-origin" }).then((response) => response.json());
+    const response = await fetch(`/api/v1/meetings/${meetingId}/terms/explain`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", [csrf.headerName]: csrf.token },
+      body: JSON.stringify({ term })
+    });
+    return { status: response.status, body: await response.json() };
+  }, { meetingId: meeting.id, term });
+  expect(termExplanation.status).toBe(200);
+  expect(termExplanation.body).toMatchObject({
+    term,
+    sourceType: "glossary",
+    explanation: "수정된 Domain Dictionary 설명입니다.",
+    model: "local-glossary"
+  });
+
+  await createForm.getByRole("textbox").nth(0).fill(term);
+  await createForm.getByRole("textbox").nth(1).fill("중복 등록은 거부되어야 합니다.");
+  const duplicateTermResponse = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().endsWith(`/api/v1/spaces/${space.id}/terms`)
+  );
+  await createForm.getByRole("button", { name: "용어 등록" }).click();
+  expect((await duplicateTermResponse).status()).toBe(409);
+  await expect(page.getByRole("alert")).toContainText("같은 용어가 이미 등록되어 있습니다.");
+
+  await page.goto("/spaces");
+  const calendarResponse = page.waitForResponse(
+    (response) => response.request().method() === "GET" && response.url().includes("/api/v1/calendar/events?")
+  );
+  await page.getByLabel("캘린더 기준 날짜").fill("2030-04-03");
+  expect((await calendarResponse).ok()).toBeTruthy();
+  await expect(page.getByRole("link", { name: /CI calendar target meeting/ })).toBeVisible();
+});
+
+test("member, invitation, task, and report mutations stay on the Browser to BFF to Core path", async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const owner = await signup(request, "workspace-mutations-owner");
+  const member = await signup(request, "workspace-mutations-member");
+  const ownerAuthorization = { Authorization: `Bearer ${owner.accessToken}` };
+  const spaceName = `CI mutation space ${Date.now()}`;
+
+  const spaceResponse = await request.post(apiPath("/api/v1/spaces"), {
+    data: { name: spaceName, description: "BFF mutation verification" },
+    headers: ownerAuthorization
+  });
+  expect(spaceResponse.ok()).toBeTruthy();
+  const space = (await spaceResponse.json()) as { id: string };
+
+  const memberInvitationResponse = await request.post(apiPath(`/api/v1/spaces/${space.id}/invitations`), {
+    data: { email: member.user.email, role: "MEMBER" },
+    headers: ownerAuthorization
+  });
+  expect(memberInvitationResponse.ok()).toBeTruthy();
+  const memberInvitation = (await memberInvitationResponse.json()) as { invitationId: string; inviteToken: string };
+  const acceptResponse = await request.post(
+    apiPath(`/api/v1/spaces/${space.id}/invitations/${memberInvitation.invitationId}/accept`),
+    { data: { token: memberInvitation.inviteToken }, headers: { Authorization: `Bearer ${member.accessToken}` } }
+  );
+  expect(acceptResponse.ok()).toBeTruthy();
+
+  await loginThroughBff(
+    page,
+    owner,
+    `/team-members?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`
+  );
+  await expect(page.getByRole("heading", { name: "Members" })).toBeVisible();
+
+  const inviteResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().endsWith(`/api/v1/spaces/${space.id}/invitations`)
+  );
+  await page.getByLabel("초대 이메일").fill(`pending-${Date.now()}@example.com`);
+  await page.getByRole("button", { name: "Space 초대 생성" }).click();
+  const inviteResponse = await inviteResponsePromise;
+  expect(inviteResponse.ok(), await inviteResponse.text()).toBeTruthy();
+
+  const memberRow = page.locator(".team-members-row").filter({ hasText: member.user.email });
+  await expect(memberRow).toBeVisible();
+  const roleResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && response.url().includes(`/api/v1/spaces/${space.id}/members/`)
+  );
+  await memberRow.getByLabel(`${member.user.displayName} Space role 변경`).selectOption("ADMIN");
+  const roleResponse = await roleResponsePromise;
+  expect(roleResponse.ok(), await roleResponse.text()).toBeTruthy();
+  await expect(memberRow.getByLabel(`${member.user.displayName} Space role 변경`)).toHaveValue("ADMIN");
+
+  await page.goto(`/project-overview?${new URLSearchParams({ spaceId: space.id, project: spaceName }).toString()}`);
+  await expect(page.getByRole("heading", { name: `${spaceName} 프로젝트` })).toBeVisible();
+  await page.getByLabel("태스크 제목").fill("BFF mutation task");
+  await page.getByLabel("태스크 설명").fill("Browser BFF Core CRUD verification");
+  const createTaskResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().endsWith(`/api/v1/spaces/${space.id}/tasks`)
+  );
+  await page.getByRole("button", { name: "카드 생성" }).click();
+  const createTaskResponse = await createTaskResponsePromise;
+  expect(createTaskResponse.ok(), await createTaskResponse.text()).toBeTruthy();
+
+  const taskCard = page.locator(".project-kanban-card").filter({ hasText: "BFF mutation task" });
+  await expect(taskCard).toBeVisible();
+  const deleteTaskResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === "DELETE" && response.url().includes(`/api/v1/spaces/${space.id}/tasks/`)
+  );
+  await taskCard.getByRole("button", { name: "삭제" }).click();
+  const deleteTaskResponse = await deleteTaskResponsePromise;
+  expect(deleteTaskResponse.ok(), await deleteTaskResponse.text()).toBeTruthy();
+  await expect(taskCard).toHaveCount(0);
+
+  const reportMutation = await page.evaluate(async ({ meetingId, reportId }) => {
+    const csrf = await fetch("/api/v1/auth/csrf", { credentials: "same-origin" }).then((response) => response.json());
+    const response = await fetch(`/api/v1/meetings/${meetingId}/reports/${reportId}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", [csrf.headerName]: csrf.token },
+      body: JSON.stringify({ summary: "BFF report mutation route verification" })
+    });
+    return { status: response.status, body: await response.text() };
+  }, { meetingId: `meeting-${crypto.randomUUID()}`, reportId: `report-${crypto.randomUUID()}` });
+  expect(reportMutation.status).toBe(404);
+  expect(reportMutation.body).toContain("MEETING_NOT_FOUND");
+});

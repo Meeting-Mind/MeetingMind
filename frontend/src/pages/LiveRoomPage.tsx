@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  explainMeetingTerm,
   fetchMeetingDialogue,
   startMeetingTranscription,
   stopMeetingTranscription
@@ -16,7 +17,7 @@ import {
 import { bffFetch } from "../auth/csrf";
 import type { AuthSession } from "../auth/session";
 import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
-import type { WorkspaceData } from "../types";
+import type { TermExplanationResponse, WorkspaceData } from "../types";
 
 const PREJOIN_STORAGE_KEY = "meetingmind-prejoin";
 
@@ -40,27 +41,6 @@ function formatTranscriptTime(startMs: number): string {
   const minutes = Math.floor((totalSeconds % 3_600) / 60);
   const seconds = totalSeconds % 60;
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
-}
-
-// ponytail: 실제 도메인 사전/키워드 추출 API 붙기 전까지 하드코딩된 목록으로 간단히 하이라이트.
-const STT_KEYWORDS = ["RAG", "Vector DB", "Embedding", "pgvector", "Chunking", "LiveKit", "gRPC", "STT"];
-const STT_KEYWORD_PATTERN = new RegExp(
-  `(${STT_KEYWORDS.map((keyword) => keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
-  "gi"
-);
-
-function renderHighlightedText(text: string) {
-  const parts = text.split(STT_KEYWORD_PATTERN);
-
-  return parts.map((part, index) =>
-    STT_KEYWORDS.some((keyword) => keyword.toLowerCase() === part.toLowerCase()) ? (
-      <span className="lk-live-room-keyword-tag" key={index}>
-        {part}
-      </span>
-    ) : (
-      <span key={index}>{part}</span>
-    )
-  );
 }
 
 type ParticipantCard = {
@@ -341,6 +321,11 @@ export function LiveRoomPage({
   const [liveTranscriptRows, setLiveTranscriptRows] = useState<SttTranscriptEntry[]>([]);
   const [sttSearchQuery, setSttSearchQuery] = useState("");
   const [bookmarkedKeys, setBookmarkedKeys] = useState<Set<string>>(new Set());
+  const [selectedTerm, setSelectedTerm] = useState("");
+  const [termExplanation, setTermExplanation] = useState<TermExplanationResponse | null>(null);
+  const [termExplanationError, setTermExplanationError] = useState("");
+  const [termExplanationLoading, setTermExplanationLoading] = useState(false);
+  const termExplanationRequestIdRef = useRef(0);
   const sttSessionIdRef = useRef<string | null>(null);
   const sttStartedRef = useRef(false);
 
@@ -441,6 +426,55 @@ export function LiveRoomPage({
       }
       return next;
     });
+  }
+
+  function requestTermExplanation(term: string) {
+    const requestId = termExplanationRequestIdRef.current + 1;
+    termExplanationRequestIdRef.current = requestId;
+    if (!meetingId) {
+      setSelectedTerm(term);
+      setTermExplanation(null);
+      setTermExplanationError("실제 회의 데이터에서만 용어 설명을 조회할 수 있습니다.");
+      return;
+    }
+
+    setSelectedTerm(term);
+    setTermExplanation(null);
+    setTermExplanationError("");
+    setTermExplanationLoading(true);
+    void explainMeetingTerm(session, meetingId, { term })
+      .then((response) => {
+        if (requestId === termExplanationRequestIdRef.current) {
+          setTermExplanation(response);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (requestId === termExplanationRequestIdRef.current) {
+          setTermExplanationError(cause instanceof Error ? cause.message : "용어 설명을 불러오지 못했습니다.");
+        }
+      })
+      .finally(() => {
+        if (requestId === termExplanationRequestIdRef.current) {
+          setTermExplanationLoading(false);
+        }
+      });
+  }
+
+  function handleTranscriptSelection(event: React.MouseEvent<HTMLParagraphElement>) {
+    const selection = window.getSelection();
+    const term = selection?.toString().trim() ?? "";
+    if (!term || !selection?.anchorNode || !selection.focusNode || !event.currentTarget.contains(selection.anchorNode) || !event.currentTarget.contains(selection.focusNode)) {
+      return;
+    }
+    if (term.length > 120) {
+      termExplanationRequestIdRef.current += 1;
+      setSelectedTerm(term);
+      setTermExplanation(null);
+      setTermExplanationError("선택한 용어는 120자 이하여야 합니다.");
+      setTermExplanationLoading(false);
+      return;
+    }
+    requestTermExplanation(term);
   }
 
   useEffect(() => {
@@ -736,6 +770,41 @@ export function LiveRoomPage({
               <span>LIVE</span>
             </div>
 
+            {selectedTerm ? (
+              <section aria-live="polite" className="lk-live-room-term-explanation">
+                <div className="lk-live-room-term-explanation-head">
+                  <strong>{selectedTerm}</strong>
+                  <button
+                    aria-label="용어 설명 닫기"
+                    className="lk-live-room-term-explanation-close"
+                    onClick={() => {
+                      termExplanationRequestIdRef.current += 1;
+                      setSelectedTerm("");
+                      setTermExplanation(null);
+                      setTermExplanationError("");
+                    }}
+                    type="button"
+                  >
+                    닫기
+                  </button>
+                </div>
+                {termExplanationLoading ? <p>설명을 확인하는 중입니다.</p> : null}
+                {termExplanationError ? <p className="is-error">{termExplanationError}</p> : null}
+                {termExplanation ? (
+                  <>
+                    <p>{termExplanation.explanation}</p>
+                    {termExplanation.sources.length > 0 ? (
+                      <ul>
+                        {termExplanation.sources.map((source) => (
+                          <li key={source.sourceId}>{source.title || source.text}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : null}
+              </section>
+            ) : null}
+
             <div className="lk-live-room-sidebar-list">
               {visibleTranscriptRows.length === 0 ? (
                 <p className="lk-live-room-sidebar-empty">
@@ -760,7 +829,7 @@ export function LiveRoomPage({
                         <span>{row.time}</span>
                         <strong>{row.displayName}</strong>
                       </div>
-                      <p>{renderHighlightedText(row.text)}</p>
+                      <p onMouseUp={handleTranscriptSelection}>{row.text}</p>
                     </article>
                   );
                 })
