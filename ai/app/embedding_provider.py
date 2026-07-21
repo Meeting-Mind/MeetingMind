@@ -1,9 +1,10 @@
 import json
-import os
 import ssl
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from .config import get_env
 
 try:
     import certifi
@@ -34,9 +35,9 @@ class OpenAIEmbeddingProvider:
     @classmethod
     def from_environment(cls) -> "OpenAIEmbeddingProvider":
         return cls(
-            os.getenv("OPENAI_API_KEY", ""),
-            model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
-            dimension=int(os.getenv("OPENAI_EMBEDDING_DIMENSION", "1536")),
+            get_env("OPENAI_API_KEY", "") or "",
+            model=get_env("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small") or "text-embedding-3-small",
+            dimension=int(get_env("OPENAI_EMBEDDING_DIMENSION", "1536") or "1536"),
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:

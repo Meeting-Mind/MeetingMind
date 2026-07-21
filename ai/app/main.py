@@ -2,7 +2,6 @@ import json
 import hmac
 import logging
 import os
-from pathlib import Path
 import ssl
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
@@ -25,6 +24,7 @@ from .grounding import (
     strict_json_schema_format,
 )
 from .embedding_provider import OpenAIEmbeddingProvider
+from .config import get_env
 from .rag import (
     InMemoryRagRetriever,
     RagBuildRequest,
@@ -51,16 +51,6 @@ try:
 except ImportError:
     certifi = None
 
-
-APP_ROOT = Path(__file__).resolve().parent.parent
-DOTENV_CANDIDATES = [
-    APP_ROOT / ".env",
-    APP_ROOT.parent / ".env",
-    APP_ROOT.parent / "backend" / ".env",
-]
-ENV_ALIASES = {
-    "OPENAI_API_KEY": ("OPEN_AI_KEY",),
-}
 
 OPENAI_DEFAULT_TIMEOUT_SECONDS = 30
 OPENAI_REPORT_TIMEOUT_SECONDS = 60
@@ -310,40 +300,6 @@ class ExtractTasksResponse(BaseModel):
 
 def observe_ai_endpoint(endpoint: str, operation: Any) -> Any:
     return observe_endpoint(endpoint, operation, logger=LOGGER)
-
-
-def load_dotenv() -> dict[str, str]:
-    values: dict[str, str] = {}
-
-    for candidate in DOTENV_CANDIDATES:
-        if not candidate.exists():
-            continue
-
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip().strip("\"'")
-
-    return values
-
-
-ENV_CACHE = load_dotenv()
-
-
-def get_env(key: str, default: str | None = None) -> str | None:
-    value = os.getenv(key) or ENV_CACHE.get(key)
-    if value:
-        return value
-
-    for alias in ENV_ALIASES.get(key, ()):
-        value = os.getenv(alias) or ENV_CACHE.get(alias)
-        if value:
-            return value
-
-    return default
 
 
 def require_env(key: str) -> str:
