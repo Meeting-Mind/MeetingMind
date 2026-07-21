@@ -12,4 +12,5 @@ ec9a0a404441fd2f25da6b5dc9ce42d207d56e6e:backend/.env:openai-api-key:4
 46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:frontend/playwright.config.ts:generic-api-key:46
 46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/tokenvault/TokenVaultTest.java:generic-api-key:23
 46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:bff/src/test/java/com/meetingmind/bff/tokenvault/TokenVaultTest.java:generic-api-key:108
+47d1f9b136d42f3bfab254c24e20c735ccc92195:bff/src/test/java/com/meetingmind/bff/RedisSessionSharingIntegrationTest.java:generic-api-key:25
 46246a2b9190343bba7ec6bd2ff1862f0d5d56a2:scripts/bff-backend-compat-e2e.sh:generic-api-key:113

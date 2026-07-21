@@ -22,8 +22,6 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 @EnabledIfEnvironmentVariable(named = "BFF_REDIS_INTEGRATION", matches = "true")
 class RedisSessionSharingIntegrationTest {
 
-    private static final String AUTH_USER_ID = "0a5b7c1e-5d75-4dc0-a10e-a330d0583930";
-
     @Test
     void sharesSessionAcrossApplicationInstances() {
         String namespace = "meetingmind:bff:test:" + UUID.randomUUID();
@@ -48,32 +46,33 @@ class RedisSessionSharingIntegrationTest {
     @Test
     void invalidatesEveryRedisSessionIndexedForOneAuthUser() {
         String namespace = "meetingmind:bff:logout-all:" + UUID.randomUUID();
+        String authUserId = UUID.randomUUID().toString();
 
         try (ConfigurableApplicationContext context = application(namespace)) {
             SessionRepository<Session> repository = sessionRepository(context);
-            Session first = authenticatedSession(repository);
-            Session second = authenticatedSession(repository);
+            Session first = authenticatedSession(repository, authUserId);
+            Session second = authenticatedSession(repository, authUserId);
             assertThat(repository).isInstanceOf(FindByIndexNameSessionRepository.class);
             assertThat(indexed(repository).findByIndexNameAndIndexValue(
                     FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME,
-                    AUTH_USER_ID)).containsKeys(first.getId(), second.getId());
+                    authUserId)).containsKeys(first.getId(), second.getId());
 
-            context.getBean(BffSessionManager.class).invalidateUserSessions(AUTH_USER_ID);
+            context.getBean(BffSessionManager.class).invalidateUserSessions(authUserId);
 
             assertThat(repository.findById(first.getId())).isNull();
             assertThat(repository.findById(second.getId())).isNull();
         }
     }
 
-    private Session authenticatedSession(SessionRepository<Session> repository) {
+    private Session authenticatedSession(SessionRepository<Session> repository, String authUserId) {
         Session session = repository.createSession();
         SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
         securityContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
-                new BffAuthUser(AUTH_USER_ID, "member@meetingmind.test", "Member", null, "ACTIVE"),
+                new BffAuthUser(authUserId, "member@meetingmind.test", "Member", null, "ACTIVE"),
                 null,
                 java.util.List.of()));
         session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
-        session.setAttribute(BffSessionAttributes.USER_ID, AUTH_USER_ID);
+        session.setAttribute(BffSessionAttributes.USER_ID, authUserId);
         session.setAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID, UUID.randomUUID());
         session.setAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT, Instant.now().plusSeconds(600));
         repository.save(session);

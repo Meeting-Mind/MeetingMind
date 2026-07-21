@@ -47,13 +47,13 @@ class MigrationIntegrationTest {
                     """);
         }
 
-        var v12Result = Flyway.configure()
+        var latestResult = Flyway.configure()
                 .dataSource(url, user, password)
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
 
-        assertThat(v12Result.migrationsExecuted).isEqualTo(2);
+        assertThat(latestResult.migrationsExecuted).isEqualTo(10);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -67,7 +67,7 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"
             );
 
             try (var statement = connection.createStatement()) {
