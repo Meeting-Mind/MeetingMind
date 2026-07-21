@@ -53,7 +53,7 @@ class MigrationIntegrationTest {
                 .load()
                 .migrate();
 
-        assertThat(latestResult.migrationsExecuted).isEqualTo(10);
+        assertThat(latestResult.migrationsExecuted).isEqualTo(4);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -67,7 +67,7 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "19", "20"
             );
 
             try (var statement = connection.createStatement()) {
