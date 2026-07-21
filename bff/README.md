@@ -22,7 +22,11 @@ BFF는 `meetingmind.bff.browser.requests`, `meetingmind.bff.refresh`, `meetingmi
 
 로컬 Token Vault key는 매 실행마다 바꾸면 기존 bundle을 복호화할 수 없으므로 `.env` 등 Git에 포함되지 않는 로컬 secret에 고정한다. 운영은 `BFF_TOKEN_VAULT_KEY_PROVIDER=kms`와 `BFF_TOKEN_VAULT_KMS_KEY_ID`를 사용하고 EKS workload IAM으로 KMS 권한을 부여한다. key가 없거나 잘못되면 평문/임시 key로 우회하지 않고 시작을 거부한다.
 
-인증과 업무 endpoint를 사용하려면 현재 Backend를 `http://127.0.0.1:8080`에 실행하거나 `BFF_BACKEND_BASE_URL`을 해당 origin으로 설정한다. BFF는 고정된 signup/login/google/refresh와 업무 API allowlist만 호출하고 Backend token 응답을 브라우저로 전달하지 않는다. Core/AI/LiveKit 목적지와 timeout/circuit/bulkhead 기본값은 `.env.example`의 서비스별 설정으로 분리할 수 있다.
+기본 인증 provider는 별도 Auth Service다. `BFF_AUTH_SERVICE_BASE_URL`의 고정 internal signup/login/google/refresh/revoke만 호출하고, Auth 성공 직후 `BFF_CORE_BASE_URL`의 internal User projection을 완성한 뒤 Browser session을 만든다. Core/AI/LiveKit route는 정확한 audience access만 사용한다. Auth 장애를 legacy로 자동 우회하지 않으며 rollback은 `BFF_AUTH_PROVIDER=legacy`, `BFF_AUTH_ISSUER=meetingmind-core-legacy`와 Core validation mode를 함께 명시적으로 전환한다.
+
+`POST /api/v1/auth/logout-all`은 최근 인증 10분을 요구한다. 시간이 지난 세션은 `POST /api/v1/auth/reauthenticate`에서 local 비밀번호 또는 새 Google credential을 검증하고, Auth가 반환한 서버 시각만 session에 저장한다. 성공 시 Auth의 전체 revoke를 먼저 확정하고 Auth UUID Spring Session index로 다른 BFF session과 Token Bundle을 제거한 뒤 현재 session을 마지막에 무효화한다. `legacy` provider는 불완전한 로컬 삭제를 성공으로 처리하지 않고 기능 사용 불가로 응답한다.
+
+로컬/CI의 `X-MeetingMind-Test-Principal`은 Auth/Core 양쪽에서 명시적으로 허용한 profile에서만 사용한다. 운영 EKS에서는 이 설정을 끄고 mTLS SPIFFE workload identity를 사용한다.
 
 ## Verification
 

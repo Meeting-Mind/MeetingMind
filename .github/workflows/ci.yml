@@ -219,7 +219,7 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Apply and verify Flyway V1-V10
+      - name: Apply and verify Flyway V1-V13
         env:
           CI_POSTGRES_URL: jdbc:postgresql://127.0.0.1:5432/meetingmind_ci
           CI_POSTGRES_USER: meetingmind

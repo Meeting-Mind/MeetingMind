@@ -78,7 +78,7 @@ class BffAbsoluteSessionExpiryFilterTest {
     private UUID expiredSession(MockHttpServletRequest request) {
         MockHttpSession session = new MockHttpSession();
         UUID tokenBundleId = UUID.randomUUID();
-        session.setAttribute(BffSessionAttributes.USER_ID, "user-id");
+        session.setAttribute(BffSessionAttributes.RESOURCE_USER_ID, "user-id");
         session.setAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID, tokenBundleId);
         session.setAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT, NOW.minusSeconds(1));
         request.setSession(session);

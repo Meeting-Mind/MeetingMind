@@ -28,13 +28,15 @@
 
 ```json
 {
-  "id": "0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
+  "id": "user-0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
   "email": "miju@meetingmind.ai",
   "displayName": "이미주",
   "pictureUrl": null,
   "status": "ACTIVE"
 }
 ```
+
+`User.id`는 Browser/Core 업무 API의 안정된 resource ID인 `user-{Auth UUID}`다. Auth UUID 원문은 Browser 응답에 노출하지 않으며 BFF 내부 session index와 JWT `sub`에만 사용한다.
 
 ### Session View
 
@@ -94,7 +96,7 @@ Spring Security CSRF token을 브라우저가 상태 변경 요청에 전달할 
 ```json
 {
   "user": {
-    "id": "0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
+    "id": "user-0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
     "email": "miju@meetingmind.ai",
     "displayName": "이미주",
     "pictureUrl": null,
@@ -109,6 +111,7 @@ Spring Security CSRF token을 브라우저가 상태 변경 요청에 전달할 
 ```
 
 - `Set-Cookie`로 BFF session을 설정한다.
+- Auth Service 발급 성공 뒤 Core User projection을 멱등 생성한 경우에만 BFF session과 cookie를 만든다. projection 실패는 `503 USER_PROJECTION_UNAVAILABLE`로 실패시키고 발급된 AuthSession을 best-effort revoke한다.
 - email/password/displayName 검증은 기존 정책을 유지한다.
 - `400 INVALID_REQUEST`, `409 EMAIL_ALREADY_REGISTERED`.
 
@@ -160,7 +163,7 @@ Spring Security CSRF token을 브라우저가 상태 변경 요청에 전달할 
 {
   "authenticated": true,
   "user": {
-    "id": "0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
+    "id": "user-0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
     "email": "miju@meetingmind.ai",
     "displayName": "이미주",
     "pictureUrl": null,
@@ -197,16 +200,53 @@ Spring Security CSRF token을 브라우저가 상태 변경 요청에 전달할 
 - Auth Service 일시 장애가 있어도 로컬 BFF session/cookie는 삭제하고 revoke 재처리/감사 이벤트를 남긴다.
 - Phase 1 현재 Backend 호환 경로는 revoke 실패를 token 없는 보안 이벤트로 기록하고 로컬 session/cookie를 fail closed한다. 암호화된 durable revoke 재처리는 Auth Service 추출·운영 관측 task의 출시 gate로 유지한다.
 
+## POST /api/v1/auth/reauthenticate
+
+모든 기기 로그아웃 같은 민감 동작을 위한 최근 인증을 갱신한다. 새 로그인 세션이나 token을 발급하지 않는다.
+
+### Local Request
+
+```json
+{
+  "method": "PASSWORD",
+  "password": "password-123!"
+}
+```
+
+### Google Request
+
+```json
+{
+  "method": "GOOGLE",
+  "credential": "new-google-id-credential"
+}
+```
+
+### Response `204`
+
+- BFF는 현재 서버 세션의 `authSessionId`와 Auth `userId`만 내부 Auth 요청에 사용한다.
+- Auth Service가 현재 AuthSession/User 결합과 계정 상태를 확인한 뒤 local 비밀번호 또는 이미 연결된 Google identity를 검증한다.
+- 성공하면 Auth Service가 반환한 서버 시각을 BFF session의 `authenticatedAt`으로 교체한다. Browser가 시각이나 사용자/세션 ID를 보내지 않는다.
+- Google 재인증은 새 credential을 검증만 하고 User/AuthIdentity를 생성하거나 연결하지 않는다.
+- 실패는 계정·provider 존재 여부를 구분하지 않는 `401 REAUTHENTICATION_FAILED`다.
+- 만료·폐기되거나 사용자 결합이 다른 현재 AuthSession은 `401 SESSION_INVALID`로 정리한다.
+
 ## POST /api/v1/auth/logout-all
 
 현재 사용자의 모든 AuthSession과 BffSession/TokenBundle을 폐기한다.
+
+### Request
+
+body를 사용하지 않는다. 사용자 ID, AuthSession ID, `authenticatedAt`과 재인증 credential을 이 endpoint 입력으로 받지 않는다.
 
 ### Response `204`
 
 - 최근 인증 또는 동등한 재인증이 필요하다.
 - 조건을 충족하지 않으면 `403 REAUTHENTICATION_REQUIRED`를 반환한다.
-- `authenticatedAt`이 최근 10분 이내면 허용한다. 초과하면 local 사용자는 비밀번호, Google 사용자는 새 Google ID credential을 재검증한다.
+- BFF session의 `authenticatedAt`이 최근 10분 이내면 허용한다. 초과하면 Frontend가 `POST /reauthenticate`를 완료한 뒤 이 요청을 한 번 재시도한다.
 - Auth Service의 사용자 전체 revoke와 transactional outbox 기록이 durable하게 커밋된 뒤 `204`를 반환하고 현재 cookie를 삭제한다.
+- BFF는 Auth UUID Spring Session index로 다른 BffSession과 Token Bundle을 먼저 삭제하고 현재 요청의 session을 마지막에 무효화한다. 완료되지 않은 정리를 `204`로 응답하지 않는다.
+- 명시적 legacy provider는 실제 AuthSession 전체 revoke를 제공할 수 없으므로 local-only 삭제를 성공으로 위장하지 않고 `409 AUTH_FEATURE_UNAVAILABLE`를 반환한다.
 
 ## Protected API Final 401
 

@@ -16,6 +16,18 @@ spring:
       hibernate.jdbc.time_zone: UTC
 
 meetingmind:
+  auth:
+    validation-mode: ${MEETINGMIND_AUTH_VALIDATION_MODE:DUAL}
+    target:
+      issuer: ${MEETINGMIND_AUTH_TARGET_ISSUER:https://auth.meetingmind.internal}
+      audience: meetingmind-core
+      jwks-uri: ${MEETINGMIND_AUTH_JWKS_URI:http://127.0.0.1:8082/.well-known/jwks.json}
+      jwks-request-timeout: ${MEETINGMIND_AUTH_JWKS_TIMEOUT:2s}
+      allow-test-principal-header: ${MEETINGMIND_AUTH_ALLOW_TEST_PRINCIPAL_HEADER:false}
+      test-principal: ${MEETINGMIND_AUTH_TEST_PRINCIPAL:}
+    workload:
+      allowed-principals: ${MEETINGMIND_CORE_ALLOWED_PRINCIPALS:spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff}
+      allow-test-principal-header: ${MEETINGMIND_CORE_ALLOW_TEST_PRINCIPAL_HEADER:false}
   ai:
     service-token: ${AI_INTERNAL_SERVICE_TOKEN:}
 

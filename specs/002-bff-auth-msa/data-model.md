@@ -22,7 +22,8 @@ T032 runtime은 local `passwordHash`에 BCrypt만 사용하고 refresh `tokenHas
 ### BffSession
 
 - `id`: 브라우저 cookie가 참조하는 충분한 entropy의 opaque session ID. 원문은 cookie에만 있고 Redis key는 namespace를 분리한다.
-- `userId`: 표시 정보와 downstream subject 연결을 위한 Auth User ID.
+- `resourceUserId`: Browser/Core 업무 API에 노출하는 `user-{Auth UUID}` 문자열 resource ID.
+- `authUserId`: Auth User UUID. JWT `sub`, 실제 AuthSession 소유자와 Spring Session principal index를 연결하는 내부 값이며 Browser에 노출하지 않는다.
 - `authSessionId`: Auth Service의 논리 로그인 세션 ID.
 - `tokenBundleId`: Token Vault 암호문 참조. token 원문을 session attribute에 넣지 않는다.
 - `createdAt`
@@ -54,6 +55,8 @@ T032 runtime은 local `passwordHash`에 BCrypt만 사용하고 refresh `tokenHas
 
 복호화된 payload는 요청 처리 메모리에서만 짧게 사용하고 로그, metric label, exception, tracing attribute에 남기지 않는다. refresh 성공 시 bundle 전체를 원자 교체하고 이전 암호문은 재사용하지 않는다.
 
+schema v1은 `meetingmind-legacy` 단일 access와 expiry만 가지며 rollback provider에서만 사용한다. schema v2는 `meetingmind-core`, `meetingmind-ai`, `meetingmind-livekit` 각각의 access/expiry map을 가지며 route가 요구하는 정확한 audience entry만 사용한다. v1 access를 target audience key로 복제하거나 schema v2 audience가 없을 때 다른 access로 대체하지 않는다.
+
 물리 저장 형식은 AES-256-GCM ciphertext와 KMS encrypted data key만 포함한다. `bundleId`, `authSessionId`, `version`을 encryption context/AAD에 묶어 다른 bundle이나 version으로 ciphertext를 이동하면 복호화를 거부한다. 운영은 AWS KMS `GenerateDataKey`/`Decrypt`와 workload IAM을 사용하고, local/test는 외부 주입한 256-bit AES master key adapter만 허용한다. local key가 없거나 잘못된 길이면 애플리케이션은 평문 또는 임시 키로 우회하지 않고 시작을 거부한다.
 
 ### User
@@ -68,6 +71,13 @@ T032 runtime은 local `passwordHash`에 BCrypt만 사용하고 refresh `tokenHas
 - `lastLoginAt`
 
 Auth Service가 소유한다. Resource Service는 필요한 사용자 projection만 API/event로 동기화하며 Auth DB를 직접 조회하지 않는다.
+
+### CoreUserProjection
+
+- `id`: 기존 Core `users.id` 문자열 PK. Space/Meeting 등 기존 업무 FK는 이 값을 계속 사용한다.
+- `authUserId`: Auth `User.id`를 가리키는 UUID unique projection. 물리 cross-DB FK는 만들지 않는다.
+
+T034는 canonical `user-{UUID}` ID의 suffix만 `authUserId`로 backfill한다. 비정형 문자열을 임의 UUID로 hash하거나 새 UUID로 치환하지 않는다. 인증 identity가 연결된 User의 projection이 없거나 suffix와 다르면 이관을 중단한다. 이후 Core는 검증된 JWT `sub` UUID로 `authUserId`를 조회한 뒤 기존 문자열 업무 ID/FK를 사용한다. 신규 User는 BFF가 Auth 발급 성공 직후 target Core access와 workload identity로 동기 멱등 projection하고 성공 후에만 Browser session을 만든다.
 
 ### AuthIdentity
 
@@ -143,6 +153,7 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 
 - User 1:N AuthIdentity.
 - User 1:N AuthSession.
+- Auth User 1:1 CoreUserProjection을 목표로 하되 물리 cross-DB FK나 join은 사용하지 않는다.
 - AuthSession 1:N AuthRefreshCredential. 한 AuthSession은 하나의 family와 최대 하나의 active leaf를 가진다.
 - AuthSession 1:N AuthOutboxEvent.
 - AuthSession 1:N BffSession을 허용하되 정상 웹 흐름은 기기/브라우저 로그인당 1:1을 목표로 한다.
@@ -154,9 +165,10 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 
 - BffSession은 인증 상태만 나타내며 SpaceRole/MeetingParticipant 권한의 원천이 아니다.
 - Resource Service는 access JWT 서명과 필수 claim을 검증한 뒤 자신의 최신 RBAC/ACL을 확인한다.
-- `userId`, `authSessionId`, `tokenBundleId`는 현재 session과 연결된 값인지 서버에서 검증하고 브라우저 입력으로 받지 않는다.
+- `resourceUserId`, `authUserId`, `authSessionId`, `tokenBundleId`는 현재 session과 연결된 값인지 서버에서 검증하고 브라우저 입력으로 받지 않는다.
 - Token Vault 읽기/쓰기 권한은 Web BFF Token Manager workload에만 부여한다.
 - 모든 기기 로그아웃은 최근 10분 인증 또는 local 비밀번호/새 Google credential 재인증을 요구한다.
+- 재인증 성공 시 Auth Service가 반환한 서버 시각만 BffSession `authenticatedAt`에 저장한다. Browser가 제출한 시각을 신뢰하거나 재인증을 위해 새 AuthSession/TokenBundle을 만들지 않는다.
 - AI/RAG 검색은 서비스 분리 후에도 검색 전 권한 선필터를 적용한다.
 
 ## Validation and Invariants
@@ -166,6 +178,8 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 - Remember me가 false면 운영 cookie는 session cookie이고 서버 절대 만료는 12시간을 넘지 않는다.
 - Remember me가 true면 cookie와 서버 세션은 7일 sliding 유휴 만료와 14일 절대 만료를 함께 적용하고, 유휴 갱신은 절대 만료를 연장하지 않는다.
 - TokenBundle `authSessionId`는 BffSession과 일치해야 하며 mismatch 시 fail closed하고 보안 이벤트를 남긴다.
+- BffSession `resourceUserId`는 정확히 `user-{authUserId}`이고 Browser `User.id`와 Core `users.id`에 사용한다.
+- Spring Session principal index는 `authUserId` UUID 문자열을 사용한다. T035는 index를 생성하고 T024가 logout-all에서 사용자별 BffSession 조회에 사용한다.
 - TokenBundle의 audience별 access JWT는 각 entry의 audience와 JWT `aud`가 같아야 하고 600초 수명을 넘지 않는다.
 - refresh 성공은 새 credential 활성화, 이전 credential 사용 처리, TokenBundle 교체를 재시도 안전하게 수행해야 한다.
 - 이미 사용된 refresh 재사용은 같은 transaction에서 AuthSession/family revoke와 outbox insert까지 완료해야 한다.
@@ -192,3 +206,8 @@ AuthSession revoke와 AuthOutboxEvent insert는 같은 Auth PostgreSQL 트랜잭
 5. 기존 refresh row를 새 AuthSession/credential lineage로 추측 변환하지 않는다. 재로그인 또는 명시적 session migration으로 전환한다.
 6. Phase 1 TokenBundle schema v1은 legacy access를 `meetingmind-legacy`로만 해석한다. Auth Service 로그인/refresh 성공 시 schema v2 audience별 bundle로 원자 교체하며 v1 token을 신규 Resource Service audience로 복제하지 않는다.
 7. Core/Auth dual validation 기간이 끝난 뒤에만 legacy issuer와 token endpoint를 제거한다.
+8. Core forward-only migration은 nullable `users.auth_user_id UUID`와 partial unique index를 추가하고 canonical `user-{UUID}`만 backfill한다. 인증 identity가 없는 비정형 demo/resource user는 Core에 남을 수 있지만 Auth 이관 대상이 아니다.
+9. T034 오프라인 도구는 source와 target에 별도 JDBC 연결을 사용하며 DB link/cross-DB query를 만들지 않는다. `DRY_RUN`은 mapping과 충돌을 검사하고, `APPLY`는 target transaction으로 upsert 후 exact reconciliation하며, `VERIFY`는 변경 없이 대사한다.
+10. 이관 대상은 legacy `auth_identities`가 연결된 User/AuthIdentity다. local BCrypt hash와 Google provider subject는 보존하지만 refresh hash/AuthSession은 복사하지 않는다.
+11. 최초 snapshot 후 login/signup/Google 쓰기를 잠시 중단하고 final delta `APPLY`와 `VERIFY`를 통과한 뒤 Auth 발급을 전환한다. 실패하면 target 발급을 시작하지 않고 legacy DB/issuer를 유지한다.
+12. T035 배포에서 기존 직렬화 session/Token Bundle 문서는 새 구조로 추측 변환하지 않고 fail closed 후 재로그인을 요구한다. 새 코드의 schema v1 provider는 rollback window를 지원하지만 이전 release의 암호문 shape를 자동 수용한다는 의미는 아니다.

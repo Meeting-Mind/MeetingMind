@@ -45,7 +45,8 @@ public final class BffAbsoluteSessionExpiryFilter extends OncePerRequestFilter {
         }
 
         Object absoluteExpiry = session.getAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT);
-        boolean authenticatedSession = session.getAttribute(BffSessionAttributes.USER_ID) != null;
+        boolean authenticatedSession =
+                session.getAttribute(BffSessionAttributes.RESOURCE_USER_ID) != null;
         if (!authenticatedSession) {
             filterChain.doFilter(request, response);
             return;

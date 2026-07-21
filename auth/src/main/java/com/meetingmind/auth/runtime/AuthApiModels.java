@@ -69,6 +69,28 @@ final class AuthApiModels {
     ) {
     }
 
+    record ReauthenticateRequest(
+            @NotNull UUID currentAuthSessionId,
+            @NotNull UUID userId,
+            @NotBlank @Pattern(regexp = "PASSWORD|GOOGLE") String method,
+            @Size(max = 128) String password,
+            @Size(max = 8192) String credential
+    ) {
+        @Override
+        public String toString() {
+            return "ReauthenticateRequest[currentAuthSessionId="
+                    + currentAuthSessionId
+                    + ", userId="
+                    + userId
+                    + ", method="
+                    + method
+                    + ", credential=REDACTED]";
+        }
+    }
+
+    record ReauthenticateResponse(Instant authenticatedAt) {
+    }
+
     record RevokeAllRequest(
             @NotNull UUID currentAuthSessionId,
             @NotNull UUID userId,

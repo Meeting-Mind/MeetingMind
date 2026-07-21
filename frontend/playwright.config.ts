@@ -43,6 +43,8 @@ export default defineConfig({
         BFF_REDIS_HOST: "127.0.0.1",
         BFF_REDIS_PORT: process.env.BFF_REDIS_PORT ?? "6379",
         BFF_BACKEND_BASE_URL: `http://127.0.0.1:${backendPort}`,
+        BFF_AUTH_PROVIDER: "legacy",
+        BFF_AUTH_ISSUER: "meetingmind-core-legacy",
         BFF_TOKEN_VAULT_LOCAL_KEY_BASE64: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
         SPRING_PROFILES_ACTIVE: "local"
       },

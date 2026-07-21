@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.http.HttpHeaders;
@@ -19,7 +20,7 @@ import org.springframework.stereotype.Service;
 public class BffTokenManager {
 
     private final TokenVault tokenVault;
-    private final CompatibilityAuthClient compatibilityAuthClient;
+    private final AuthClient authClient;
     private final RefreshSingleFlightLock refreshLock;
     private final BffSessionManager sessionManager;
     private final TokenManagerPolicy policy;
@@ -28,14 +29,14 @@ public class BffTokenManager {
 
     public BffTokenManager(
             TokenVault tokenVault,
-            CompatibilityAuthClient compatibilityAuthClient,
+            AuthClient authClient,
             RefreshSingleFlightLock refreshLock,
             BffSessionManager sessionManager,
             TokenManagerPolicy policy,
             Clock clock,
             BffRolloutMetrics rolloutMetrics) {
         this.tokenVault = tokenVault;
-        this.compatibilityAuthClient = compatibilityAuthClient;
+        this.authClient = authClient;
         this.refreshLock = refreshLock;
         this.sessionManager = sessionManager;
         this.policy = policy;
@@ -43,18 +44,22 @@ public class BffTokenManager {
         this.rolloutMetrics = rolloutMetrics;
     }
 
-    public <T> T execute(HttpServletRequest request, AuthorizedDownstreamCall<T> downstreamCall) {
+    public <T> T execute(
+            HttpServletRequest request,
+            String audience,
+            AuthorizedDownstreamCall<T> downstreamCall) {
         SessionReference session = requireSession(request);
         VersionedTokenBundle tokens = readOrInvalidate(session, request, null);
         boolean refreshed = false;
+        com.meetingmind.bff.tokenvault.AudienceAccessToken access = accessToken(tokens.payload(), audience);
 
-        if (!tokens.payload().accessExpiresAt().isAfter(clock.instant().plus(policy.accessExpirySkew()))) {
+        if (!access.expiresAt().isAfter(clock.instant().plus(policy.accessExpirySkew()))) {
             tokens = refreshOrInvalidate(session, tokens, request);
             refreshed = true;
         }
 
         try {
-            return downstreamCall.execute(authorization(tokens.payload()));
+            return downstreamCall.execute(authorization(tokens.payload(), audience));
         } catch (DownstreamUnauthorizedException unauthorized) {
             if (refreshed) {
                 throw invalidate(request, tokens.payload());
@@ -63,7 +68,7 @@ public class BffTokenManager {
 
         VersionedTokenBundle refreshedTokens = refreshOrInvalidate(session, tokens, request);
         try {
-            return downstreamCall.execute(authorization(refreshedTokens.payload()));
+            return downstreamCall.execute(authorization(refreshedTokens.payload(), audience));
         } catch (DownstreamUnauthorizedException unauthorized) {
             throw invalidate(request, refreshedTokens.payload());
         }
@@ -74,12 +79,17 @@ public class BffTokenManager {
             SessionReference session = requireSession(request);
             VersionedTokenBundle tokens = tokenVault.readVersioned(
                     session.tokenBundleId(), session.authSessionId());
-            if (!tokens.payload().accessExpiresAt().isAfter(clock.instant().plus(policy.accessExpirySkew()))) {
-                tokens = refreshSingleFlight(session, tokens, request.getHeader(HttpHeaders.USER_AGENT));
+            if (tokens.payload().schemaVersion() == AuthTokenResponse.LEGACY_SCHEMA_VERSION
+                    && !accessToken(tokens.payload(), AuthTokenResponse.LEGACY_AUDIENCE)
+                            .expiresAt()
+                            .isAfter(clock.instant().plus(policy.accessExpirySkew()))) {
+                tokens = refreshSingleFlight(
+                        session, tokens, request.getHeader(HttpHeaders.USER_AGENT));
             }
-            compatibilityAuthClient.revokeBestEffort(
+            authClient.revokeBestEffort(
+                    session.authSessionId(),
                     tokens.payload().tokenType(),
-                    tokens.payload().accessToken(),
+                    rawAccessTokens(tokens.payload()),
                     tokens.payload().refreshToken());
         } catch (RuntimeException ignored) {
             // Logout is idempotent and fails closed even when Auth or the vault is unavailable.
@@ -116,9 +126,14 @@ public class BffTokenManager {
                         if (lockedCurrent.version() != observed.version()) {
                             return lockedCurrent;
                         }
-                        LegacyAuthTokenResponse response = compatibilityAuthClient.refresh(
-                                lockedCurrent.payload().refreshToken(), userAgent);
-                        if (!session.userId().equals(response.user().id())) {
+                        AuthTokenResponse response = authClient.refresh(
+                                session.authSessionId(),
+                                lockedCurrent.payload().refreshToken(),
+                                userAgent);
+                        if (!session.resourceUserId().equals(response.user().resourceUserId())
+                                || !session.authUserId().equals(response.user().authUserId())
+                                || !session.authSessionId().equals(response.authSessionId())
+                                || lockedCurrent.payload().schemaVersion() != response.schemaVersion()) {
                             throw BffAuthException.of(
                                     HttpStatus.UNAUTHORIZED,
                                     "SESSION_INVALID",
@@ -152,21 +167,26 @@ public class BffTokenManager {
     private TokenBundlePayload replacement(
             SessionReference session,
             TokenBundlePayload current,
-            LegacyAuthTokenResponse response) {
+            AuthTokenResponse response) {
         Instant now = clock.instant();
         Instant refreshExpiresAt = minimum(
                 now.plusSeconds(response.refreshExpiresIn()), session.absoluteExpiresAt());
-        Instant accessExpiresAt = minimum(now.plusSeconds(response.expiresIn()), refreshExpiresAt);
         return new TokenBundlePayload(
                 session.authSessionId(),
-                response.accessToken(),
+                response.schemaVersion(),
+                response.accessTokens().entrySet().stream()
+                        .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                                Map.Entry::getKey,
+                                entry -> new com.meetingmind.bff.tokenvault.AudienceAccessToken(
+                                        entry.getValue().token(),
+                                        minimum(
+                                                now.plusSeconds(entry.getValue().expiresIn()),
+                                                refreshExpiresAt)))),
                 response.refreshToken(),
                 response.tokenType(),
-                accessExpiresAt,
                 refreshExpiresAt,
                 current.issuer(),
-                current.audiences(),
-                current.scopes());
+                current.scopesByAudience());
     }
 
     private VersionedTokenBundle readOrInvalidate(
@@ -183,12 +203,14 @@ public class BffTokenManager {
         if (session == null) {
             throw invalidSession();
         }
-        Object userId = session.getAttribute(BffSessionAttributes.USER_ID);
+        Object resourceUserId = session.getAttribute(BffSessionAttributes.RESOURCE_USER_ID);
+        Object authUserId = session.getAttribute(BffSessionAttributes.AUTH_USER_ID);
         Object authSessionId = session.getAttribute(BffSessionAttributes.AUTH_SESSION_ID);
         Object tokenBundleId = session.getAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID);
         Object absoluteExpiresAt = session.getAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT);
-        if (!(userId instanceof String user)
+        if (!(resourceUserId instanceof String user)
                 || user.isBlank()
+                || !(authUserId instanceof UUID authUser)
                 || !(authSessionId instanceof UUID authId)
                 || !(tokenBundleId instanceof UUID bundleId)
                 || !(absoluteExpiresAt instanceof Instant absolute)
@@ -196,14 +218,17 @@ public class BffTokenManager {
             sessionManager.invalidateCurrentSession(request);
             throw invalidSession();
         }
-        return new SessionReference(user, authId, bundleId, absolute);
+        return new SessionReference(user, authUser, authId, bundleId, absolute);
     }
 
     private BffAuthException invalidate(HttpServletRequest request, TokenBundlePayload tokens) {
         if (tokens != null) {
             try {
-                compatibilityAuthClient.revokeBestEffort(
-                        tokens.tokenType(), tokens.accessToken(), tokens.refreshToken());
+                authClient.revokeBestEffort(
+                        tokens.authSessionId(),
+                        tokens.tokenType(),
+                        rawAccessTokens(tokens),
+                        tokens.refreshToken());
             } catch (RuntimeException ignored) {
                 // The browser session still fails closed; compatibility revoke failure is audited by the client.
             }
@@ -219,8 +244,23 @@ public class BffTokenManager {
                 "로그인이 만료되었습니다. 다시 로그인해 주세요.");
     }
 
-    private String authorization(TokenBundlePayload tokens) {
-        return tokens.tokenType() + " " + tokens.accessToken();
+    private String authorization(TokenBundlePayload tokens, String audience) {
+        return tokens.tokenType() + " " + accessToken(tokens, audience).token();
+    }
+
+    private com.meetingmind.bff.tokenvault.AudienceAccessToken accessToken(
+            TokenBundlePayload tokens, String audience) {
+        String key = tokens.schemaVersion() == AuthTokenResponse.LEGACY_SCHEMA_VERSION
+                ? AuthTokenResponse.LEGACY_AUDIENCE
+                : audience;
+        return tokens.requireAccessToken(key);
+    }
+
+    private Map<String, String> rawAccessTokens(TokenBundlePayload tokens) {
+        return tokens.accessTokens().entrySet().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey,
+                        entry -> entry.getValue().token()));
     }
 
     private void waitForLeader() {
@@ -237,5 +277,9 @@ public class BffTokenManager {
     }
 
     private record SessionReference(
-            String userId, UUID authSessionId, UUID tokenBundleId, Instant absoluteExpiresAt) {}
+            String resourceUserId,
+            UUID authUserId,
+            UUID authSessionId,
+            UUID tokenBundleId,
+            Instant absoluteExpiresAt) {}
 }

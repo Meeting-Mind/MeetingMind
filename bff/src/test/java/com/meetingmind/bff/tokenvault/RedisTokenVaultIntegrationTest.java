@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.meetingmind.bff.MeetingMindBffApplication;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,7 @@ class RedisTokenVaultIntegrationTest {
             String rawCreated = redis.opsForValue().get(namespace + ":" + bundleId);
             assertThat(rawCreated)
                     .isNotNull()
-                    .doesNotContain(first.accessToken())
+                    .doesNotContain(accessToken(first))
                     .doesNotContain(first.refreshToken());
 
             TokenBundlePayload second = payload(authSessionId, "access-plain-v2", "refresh-plain-v2", 1800);
@@ -40,9 +41,9 @@ class RedisTokenVaultIntegrationTest {
             assertThat(rotated.version()).isEqualTo(2);
             assertThat(rawRotated)
                     .isNotNull()
-                    .doesNotContain(first.accessToken())
+                    .doesNotContain(accessToken(first))
                     .doesNotContain(first.refreshToken())
-                    .doesNotContain(second.accessToken())
+                    .doesNotContain(accessToken(second))
                     .doesNotContain(second.refreshToken());
             assertThat(vault.read(bundleId, authSessionId)).isEqualTo(second);
 
@@ -72,14 +73,20 @@ class RedisTokenVaultIntegrationTest {
         Instant now = Instant.now();
         return new TokenBundlePayload(
                 authSessionId,
-                accessToken,
+                1,
+                Map.of(
+                        "meetingmind-legacy",
+                        new AudienceAccessToken(
+                                accessToken, now.plusSeconds(accessLifetimeSeconds))),
                 refreshToken,
                 "Bearer",
-                now.plusSeconds(accessLifetimeSeconds),
                 now.plusSeconds(1209600),
                 "meetingmind-auth",
-                Set.of("meetingmind-core"),
-                Set.of("meeting:read"));
+                Map.of());
+    }
+
+    private String accessToken(TokenBundlePayload payload) {
+        return payload.requireAccessToken("meetingmind-legacy").token();
     }
 
     private String environment(String name, String defaultValue) {

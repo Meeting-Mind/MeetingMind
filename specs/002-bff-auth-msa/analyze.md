@@ -11,7 +11,7 @@
 - Browser contract vs Data Model: Pass
 - Auth contract vs ERD: Pass; T030 lineage/JWT/outbox/workload 계약과 T032 물리 runtime 일치, 새 관계/migration 불필요
 - Legacy vs Target labeling: Pass
-- Verification coverage: T010, T011, T012, T013, T014, T015, T016, T020, T021, T022, T023, T030, T031, T032, T033 Pass; M002 Web BFF compatibility와 M003 Browser session cutover 완료, M004 Auth credential/session/revoke/keys 완료·data/cutover 진행 중
+- Verification coverage: T010, T011, T012, T013, T014, T015, T016, T020, T021, T022, T023, T024, T030, T031, T032, T033, T034, T035, T036 Pass; M002 Web BFF compatibility, M003 Browser session cutover와 M004 Auth Service 추출 완료
 
 ## Findings
 
@@ -39,11 +39,17 @@
 | Low | revoke-all이 `userId`와 BFF 최근 인증 주장만 받으면 Auth DB가 현재 session 소유자 결합을 독립 확인할 수 없다. | BFF 결합 버그나 침해가 다른 사용자의 모든 AuthSession 폐기로 확대될 수 있다. | `currentAuthSessionId`와 `userId`를 함께 받고 AuthSession owner, 최근 10분과 최대 60초 미래 skew를 변경 전에 검증한다. | Q-017, `auth-service-api.md`, `AuthRuntimeService` | T032 Verified |
 | Low | T033 전 임시 signer를 넣으면 HMAC/로컬 private key가 운영 계약으로 굳거나 test token이 image에 포함될 수 있다. | Resource validator 계약과 키 수명 경계가 갈라지고 서명키가 container에 노출될 수 있다. | production `AccessTokenIssuer`는 fail-closed port로 두고 test source signer로만 T032 DB/API를 검증하며 signer 부재 시 transaction rollback을 확인한다. | D-019, `auth/**` | T033 Resolved; KMS-only runtime adapter/JWKS/validator verified |
 | Low | JWKS rotation 순서가 운영자 기억에만 의존하면 새 `kid`가 validator cache에 없거나 이전 token이 overlap 전에 실패할 수 있다. | 정상 rotation 중 이미 발급된 access가 최대 10분 내인데도 거부되거나 Auth 장애 격리가 깨질 수 있다. | key ring이 정기 rotation의 5분 선게시와 1시간 이전 key overlap을 시작 시 검증하고 unknown `kid` 1회 refresh/fail-closed를 자동 테스트한다. | `auth/**`, target validator, `auth-service-api.md` | T033 Verified; 90일 운영 경보는 T045 |
+| Medium | T024가 T032만 의존하면 현재 BFF의 legacy 호환 UUID를 Auth Service의 실제 AuthSession으로 오인하게 된다. | Auth owner binding이 항상 실패하거나 실제 다른 기기 세션을 폐기하지 못한 채 UI만 성공으로 보일 수 있다. | T034 데이터 이전과 T035 BFF→Auth 전환에서 실제 AuthSession ID와 BFF 사용자 session index를 확보한 뒤 T024를 노출한다. | `tasks.md`, BFF compatibility auth, `auth-service-api.md` | T034→T035→T024 순차 구현과 실제 PostgreSQL/Redis 검증 완료 |
+| High | Auth User UUID를 Browser session `user.id`로 그대로 노출하면 Core 응답의 `user-{UUID}`와 달라 Frontend 참가자·멤버·현재 사용자 비교가 실패한다. | 로그인 뒤 회의 입장/권한 UI가 현재 사용자를 찾지 못하거나 자기 자신을 초대 대상으로 처리할 수 있다. | external resource user ID와 internal Auth UUID를 분리하고 BFF session에 두 값을 저장한다. | Q-020, Browser/Core contracts, BFF session | T035 Verified |
+| High | T034는 기존 User만 Auth/Core에 대사하므로 Auth cutover 뒤 신규 signup은 Core projection row가 없다. | 유효 target JWT가 발급돼도 Core가 `sub`를 업무 User로 해석하지 못해 첫 요청이 401이 된다. | BFF가 target Auth 성공 직후 Core projection을 동기 멱등 생성하고 성공 전 Browser session 생성을 막는다. | Q-021, `core-user-projection-api.md`, BFF/Core runtime | T035 Verified |
+| High | Core가 target validator 실패 뒤 legacy HS256 검증을 시도하면 알고리즘/profile 혼동이 downgrade 경로가 된다. | 잘못된 target token이 더 약한 legacy validator에 수용될 수 있다. | unverified header는 validator 선택에만 사용하고 `RS256/at+jwt/kid` 또는 legacy profile을 결정적으로 분류한 뒤 한 validator만 실행한다. | Core access resolver/tests | T035 Verified |
+| Medium | 단일 access/expiry Token Bundle은 target 서비스별 audience access를 표현하지 못한다. | Core token을 AI/LiveKit에 재사용하거나 잘못된 token으로 모든 route가 401이 될 수 있다. | schema v1/v2를 구분하고 v2 audience→token/expiry map을 원자 refresh하며 route가 정확한 audience를 선택한다. | BFF Token Vault/Manager/Proxy tests | T035 Verified |
 
 ## Recommendation
 
-1. T024는 T032 revoke-all 계약이 완료됐으므로 BFF 최근 인증/재인증과 Frontend 모든 기기 로그아웃 UI를 연결할 수 있다.
-2. T034에서 User/AuthIdentity/AuthSession forward-only 이전과 reconciliation/rollback 경계를 구현한 뒤 T035에서 T033 validator를 Core dual validation에 연결한다.
-3. Q-011~Q-013을 결정하기 전 EKS production 리소스를 생성하지 않는다.
-4. T023 runbook의 7일 관측 window와 guardrail을 실제 배포 지표로 통과한 뒤 compatibility 경로 제거를 승인한다.
-5. Auth Service 추출 뒤 도메인 분리는 EKS 관측 근거를 확보하고 별도 spec으로 진행한다.
+1. T034는 Core UUID projection, User/AuthIdentity forward-only 이전과 reconciliation/rollback 경계를 구현해 검증을 완료했다. legacy refresh session은 lineage와 원문을 복구할 수 없어 신규 AuthSession으로 변환하지 않는다.
+2. T035는 T033 validator를 Core dual validation에 연결하고 BFF target Auth, 실제 AuthSession/Auth UUID index, audience Token Bundle과 신규 User projection을 검증 완료했다.
+3. T024는 BFF 최근 인증/전용 재인증과 Frontend 모든 기기 로그아웃 UI를 실제 사용자 session index에 연결해 완료했다.
+4. Q-011~Q-013을 결정하기 전 EKS production 리소스를 생성하지 않는다.
+5. T023 runbook의 7일 관측 window와 guardrail을 실제 배포 지표로 통과한 뒤 compatibility 경로 제거를 승인한다.
+6. Auth Service 추출 뒤 도메인 분리는 EKS 관측 근거를 확보하고 별도 spec으로 진행한다.

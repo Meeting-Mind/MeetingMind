@@ -90,4 +90,48 @@ class JdbcAuthStoreIntegrationTest {
                 .isInstanceOf(AuthException.class)
                 .satisfies(error -> assertThat(((AuthException) error).code()).isEqualTo("REFRESH_TOKEN_INVALID"));
     }
+
+    @Test
+    void authProjectionIsIdempotentAndRejectsOwnershipConflicts() {
+        UUID authUserId = UUID.randomUUID();
+        String resourceUserId = "user-" + authUserId;
+        String email = "projection-" + authUserId + "@meetingmind.test";
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+
+        AuthUser created = store.upsertAuthProjection(
+                authUserId,
+                resourceUserId,
+                email,
+                "Projection User",
+                null,
+                "active",
+                now);
+        AuthUser updated = store.upsertAuthProjection(
+                authUserId,
+                resourceUserId,
+                email,
+                "Projection User Updated",
+                null,
+                "active",
+                now.plusSeconds(1));
+
+        assertThat(created.id()).isEqualTo(resourceUserId);
+        assertThat(updated.displayName()).isEqualTo("Projection User Updated");
+        assertThat(store.findUserByAuthUserId(authUserId))
+                .get()
+                .extracting(AuthUser::id)
+                .isEqualTo(resourceUserId);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.upsertAuthProjection(
+                        UUID.randomUUID(),
+                        resourceUserId,
+                        "conflict-" + email,
+                        "Conflict",
+                        null,
+                        "active",
+                        now))
+                .isInstanceOfSatisfying(
+                        AuthException.class,
+                        exception -> assertThat(exception.code())
+                                .isEqualTo("USER_PROJECTION_CONFLICT"));
+    }
 }

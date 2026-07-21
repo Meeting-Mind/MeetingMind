@@ -25,6 +25,13 @@ type AuthSessionBootstrap = {
   session: AuthSessionView | null;
 };
 
+export class ReauthenticationRequiredError extends Error {
+  constructor(message = "모든 기기 로그아웃을 위해 다시 인증해 주세요.") {
+    super(message);
+    this.name = "ReauthenticationRequiredError";
+  }
+}
+
 export async function bootstrapAuthSession(): Promise<AuthSession | null> {
   const response = await fetch("/api/v1/auth/session", {
     credentials: "same-origin",
@@ -89,6 +96,36 @@ export async function logoutCurrentSession(): Promise<void> {
   resetCsrfToken();
 }
 
+export async function logoutAllDevices(): Promise<void> {
+  let response: Response;
+  try {
+    response = await bffFetch("/api/v1/auth/logout-all", {
+      method: "POST",
+      headers: { Accept: "application/json" }
+    });
+  } catch {
+    throw new Error("전체 로그아웃 서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.");
+  }
+
+  if (response.status !== 204) {
+    const error = await readError(response);
+    if (response.status === 403 && error.code === "REAUTHENTICATION_REQUIRED") {
+      throw new ReauthenticationRequiredError(error.message);
+    }
+    throw new Error(error.message || `모든 기기 로그아웃 요청 실패 (${response.status})`);
+  }
+
+  resetCsrfToken();
+}
+
+export async function reauthenticateWithPassword(password: string): Promise<void> {
+  return reauthenticate({ method: "PASSWORD", password });
+}
+
+export async function reauthenticateWithGoogle(credential: string): Promise<void> {
+  return reauthenticate({ method: "GOOGLE", credential });
+}
+
 async function authRequest(path: string, body: Record<string, string | boolean>): Promise<AuthSession> {
   const response = await bffFetch(
     path,
@@ -117,6 +154,27 @@ async function authRequest(path: string, body: Record<string, string | boolean>)
   return { user: payload.user, session: payload.session };
 }
 
+async function reauthenticate(body: Record<string, string>): Promise<void> {
+  let response: Response;
+  try {
+    response = await bffFetch("/api/v1/auth/reauthenticate", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new Error("재인증 서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.");
+  }
+
+  if (response.status !== 204) {
+    const error = await readError(response);
+    throw new Error(error.message || `재인증 요청 실패 (${response.status})`);
+  }
+}
+
 function isAuthUser(value: unknown): value is AuthUser {
   if (!value || typeof value !== "object") {
     return false;
@@ -140,19 +198,26 @@ function isSessionView(value: unknown): value is AuthSessionView {
 }
 
 async function readErrorMessage(response: Response) {
+  return (await readError(response)).message;
+}
+
+async function readError(response: Response): Promise<{ code: string; message: string }> {
   try {
     const text = await response.text();
     if (!text) {
-      return "";
+      return { code: "", message: "" };
     }
 
     try {
-      const payload = JSON.parse(text) as { message?: string };
-      return payload.message || text;
+      const payload = JSON.parse(text) as { code?: string; message?: string };
+      return {
+        code: payload.code || "",
+        message: payload.message || text
+      };
     } catch {
-      return text;
+      return { code: "", message: text };
     }
   } catch {
-    return "";
+    return { code: "", message: "" };
   }
 }

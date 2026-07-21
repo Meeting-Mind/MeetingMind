@@ -1,6 +1,7 @@
 package com.meetingmind.bff.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.bff.config.BffSessionLifetimePolicy;
@@ -17,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,9 @@ class BffSessionManagerTest {
 
     private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
     private static final String LOCAL_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    private static final UUID AUTH_USER_ID =
+            UUID.fromString("0a5b7c1e-5d75-4dc0-a10e-a330d0583930");
+    private static final String RESOURCE_USER_ID = "user-" + AUTH_USER_ID;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final InMemoryStore store = new InMemoryStore();
@@ -40,9 +45,11 @@ class BffSessionManagerTest {
             new AesGcmTokenPayloadCipher(new LocalEnvelopeKeyService("test-key", LOCAL_KEY)),
             objectMapper,
             Clock.fixed(NOW, ZoneOffset.UTC));
+    private final NoOpCompatibilityClient authClient = new NoOpCompatibilityClient();
     private final BffSessionManager manager = new BffSessionManager(
             tokenVault,
-            new NoOpCompatibilityClient(),
+            authClient,
+            tokens -> {},
             new ChangeSessionIdAuthenticationStrategy(),
             new HttpSessionSecurityContextRepository(),
             new BffSessionLifetimePolicy(
@@ -51,8 +58,7 @@ class BffSessionManagerTest {
                     Duration.ofDays(7),
                     Duration.ofDays(14)),
             Clock.fixed(NOW, ZoneOffset.UTC),
-            "meetingmind-core-legacy",
-            "meetingmind-core");
+            "meetingmind-core-legacy");
 
     @AfterEach
     void clearSecurityContext() {
@@ -77,7 +83,10 @@ class BffSessionManagerTest {
                 .isEqualTo(NOW.plus(Duration.ofHours(12)));
         assertThat(request.getAttribute(SessionCookieConfiguration.COOKIE_MAX_AGE_REQUEST_ATTRIBUTE))
                 .isNull();
-        assertThat(storedTokens.accessToken()).isEqualTo("legacy-access-secret");
+        assertThat(storedTokens
+                        .requireAccessToken(AuthTokenResponse.LEGACY_AUDIENCE)
+                        .token())
+                .isEqualTo("legacy-access-secret");
         assertThat(storedTokens.refreshToken()).isEqualTo("legacy-refresh-secret");
         assertThat(objectMapper.writeValueAsString(authenticated))
                 .doesNotContain("legacy-access-secret")
@@ -107,8 +116,41 @@ class BffSessionManagerTest {
         BffSessionBootstrapResponse bootstrap = manager.currentSession(authentication, request);
 
         assertThat(bootstrap.authenticated()).isTrue();
-        assertThat(bootstrap.user().id()).isEqualTo("user-id");
+        assertThat(bootstrap.user().id()).isEqualTo(RESOURCE_USER_ID);
         assertThat(bootstrap.session().expiresAt()).isEqualTo(NOW.plus(Duration.ofHours(12)));
+    }
+
+    @Test
+    void projectionFailureRevokesTheIssuedAuthSessionBeforeCreatingLocalState() {
+        BffSessionManager failingManager = new BffSessionManager(
+                tokenVault,
+                authClient,
+                ignored -> {
+                    throw BffAuthException.of(
+                            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                            "USER_PROJECTION_UNAVAILABLE",
+                            "projection failed");
+                },
+                new ChangeSessionIdAuthenticationStrategy(),
+                new HttpSessionSecurityContextRepository(),
+                new BffSessionLifetimePolicy(
+                        Duration.ofMinutes(60),
+                        Duration.ofHours(12),
+                        Duration.ofDays(7),
+                        Duration.ofDays(14)),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                "meetingmind-core-legacy");
+        MockHttpServletRequest request = requestWithAnonymousSession();
+
+        assertThatThrownBy(() -> failingManager.establish(
+                        tokens(), false, request, new MockHttpServletResponse()))
+                .isInstanceOfSatisfying(
+                        BffAuthException.class,
+                        exception -> assertThat(exception.code())
+                                .isEqualTo("USER_PROJECTION_UNAVAILABLE"));
+
+        assertThat(authClient.revokeCalls).isEqualTo(1);
+        assertThat(store.bundle).isNull();
     }
 
     private MockHttpServletRequest requestWithAnonymousSession() {
@@ -117,14 +159,23 @@ class BffSessionManagerTest {
         return request;
     }
 
-    private LegacyAuthTokenResponse tokens() {
-        return new LegacyAuthTokenResponse(
-                "legacy-access-secret",
+    private AuthTokenResponse tokens() {
+        return new AuthTokenResponse(
+                AuthTokenResponse.LEGACY_SCHEMA_VERSION,
+                UUID.fromString("e655a7be-39b1-44eb-9559-419ea96e5c62"),
+                Map.of(
+                        AuthTokenResponse.LEGACY_AUDIENCE,
+                        new AuthTokenResponse.AccessToken("legacy-access-secret", 3_600)),
                 "legacy-refresh-secret",
                 "Bearer",
-                3_600,
                 1_209_600,
-                new LegacyAuthUser("user-id", "user@example.com", "User", null, "ACTIVE"));
+                new AuthTokenResponse.User(
+                        AUTH_USER_ID,
+                        RESOURCE_USER_ID,
+                        "user@example.com",
+                        "User",
+                        null,
+                        "ACTIVE"));
     }
 
     private static final class InMemoryStore implements EncryptedTokenBundleStore {
@@ -157,29 +208,38 @@ class BffSessionManagerTest {
         }
     }
 
-    private static final class NoOpCompatibilityClient implements CompatibilityAuthClient {
+    private static final class NoOpCompatibilityClient implements AuthClient {
+
+        private int revokeCalls;
 
         @Override
-        public LegacyAuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
+        public AuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public LegacyAuthTokenResponse login(BrowserAuthRequests.Login request, String userAgent) {
+        public AuthTokenResponse login(BrowserAuthRequests.Login request, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public LegacyAuthTokenResponse google(BrowserAuthRequests.Google request, String userAgent) {
+        public AuthTokenResponse google(BrowserAuthRequests.Google request, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public LegacyAuthTokenResponse refresh(String refreshToken, String userAgent) {
+        public AuthTokenResponse refresh(
+                UUID authSessionId, String refreshToken, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public void revokeBestEffort(String tokenType, String accessToken, String refreshToken) {}
+        public void revokeBestEffort(
+                UUID authSessionId,
+                String tokenType,
+                Map<String, String> accessTokens,
+                String refreshToken) {
+            revokeCalls++;
+        }
     }
 }

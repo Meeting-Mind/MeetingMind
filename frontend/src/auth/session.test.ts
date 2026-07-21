@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetCsrfToken } from "./csrf";
-import { bootstrapAuthSession, loginWithPassword, logoutCurrentSession, type AuthSession } from "./session";
+import {
+  bootstrapAuthSession,
+  loginWithPassword,
+  logoutAllDevices,
+  logoutCurrentSession,
+  reauthenticateWithGoogle,
+  reauthenticateWithPassword,
+  ReauthenticationRequiredError,
+  type AuthSession
+} from "./session";
 
 const validSession: AuthSession = {
   user: {
@@ -118,5 +127,55 @@ describe("BFF auth session", () => {
     await expect(logoutCurrentSession()).rejects.toThrow(
       "로그아웃 서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요."
     );
+  });
+
+  it("requires step-up authentication without clearing the active CSRF session", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "csrf-value", headerName: "X-CSRF-TOKEN" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: "REAUTHENTICATION_REQUIRED",
+            message: "다시 인증해 주세요."
+          }),
+          { status: 403 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(logoutAllDevices()).rejects.toBeInstanceOf(ReauthenticationRequiredError);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/auth/csrf",
+      "/api/v1/auth/logout-all"
+    ]);
+  });
+
+  it("sends only method-specific reauthentication proof and then logs out all devices", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "csrf-value", headerName: "X-CSRF-TOKEN" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reauthenticateWithPassword("password-123!")).resolves.toBeUndefined();
+    await expect(reauthenticateWithGoogle("google-credential")).resolves.toBeUndefined();
+    await expect(logoutAllDevices()).resolves.toBeUndefined();
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      method: "PASSWORD",
+      password: "password-123!"
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      method: "GOOGLE",
+      credential: "google-credential"
+    });
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/v1/auth/logout-all");
   });
 });

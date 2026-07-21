@@ -312,6 +312,18 @@ class AuthRuntimeService {
         });
     }
 
+    AuthApiModels.ReauthenticateResponse reauthenticate(
+            AuthApiModels.ReauthenticateRequest request,
+            String traceId
+    ) {
+        validateReauthenticationRequest(request);
+        return switch (request.method()) {
+            case "PASSWORD" -> reauthenticatePassword(request, traceId);
+            case "GOOGLE" -> reauthenticateGoogle(request, traceId);
+            default -> throw new IllegalStateException("검증되지 않은 재인증 방식입니다.");
+        };
+    }
+
     void revokeAll(AuthApiModels.RevokeAllRequest request, String traceId) {
         Instant now = Instant.now(clock);
         if (request.authenticatedAt().isBefore(now.minus(properties.recentAuthWindow()))
@@ -358,6 +370,164 @@ class AuthRuntimeService {
                 }
             }
         });
+    }
+
+    private AuthApiModels.ReauthenticateResponse reauthenticatePassword(
+            AuthApiModels.ReauthenticateRequest request,
+            String traceId
+    ) {
+        Instant authenticatedAt = transactions.execute(status -> {
+            ReauthenticationContext context = requireReauthenticationContext(request);
+            AuthModels.Identity identity = repository.findIdentityByUserAndProvider(
+                    request.userId(),
+                    "LOCAL"
+            ).orElse(null);
+            Instant now = Instant.now(clock);
+            if (identity == null
+                    || identity.passwordHash() == null
+                    || !passwords.matches(request.password(), identity.passwordHash())) {
+                recordReauthentication(
+                        context,
+                        "REAUTHENTICATION_FAILURE",
+                        "INVALID_CREDENTIALS",
+                        request.method(),
+                        now,
+                        traceId
+                );
+                return null;
+            }
+            recordReauthentication(
+                    context,
+                    "REAUTHENTICATION_SUCCESS",
+                    null,
+                    request.method(),
+                    now,
+                    traceId
+            );
+            return now;
+        });
+        if (authenticatedAt == null) {
+            throw reauthenticationFailed();
+        }
+        return new AuthApiModels.ReauthenticateResponse(authenticatedAt);
+    }
+
+    private AuthApiModels.ReauthenticateResponse reauthenticateGoogle(
+            AuthApiModels.ReauthenticateRequest request,
+            String traceId
+    ) {
+        transactions.executeWithoutResult(status -> requireReauthenticationContext(request));
+
+        AuthModels.GoogleUser googleUser;
+        try {
+            googleUser = googleVerifier.verify(request.credential());
+            validateGoogleUser(googleUser);
+        } catch (AuthRuntimeException exception) {
+            auditRecorder.failure(
+                    request.userId(),
+                    "REAUTHENTICATION_FAILURE",
+                    exception.code(),
+                    traceId
+            );
+            if ("AUTH_PROVIDER_UNAVAILABLE".equals(exception.code())) {
+                throw exception;
+            }
+            throw reauthenticationFailed();
+        }
+
+        Instant authenticatedAt = transactions.execute(status -> {
+            ReauthenticationContext context = requireReauthenticationContext(request);
+            AuthModels.Identity identity = repository.findIdentity(
+                    "GOOGLE",
+                    googleUser.providerUserId()
+            ).orElse(null);
+            Instant now = Instant.now(clock);
+            if (identity == null || !identity.userId().equals(request.userId())) {
+                recordReauthentication(
+                        context,
+                        "REAUTHENTICATION_FAILURE",
+                        "INVALID_CREDENTIALS",
+                        request.method(),
+                        now,
+                        traceId
+                );
+                return null;
+            }
+            recordReauthentication(
+                    context,
+                    "REAUTHENTICATION_SUCCESS",
+                    null,
+                    request.method(),
+                    now,
+                    traceId
+            );
+            return now;
+        });
+        if (authenticatedAt == null) {
+            throw reauthenticationFailed();
+        }
+        return new AuthApiModels.ReauthenticateResponse(authenticatedAt);
+    }
+
+    private ReauthenticationContext requireReauthenticationContext(
+            AuthApiModels.ReauthenticateRequest request
+    ) {
+        AuthModels.Session session = repository.findSessionForUpdate(
+                request.currentAuthSessionId()
+        ).orElseThrow(AuthRuntimeService::reauthenticationSubjectMismatch);
+        if (!session.userId().equals(request.userId())) {
+            throw reauthenticationSubjectMismatch();
+        }
+        Instant now = Instant.now(clock);
+        if (session.isRevoked() || session.isExpired(now)) {
+            throw AuthRuntimeException.unauthorized(
+                    "AUTH_SESSION_REVOKED",
+                    "인증 세션이 만료되었거나 폐기되었습니다."
+            );
+        }
+        AuthModels.User user = repository.findUserById(request.userId()).orElse(null);
+        if (user == null || !user.isActive()) {
+            throw AuthRuntimeException.unauthorized(
+                    "AUTH_SESSION_REVOKED",
+                    "인증 세션이 만료되었거나 폐기되었습니다."
+            );
+        }
+        return new ReauthenticationContext(user, session);
+    }
+
+    private void recordReauthentication(
+            ReauthenticationContext context,
+            String eventType,
+            String reasonCode,
+            String method,
+            Instant occurredAt,
+            String traceId
+    ) {
+        repository.insertAudit(
+                context.user().id(),
+                context.session().id(),
+                eventType,
+                reasonCode,
+                occurredAt,
+                traceId,
+                Map.of("method", method)
+        );
+    }
+
+    private void validateReauthenticationRequest(AuthApiModels.ReauthenticateRequest request) {
+        boolean passwordPresent = request.password() != null && !request.password().isBlank();
+        boolean credentialPresent = request.credential() != null && !request.credential().isBlank();
+        boolean valid = switch (request.method()) {
+            case "PASSWORD" -> passwordPresent && !credentialPresent;
+            case "GOOGLE" -> credentialPresent && !passwordPresent;
+            default -> false;
+        };
+        if (!valid) {
+            throw AuthRuntimeException.badRequest(
+                    "INVALID_REQUEST",
+                    "재인증 요청값이 올바르지 않습니다."
+            );
+        }
     }
 
     private AuthApiModels.TokenResponse issueSession(
@@ -498,6 +668,20 @@ class AuthRuntimeService {
         );
     }
 
+    private static AuthRuntimeException reauthenticationFailed() {
+        return AuthRuntimeException.unauthorized(
+                "REAUTHENTICATION_FAILED",
+                "인증 정보를 확인해 주세요."
+        );
+    }
+
+    private static AuthRuntimeException reauthenticationSubjectMismatch() {
+        return AuthRuntimeException.forbidden(
+                "AUTH_SESSION_SUBJECT_MISMATCH",
+                "인증 세션과 사용자가 일치하지 않습니다."
+        );
+    }
+
     private static AuthRuntimeException invalidIssuerOutput() {
         return AuthRuntimeException.serviceUnavailable(
                 "TOKEN_ISSUER_INVALID_OUTPUT",
@@ -549,5 +733,11 @@ class AuthRuntimeService {
         static RefreshOutcome error(RefreshResult result) {
             return new RefreshOutcome(result, null);
         }
+    }
+
+    private record ReauthenticationContext(
+            AuthModels.User user,
+            AuthModels.Session session
+    ) {
     }
 }

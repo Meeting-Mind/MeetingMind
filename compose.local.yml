@@ -61,6 +61,14 @@ services:
       BFF_ACCEPT_BROWSER_TRAFFIC: ${BFF_ACCEPT_BROWSER_TRAFFIC:-true}
       BFF_TOKEN_VAULT_LOCAL_KEY_BASE64: ${BFF_TOKEN_VAULT_LOCAL_KEY_BASE64:-}
       BFF_BACKEND_BASE_URL: ${BFF_BACKEND_BASE_URL:-http://host.docker.internal:8080}
+      BFF_CORE_BASE_URL: ${BFF_CORE_BASE_URL:-http://host.docker.internal:8080}
+      BFF_AUTH_PROVIDER: ${BFF_AUTH_PROVIDER:-auth-service}
+      BFF_AUTH_ISSUER: ${BFF_AUTH_ISSUER:-https://auth.meetingmind.internal}
+      BFF_AUTH_SERVICE_BASE_URL: ${BFF_AUTH_SERVICE_BASE_URL:-http://meetingmind-auth:8082}
+      BFF_AUTH_ALLOW_TEST_PRINCIPAL_HEADER: ${BFF_AUTH_ALLOW_TEST_PRINCIPAL_HEADER:-true}
+      BFF_AUTH_TEST_PRINCIPAL: ${BFF_AUTH_TEST_PRINCIPAL:-spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff}
+      BFF_CORE_ALLOW_TEST_PRINCIPAL_HEADER: ${BFF_CORE_ALLOW_TEST_PRINCIPAL_HEADER:-true}
+      BFF_CORE_TEST_PRINCIPAL: ${BFF_CORE_TEST_PRINCIPAL:-spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff}
     ports:
       - "${MEETINGMIND_BFF_PORT:-8081}:8081"
     depends_on:

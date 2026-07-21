@@ -4,7 +4,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Target Internal Contract; T032 credential/session/revoke and T033 KMS/JWKS/validator complete, BFF/Core cutover pending T035 |
+| Status | Implemented through T035 BFF/Core cutover; production mTLS/KMS/EKS wiring remains T040+ |
 | Owner | Auth Service |
 | Base path | `/internal/v1/auth` |
 | Consumers | Web BFF only for login/refresh/revoke; Resource Services for JWKS only |
@@ -55,6 +55,7 @@
 ```
 
 - 각 access JWT의 `aud`는 정확히 하나이며 다른 Resource Service에서 사용할 수 없다.
+- 내부 응답 `user.id`는 Auth UUID이며 JWT `sub`와 같다. BFF는 Browser/Core 외부 응답에 이를 직접 노출하지 않고 deterministic `user-{Auth UUID}` resource ID를 만든다.
 - access 만료는 600초, 허용 clock skew는 검증 시 60초다.
 - refresh 절대 상한은 14일이다.
 - `accessTokens`는 고정 allowlist audience만 포함하며 요청 body가 임의 audience를 선택하지 않는다.
@@ -157,6 +158,50 @@
 - BFF는 session에 연결된 `authSessionId`만 보내며 브라우저 값을 전달하지 않는다.
 - AuthSession revoke와 `AuthSessionRevokedV1` outbox insert가 같은 DB 트랜잭션에 durable하게 커밋된 뒤 응답한다.
 
+## POST /internal/v1/auth/reauthenticate
+
+현재 AuthSession에 민감 동작용 최근 인증을 부여하되 새 AuthSession, refresh family 또는 access JWT를 만들지 않는다.
+
+### Local Request
+
+```json
+{
+  "currentAuthSessionId": "e655a7be-39b1-44eb-9559-419ea96e5c62",
+  "userId": "0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
+  "method": "PASSWORD",
+  "password": "password-123!",
+  "credential": null
+}
+```
+
+### Google Request
+
+```json
+{
+  "currentAuthSessionId": "e655a7be-39b1-44eb-9559-419ea96e5c62",
+  "userId": "0a5b7c1e-5d75-4dc0-a10e-a330d0583930",
+  "method": "GOOGLE",
+  "password": null,
+  "credential": "new-google-id-credential"
+}
+```
+
+정확히 선택한 method의 credential 하나만 허용한다. BFF는 ID를 서버 session에서, credential만 Browser의 현재 요청에서 가져온다.
+
+### Response `200`
+
+```json
+{
+  "authenticatedAt": "2026-07-18T04:10:00Z"
+}
+```
+
+- Auth Service는 현재 AuthSession을 잠그고 `userId` 소유권, active/expiry와 User `ACTIVE`를 먼저 확인한다.
+- `PASSWORD`는 해당 User에 이미 연결된 `LOCAL` identity의 BCrypt hash만 비교한다.
+- `GOOGLE`은 signature/issuer/audience/expiry를 새로 검증하고 해당 Google `sub` identity가 같은 User에 이미 연결됐는지 확인한다. 계정이나 identity를 생성·연결하지 않는다.
+- 성공 시 `REAUTHENTICATION_SUCCESS`, 실패 시 credential/provider 존재를 노출하지 않는 `REAUTHENTICATION_FAILURE` 감사를 남기며 credential 원문은 저장·로그하지 않는다.
+- credential 또는 identity 불일치는 `401 REAUTHENTICATION_FAILED`, session/user 결합 불일치는 `403 AUTH_SESSION_SUBJECT_MISMATCH`, 만료·폐기 session은 `401 AUTH_SESSION_REVOKED`다.
+
 ## POST /internal/v1/auth/revoke-all
 
 사용자의 모든 논리 AuthSession을 폐기한다.
@@ -175,7 +220,7 @@
 ### Response
 
 - `204`, 이미 모두 폐기된 경우에도 멱등하다.
-- BFF가 최근 10분 인증 또는 local/Google 재인증을 먼저 적용하고 Auth Service도 workload principal과 subject/user binding을 검증한다.
+- BFF가 최근 10분 인증 또는 전용 local/Google 재인증을 먼저 적용하고 Auth Service도 workload principal과 subject/user binding을 검증한다.
 - `currentAuthSessionId`와 `userId`는 BFF 서버 세션에서만 가져오며 브라우저 값을 전달하지 않는다. Auth Service는 해당 AuthSession row의 `userId` 결합과 `authenticatedAt`이 현재 기준 10분 이내이고 60초 이상 미래가 아닌지 다시 검증한다.
 - 결합 불일치는 `403 AUTH_SESSION_SUBJECT_MISMATCH`, 최근 인증 미충족은 `401 RECENT_AUTH_REQUIRED`로 거부하며 어떤 세션도 변경하지 않는다.
 - 사용자 소유의 각 active AuthSession을 revoke하고 session별 `AuthSessionRevokedV1` outbox를 같은 트랜잭션에 기록한 뒤 응답한다.
@@ -224,7 +269,7 @@ T033 Resource validator는 JWKS를 최대 5분 메모리 cache하고 ETag 재검
 
 - BFF/Auth/Resource 내부 호출은 양방향 TLS와 SPIFFE URI SAN workload identity를 사용한다.
 - identity 형식은 `spiffe://meetingmind.internal/ns/{namespace}/sa/{serviceAccount}`다.
-- `/internal/v1/auth/signup|login|google|refresh|revoke|revoke-all`은 Web BFF principal만 호출할 수 있다.
+- `/internal/v1/auth/signup|login|google|refresh|revoke|reauthenticate|revoke-all`은 Web BFF principal만 호출할 수 있다.
 - JWKS는 등록된 Resource Service와 Web BFF principal만 호출할 수 있다.
 - public ingress는 `/internal/**`와 JWKS internal route를 라우팅하지 않는다.
 - NetworkPolicy로 caller/callee namespace와 service account 경계를 제한하고 애플리케이션은 신뢰 프록시가 검증한 principal만 allowlist와 대조한다.
@@ -235,3 +280,5 @@ T033 Resource validator는 JWKS를 최대 5분 메모리 cache하고 ETag 재검
 Phase 1에는 Web BFF가 현재 Backend `/api/v1/auth/signup|login|google|refresh|logout`을 서버 측에서 호출할 수 있다. 이 응답은 BFF 밖으로 전달하지 않고 즉시 Token Bundle로 암호화한다. Auth Service 추출과 dual validation 종료 전에는 기존 endpoint/schema를 삭제하지 않는다.
 
 현재 Backend token 응답에는 목표 논리 `authSessionId`가 없으므로 Phase 1 BFF가 내부 호환 ID를 생성한다. 이 값은 Browser나 현재 Backend로 전달하지 않고 BffSession/TokenBundle 연결에만 사용하며, Auth Service 전환 시 Internal Token Response의 서버 발급 `authSessionId`로 교체한다.
+
+Auth Service 전환 모드는 명시적 설정으로만 선택한다. target Auth 호출 실패를 legacy Backend로 자동 재시도하지 않으며 rollback은 BFF provider 설정과 Core validation mode를 함께 바꾸는 운영 절차로 수행한다.

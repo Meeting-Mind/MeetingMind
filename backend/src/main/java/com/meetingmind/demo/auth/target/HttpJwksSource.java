@@ -5,6 +5,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,8 +16,17 @@ public final class HttpJwksSource implements JwksSource {
     private final URI uri;
     private final HttpClient httpClient;
     private final Duration requestTimeout;
+    private final Map<String, String> fixedHeaders;
 
     public HttpJwksSource(URI uri, HttpClient httpClient, Duration requestTimeout) {
+        this(uri, httpClient, requestTimeout, Map.of());
+    }
+
+    public HttpJwksSource(
+            URI uri,
+            HttpClient httpClient,
+            Duration requestTimeout,
+            Map<String, String> fixedHeaders) {
         if (uri == null || !uri.isAbsolute()) {
             throw new IllegalArgumentException("JWKS URI는 절대 URI여야 합니다.");
         }
@@ -29,6 +39,7 @@ public final class HttpJwksSource implements JwksSource {
         this.uri = uri;
         this.httpClient = httpClient;
         this.requestTimeout = requestTimeout;
+        this.fixedHeaders = fixedHeaders == null ? Map.of() : Map.copyOf(fixedHeaders);
     }
 
     @Override
@@ -38,6 +49,7 @@ public final class HttpJwksSource implements JwksSource {
                     .timeout(requestTimeout)
                     .header("Accept", "application/json")
                     .GET();
+            fixedHeaders.forEach(request::header);
             if (etag != null && !etag.isBlank()) {
                 request.header("If-None-Match", etag);
             }

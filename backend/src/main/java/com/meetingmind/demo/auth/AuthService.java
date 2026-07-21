@@ -12,17 +12,20 @@ public class AuthService {
     private final AuthStore store;
     private final PasswordHasher passwordHasher;
     private final AuthTokenService tokenService;
+    private final AccessTokenSubjectResolver accessTokenSubjectResolver;
     private final GoogleCredentialVerifier googleCredentialVerifier;
 
     public AuthService(
             AuthStore store,
             PasswordHasher passwordHasher,
             AuthTokenService tokenService,
-            GoogleCredentialVerifier googleCredentialVerifier
+            GoogleCredentialVerifier googleCredentialVerifier,
+            AccessTokenSubjectResolver accessTokenSubjectResolver
     ) {
         this.store = store;
         this.passwordHasher = passwordHasher;
         this.tokenService = tokenService;
+        this.accessTokenSubjectResolver = accessTokenSubjectResolver;
         this.googleCredentialVerifier = googleCredentialVerifier;
     }
 
@@ -106,8 +109,11 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public AuthUserResponse currentUser(String authorizationHeader) {
-        String userId = tokenService.resolveSubject(authorizationHeader);
-        return store.findUserById(userId)
+        AccessTokenSubjectResolver.Subject subject =
+                accessTokenSubjectResolver.resolve(authorizationHeader);
+        return (subject.target()
+                        ? store.findUserByAuthUserId(subject.authUserId())
+                        : store.findUserById(subject.resourceUserId()))
                 .map(AuthUserResponse::from)
                 .orElseThrow(() -> new AuthException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "사용자를 찾을 수 없습니다."));
     }

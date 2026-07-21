@@ -11,6 +11,7 @@
 ### User
 
 - `id`
+- `authUserId`: nullable UUID unique projection. canonical `user-{UUID}`만 V13에서 backfill하며 Auth DB와 물리 FK를 만들지 않는다.
 - `email`
 - `displayName`
 - `pictureUrl`
@@ -18,7 +19,7 @@
 - `createdAt`
 - `lastLoginAt`
 
-Backend가 발급하는 MeetingMind access token의 subject는 `User.id`다. 사용자는 여러 인증 방식을 가질 수 있으므로 Google OAuth와 자체 계정 정보는 `AuthIdentity`로 분리한다.
+legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth access token의 UUID `sub`는 `authUserId`로 Core User를 찾고, Space/Meeting 등 기존 업무 FK는 문자열 `User.id`를 계속 사용한다. 신규 Auth User는 BFF가 target Core access와 workload identity로 internal projection을 동기 멱등 생성하며 `id = "user-" + authUserId` ownership 충돌은 거부한다. 사용자는 여러 인증 방식을 가질 수 있으므로 Google OAuth와 자체 계정 정보는 `AuthIdentity`로 분리한다.
 
 ### AuthIdentity
 

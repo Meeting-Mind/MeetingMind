@@ -22,9 +22,12 @@ spring:
     timeout: ${BFF_SESSION_IDLE_TIMEOUT:60m}
     redis:
       namespace: meetingmind:bff:session
+      repository-type: indexed
 
 meetingmind:
   bff:
+    auth-provider: ${BFF_AUTH_PROVIDER:auth-service}
+    auth-issuer: ${BFF_AUTH_ISSUER:https://auth.meetingmind.internal}
     session-cookie:
       name: ${BFF_SESSION_COOKIE_NAME:__Host-mm-session}
       secure: ${BFF_SESSION_COOKIE_SECURE:true}
@@ -43,8 +46,14 @@ meetingmind:
       local-master-key-base64: ${BFF_TOKEN_VAULT_LOCAL_KEY_BASE64:}
     compat-auth:
       base-url: ${BFF_BACKEND_BASE_URL:http://127.0.0.1:8080}
-      issuer: ${BFF_COMPAT_AUTH_ISSUER:meetingmind-core-legacy}
-      audience: ${BFF_COMPAT_AUTH_AUDIENCE:meetingmind-core}
+    target-auth:
+      base-url: ${BFF_AUTH_SERVICE_BASE_URL:http://127.0.0.1:8082}
+      allow-test-principal-header: ${BFF_AUTH_ALLOW_TEST_PRINCIPAL_HEADER:false}
+      test-principal: ${BFF_AUTH_TEST_PRINCIPAL:}
+    core-projection:
+      base-url: ${BFF_CORE_BASE_URL:http://127.0.0.1:8080}
+      allow-test-principal-header: ${BFF_CORE_ALLOW_TEST_PRINCIPAL_HEADER:false}
+      test-principal: ${BFF_CORE_TEST_PRINCIPAL:}
     token-manager:
       access-expiry-skew: 30s
       lock-namespace: ${BFF_TOKEN_REFRESH_LOCK_NAMESPACE:meetingmind:bff:token-refresh-lock}

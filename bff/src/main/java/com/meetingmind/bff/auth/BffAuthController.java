@@ -18,17 +18,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/auth")
 public class BffAuthController {
 
-    private final CompatibilityAuthClient compatibilityAuthClient;
+    private final AuthClient authClient;
     private final BffSessionManager sessionManager;
     private final BffTokenManager tokenManager;
+    private final BffAllDeviceLogoutService allDeviceLogoutService;
 
     public BffAuthController(
-            CompatibilityAuthClient compatibilityAuthClient,
+            AuthClient authClient,
             BffSessionManager sessionManager,
-            BffTokenManager tokenManager) {
-        this.compatibilityAuthClient = compatibilityAuthClient;
+            BffTokenManager tokenManager,
+            BffAllDeviceLogoutService allDeviceLogoutService) {
+        this.authClient = authClient;
         this.sessionManager = sessionManager;
         this.tokenManager = tokenManager;
+        this.allDeviceLogoutService = allDeviceLogoutService;
     }
 
     @PostMapping("/signup")
@@ -37,8 +40,8 @@ public class BffAuthController {
             @Valid @RequestBody BrowserAuthRequests.Signup request,
             HttpServletRequest servletRequest,
             HttpServletResponse servletResponse) {
-        LegacyAuthTokenResponse tokens =
-                compatibilityAuthClient.signup(request, servletRequest.getHeader("User-Agent"));
+        AuthTokenResponse tokens =
+                authClient.signup(request, servletRequest.getHeader("User-Agent"));
         return sessionManager.establish(tokens, request.rememberMe(), servletRequest, servletResponse);
     }
 
@@ -47,8 +50,8 @@ public class BffAuthController {
             @Valid @RequestBody BrowserAuthRequests.Login request,
             HttpServletRequest servletRequest,
             HttpServletResponse servletResponse) {
-        LegacyAuthTokenResponse tokens =
-                compatibilityAuthClient.login(request, servletRequest.getHeader("User-Agent"));
+        AuthTokenResponse tokens =
+                authClient.login(request, servletRequest.getHeader("User-Agent"));
         return sessionManager.establish(tokens, request.rememberMe(), servletRequest, servletResponse);
     }
 
@@ -57,8 +60,8 @@ public class BffAuthController {
             @Valid @RequestBody BrowserAuthRequests.Google request,
             HttpServletRequest servletRequest,
             HttpServletResponse servletResponse) {
-        LegacyAuthTokenResponse tokens =
-                compatibilityAuthClient.google(request, servletRequest.getHeader("User-Agent"));
+        AuthTokenResponse tokens =
+                authClient.google(request, servletRequest.getHeader("User-Agent"));
         return sessionManager.establish(tokens, request.rememberMe(), servletRequest, servletResponse);
     }
 
@@ -74,5 +77,19 @@ public class BffAuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(HttpServletRequest request) {
         tokenManager.logout(request);
+    }
+
+    @PostMapping("/reauthenticate")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void reauthenticate(
+            @Valid @RequestBody BrowserAuthRequests.Reauthenticate request,
+            HttpServletRequest servletRequest) {
+        allDeviceLogoutService.reauthenticate(request, servletRequest);
+    }
+
+    @PostMapping("/logout-all")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logoutAll(HttpServletRequest request) {
+        allDeviceLogoutService.logoutAll(request);
     }
 }

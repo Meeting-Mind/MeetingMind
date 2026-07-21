@@ -34,6 +34,25 @@ class MigrationIntegrationTest {
                     values ('migration-user', 'migration@meetingmind.test', 'Migration User')
                     """);
             statement.executeUpdate("""
+                    insert into users (id, email, display_name)
+                    values (
+                        'user-11111111-1111-4111-8111-111111111111',
+                        'auth-migration@meetingmind.test',
+                        'Auth Migration User'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    insert into auth_identities (
+                        id, user_id, provider, provider_user_id, password_hash
+                    ) values (
+                        'identity-22222222-2222-4222-8222-222222222222',
+                        'user-11111111-1111-4111-8111-111111111111',
+                        'local',
+                        'auth-migration@meetingmind.test',
+                        '$2a$10$migrationfixturehash'
+                    )
+                    """);
+            statement.executeUpdate("""
                     insert into spaces (id, name, created_by)
                     values ('migration-space', 'Migration Space', 'migration-user')
                     """);
@@ -47,13 +66,13 @@ class MigrationIntegrationTest {
                     """);
         }
 
-        var v12Result = Flyway.configure()
+        var v13Result = Flyway.configure()
                 .dataSource(url, user, password)
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
 
-        assertThat(v12Result.migrationsExecuted).isEqualTo(2);
+        assertThat(v13Result.migrationsExecuted).isEqualTo(3);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -67,10 +86,27 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"
             );
 
             try (var statement = connection.createStatement()) {
+                try (var rows = statement.executeQuery("""
+                        select auth_user_id
+                        from users
+                        where id = 'user-11111111-1111-4111-8111-111111111111'
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getObject("auth_user_id").toString())
+                            .isEqualTo("11111111-1111-4111-8111-111111111111");
+                }
+                try (var rows = statement.executeQuery("""
+                        select auth_user_id
+                        from users
+                        where id = 'migration-user'
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getObject("auth_user_id")).isNull();
+                }
                 try (var rows = statement.executeQuery("""
                         select column_name
                         from information_schema.columns

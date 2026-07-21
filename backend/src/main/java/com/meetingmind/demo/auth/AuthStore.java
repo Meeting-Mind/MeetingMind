@@ -2,10 +2,13 @@ package com.meetingmind.demo.auth;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 public interface AuthStore {
 
     Optional<AuthUser> findUserById(String userId);
+
+    Optional<AuthUser> findUserByAuthUserId(UUID authUserId);
 
     Optional<AuthUser> findUserByEmail(String email);
 
@@ -36,6 +39,15 @@ public interface AuthStore {
     Optional<RefreshTokenSession> findRefreshSessionForUpdate(String refreshTokenHash);
 
     void revokeRefreshSession(String refreshTokenHash, Instant revokedAt);
+
+    AuthUser upsertAuthProjection(
+            UUID authUserId,
+            String resourceUserId,
+            String email,
+            String displayName,
+            String pictureUrl,
+            String status,
+            Instant now);
 
     static String normalizeEmail(String email) {
         return email.trim().toLowerCase();

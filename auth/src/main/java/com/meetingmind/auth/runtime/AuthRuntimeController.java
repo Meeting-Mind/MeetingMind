@@ -73,6 +73,19 @@ class AuthRuntimeController {
         return noContent();
     }
 
+    @PostMapping("/reauthenticate")
+    ResponseEntity<AuthApiModels.ReauthenticateResponse> reauthenticate(
+            @Valid @RequestBody AuthApiModels.ReauthenticateRequest request,
+            HttpServletRequest servletRequest
+    ) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(service.reauthenticate(
+                        request,
+                        RequestTraceFilter.current(servletRequest)
+                ));
+    }
+
     @PostMapping("/revoke-all")
     ResponseEntity<Void> revokeAll(
             @Valid @RequestBody AuthApiModels.RevokeAllRequest request,

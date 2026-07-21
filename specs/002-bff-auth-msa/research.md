@@ -39,6 +39,8 @@
 | D-020 | Refresh lookup hash는 환경 secret 기반 HMAC-SHA-256 | 랜덤 refresh 원문을 DB에 저장하지 않으면서 indexed lookup과 secret 교체 경계를 제공한다. | 평문, 단순 SHA-256, 느린 password hash | 최소 32자 secret을 secret manager로 주입하고 DB에는 `hmac_sha256$...`만 저장한다. |
 | D-021 | T032는 transactional outbox producer까지만 구현 | transport 제품이 Q-012/T040에 남아 있어 임시 broker/no-op publisher가 durable revoke를 성공으로 위장하면 안 된다. | 임시 in-memory/no-op publish, 제품 선결정 | revoke transaction은 outbox row까지 durable하게 커밋하고 실제 전송·재시도·관측 adapter는 T045 출시 gate로 유지한다. |
 | D-012 | 명시 route registry와 JDK/Spring 기반 서비스별 회복성 guard | 현재 실제 API만 목적지·method와 함께 고정해 SSRF/과도한 proxy 범위를 막고, 새 라이브러리 없이 timeout·Semaphore bulkhead·연속 실패 circuit 요구를 충족한다. | 동적 reverse proxy, Resilience4j 신규 도입, 모든 `/api/v1/**` 전달 | Core/AI/LiveKit별 설정과 route/error 자동 테스트가 필요하며 운영 SLO 확정 뒤 기본값을 조정한다. |
+| D-022 | Core 문자열 User PK 유지 + Auth UUID projection | 이미 Space/Meeting 등 다수 업무 FK가 `users.id`를 참조하므로 전면 PK 재작성 없이 Auth의 UUID subject 계약을 지킨다. | Auth도 legacy 문자열 사용, 모든 Core FK를 UUID로 일괄 변환, 별도 mapping table | Core `users.auth_user_id UUID` unique projection과 canonical `user-{UUID}` backfill이 필요하며 비정형 인증 ID는 fail closed한다. |
+| D-023 | 오프라인 snapshot/delta 이관 + 짧은 인증 쓰기 중단 | 현재 규모에서 dual-write/CDC 운영 복잡도를 추가하지 않고 동일 입력의 반복 실행과 exact reconciliation으로 전환을 검증할 수 있다. | application dual-write, CDC/DMS/Debezium, login 시 lazy migration | User/AuthIdentity만 이전하고 최종 delta 동안 login/signup/Google 쓰기를 중단한다. 기존 refresh/AuthSession은 이전하지 않아 사용자는 전환 후 재로그인한다. |
 
 ## Evidence
 
@@ -61,6 +63,9 @@
 - Spring Session JDBC: 신규 인프라가 적지만 세션 hot write가 Core PostgreSQL과 장애 자원을 공유한다.
 - Google Authorization Code 즉시 전환: Google API 권한이 없는 현재 로그인 요구에 불필요한 scope/token 운영을 추가한다.
 - LiveKit 자체 호스팅: 미디어 node, UDP/TURN, autoscaling 운영이 현재 제품 핵심 개발 범위를 잠식한다.
+- Auth subject에 legacy 문자열 ID 유지: 초기 변경은 작지만 UUID/JWT 계약과 서비스별 독립 모델에 legacy 형식이 계속 전파된다.
+- Core User PK/FK 일괄 UUID 변환: 신규 데이터가 거의 없고 모든 도메인 팀을 동시에 멈출 수 있을 때는 깔끔하지만, 현재 점진 전환과 충돌·rollback 범위에 비해 위험이 크다.
+- application dual-write 또는 CDC 선도입: 무중단 대규모 이전에는 적합하지만 현재는 분산 실패 보상, 순서·재처리 관측과 추가 인프라가 T034 범위를 크게 넘는다.
 
 ## Follow-up
 

@@ -9,6 +9,7 @@ import com.meetingmind.bff.config.TokenManagerPolicy;
 import com.meetingmind.bff.observability.BffRolloutMetrics;
 import com.meetingmind.bff.tokenvault.EncryptedTokenBundle;
 import com.meetingmind.bff.tokenvault.EncryptedTokenBundleStore;
+import com.meetingmind.bff.tokenvault.AudienceAccessToken;
 import com.meetingmind.bff.tokenvault.TokenBundlePayload;
 import com.meetingmind.bff.tokenvault.TokenVault;
 import com.meetingmind.bff.tokenvault.TokenVaultException;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -40,7 +42,9 @@ class BffTokenManagerTest {
 
     private static final Instant NOW = Instant.parse("2026-07-16T00:00:00Z");
     private static final String LOCAL_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
-    private static final String USER_ID = "user-id";
+    private static final UUID AUTH_USER_ID =
+            UUID.fromString("0a5b7c1e-5d75-4dc0-a10e-a330d0583930");
+    private static final String USER_ID = "user-" + AUTH_USER_ID;
 
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final InMemoryStore store = new InMemoryStore();
@@ -56,6 +60,7 @@ class BffTokenManagerTest {
     private final BffSessionManager sessionManager = new BffSessionManager(
             tokenVault,
             authClient,
+            tokens -> {},
             new ChangeSessionIdAuthenticationStrategy(),
             new HttpSessionSecurityContextRepository(),
             new BffSessionLifetimePolicy(
@@ -64,8 +69,7 @@ class BffTokenManagerTest {
                     Duration.ofDays(7),
                     Duration.ofDays(14)),
             clock,
-            "meetingmind-core-legacy",
-            "meetingmind-core");
+            "meetingmind-core-legacy");
     private final BffTokenManager tokenManager = new BffTokenManager(
             tokenVault,
             authClient,
@@ -83,7 +87,8 @@ class BffTokenManagerTest {
     void refreshesBeforeCallingDownstreamWhenAccessIsNearExpiry() {
         SessionFixture fixture = sessionFixture(10);
 
-        String authorization = tokenManager.execute(fixture.request(), value -> value);
+        String authorization =
+                tokenManager.execute(fixture.request(), "meetingmind-core", value -> value);
 
         assertThat(authorization).isEqualTo("Bearer refreshed-access-secret");
         assertThat(authClient.refreshCalls).hasValue(1);
@@ -104,10 +109,10 @@ class BffTokenManagerTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<String> firstResult = executor.submit(() ->
-                    tokenManager.execute(first.request(), value -> value));
+                    tokenManager.execute(first.request(), "meetingmind-core", value -> value));
             assertThat(authClient.refreshEntered.await(1, TimeUnit.SECONDS)).isTrue();
             Future<String> secondResult = executor.submit(() ->
-                    tokenManager.execute(second.request(), value -> value));
+                    tokenManager.execute(second.request(), "meetingmind-core", value -> value));
             assertThat(refreshLock.contentionObserved.await(1, TimeUnit.SECONDS)).isTrue();
             authClient.allowRefresh.countDown();
 
@@ -124,7 +129,7 @@ class BffTokenManagerTest {
         SessionFixture fixture = sessionFixture(900);
         AtomicInteger downstreamCalls = new AtomicInteger();
 
-        String result = tokenManager.execute(fixture.request(), authorization -> {
+        String result = tokenManager.execute(fixture.request(), "meetingmind-core", authorization -> {
             if (downstreamCalls.incrementAndGet() == 1) {
                 throw new DownstreamUnauthorizedException();
             }
@@ -137,11 +142,46 @@ class BffTokenManagerTest {
     }
 
     @Test
+    void schemaV2UsesOnlyTheAccessTokenForTheRequestedAudience() {
+        SessionFixture fixture = targetSessionFixture(600);
+        String core = tokenManager.execute(
+                fixture.request(), "meetingmind-core", authorization -> authorization);
+        String ai = tokenManager.execute(
+                fixture.request(), "meetingmind-ai", authorization -> authorization);
+        String livekit = tokenManager.execute(
+                fixture.request(), "meetingmind-livekit", authorization -> authorization);
+
+        assertThat(core).isEqualTo("Bearer target-core-secret");
+        assertThat(ai).isEqualTo("Bearer target-ai-secret");
+        assertThat(livekit).isEqualTo("Bearer target-livekit-secret");
+        assertThat(authClient.refreshCalls).hasValue(0);
+    }
+
+    @Test
+    void schemaV2RefreshAtomicallyRotatesTheWholeAudienceMap() {
+        SessionFixture fixture = targetSessionFixture(10);
+        authClient.targetRefresh = true;
+
+        String authorization = tokenManager.execute(
+                fixture.request(), "meetingmind-ai", value -> value);
+        TokenBundlePayload rotated =
+                tokenVault.read(fixture.bundleId(), fixture.authSessionId());
+
+        assertThat(authorization).isEqualTo("Bearer refreshed-ai-secret");
+        assertThat(rotated.schemaVersion()).isEqualTo(2);
+        assertThat(rotated.requireAccessToken("meetingmind-core").token())
+                .isEqualTo("refreshed-core-secret");
+        assertThat(rotated.requireAccessToken("meetingmind-livekit").token())
+                .isEqualTo("refreshed-livekit-secret");
+        assertThat(rotated.refreshToken()).isEqualTo("refreshed-refresh-secret");
+    }
+
+    @Test
     void finalUnauthorizedDeletesTheBundleAndInvalidatesTheSession() {
         SessionFixture fixture = sessionFixture(900);
         AtomicInteger downstreamCalls = new AtomicInteger();
 
-        assertThatThrownBy(() -> tokenManager.execute(fixture.request(), authorization -> {
+        assertThatThrownBy(() -> tokenManager.execute(fixture.request(), "meetingmind-core", authorization -> {
                     downstreamCalls.incrementAndGet();
                     throw new DownstreamUnauthorizedException();
                 }))
@@ -165,7 +205,8 @@ class BffTokenManagerTest {
                 "REFRESH_TOKEN_INVALID",
                 "must not reach browser");
 
-        assertThatThrownBy(() -> tokenManager.execute(fixture.request(), authorization -> authorization))
+        assertThatThrownBy(() -> tokenManager.execute(
+                        fixture.request(), "meetingmind-core", authorization -> authorization))
                 .isInstanceOfSatisfying(BffAuthException.class, exception -> {
                     assertThat(exception.status()).isEqualTo(HttpStatus.UNAUTHORIZED);
                     assertThat(exception.code()).isEqualTo("SESSION_INVALID");
@@ -226,14 +267,39 @@ class BffTokenManagerTest {
         UUID bundleId = UUID.randomUUID();
         tokenVault.create(bundleId, new TokenBundlePayload(
                 authSessionId,
-                "initial-access-secret",
+                AuthTokenResponse.LEGACY_SCHEMA_VERSION,
+                Map.of(
+                        AuthTokenResponse.LEGACY_AUDIENCE,
+                        new AudienceAccessToken(
+                                "initial-access-secret",
+                                NOW.plusSeconds(accessLifetimeSeconds))),
                 "initial-refresh-secret",
                 "Bearer",
-                NOW.plusSeconds(accessLifetimeSeconds),
                 NOW.plus(Duration.ofDays(14)),
                 "meetingmind-core-legacy",
-                Set.of("meetingmind-core"),
-                Set.of()));
+                Map.of()));
+        return request(authSessionId, bundleId);
+    }
+
+    private SessionFixture targetSessionFixture(long accessLifetimeSeconds) {
+        UUID authSessionId = UUID.randomUUID();
+        UUID bundleId = UUID.randomUUID();
+        Instant expiresAt = NOW.plusSeconds(accessLifetimeSeconds);
+        tokenVault.create(bundleId, new TokenBundlePayload(
+                authSessionId,
+                AuthTokenResponse.TARGET_SCHEMA_VERSION,
+                Map.of(
+                        "meetingmind-core",
+                        new AudienceAccessToken("target-core-secret", expiresAt),
+                        "meetingmind-ai",
+                        new AudienceAccessToken("target-ai-secret", expiresAt),
+                        "meetingmind-livekit",
+                        new AudienceAccessToken("target-livekit-secret", expiresAt)),
+                "target-refresh-secret",
+                "Bearer",
+                NOW.plus(Duration.ofDays(14)),
+                "https://auth.meetingmind.internal",
+                Map.of()));
         return request(authSessionId, bundleId);
     }
 
@@ -243,7 +309,8 @@ class BffTokenManagerTest {
 
     private SessionFixture request(UUID authSessionId, UUID bundleId) {
         MockHttpSession session = new MockHttpSession();
-        session.setAttribute(BffSessionAttributes.USER_ID, USER_ID);
+        session.setAttribute(BffSessionAttributes.RESOURCE_USER_ID, USER_ID);
+        session.setAttribute(BffSessionAttributes.AUTH_USER_ID, AUTH_USER_ID);
         session.setAttribute(BffSessionAttributes.AUTH_SESSION_ID, authSessionId);
         session.setAttribute(BffSessionAttributes.TOKEN_BUNDLE_ID, bundleId);
         session.setAttribute(BffSessionAttributes.ABSOLUTE_EXPIRES_AT, NOW.plus(Duration.ofHours(12)));
@@ -313,7 +380,7 @@ class BffTokenManagerTest {
         }
     }
 
-    private static final class FakeCompatibilityAuthClient implements CompatibilityAuthClient {
+    private static final class FakeCompatibilityAuthClient implements AuthClient {
 
         private final AtomicInteger refreshCalls = new AtomicInteger();
         private final AtomicInteger revokeCalls = new AtomicInteger();
@@ -321,26 +388,28 @@ class BffTokenManagerTest {
         private final CountDownLatch allowRefresh = new CountDownLatch(1);
         private volatile boolean blockRefresh;
         private volatile RuntimeException refreshFailure;
+        private volatile boolean targetRefresh;
         private volatile String revokedAccessToken;
         private volatile String revokedRefreshToken;
 
         @Override
-        public LegacyAuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
+        public AuthTokenResponse signup(BrowserAuthRequests.Signup request, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public LegacyAuthTokenResponse login(BrowserAuthRequests.Login request, String userAgent) {
+        public AuthTokenResponse login(BrowserAuthRequests.Login request, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public LegacyAuthTokenResponse google(BrowserAuthRequests.Google request, String userAgent) {
+        public AuthTokenResponse google(BrowserAuthRequests.Google request, String userAgent) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public LegacyAuthTokenResponse refresh(String refreshToken, String userAgent) {
+        public AuthTokenResponse refresh(
+                UUID authSessionId, String refreshToken, String userAgent) {
             refreshCalls.incrementAndGet();
             refreshEntered.countDown();
             if (blockRefresh) {
@@ -356,19 +425,58 @@ class BffTokenManagerTest {
             if (refreshFailure != null) {
                 throw refreshFailure;
             }
-            return new LegacyAuthTokenResponse(
-                    "refreshed-access-secret",
+            if (targetRefresh) {
+                return new AuthTokenResponse(
+                        AuthTokenResponse.TARGET_SCHEMA_VERSION,
+                        authSessionId,
+                        Map.of(
+                                "meetingmind-core",
+                                new AuthTokenResponse.AccessToken(
+                                        "refreshed-core-secret", 600),
+                                "meetingmind-ai",
+                                new AuthTokenResponse.AccessToken(
+                                        "refreshed-ai-secret", 600),
+                                "meetingmind-livekit",
+                                new AuthTokenResponse.AccessToken(
+                                        "refreshed-livekit-secret", 600)),
+                        "refreshed-refresh-secret",
+                        "Bearer",
+                        1_209_600,
+                        new AuthTokenResponse.User(
+                                AUTH_USER_ID,
+                                USER_ID,
+                                "user@example.com",
+                                "User",
+                                null,
+                                "ACTIVE"));
+            }
+            return new AuthTokenResponse(
+                    AuthTokenResponse.LEGACY_SCHEMA_VERSION,
+                    authSessionId,
+                    Map.of(
+                            AuthTokenResponse.LEGACY_AUDIENCE,
+                            new AuthTokenResponse.AccessToken(
+                                    "refreshed-access-secret", 900)),
                     "refreshed-refresh-secret",
                     "Bearer",
-                    900,
                     1_209_600,
-                    new LegacyAuthUser(USER_ID, "user@example.com", "User", null, "ACTIVE"));
+                    new AuthTokenResponse.User(
+                            AUTH_USER_ID,
+                            USER_ID,
+                            "user@example.com",
+                            "User",
+                            null,
+                            "ACTIVE"));
         }
 
         @Override
-        public void revokeBestEffort(String tokenType, String accessToken, String refreshToken) {
+        public void revokeBestEffort(
+                UUID authSessionId,
+                String tokenType,
+                Map<String, String> accessTokens,
+                String refreshToken) {
             revokeCalls.incrementAndGet();
-            revokedAccessToken = accessToken;
+            revokedAccessToken = accessTokens.get(AuthTokenResponse.LEGACY_AUDIENCE);
             revokedRefreshToken = refreshToken;
         }
     }

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.auth.migration.LegacyAuthDataMigration;
 import com.meetingmind.auth.runtime.AuthIntegrationTestConfiguration;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,6 +17,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -25,6 +27,7 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @EnabledIfEnvironmentVariable(named = "AUTH_DB_INTEGRATION", matches = "true")
 class AuthPostgresIntegrationTest {
@@ -74,6 +77,7 @@ class AuthPostgresIntegrationTest {
         }
 
         assertMigratedSchemaAndPrivileges(url, migrationUser, migrationPassword, runtimeUser);
+        assertLegacyAuthDataMigration(url, migrationUser, migrationPassword);
         assertRuntimeDmlAndDdlBoundary(url, runtimeUser, runtimePassword);
         assertRuntimePersistence(
                 url,
@@ -177,6 +181,106 @@ class AuthPostgresIntegrationTest {
         UUID secondAllDeviceSessionId = UUID.fromString(allDeviceTwo.path("authSessionId").asText());
         String secondAllDeviceRefresh = allDeviceTwo.path("refreshToken").asText();
 
+        HttpResponse<String> malformedReauthentication = post(
+                port,
+                "/internal/v1/auth/reauthenticate",
+                """
+                {
+                  "currentAuthSessionId":"%s",
+                  "userId":"%s",
+                  "method":"PASSWORD",
+                  "password":"%s",
+                  "credential":"%s"
+                }
+                """.formatted(currentAuthSessionId, userId, password, googleCredential),
+                BFF_PRINCIPAL
+        );
+        assertError(malformedReauthentication, 400, "INVALID_REQUEST");
+
+        HttpResponse<String> reauthenticationMismatch = post(
+                port,
+                "/internal/v1/auth/reauthenticate",
+                """
+                {
+                  "currentAuthSessionId":"%s",
+                  "userId":"%s",
+                  "method":"PASSWORD",
+                  "password":"%s"
+                }
+                """.formatted(currentAuthSessionId, UUID.randomUUID(), password),
+                BFF_PRINCIPAL
+        );
+        assertError(reauthenticationMismatch, 403, "AUTH_SESSION_SUBJECT_MISMATCH");
+
+        HttpResponse<String> wrongPasswordReauthentication = post(
+                port,
+                "/internal/v1/auth/reauthenticate",
+                """
+                {
+                  "currentAuthSessionId":"%s",
+                  "userId":"%s",
+                  "method":"PASSWORD",
+                  "password":"Wrong-Password-123!"
+                }
+                """.formatted(currentAuthSessionId, userId),
+                BFF_PRINCIPAL
+        );
+        assertError(wrongPasswordReauthentication, 401, "REAUTHENTICATION_FAILED");
+
+        HttpResponse<String> wrongGoogleReauthentication = post(
+                port,
+                "/internal/v1/auth/reauthenticate",
+                """
+                {
+                  "currentAuthSessionId":"%s",
+                  "userId":"%s",
+                  "method":"GOOGLE",
+                  "credential":"valid-google:other-%s@meetingmind.test"
+                }
+                """.formatted(currentAuthSessionId, userId, UUID.randomUUID()),
+                BFF_PRINCIPAL
+        );
+        assertError(wrongGoogleReauthentication, 401, "REAUTHENTICATION_FAILED");
+
+        HttpResponse<String> passwordReauthentication = post(
+                port,
+                "/internal/v1/auth/reauthenticate",
+                """
+                {
+                  "currentAuthSessionId":"%s",
+                  "userId":"%s",
+                  "method":"PASSWORD",
+                  "password":"%s"
+                }
+                """.formatted(currentAuthSessionId, userId, password),
+                BFF_PRINCIPAL
+        );
+        assertThat(passwordReauthentication.statusCode()).isEqualTo(200);
+        JsonNode passwordReauthenticationBody = OBJECT_MAPPER.readTree(passwordReauthentication.body());
+        assertThat(passwordReauthenticationBody.size()).isEqualTo(1);
+        assertThat(passwordReauthenticationBody.path("authenticatedAt").asText()).isNotBlank();
+
+        HttpResponse<String> googleReauthentication = post(
+                port,
+                "/internal/v1/auth/reauthenticate",
+                """
+                {
+                  "currentAuthSessionId":"%s",
+                  "userId":"%s",
+                  "method":"GOOGLE",
+                  "credential":"%s"
+                }
+                """.formatted(currentAuthSessionId, userId, googleCredential),
+                BFF_PRINCIPAL
+        );
+        assertThat(googleReauthentication.statusCode()).isEqualTo(200);
+        JsonNode googleReauthenticationBody = OBJECT_MAPPER.readTree(googleReauthentication.body());
+        assertThat(googleReauthenticationBody.size()).isEqualTo(1);
+        String authenticatedAt = googleReauthenticationBody.path("authenticatedAt").asText();
+        assertThat(authenticatedAt).isNotBlank();
+        assertThat(googleReauthentication.body())
+                .doesNotContain("accessToken", "refreshToken", "authSessionId");
+
         HttpResponse<String> mismatch = post(port, "/internal/v1/auth/revoke-all", """
                 {
                   "currentAuthSessionId":"%s",
@@ -204,7 +308,7 @@ class AuthPostgresIntegrationTest {
                   "reason":"ALL_DEVICE_LOGOUT",
                   "authenticatedAt":"%s"
                 }
-                """.formatted(currentAuthSessionId, userId, Instant.now());
+                """.formatted(currentAuthSessionId, userId, authenticatedAt);
         assertThat(post(port, "/internal/v1/auth/revoke-all", revokeAllJson, BFF_PRINCIPAL).statusCode())
                 .isEqualTo(204);
         assertThat(post(port, "/internal/v1/auth/revoke-all", revokeAllJson, BFF_PRINCIPAL).statusCode())
@@ -505,10 +609,29 @@ class AuthPostgresIntegrationTest {
                     rows.next();
                     assertThat(rows.getInt("active_count")).isZero();
                     int sessionCount = rows.getInt("session_count");
-                    assertThat(sessionCount).isGreaterThanOrEqualTo(5);
+                    assertThat(sessionCount).isEqualTo(5);
                     assertThat(outboxCount(connection, evidence.userId())).isEqualTo(sessionCount);
                 }
             }
+
+            assertThat(textMatchCount(
+                    connection,
+                    """
+                    select count(*)
+                    from session_audits
+                    where user_id = ? and event_type = 'REAUTHENTICATION_SUCCESS'
+                    """,
+                    evidence.userId()
+            )).isEqualTo(2);
+            assertThat(textMatchCount(
+                    connection,
+                    """
+                    select count(*)
+                    from session_audits
+                    where user_id = ? and event_type = 'REAUTHENTICATION_FAILURE'
+                    """,
+                    evidence.userId()
+            )).isEqualTo(2);
 
             assertThat(textMatchCount(
                     connection,
@@ -548,6 +671,223 @@ class AuthPostgresIntegrationTest {
                     evidence.userId()
             )).isEqualTo(1);
         }
+    }
+
+    private void assertLegacyAuthDataMigration(
+            String url,
+            String migrationUser,
+            String migrationPassword
+    ) throws Exception {
+        String sourceSchema = "legacy_auth_" + UUID.randomUUID().toString().replace("-", "");
+        String sourceUrl = url + (url.contains("?") ? "&" : "?") + "currentSchema=" + sourceSchema;
+        UUID userId = UUID.randomUUID();
+        UUID localIdentityId = UUID.randomUUID();
+        UUID googleIdentityId = UUID.randomUUID();
+        String legacyUserId = "user-" + userId;
+        String email = "legacy-" + userId + "@meetingmind.test";
+        String passwordHash = new BCryptPasswordEncoder(10).encode("Legacy-Password-123!");
+        Instant createdAt = Instant.parse("2026-07-18T01:00:00Z");
+        Instant lastUsedAt = Instant.parse("2026-07-18T02:00:00Z");
+
+        try (var connection = DriverManager.getConnection(url, migrationUser, migrationPassword);
+             var statement = connection.createStatement()) {
+            statement.execute("create schema " + sourceSchema);
+            statement.execute("""
+                    create table %s.users (
+                        id varchar(64) primary key,
+                        auth_user_id uuid,
+                        email varchar(320) not null,
+                        display_name varchar(100) not null,
+                        picture_url text,
+                        status varchar(32) not null,
+                        created_at timestamptz not null,
+                        last_login_at timestamptz
+                    )
+                    """.formatted(sourceSchema));
+            statement.execute("""
+                    create table %s.auth_identities (
+                        id varchar(64) primary key,
+                        user_id varchar(64) not null references %s.users(id),
+                        provider varchar(16) not null,
+                        provider_user_id varchar(320) not null,
+                        password_hash varchar(255),
+                        created_at timestamptz not null,
+                        last_used_at timestamptz
+                    )
+                    """.formatted(sourceSchema, sourceSchema));
+        }
+
+        try {
+            try (var connection = DriverManager.getConnection(url, migrationUser, migrationPassword)) {
+                try (var insertUser = connection.prepareStatement("""
+                        insert into %s.users (
+                            id, auth_user_id, email, display_name, picture_url,
+                            status, created_at, last_login_at
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                        """.formatted(sourceSchema))) {
+                    insertUser.setString(1, legacyUserId);
+                    insertUser.setObject(2, userId);
+                    insertUser.setString(3, email.toUpperCase(Locale.ROOT));
+                    insertUser.setString(4, "Legacy User");
+                    insertUser.setString(5, "https://example.test/legacy.png");
+                    insertUser.setString(6, "active");
+                    insertUser.setTimestamp(7, java.sql.Timestamp.from(createdAt));
+                    insertUser.setTimestamp(8, java.sql.Timestamp.from(lastUsedAt));
+                    insertUser.executeUpdate();
+                }
+                try (var insertIdentity = connection.prepareStatement("""
+                        insert into %s.auth_identities (
+                            id, user_id, provider, provider_user_id, password_hash,
+                            created_at, last_used_at
+                        ) values (?, ?, ?, ?, ?, ?, ?)
+                        """.formatted(sourceSchema))) {
+                    insertIdentity.setString(1, "identity-" + localIdentityId);
+                    insertIdentity.setString(2, legacyUserId);
+                    insertIdentity.setString(3, "local");
+                    insertIdentity.setString(4, email.toUpperCase(Locale.ROOT));
+                    insertIdentity.setString(5, passwordHash);
+                    insertIdentity.setTimestamp(6, java.sql.Timestamp.from(createdAt));
+                    insertIdentity.setTimestamp(7, java.sql.Timestamp.from(lastUsedAt));
+                    insertIdentity.executeUpdate();
+
+                    insertIdentity.setString(1, "identity-" + googleIdentityId);
+                    insertIdentity.setString(2, legacyUserId);
+                    insertIdentity.setString(3, "google");
+                    insertIdentity.setString(4, "google-subject-" + userId);
+                    insertIdentity.setNull(5, java.sql.Types.VARCHAR);
+                    insertIdentity.setTimestamp(6, java.sql.Timestamp.from(createdAt));
+                    insertIdentity.setTimestamp(7, java.sql.Timestamp.from(lastUsedAt));
+                    insertIdentity.executeUpdate();
+                }
+            }
+
+            var dryRun = LegacyAuthDataMigration.run(migrationConfig(
+                    LegacyAuthDataMigration.Mode.DRY_RUN,
+                    sourceUrl,
+                    url,
+                    migrationUser,
+                    migrationPassword
+            ));
+            assertThat(dryRun.userCount()).isEqualTo(1);
+            assertThat(dryRun.identityCount()).isEqualTo(2);
+            assertThat(dryRun.mismatchCount()).isEqualTo(3);
+
+            var applied = LegacyAuthDataMigration.run(migrationConfig(
+                    LegacyAuthDataMigration.Mode.APPLY,
+                    sourceUrl,
+                    url,
+                    migrationUser,
+                    migrationPassword
+            ));
+            assertThat(applied.mismatchCount()).isZero();
+
+            var verified = LegacyAuthDataMigration.run(migrationConfig(
+                    LegacyAuthDataMigration.Mode.VERIFY,
+                    sourceUrl,
+                    url,
+                    migrationUser,
+                    migrationPassword
+            ));
+            assertThat(verified.mismatchCount()).isZero();
+
+            var reapplied = LegacyAuthDataMigration.run(migrationConfig(
+                    LegacyAuthDataMigration.Mode.APPLY,
+                    sourceUrl,
+                    url,
+                    migrationUser,
+                    migrationPassword
+            ));
+            assertThat(reapplied.userCount()).isEqualTo(1);
+            assertThat(reapplied.identityCount()).isEqualTo(2);
+            assertThat(reapplied.mismatchCount()).isZero();
+
+            try (var connection = DriverManager.getConnection(url, migrationUser, migrationPassword);
+                 var query = connection.prepareStatement("""
+                         select
+                           u.email,
+                           u.display_name,
+                           i.provider,
+                           i.provider_user_id,
+                           i.password_hash
+                         from auth_users u
+                         join auth_identities i on i.user_id = u.id
+                         where u.id = ?
+                         order by i.provider
+                         """)) {
+                query.setObject(1, userId);
+                try (var rows = query.executeQuery()) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getString("email")).isEqualTo(email);
+                    assertThat(rows.getString("provider")).isEqualTo("GOOGLE");
+                    assertThat(rows.getString("password_hash")).isNull();
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getString("provider")).isEqualTo("LOCAL");
+                    assertThat(rows.getString("provider_user_id")).isEqualTo(email);
+                    assertThat(rows.getString("password_hash")).isEqualTo(passwordHash);
+                    assertThat(rows.next()).isFalse();
+                }
+            }
+
+            UUID invalidUserId = UUID.randomUUID();
+            try (var connection = DriverManager.getConnection(url, migrationUser, migrationPassword);
+                 var insertUser = connection.prepareStatement("""
+                         insert into %s.users (
+                             id, auth_user_id, email, display_name, status, created_at
+                         ) values (?, ?, ?, ?, 'active', ?)
+                         """.formatted(sourceSchema));
+                 var insertIdentity = connection.prepareStatement("""
+                         insert into %s.auth_identities (
+                             id, user_id, provider, provider_user_id, password_hash, created_at
+                         ) values (?, ?, 'local', ?, ?, ?)
+                         """.formatted(sourceSchema))) {
+                insertUser.setString(1, "user-" + invalidUserId);
+                insertUser.setObject(2, UUID.randomUUID());
+                insertUser.setString(3, "invalid-" + invalidUserId + "@meetingmind.test");
+                insertUser.setString(4, "Invalid Projection");
+                insertUser.setTimestamp(5, java.sql.Timestamp.from(createdAt));
+                insertUser.executeUpdate();
+
+                insertIdentity.setString(1, "identity-" + UUID.randomUUID());
+                insertIdentity.setString(2, "user-" + invalidUserId);
+                insertIdentity.setString(3, "invalid-" + invalidUserId + "@meetingmind.test");
+                insertIdentity.setString(4, passwordHash);
+                insertIdentity.setTimestamp(5, java.sql.Timestamp.from(createdAt));
+                insertIdentity.executeUpdate();
+            }
+
+            assertThatThrownBy(() -> LegacyAuthDataMigration.run(migrationConfig(
+                    LegacyAuthDataMigration.Mode.VERIFY,
+                    sourceUrl,
+                    url,
+                    migrationUser,
+                    migrationPassword
+            )))
+                    .isInstanceOf(LegacyAuthDataMigration.MigrationException.class)
+                    .hasMessage("USER_PROJECTION_MISMATCH");
+        } finally {
+            try (var connection = DriverManager.getConnection(url, migrationUser, migrationPassword);
+                 var statement = connection.createStatement()) {
+                statement.execute("drop schema " + sourceSchema + " cascade");
+            }
+        }
+    }
+
+    private LegacyAuthDataMigration.Config migrationConfig(
+            LegacyAuthDataMigration.Mode mode,
+            String sourceUrl,
+            String targetUrl,
+            String user,
+            String password
+    ) {
+        return new LegacyAuthDataMigration.Config(
+                mode,
+                sourceUrl,
+                user,
+                password,
+                targetUrl,
+                user,
+                password
+        );
     }
 
     private void assertMissingSignerRollsBack(

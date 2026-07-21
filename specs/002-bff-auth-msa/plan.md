@@ -15,14 +15,16 @@
 - T015에서 현재 Backend의 실제 `/api/v1/*` method/path만 허용하는 proxy, Core/AI/LiveKit별 JDK HTTP timeout, queue 없는 bulkhead와 연속 실패 circuit breaker를 추가했다. 업무 proxy는 T014 Token Manager를 통과한다.
 - T016에서 CSRF가 적용된 현재 세션 logout과 실제 Redis·현재 Backend 프로세스 compatibility E2E를 추가했다. Browser 응답/Redis/로그 token scan, 강제 선제 refresh, logout 후 이전 cookie 재사용 차단과 멱등성을 CI에서 검증한다.
 - T020에서 Frontend의 token 저장·Bearer 구성을 제거하고 `/api/v1/auth/session` bootstrap, same-origin cookie와 공통 CSRF 요청 준비를 적용했다. Vite는 `/api`를 BFF로만 proxy하며 Playwright는 Backend+BFF+Redis+Frontend 전체 경계를 실행한다.
-- T021에서 현재 세션 로그아웃 control과 `/api/v1/auth/logout` CSRF 호출을 연결했다. 성공 시 인증·사용자별 화면 상태를 초기화하고 랜딩으로 이동하며, 네트워크 실패 시 서버 세션을 추측해 지우지 않고 로그인 상태와 재시도 오류를 유지한다. 모든 기기 로그아웃은 T030의 최근 10분/재인증 계약과 T032 Auth revoke-all 구현 이후 T024에서 연결한다.
+- T021에서 현재 세션 로그아웃 control과 `/api/v1/auth/logout` CSRF 호출을 연결했다. 성공 시 인증·사용자별 화면 상태를 초기화하고 랜딩으로 이동하며, 네트워크 실패 시 서버 세션을 추측해 지우지 않고 로그인 상태와 재시도 오류를 유지한다.
 - T022에서 업무 API와 LiveKit/auth 요청이 사용하는 공통 BFF fetch가 `401 SESSION_INVALID` body만 전역 세션 만료로 발행하도록 연결했다. 만료 시 현재 same-origin 경로를 검증해 보존하고 랜딩 document를 새로 로드한 뒤 재로그인 안내를 표시하며, 성공 로그인 후 해당 경로로 복귀한다. `INVALID_CREDENTIALS` 등 다른 `401`은 로컬 요청 오류로만 처리한다.
 - T023에서 Browser traffic 수용 여부를 readiness로 drain하는 rollout flag와 login/refresh/logout/session/proxy 저카디널리티 metric을 추가했다. 5%→25%→50%→100% 단계별 guardrail과 7일 rollback window를 runbook에 고정하고, 위반 시 같은 cookie/Redis/Token Vault 계약의 안정 BFF release로 traffic만 복원하도록 했다.
 - T030에서 AuthSession별 1회용 refresh family, KMS RSA-2048 `RS256` audience별 10분 JWT/JWKS, durable `sid` revoke event와 mTLS SPIFFE workload identity를 확정했다. 모든 기기 로그아웃은 최근 10분 인증 또는 local/Google 재인증 뒤 수행한다.
 - T031에서 독립 Auth Service/비루트 Docker image와 전용 PostgreSQL을 추가했다. Flyway V1 스키마와 기존 migration을 변경하지 않는 V2 최소 권한 축소, DB 포함 readiness/DB 제외 liveness를 실제 PostgreSQL·Compose·권한 negative test로 검증했다. 인증 endpoint runtime은 T032 전까지 노출하지 않는다.
 - T032에서 Web BFF workload 전용 internal signup/login/Google/refresh/revoke/revoke-all, BCrypt/HMAC 저장 경계, 1회용 refresh lineage/reuse family 폐기, 감사와 transactional outbox producer를 구현했다. direct certificate SPIFFE SAN을 기본으로 검증하고 local/test header는 운영 profile에서 강제로 무시한다. KMS signer가 없는 runtime은 발급 transaction 전체를 rollback하며 T033 전까지 임시 JWT를 만들지 않는다.
 - T033은 KMS key ID만 가진 rotation key ring, `RAW` RS256 KMS 서명, 내부 JWKS와 5분 ETag cache Resource validator를 구현한다. 정기 교체 설정은 5분 선게시와 1시간 이전 key overlap을 시작 시 강제하고 침해 대응만 명시적 emergency mode로 예외 처리한다. Core 요청 경로의 legacy/new dual validation 활성화는 T035까지 보류한다.
+- T034는 Core 문자열 User PK/FK를 유지하면서 V13 `auth_user_id UUID` projection을 canonical ID에 backfill했다. runtime bootJar와 분리된 Auth migration source set이 별도 source/target 연결로 User/AuthIdentity만 dry-run/apply/verify하고 ownership 충돌·비정형 mapping·대사 불일치를 fail closed한다. legacy AuthSession은 이전하지 않으며 최종 delta 쓰기 drain과 재로그인/rollback은 runbook에 고정했다.
 - T036은 CI에서 발견된 BFF/Auth의 수정 가능한 Jackson/Tomcat 취약점을 Backend의 검증된 안전 버전으로 정렬하고, 고정 테스트 키에 대한 Gitleaks 오탐을 커밋·파일·규칙·라인 fingerprint 단위로만 예외 처리한다.
+- T024에서 전용 local/Google 재인증, Auth-first revoke-all, Auth UUID Spring Session index 정리와 모든 기기 로그아웃 UI를 연결했다. 현재 session은 다른 session/Token Bundle 정리 뒤 마지막에 폐기하며 legacy provider는 기능 사용 불가로 fail closed한다.
 - LiveKit client/server token 연동은 있으나 목표 운영 provider는 LiveKit Cloud로 확정됐다.
 
 ## Target Architecture
@@ -70,6 +72,8 @@ flowchart LR
 | Deployment | AWS EKS, single-region Multi-AZ | 장기 확장성과 서비스별 독립 배포를 선택했다. | ECS Fargate, multi-region |
 | Media | LiveKit Cloud | UDP/TURN/media node 운영을 애플리케이션 장애 경계에서 분리한다. | Self-host LiveKit |
 | Data ownership | Database per service target | 공유 DB 변경과 장애 전파를 줄인다. | Shared schema |
+| User ID bridge | Core 문자열 PK 유지 + `auth_user_id UUID` projection | 업무 FK 재작성 없이 Auth/JWT UUID subject와 Core 사용자를 결정적으로 연결한다. | legacy subject 유지, Core PK/FK 일괄 UUID 전환 |
+| Auth data migration | 반복 가능한 offline snapshot/delta + 짧은 auth write freeze | dual-write/CDC 없이 dry-run/apply/verify와 exact reconciliation으로 현재 전환 규모를 안전하게 검증한다. | application dual-write, CDC, lazy migration |
 
 ## Component Responsibilities
 
@@ -113,6 +117,7 @@ flowchart LR
 - refresh는 32-byte random 원문과 환경별 최소 32자 secret의 HMAC-SHA-256 lookup hash를 사용한다. 성공 rotation은 이전 credential 사용 처리, 다음 leaf와 lineage, AuthSession 회전 시각, 감사 기록을 한 transaction으로 커밋한다.
 - 사용된 refresh가 다시 제시되면 예외를 던지기 전에 해당 AuthSession family, revoke outbox와 감사 기록을 같은 transaction으로 commit하고 다른 AuthSession은 유지한다.
 - revoke/revoke-all은 AuthSession revoke, family credential revoke, session별 outbox와 감사를 원자 처리한다. revoke-all은 `currentAuthSessionId`/`userId` 결합과 최근 10분 `authenticatedAt`을 Auth Service가 다시 검증한다.
+- T024 step-up 재인증은 현재 AuthSession/User 결합을 확인한 뒤 local 비밀번호 또는 이미 연결된 Google identity를 검증하고 Auth 서버 시각만 반환한다. login endpoint를 재사용해 새 AuthSession/token을 만들거나 Google identity를 새로 연결하지 않는다.
 - audience access 발급은 T033 `AccessTokenIssuer` port로 분리한다. signer가 없으면 계정/identity/session/refresh 변경을 모두 rollback하며 runtime image에 test signer나 임시 algorithm을 포함하지 않는다.
 
 ### Resource Services
@@ -132,10 +137,11 @@ flowchart LR
   - `POST /api/v1/auth/google`
   - `GET /api/v1/auth/session`
   - `POST /api/v1/auth/logout`
+  - `POST /api/v1/auth/reauthenticate`
   - `POST /api/v1/auth/logout-all`
   - public `/auth/refresh`는 목표 계약에 없다.
 - BFF-Auth: `contracts/auth-service-api.md`
-  - `/internal/v1/auth/signup|login|google|refresh|revoke|revoke-all`
+  - `/internal/v1/auth/signup|login|google|refresh|revoke|reauthenticate|revoke-all`
   - `GET /.well-known/jwks.json`
 - Auth revoke event: `contracts/auth-revocation-event.md`
   - Auth DB revoke와 outbox를 한 트랜잭션으로 커밋한다.
@@ -154,6 +160,7 @@ flowchart LR
 - AuthOutboxEvent: session revoke를 durable하게 발행하기 위한 transactional outbox.
 - User/AuthIdentity: Auth Service 소유로 이동한다.
 - SessionAudit: login/logout/revoke/reuse/security event만 영속 감사하고 token 원문은 저장하지 않는다.
+- Core User projection: Resource DB의 기존 `users.id`/업무 FK는 유지하고 `users.auth_user_id UUID`를 Auth subject 연결용 unique projection으로 둔다. Auth DB를 join하지 않는다.
 
 ## Security and Permissions
 
@@ -258,9 +265,36 @@ flowchart LR
 
 ### Phase 3 — Auth Service Extraction
 
-- User/AuthIdentity/AuthSession을 Auth 전용 DB로 forward-only 이전한다.
+- Core `users.auth_user_id`는 canonical `user-{UUID}` suffix로 backfill하고 legacy User/AuthIdentity만 Auth 전용 DB로 forward-only 이전한다.
+- T034 도구는 source/target 별도 연결, dry-run/apply/verify와 exact reconciliation을 제공한다. 최초 snapshot 뒤 최종 delta 동안 legacy login/signup/Google 인증 쓰기를 짧게 중단하며 application dual-write나 DB link는 사용하지 않는다.
+- legacy refresh/AuthSession은 새 HMAC/lineage로 안전하게 복구할 수 없으므로 이전하지 않는다. BFF→Auth 전환 시 기존 BFF session을 만료시키고 재로그인으로 새 AuthSession을 만든다.
+- 비정형 legacy ID, projection 불일치, email/provider 소유권 충돌 또는 대사 불일치는 전환을 중단한다. 기존 DB/issuer는 rollback window 동안 삭제하지 않는다.
 - Auth가 비대칭 access/JWKS를 발급하고 Core가 dual validation window에서 신규/legacy token을 구분한다.
 - refresh/login/logout을 Auth로 전환한 뒤 legacy issuer를 중지한다.
+
+#### T035 Implemented Boundary
+
+T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 경계씩 통합한다.
+
+1. Q-020/Q-021 권장안에 따라 Browser/Core external user ID는 `user-{Auth UUID}`를 유지하고 BFF가 신규 Core projection을 동기 생성한다.
+2. BFF Auth client를 `legacy`와 `auth-service` provider로 분리하되 Browser endpoint/cookie/CSRF shape는 유지한다. provider fallback은 요청 실패 시 자동 수행하지 않고 배포 설정으로만 선택한다.
+3. Token Bundle은 legacy 단일 access인 schema v1과 target audience별 access map인 schema v2를 명시적으로 구분한다. target route는 `CORE/AI/LIVEKIT`별 정확한 audience token만 선택하며 다른 audience나 legacy token을 복제하지 않는다.
+4. BFF target 로그인은 Auth Service가 발급한 실제 `authSessionId`와 Auth User UUID를 session에 저장한다. Spring Session Redis의 principal/user index를 활성화해 T024가 사용자 전체 BffSession을 조회할 수 있게 한다.
+5. Core는 JWT header profile로 legacy HS256과 target `RS256/at+jwt/kid`를 먼저 분류하고 선택된 validator 하나만 실행한다. target 검증 실패를 legacy validator로 재시도하지 않아 downgrade를 막는다.
+6. target JWT `sub` UUID는 Core `users.auth_user_id`로 resource User를 찾고 기존 문자열 업무 FK를 사용한다. BFF는 target 인증 성공 뒤 Core target access+workload identity로 멱등 projection을 만들고 성공 후에만 Browser session을 만든다.
+7. local/CI는 test source signer와 test workload principal만 사용하고 runtime image에는 signer/private key를 넣지 않는다. 운영 mTLS 제품과 KMS/EKS 연결은 Q-012/T040 이후 출시 gate다.
+8. 기존 직렬화 session/Token Bundle은 추측 변환하지 않고 강제 재로그인한다. 새 schema v1/v2는 같은 release에서 legacy/target provider rollback을 지원하되 provider 실패를 자동 fallback하지 않는다.
+9. 통합 검증은 Auth actual session/refresh/revoke, BFF audience selection·single-flight, 실제 Redis Auth UUID index, Core dual/target-only validation과 실제 PostgreSQL projection, Browser token 무노출과 명시적 legacy rollback을 포함한다.
+
+#### T024 Implementation Boundary
+
+1. 최근 인증이 지난 `logout-all`은 credential을 같은 요청 body에 섞지 않고 `403 REAUTHENTICATION_REQUIRED`로 step-up을 요구한다.
+2. Browser `reauthenticate`는 method별 credential만 받고 BFF가 현재 server session의 Auth UUID/AuthSession ID를 결합한다. Auth가 반환한 서버 시각만 BFF `authenticatedAt`을 갱신한다.
+3. Auth 재인증은 기존 local/Google verifier를 재사용하되 계정 생성, identity 연결, login timestamp 갱신, AuthSession/token 발급을 하지 않는다.
+4. `logout-all`은 Auth DB 전체 revoke/outbox commit을 먼저 완료하고, BFF가 Auth UUID principal index로 다른 session을 먼저 삭제한 뒤 현재 session/cookie를 마지막에 무효화한다.
+5. Token Bundle 삭제 실패는 암호문 TTL 정리를 보존하되 BffSession을 활성 상태로 남기는 근거가 되지 않는다. BffSession index 정리가 완료되지 않으면 `204`를 반환하지 않는다.
+6. legacy provider에서는 Auth 전체 revoke가 불가능하므로 local-only 성공을 만들지 않고 기능 사용 불가로 fail closed한다.
+7. 실제 PostgreSQL에서 재인증 결합/무세션 생성/전체 revoke를, 실제 Redis에서 두 BffSession/Token Bundle 삭제와 다른 cookie의 다음 요청 차단을 검증한다.
 
 ### Phase 4 — AWS EKS Production Baseline
 
