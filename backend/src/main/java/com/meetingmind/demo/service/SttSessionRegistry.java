@@ -20,6 +20,7 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -54,30 +55,63 @@ public class SttSessionRegistry {
         String sessionId = UUID.randomUUID().toString();
         List<TranscriptEntryResponse> transcript = Collections.synchronizedList(new ArrayList<>());
         AtomicReference<Boolean> failed = new AtomicReference<>(false);
+        AtomicReference<String> partialText = new AtomicReference<>();
         Instant startedAt = Instant.now();
         String speakerLabel = "stt-" + sessionId;
 
-        SttStreamClient client = streamClientFactory.create(text -> {
-            transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), displayName, text));
+        Consumer<String> onFinal = text -> {
+            // Clova가 확정 신호(epFlag=true)만 보내고 text는 비워서 보내는 경우가 있어서,
+            // 그럴 땐 직전까지 쌓인 partial 텍스트를 최종 결과로 사용한다.
+            String finalText = (text == null || text.isBlank()) ? partialText.get() : text;
+            partialText.set(null);
+            if (finalText == null || finalText.isBlank()) {
+                return;
+            }
+            transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), displayName, finalText));
             if (meetingId != null) {
                 int endMs = (int) Duration.between(startedAt, Instant.now()).toMillis();
                 int startMs = Math.max(0, endMs - 1_000);
                 workspaceDomainService.appendTranscriptSegment(
-                        meetingId, speakerLabel, displayName, startMs, Math.max(startMs, endMs), text
+                        meetingId, speakerLabel, displayName, startMs, Math.max(startMs, endMs), finalText
                 );
             } else {
-                appendToTranscriptFile(roomName, displayName, text);
+                appendToTranscriptFile(roomName, displayName, finalText);
             }
-        }, ignored -> {
+        };
+        Consumer<String> onPartial = partialText::set;
+        Consumer<Throwable> onError = ignored -> {
             if (meetingId != null && failed.compareAndSet(false, true)) {
                 workspaceDomainService.failMeetingTranscript(meetingId);
             }
-        });
+        };
+
+        // 세션 하나가 통째로 침묵-발화를 반복하는 동안, 실제 Clova gRPC 연결은 침묵 5초마다
+        // 끊고 새로 여는 방식으로 문장 경계를 확정 짓는다. 자세한 이유는 클래스 주석 참고.
+        SttStreamClient client = new SilenceSegmentingSttStreamClient(streamClientFactory, onFinal, onPartial, onError);
 
         sessions.put(sessionId, new SessionState(
-                meetingId, roomName, client, transcript, new AtomicReference<>(), failed
+                meetingId, roomName, speakerLabel, displayName, client, transcript, new AtomicReference<>(), failed, partialText
         ));
         return sessionId;
+    }
+
+    // ponytail: 화자(트랙)당 세션 하나라 partial은 세션별로 최대 1개만 들고 있으면 됨. 여러 명이 동시에
+    // 말하는 회의라도 세션이 speakerLabel 단위로 이미 분리되어 있어 이 이상 복잡한 상태 관리는 불필요.
+    public List<PartialTranscript> getMeetingPartials(String meetingId) {
+        List<PartialTranscript> partials = new ArrayList<>();
+        for (SessionState state : sessions.values()) {
+            if (!meetingId.equals(state.meetingId())) {
+                continue;
+            }
+            String text = state.partialText().get();
+            if (text != null && !text.isBlank()) {
+                partials.add(new PartialTranscript(state.speakerLabel(), state.displayName(), text));
+            }
+        }
+        return partials;
+    }
+
+    public record PartialTranscript(String speakerLabel, String speakerName, String text) {
     }
 
     private void appendToTranscriptFile(String roomName, String displayName, String text) {
@@ -186,10 +220,13 @@ public class SttSessionRegistry {
     private record SessionState(
             String meetingId,
             String roomName,
+            String speakerLabel,
+            String displayName,
             SttStreamClient client,
             List<TranscriptEntryResponse> transcript,
             AtomicReference<String> egressId,
-            AtomicReference<Boolean> failed
+            AtomicReference<Boolean> failed,
+            AtomicReference<String> partialText
     ) {
     }
 }

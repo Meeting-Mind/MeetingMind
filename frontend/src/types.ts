@@ -356,6 +356,11 @@ export interface MeetingDialogueResponse {
     endMs: number;
     text: string;
   }>;
+  partials: Array<{
+    speakerLabel: string;
+    speakerName: string | null;
+    text: string;
+  }>;
 }
 
 export interface TranscriptResponse {

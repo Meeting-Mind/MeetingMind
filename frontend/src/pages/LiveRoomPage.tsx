@@ -29,11 +29,25 @@ type RoomTokenResponse = {
   name: string;
 };
 
-type SttTranscriptEntry = {
-  time: string;
+// final로 확정된 말풍선. 한 번 messages 배열에 들어간 뒤로는 절대 수정하지 않는다.
+type SttMessage = {
+  key: string;
+  speakerLabel: string;
   displayName: string;
+  time: string;
   text: string;
 };
+
+// 지금 화자가 말하고 있는 중이라 아직 확정되지 않은 말풍선. final이 오면 사라지고
+// SttMessage로 messages 배열에 옮겨 붙는다.
+type SttPartialMessage = {
+  speakerLabel: string;
+  displayName: string;
+  time: string;
+  text: string;
+};
+
+type SttConnectionStatus = "idle" | "connecting" | "connected" | "disconnected";
 
 function formatTranscriptTime(startMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(startMs / 1_000));
@@ -41,6 +55,13 @@ function formatTranscriptTime(startMs: number): string {
   const minutes = Math.floor((totalSeconds % 3_600) / 60);
   const seconds = totalSeconds % 60;
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function formatNowTime(): string {
+  const now = new Date();
+  return [now.getHours(), now.getMinutes(), now.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
 }
 
 type ParticipantCard = {
@@ -318,7 +339,10 @@ export function LiveRoomPage({
   const [meetingAiNotice, setMeetingAiNotice] = useState("");
   const [participantCards, setParticipantCards] = useState<ParticipantCard[]>([]);
   const [activeSpeakerSid, setActiveSpeakerSid] = useState<string | null>(null);
-  const [liveTranscriptRows, setLiveTranscriptRows] = useState<SttTranscriptEntry[]>([]);
+  const [messages, setMessages] = useState<SttMessage[]>([]);
+  const [currentPartialMessage, setCurrentPartialMessage] = useState<SttPartialMessage | null>(null);
+  const [sttConnectionStatus, setSttConnectionStatus] = useState<SttConnectionStatus>("idle");
+  const [sttStatusBannerVisible, setSttStatusBannerVisible] = useState(false);
   const [sttSearchQuery, setSttSearchQuery] = useState("");
   const [bookmarkedKeys, setBookmarkedKeys] = useState<Set<string>>(new Set());
   const [selectedTerm, setSelectedTerm] = useState("");
@@ -328,6 +352,27 @@ export function LiveRoomPage({
   const termExplanationRequestIdRef = useRef(0);
   const sttSessionIdRef = useRef<string | null>(null);
   const sttStartedRef = useRef(false);
+  const sttListRef = useRef<HTMLDivElement | null>(null);
+  const seenSegmentIdsRef = useRef<Set<string>>(new Set());
+  const sttConnectionStatusRef = useRef<SttConnectionStatus>("idle");
+  const sttStatusHideTimerRef = useRef<number | null>(null);
+
+  // STT 연결 상태 배너를 갱신한다. autoHide면 몇 초 뒤 배너만 사라지고(상태 자체는 유지),
+  // 아니면(연결 중/끊김) 다음 상태 전환 전까지 계속 보인다.
+  function showSttStatus(status: SttConnectionStatus, autoHide: boolean) {
+    sttConnectionStatusRef.current = status;
+    setSttConnectionStatus(status);
+    setSttStatusBannerVisible(true);
+    if (sttStatusHideTimerRef.current != null) {
+      window.clearTimeout(sttStatusHideTimerRef.current);
+      sttStatusHideTimerRef.current = null;
+    }
+    if (autoHide) {
+      sttStatusHideTimerRef.current = window.setTimeout(() => {
+        setSttStatusBannerVisible(false);
+      }, 3000);
+    }
+  }
 
   const participantProfile = useMemo(() => loadParticipantProfile(location.search), [location.search]);
   const roleLookup = useMemo(
@@ -363,6 +408,9 @@ export function LiveRoomPage({
     }
 
     let cancelled = false;
+    seenSegmentIdsRef.current = new Set();
+    setMessages([]);
+    setCurrentPartialMessage(null);
 
     const poll = async () => {
       try {
@@ -370,17 +418,43 @@ export function LiveRoomPage({
         if (cancelled) {
           return;
         }
-        setLiveTranscriptRows(
-          [...dialogue.rows]
-            .sort((left, right) => right.startMs - left.startMs)
-            .map((row) => ({
-              time: formatTranscriptTime(row.startMs),
+
+        // final로 확정된 row만 messages에 새로 추가한다. 이미 본 segmentId는 절대 다시 건드리지 않는다.
+        const newRows = dialogue.rows
+          .filter((row) => !seenSegmentIdsRef.current.has(row.segmentId))
+          .sort((left, right) => left.startMs - right.startMs);
+
+        if (newRows.length > 0) {
+          newRows.forEach((row) => seenSegmentIdsRef.current.add(row.segmentId));
+          setMessages((previous) => [
+            ...previous,
+            ...newRows.map((row) => ({
+              key: row.segmentId,
+              speakerLabel: row.speakerLabel,
               displayName: row.speakerName || row.speakerLabel,
+              time: formatTranscriptTime(row.startMs),
               text: row.text
             }))
-        );
+          ]);
+        }
+
+        const activePartial = dialogue.partials[0] ?? null;
+        setCurrentPartialMessage((previous) => {
+          if (!activePartial) {
+            return null;
+          }
+          const displayName = activePartial.speakerName || activePartial.speakerLabel;
+          if (previous && previous.speakerLabel === activePartial.speakerLabel) {
+            return { ...previous, text: activePartial.text };
+          }
+          return { speakerLabel: activePartial.speakerLabel, displayName, time: formatNowTime(), text: activePartial.text };
+        });
+
+        if (sttConnectionStatusRef.current === "disconnected") {
+          showSttStatus("connected", true);
+        }
       } catch {
-        // ponytail: 폴링 실패는 조용히 무시하고 다음 주기에 재시도.
+        showSttStatus("disconnected", false);
       }
     };
 
@@ -394,14 +468,17 @@ export function LiveRoomPage({
   }, [roomReady, meetingId, session]);
 
   async function startSttStream(targetMeetingId: string, trackId: string) {
+    showSttStatus("connecting", false);
     try {
       const data = await startMeetingTranscription(session, targetMeetingId, {
         mode: "realtime",
         trackId
       });
       sttSessionIdRef.current = data.sessionId;
+      showSttStatus("connected", true);
     } catch (error) {
       console.warn("[LiveRoomPage] STT stream start failed", error);
+      showSttStatus("disconnected", false);
     }
   }
 
@@ -598,6 +675,10 @@ export function LiveRoomPage({
       }
       sttStartedRef.current = false;
       stopSttStream();
+      if (sttStatusHideTimerRef.current != null) {
+        window.clearTimeout(sttStatusHideTimerRef.current);
+        sttStatusHideTimerRef.current = null;
+      }
     };
   }, [meetingId, participantProfile, roleLookup, session]);
 
@@ -664,10 +745,42 @@ export function LiveRoomPage({
   const cameraEnabled = localParticipant?.isCameraEnabled ?? false;
   const sharingEnabled = localParticipant?.isScreenShareEnabled ?? false;
 
+  // 확정된 메시지(절대 안 바뀜) 뒤에, 지금 말하는 중인 partial 말풍선을 하나만 붙인다.
+  const liveTranscriptEntries = useMemo(() => {
+    const entries = messages.map((message) => ({ ...message, isPartial: false }));
+    if (currentPartialMessage) {
+      entries.push({
+        key: `partial-${currentPartialMessage.speakerLabel}`,
+        speakerLabel: currentPartialMessage.speakerLabel,
+        displayName: currentPartialMessage.displayName,
+        time: currentPartialMessage.time,
+        text: currentPartialMessage.text,
+        isPartial: true
+      });
+    }
+    return entries;
+  }, [messages, currentPartialMessage]);
+
+  useEffect(() => {
+    const list = sttListRef.current;
+    if (list) {
+      list.scrollTop = list.scrollHeight;
+    }
+  }, [liveTranscriptEntries]);
+
   const trimmedSttQuery = sttSearchQuery.trim().toLowerCase();
-  const visibleTranscriptRows = trimmedSttQuery
-    ? liveTranscriptRows.filter((row) => `${row.displayName} ${row.text}`.toLowerCase().includes(trimmedSttQuery))
-    : liveTranscriptRows;
+  const visibleTranscriptEntries = trimmedSttQuery
+    ? liveTranscriptEntries.filter((entry) => `${entry.displayName} ${entry.text}`.toLowerCase().includes(trimmedSttQuery))
+    : liveTranscriptEntries;
+
+  const sttStatusMessage =
+    sttConnectionStatus === "connecting"
+      ? "STT 연결 중입니다..."
+      : sttConnectionStatus === "connected"
+        ? "STT가 연결되었습니다."
+        : sttConnectionStatus === "disconnected"
+          ? "STT 연결이 끊어졌습니다."
+          : "";
 
   return (
     <div className="lk-live-room-shell">
@@ -770,6 +883,12 @@ export function LiveRoomPage({
               <span>LIVE</span>
             </div>
 
+            {sttStatusBannerVisible ? (
+              <div className={`lk-live-room-stt-status lk-live-room-stt-status-${sttConnectionStatus}`} role="status">
+                {sttStatusMessage}
+              </div>
+            ) : null}
+
             {selectedTerm ? (
               <section aria-live="polite" className="lk-live-room-term-explanation">
                 <div className="lk-live-room-term-explanation-head">
@@ -805,31 +924,34 @@ export function LiveRoomPage({
               </section>
             ) : null}
 
-            <div className="lk-live-room-sidebar-list">
-              {visibleTranscriptRows.length === 0 ? (
+            <div className="lk-live-room-sidebar-list" ref={sttListRef}>
+              {visibleTranscriptEntries.length === 0 ? (
                 <p className="lk-live-room-sidebar-empty">
                   {sttSearchQuery.trim() ? "검색 결과가 없습니다." : "STT 연결 대기 중입니다."}
                 </p>
               ) : (
-                visibleTranscriptRows.map((row, index) => {
-                  const rowKey = `${row.time}-${row.displayName}-${index}`;
-                  const bookmarked = bookmarkedKeys.has(rowKey);
+                visibleTranscriptEntries.map((entry, index) => {
+                  const bookmarked = bookmarkedKeys.has(entry.key);
+                  const isLatest = index === visibleTranscriptEntries.length - 1;
 
                   return (
-                    <article key={rowKey} className={`lk-live-room-sidebar-feed-item ${index === 0 ? "latest" : ""}`}>
+                    <article
+                      key={entry.key}
+                      className={`lk-live-room-sidebar-feed-item ${isLatest ? "latest" : ""} ${entry.isPartial ? "is-partial" : ""}`}
+                    >
                       <button
                         aria-label={bookmarked ? "북마크 해제" : "북마크"}
                         className={`lk-live-room-bookmark ${bookmarked ? "is-active" : ""}`}
-                        onClick={() => toggleBookmark(rowKey)}
+                        onClick={() => toggleBookmark(entry.key)}
                         type="button"
                       >
                         <BookmarkGlyph filled={bookmarked} />
                       </button>
                       <div className="lk-live-room-sidebar-feed-meta">
-                        <span>{row.time}</span>
-                        <strong>{row.displayName}</strong>
+                        <span>{entry.time}</span>
+                        <strong>{entry.displayName}</strong>
                       </div>
-                      <p onMouseUp={handleTranscriptSelection}>{row.text}</p>
+                      <p onMouseUp={handleTranscriptSelection}>{entry.text}</p>
                     </article>
                   );
                 })
