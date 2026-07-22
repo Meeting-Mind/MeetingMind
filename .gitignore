@@ -14,10 +14,13 @@ __pycache__/
 backend/target/
 backend/.gradle/
 backend/build/
+backend/bin/
 bff/.gradle/
 bff/build/
+bff/bin/
 auth/.gradle/
 auth/build/
+auth/bin/
 .env
 .env.*
 !.env.example

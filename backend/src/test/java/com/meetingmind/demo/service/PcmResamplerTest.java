@@ -9,8 +9,9 @@ import org.junit.jupiter.api.Test;
 class PcmResamplerTest {
 
     @Test
-    void downsamplesLengthByFactorOfThree() {
-        short[] samples = new short[300];
+    void downsamplesLengthByFactorOfSixForStereoInput() {
+        // 300 stereo frames (L,R interleaved) = 600 shorts
+        short[] samples = new short[600];
         for (int i = 0; i < samples.length; i++) {
             samples[i] = 1000;
         }
@@ -18,12 +19,13 @@ class PcmResamplerTest {
 
         byte[] output = PcmResampler.downsample48kTo16kMono(input);
 
-        assertThat(output.length).isEqualTo(input.length / 3);
+        assertThat(output.length).isEqualTo(input.length / 6);
     }
 
     @Test
-    void preservesConstantAmplitude() {
-        short[] samples = new short[9];
+    void preservesConstantAmplitudeAndMixesChannelsDown() {
+        // 9 stereo frames (L,R interleaved) = 18 shorts, both channels at 2000
+        short[] samples = new short[18];
         for (int i = 0; i < samples.length; i++) {
             samples[i] = 2000;
         }

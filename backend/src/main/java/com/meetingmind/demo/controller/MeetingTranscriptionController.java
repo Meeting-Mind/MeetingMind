@@ -120,6 +120,11 @@ public class MeetingTranscriptionController {
                                 segment.id(), segment.speakerId(), segment.speakerLabel(), segment.speakerName(),
                                 segment.startMs(), segment.endMs(), segment.text()
                         ))
+                        .toList(),
+                sessionRegistry.getMeetingPartials(meetingId).stream()
+                        .map(partial -> new MeetingDialogueResponse.Partial(
+                                partial.speakerLabel(), partial.speakerName(), partial.text()
+                        ))
                         .toList()
         );
     }

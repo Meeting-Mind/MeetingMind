@@ -137,8 +137,8 @@ class SttTranscriptFlowIntegrationTest {
         private final AtomicReference<CapturingSttStreamClient> latest = new AtomicReference<>();
 
         @Override
-        public SttStreamClient create(Consumer<String> onTranscript, Consumer<Throwable> onError) {
-            CapturingSttStreamClient client = new CapturingSttStreamClient(onTranscript, onError);
+        public SttStreamClient create(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError) {
+            CapturingSttStreamClient client = new CapturingSttStreamClient(onFinalTranscript, onPartialTranscript, onError);
             latest.set(client);
             return client;
         }
@@ -150,18 +150,24 @@ class SttTranscriptFlowIntegrationTest {
 
     static class CapturingSttStreamClient implements SttStreamClient {
 
-        private final Consumer<String> onTranscript;
+        private final Consumer<String> onFinalTranscript;
+        private final Consumer<String> onPartialTranscript;
         @SuppressWarnings("unused")
         private final Consumer<Throwable> onError;
         private boolean closed;
 
-        CapturingSttStreamClient(Consumer<String> onTranscript, Consumer<Throwable> onError) {
-            this.onTranscript = onTranscript;
+        CapturingSttStreamClient(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError) {
+            this.onFinalTranscript = onFinalTranscript;
+            this.onPartialTranscript = onPartialTranscript;
             this.onError = onError;
         }
 
         void emitTranscript(String text) {
-            onTranscript.accept(text);
+            onFinalTranscript.accept(text);
+        }
+
+        void emitPartialTranscript(String text) {
+            onPartialTranscript.accept(text);
         }
 
         boolean closed() {

@@ -5065,6 +5065,32 @@ body.app-theme.meeting-access-body {
   font-weight: 900;
 }
 
+.lk-live-room-stt-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-bottom: 12px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lk-live-room-stt-status-connecting {
+  background: #fff3d6;
+  color: #a97a1c;
+}
+
+.lk-live-room-stt-status-connected {
+  background: #dff4e6;
+  color: #2f8a51;
+}
+
+.lk-live-room-stt-status-disconnected {
+  background: #fde3e3;
+  color: #c4453f;
+}
+
 .lk-live-room-sidebar-list {
   min-height: 0;
   flex: 1;
@@ -5083,6 +5109,11 @@ body.app-theme.meeting-access-body {
 
 .lk-live-room-sidebar-feed-item.latest {
   background: #ffdcca;
+}
+
+.lk-live-room-sidebar-feed-item.is-partial {
+  border-style: dashed;
+  opacity: 0.85;
 }
 
 .lk-live-room-sidebar-feed-meta {
