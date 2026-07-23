@@ -21,6 +21,9 @@ bff/bin/
 auth/.gradle/
 auth/build/
 auth/bin/
+stt/.gradle/
+stt/build/
+stt/bin/
 .env
 .env.*
 !.env.example

@@ -3,16 +3,22 @@ package com.meetingmind.demo.controller;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
+import com.meetingmind.demo.domain.MeetingTranscript;
 import com.meetingmind.demo.domain.TranscriptStatus;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.MeetingDialogueResponse;
 import com.meetingmind.demo.dto.MeetingTranscriptionStartResponse;
 import com.meetingmind.demo.dto.MeetingTranscriptStatusResponse;
 import com.meetingmind.demo.dto.StartMeetingTranscriptionRequest;
-import com.meetingmind.demo.service.LiveKitEgressService;
+import com.meetingmind.demo.gateway.TranscriptionGateway;
+import com.meetingmind.demo.gateway.TranscriptionHandle;
+import com.meetingmind.demo.gateway.TranscriptionSessionNotFoundException;
+import com.meetingmind.demo.gateway.TranscriptionStartCommand;
+import com.meetingmind.demo.gateway.TranscriptionStartException;
+import com.meetingmind.demo.gateway.TranscriptionStopException;
 import com.meetingmind.demo.service.SttProvider;
-import com.meetingmind.demo.service.SttSessionRegistry;
 import jakarta.validation.Valid;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -31,21 +37,18 @@ public class MeetingTranscriptionController {
     private static final Logger log = LoggerFactory.getLogger(MeetingTranscriptionController.class);
     private final AuthService authService;
     private final WorkspaceDomainService workspaceDomainService;
-    private final SttSessionRegistry sessionRegistry;
-    private final LiveKitEgressService liveKitEgressService;
+    private final TranscriptionGateway transcriptionGateway;
     private final SttProvider sttProvider;
 
     public MeetingTranscriptionController(
             AuthService authService,
             WorkspaceDomainService workspaceDomainService,
-            SttSessionRegistry sessionRegistry,
-            LiveKitEgressService liveKitEgressService,
+            TranscriptionGateway transcriptionGateway,
             SttProvider sttProvider
     ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
-        this.sessionRegistry = sessionRegistry;
-        this.liveKitEgressService = liveKitEgressService;
+        this.transcriptionGateway = transcriptionGateway;
         this.sttProvider = sttProvider;
     }
 
@@ -56,31 +59,28 @@ public class MeetingTranscriptionController {
             @Valid @RequestBody StartMeetingTranscriptionRequest request
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
-        workspaceDomainService.startMeetingTranscript(user.id(), meetingId, sttProvider.providerId());
+        MeetingTranscript transcript = workspaceDomainService.startMeetingTranscript(user.id(), meetingId, sttProvider.providerId());
 
-        String sessionId = null;
         try {
             String roomName = workspaceDomainService.meetingRoomName(meetingId);
-            sessionId = sessionRegistry.createMeetingSession(meetingId, roomName, user.displayName(), request.trackId());
-            String publicWsBaseUrl = com.meetingmind.demo.config.DotenvConfig.require("PUBLIC_WS_BASE_URL");
-            String egressId = liveKitEgressService.startTrackEgress(
-                    roomName, request.trackId(), LiveKitEgressService.egressWebSocketUrl(publicWsBaseUrl, sessionId)
-            );
-            sessionRegistry.setEgressId(sessionId, egressId);
-            return new MeetingTranscriptionStartResponse(meetingId, TranscriptStatus.PROCESSING.name(), sessionId, egressId);
-        } catch (IllegalStateException exception) {
-            if (sessionId == null) {
+            TranscriptionHandle handle = transcriptionGateway.start(new TranscriptionStartCommand(
+                    meetingId,
+                    roomName,
+                    request.trackId(),
+                    user.displayName(),
+                    transcript.retentionUntil(),
+                    UUID.randomUUID().toString()
+            ));
+            return new MeetingTranscriptionStartResponse(meetingId, TranscriptStatus.PROCESSING.name(), handle.sessionId(), handle.egressId());
+        } catch (TranscriptionStartException exception) {
+            if (exception.sessionId() == null) {
                 workspaceDomainService.failMeetingTranscript(meetingId);
-            } else {
-                sessionRegistry.failAndClose(sessionId);
             }
             log.warn(
-                    "Failed to start meeting transcription. meetingId={} trackId={} sessionId={} reason={}",
+                    "Meeting transcription start rejected by STT gateway. meetingId={} trackId={} reason={}",
                     meetingId,
                     request.trackId(),
-                    sessionId,
-                    exception.getMessage(),
-                    exception
+                    exception.getMessage()
             );
             throw new AuthorizationException(
                     HttpStatus.SERVICE_UNAVAILABLE,
@@ -106,7 +106,7 @@ public class MeetingTranscriptionController {
             @PathVariable String meetingId
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
-        String sessionId = sessionRegistry.findActiveMeetingSessionId(meetingId);
+        String sessionId = transcriptionGateway.activeSessionId(meetingId);
         if (sessionId == null) {
             throw new AuthorizationException(HttpStatus.NOT_FOUND, "STT_SESSION_NOT_FOUND", "STT 세션을 찾을 수 없습니다.");
         }
@@ -115,24 +115,16 @@ public class MeetingTranscriptionController {
 
     private MeetingTranscriptStatusResponse stopActiveSession(AuthUserResponse user, String meetingId, String sessionId) {
         workspaceDomainService.requireTranscriptManagement(user.id(), meetingId);
-        if (!sessionRegistry.belongsToMeeting(sessionId, meetingId)) {
-            throw new AuthorizationException(HttpStatus.NOT_FOUND, "STT_SESSION_NOT_FOUND", "STT 세션을 찾을 수 없습니다.");
-        }
-        String egressId = sessionRegistry.getEgressId(sessionId);
         try {
-            if (egressId != null) {
-                sessionRegistry.markStopping(sessionId);
-                liveKitEgressService.stopEgress(egressId);
-            }
-        } catch (IllegalStateException exception) {
-            sessionRegistry.failAndClose(sessionId);
+            transcriptionGateway.stop(meetingId, sessionId);
+        } catch (TranscriptionSessionNotFoundException exception) {
+            throw new AuthorizationException(HttpStatus.NOT_FOUND, "STT_SESSION_NOT_FOUND", "STT 세션을 찾을 수 없습니다.");
+        } catch (TranscriptionStopException exception) {
             log.warn(
-                    "Failed to stop meeting transcription. meetingId={} sessionId={} egressId={} reason={}",
+                    "Meeting transcription stop rejected by STT gateway. meetingId={} sessionId={} reason={}",
                     meetingId,
                     sessionId,
-                    egressId,
-                    exception.getMessage(),
-                    exception
+                    exception.getMessage()
             );
             throw new AuthorizationException(
                     HttpStatus.SERVICE_UNAVAILABLE,
@@ -140,7 +132,6 @@ public class MeetingTranscriptionController {
                     "LiveKit egress 서비스를 중지할 수 없습니다."
             );
         }
-        sessionRegistry.close(sessionId);
         return new MeetingTranscriptStatusResponse(
                 meetingId,
                 workspaceDomainService.meetingTranscript(user.id(), meetingId).transcript().status().name()
@@ -163,11 +154,7 @@ public class MeetingTranscriptionController {
                                 segment.startMs(), segment.endMs(), segment.text()
                         ))
                         .toList(),
-                sessionRegistry.getMeetingPartials(meetingId).stream()
-                        .map(partial -> new MeetingDialogueResponse.Partial(
-                                partial.speakerLabel(), partial.speakerName(), partial.text()
-                        ))
-                        .toList()
+                transcriptionGateway.partials(meetingId)
         );
     }
 
