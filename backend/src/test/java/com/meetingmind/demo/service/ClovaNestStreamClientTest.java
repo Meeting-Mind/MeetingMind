@@ -18,11 +18,49 @@ class ClovaNestStreamClientTest {
     @Test
     void extractsOnlyTranscriptionText() {
         String transcription = """
-                {"responseType":["transcription"],"transcription":{"text":"회의 전사 결과입니다."}}
+                {"responseType":["transcription"],"transcription":{"text":"회의 전사 결과입니다.","epFlag":true}}
                 """;
 
         assertThat(ClovaNestStreamClient.extractTranscription(transcription))
-                .isEqualTo("회의 전사 결과입니다.");
+                .isEqualTo(new ClovaNestStreamClient.Transcription("회의 전사 결과입니다.", true));
+    }
+
+    @Test
+    void treatsMissingEpFlagAsFinal() {
+        String transcription = """
+                {"responseType":["transcription"],"transcription":{"text":"화자 정보 없이 확정된 문장입니다."}}
+                """;
+
+        assertThat(ClovaNestStreamClient.extractTranscription(transcription).epFlag()).isTrue();
+    }
+
+    @Test
+    void extractsPartialTranscriptionWhenEpFlagFalse() {
+        String transcription = """
+                {"responseType":["transcription"],"transcription":{"text":"듣는 중","epFlag":false}}
+                """;
+
+        assertThat(ClovaNestStreamClient.extractTranscription(transcription))
+                .isEqualTo(new ClovaNestStreamClient.Transcription("듣는 중", false));
+    }
+
+    @Test
+    void ignoresEmptyInterimPing() {
+        String transcription = """
+                {"responseType":["transcription"],"transcription":{"text":"","epFlag":false}}
+                """;
+
+        assertThat(ClovaNestStreamClient.extractTranscription(transcription)).isNull();
+    }
+
+    @Test
+    void keepsEmptyFinalBoundarySignal() {
+        String transcription = """
+                {"responseType":["transcription"],"transcription":{"text":"","epFlag":true}}
+                """;
+
+        assertThat(ClovaNestStreamClient.extractTranscription(transcription))
+                .isEqualTo(new ClovaNestStreamClient.Transcription("", true));
     }
 
     @Test

@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 class ClovaNestStreamClientFactory implements SttStreamClientFactory {
 
     @Override
-    public SttStreamClient create(Consumer<String> onTranscript, Consumer<Throwable> onError) {
-        return new ClovaNestStreamClient(onTranscript, onError);
+    public SttStreamClient create(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError) {
+        return new ClovaNestStreamClient(onFinalTranscript, onPartialTranscript, onError);
     }
 }

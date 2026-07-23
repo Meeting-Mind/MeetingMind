@@ -4,5 +4,5 @@ import java.util.function.Consumer;
 
 public interface SttStreamClientFactory {
 
-    SttStreamClient create(Consumer<String> onTranscript, Consumer<Throwable> onError);
+    SttStreamClient create(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError);
 }
