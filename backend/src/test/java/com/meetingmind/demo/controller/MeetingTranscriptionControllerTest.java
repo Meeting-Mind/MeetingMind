@@ -17,6 +17,8 @@ import com.meetingmind.demo.domain.MeetingTranscript;
 import com.meetingmind.demo.domain.TranscriptSegment;
 import com.meetingmind.demo.domain.TranscriptStatus;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
+import com.meetingmind.demo.gateway.InProcessTranscriptionGateway;
+import com.meetingmind.demo.gateway.TranscriptionGateway;
 import com.meetingmind.demo.service.LiveKitEgressService;
 import com.meetingmind.demo.service.SttProvider;
 import com.meetingmind.demo.service.SttSessionRegistry;
@@ -47,13 +49,20 @@ class MeetingTranscriptionControllerTest {
         SttSessionRegistry sessionRegistry = mock(SttSessionRegistry.class);
         LiveKitEgressService liveKitEgressService = mock(LiveKitEgressService.class);
         SttProvider sttProvider = mock(SttProvider.class);
+        TranscriptionGateway transcriptionGateway = new InProcessTranscriptionGateway(sessionRegistry, liveKitEgressService);
         MeetingTranscriptionController controller = new MeetingTranscriptionController(
-                authService, workspaceDomainService, sessionRegistry, liveKitEgressService, sttProvider
+                authService, workspaceDomainService, transcriptionGateway, sttProvider
         );
         AuthUserResponse user = new AuthUserResponse("host-1", "host@meetingmind.test", "Host", null, "active");
+        Instant now = Instant.parse("2026-07-23T03:00:00Z");
 
         when(authService.currentUser("Bearer token")).thenReturn(user);
         when(sttProvider.providerId()).thenReturn("soniox-realtime");
+        when(workspaceDomainService.startMeetingTranscript("host-1", "meeting-1", "soniox-realtime"))
+                .thenReturn(new MeetingTranscript(
+                        "meeting-1", TranscriptStatus.PROCESSING, "soniox-realtime", null,
+                        now, null, null, null, false, null, now, now
+                ));
         when(workspaceDomainService.meetingRoomName("meeting-1")).thenReturn("space-room-space-1");
         when(sessionRegistry.createMeetingSession("meeting-1", "space-room-space-1", "Host", "track-1"))
                 .thenReturn("session-1");
@@ -82,11 +91,13 @@ class MeetingTranscriptionControllerTest {
     void returnsPersistedDialogueWhileTranscriptionIsProcessing() {
         AuthService authService = mock(AuthService.class);
         WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        TranscriptionGateway transcriptionGateway = new InProcessTranscriptionGateway(
+                mock(SttSessionRegistry.class), mock(LiveKitEgressService.class)
+        );
         MeetingTranscriptionController controller = new MeetingTranscriptionController(
                 authService,
                 workspaceDomainService,
-                mock(SttSessionRegistry.class),
-                mock(LiveKitEgressService.class),
+                transcriptionGateway,
                 mock(SttProvider.class)
         );
         AuthUserResponse user = new AuthUserResponse("viewer-1", "viewer@meetingmind.test", "Viewer", null, "active");
@@ -116,8 +127,9 @@ class MeetingTranscriptionControllerTest {
         SttSessionRegistry sessionRegistry = mock(SttSessionRegistry.class);
         LiveKitEgressService liveKitEgressService = mock(LiveKitEgressService.class);
         SttProvider sttProvider = mock(SttProvider.class);
+        TranscriptionGateway transcriptionGateway = new InProcessTranscriptionGateway(sessionRegistry, liveKitEgressService);
         MeetingTranscriptionController controller = new MeetingTranscriptionController(
-                authService, workspaceDomainService, sessionRegistry, liveKitEgressService, sttProvider
+                authService, workspaceDomainService, transcriptionGateway, sttProvider
         );
         AuthUserResponse user = new AuthUserResponse("host-1", "host@meetingmind.test", "Host", null, "active");
 
@@ -143,8 +155,9 @@ class MeetingTranscriptionControllerTest {
         WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
         SttSessionRegistry sessionRegistry = mock(SttSessionRegistry.class);
         LiveKitEgressService liveKitEgressService = mock(LiveKitEgressService.class);
+        TranscriptionGateway transcriptionGateway = new InProcessTranscriptionGateway(sessionRegistry, liveKitEgressService);
         MeetingTranscriptionController controller = new MeetingTranscriptionController(
-                authService, workspaceDomainService, sessionRegistry, liveKitEgressService, mock(SttProvider.class)
+                authService, workspaceDomainService, transcriptionGateway, mock(SttProvider.class)
         );
         AuthUserResponse user = new AuthUserResponse("host-1", "host@meetingmind.test", "Host", null, "active");
         Instant now = Instant.parse("2026-07-23T03:00:00Z");
