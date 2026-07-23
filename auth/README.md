@@ -21,7 +21,7 @@ T031 foundation과 T032 인증·refresh·폐기 runtime 위에 T033 AWS KMS `RS2
 
 `/internal/v1/auth/*`는 Browser/public API가 아니다. 운영에서는 direct client certificate의 SPIFFE URI SAN만 사용한다. local/test/integration profile은 명시적으로 활성화한 `X-MeetingMind-Test-Principal`만 개발용으로 허용한다.
 
-`AUTH_SIGNING_PROVIDER=disabled`이면 signup/login/Google/refresh가 access token을 발급하려 할 때 `503 TOKEN_ISSUER_UNAVAILABLE`로 전체 DB transaction을 rollback한다. 임시 HMAC JWT나 container 내부 private key로 성공시키지 않는다. 운영은 `aws-kms`만 허용하며 AWS SDK default credential chain과 EKS workload IAM을 사용한다. Outbox transport publisher와 재시도/경보는 T045 출시 gate다.
+`AUTH_SIGNING_PROVIDER=disabled`이면 signup/login/Google/refresh가 access token을 발급하려 할 때 `503 TOKEN_ISSUER_UNAVAILABLE`로 전체 DB transaction을 rollback한다. 임시 HMAC JWT나 container 내부 private key로 성공시키지 않는다. 운영은 `aws-kms`만 허용하며 AWS SDK default credential chain과 Auth ECS Task Role을 사용한다. Outbox transport publisher와 재시도/경보는 T049 출시 gate다.
 
 ## AWS KMS Signing
 

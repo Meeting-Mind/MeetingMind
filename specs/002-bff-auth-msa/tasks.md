@@ -5,6 +5,7 @@
 - `[x]`: 완료 기준과 검증 기록이 존재함
 - `[ ]`: 미완료
 - `Blocked`: 선행 결정이나 외부 준비가 필요함
+- `Deferred`: 구조적 경계는 유지하지만 현재 배포 범위에서는 보류
 - `Owner`는 책임 영역, `Agent`는 실제 작업 주체다. 구현 시작 전 팀 배정이 바뀌면 이 표부터 갱신한다.
 
 ## Milestones
@@ -15,15 +16,15 @@
 | M002 | Web BFF 호환 경로 | 별도 BFF+Redis가 현재 Backend를 감싸고 브라우저에 token을 노출하지 않음 | Complete |
 | M003 | Browser session cutover | Frontend token 저장/Bearer가 제거되고 bootstrap·logout·최종 401이 동작함 | Complete |
 | M004 | Auth Service 추출 | Auth DB/JWT/JWKS/refresh/revoke가 내부 계약으로 분리되고 Core가 로컬 검증함 | Complete |
-| M005 | EKS 운영 기준선 | single-region Multi-AZ에서 BFF/Auth/Core/AI의 배포·관측·장애 훈련을 통과함 | Blocked |
+| M005 | ECS Fargate 운영 기준선 | single-region Multi-AZ에서 BFF/Auth/Core/AI의 독립 ECS 배포·관측·장애 훈련을 통과함 | In Progress |
 | M006 | 도메인 점진 분리 | 관측 근거가 있는 도메인이 독립 DB/API/rollback으로 하나씩 추출됨 | Pending |
 
 ## Task List
 
 | ID | Milestone | Status | Area | Owner | Agent | Dependencies | Expected Files | Task | Completion Criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T001 | M001 | [x] | requirements | Docs/Contracts | Codex | - | `requirements/policies.md`, `functional-requirements*.md`, `non-functional-requirements*.md`, `glossary.md`, `status-values.md` | 브라우저/BFF/Auth의 token·session 저장 책임과 EKS/LiveKit 목표를 정리한다. | `sessionStorage` refresh 지시와 NFR 충돌이 제거되고 요구사항 ID와 BffSession 상태가 목표 구조를 설명한다. |
-| T002 | M001 | [x] | spec | Docs/Contracts | Codex | T001 | `spec.md`, `clarify.md`, `research.md`, `plan.md` | 사용자 결정과 점진 MSA 근거·범위·차단 질문을 기록한다. | 별도 BFF, Redis, EKS Multi-AZ, LiveKit Cloud와 open gate가 추적된다. |
+| T001 | M001 | [x] | requirements | Docs/Contracts | Codex | - | `requirements/policies.md`, `functional-requirements*.md`, `non-functional-requirements*.md`, `glossary.md`, `status-values.md` | 브라우저/BFF/Auth의 token·session 저장 책임과 ECS Fargate/LiveKit 목표를 정리한다. | `sessionStorage` refresh 지시와 NFR 충돌이 제거되고 요구사항 ID와 BffSession 상태가 목표 구조를 설명한다. |
+| T002 | M001 | [x] | spec | Docs/Contracts | Codex | T001 | `spec.md`, `clarify.md`, `research.md`, `plan.md`, `adr/*` | 사용자 결정과 점진 MSA 근거·범위·차단 질문을 기록한다. | 별도 BFF, Redis, ECS Fargate Multi-AZ, LiveKit Cloud와 open gate가 추적된다. |
 | T003 | M001 | [x] | contracts | Shared Contract | Codex | T002 | `contracts/*.md` | Browser-BFF와 BFF-Auth 계약을 분리한다. | browser 응답에 token이 없고 내부 refresh/revoke/JWKS 경계가 명시된다. |
 | T004 | M001 | [x] | data | Shared Contract | Codex | T002 | `data-model.md`, `erd.md` | Redis/Token Vault/Auth DB의 모델과 보존·폐기 규칙을 정의한다. | 저장소별 원문/암호문/hash 역할과 관계가 일치한다. |
 | T005 | M001 | [x] | legacy-docs | Shared Contract | Codex | T003, T004 | `specs/001-meetingmind-core/**` | 기존 Core auth 문서를 Current Legacy Compatibility로 표시하고 target 문서를 연결한다. | 기존 구현 설명을 보존하면서 신규 구현자가 legacy token 계약을 목표로 오해하지 않는다. |
@@ -47,13 +48,19 @@
 | T034 | M004 | [x] | data/migration | Data | Codex | T031, T032, Q-018, Q-019 | `backend` Core user projection migration/tests, `auth/src/migration/**`, migration tests/runbook과 관련 data/ERD/docs | Core 문자열 User PK는 유지하고 UUID projection을 backfill한 뒤 legacy User/AuthIdentity를 반복 가능한 offline snapshot/delta로 forward-only 이전한다. legacy AuthSession은 이전하지 않는다. | Core V1→V13, 별도 source/target PostgreSQL dry-run/apply/verify·멱등 재실행, exact reconciliation과 projection fail-closed 통합 테스트가 통과했고 쓰기 drain/강제 재로그인/rollback runbook을 고정했다. |
 | T035 | M004 | [x] | integration | Integration | Codex | T032, T033, T034, Q-020, Q-021 | Browser/Core user ID 및 Core projection contract, BFF Auth client·Token Bundle v1/v2·session index, Core dual validator/projection repository, Compose/CI/E2E/runbook | BFF를 Auth Service로 전환하고 audience별 token을 사용하며 Core dual validation과 신규 User projection을 연결한다. legacy/target 모드를 결정적으로 구분하고 rollback window 뒤 legacy issuer를 종료할 수 있게 한다. | 외부 `user-{Auth UUID}` 무회귀, 실제 AuthSession/Auth UUID Redis index, audience별 access와 원자 refresh, target revoke, Core downgrade 방지·UUID mapping, 신규 projection 멱등/충돌, 기존 문서 강제 재로그인과 명시적 legacy rollback을 단위·실제 Redis/PostgreSQL·프로세스 E2E로 검증했다. |
 | T036 | M004 | [x] | ci/security | Integration | Codex | T010, T031, T033 | `bff/build.gradle`, `auth/build.gradle`, `.gitleaksignore`, 관련 specs | BFF/Auth 런타임 의존성 취약점과 테스트 fixture secret scan 오탐을 최소 범위로 해소한다. | BFF/Auth 테스트·이미지 build, Trivy HIGH/CRITICAL scan과 현재 브랜치 전체 이력 Gitleaks scan이 통과하고 CI Gate 재실행 준비가 완료됐다. |
-| T040 | M005 | Blocked | platform-decision | Platform | TBD | Q-011, Q-012, Q-013 | `clarify.md`, infra ADR | region, node/IaC, SLO/RTO/RPO를 확정한다. | 운영 topology와 출시 gate가 수치로 결정된다. |
-| T041 | M005 | [ ] | infra/foundation | Platform | TBD | T040 | future `infra/**` | EKS single-region Multi-AZ, ingress/WAF, workload IAM과 NetworkPolicy를 IaC로 구성한다. | public/internal route와 AWS 권한 경계가 자동 검증된다. |
-| T042 | M005 | [ ] | infra/data | Platform/Data | TBD | T041 | future `infra/**` | HA Redis, 서비스별 RDS, KMS/Secrets와 backup을 구성한다. | encryption, failover, backup/restore와 최소 권한을 검증한다. |
-| T043 | M005 | [ ] | deploy | Platform | TBD | T041, T042 | Dockerfiles, manifests/charts | BFF/Auth/Core/AI 최소 replica/probe/PDB/HPA/anti-affinity를 적용한다. | rollout 중 가용성과 AZ 분산 기준을 통과한다. |
-| T044 | M005 | [ ] | realtime | Platform/Core | TBD | T041 | LiveKit adapter/config/runbook | LiveKit Cloud secret과 room/token 경계를 workload IAM/secret으로 연결한다. | provider 장애가 realtime에만 격리되고 Meeting metadata/report가 유지된다. |
-| T045 | M005 | [ ] | observability | Platform | TBD | T043, T044 | dashboards/alerts/runbooks | login/refresh/logout/session/Auth/Core/AI/LiveKit/KMS 지표와 redaction을 구성한다. | SLO alert와 token/PII log scan이 통과한다. |
-| T046 | M005 | [ ] | resilience | Integration | TBD | T045 | failure tests, `implement.md` | Pod/AZ/Redis/Auth/Core/AI/LiveKit/KMS 장애 훈련을 수행한다. | `plan.md` failure behavior와 RTO/RPO 기준을 충족하거나 출시를 차단한다. |
+| T039 | M005 | [x] | infra/network-design | Platform | Codex | Q-011 | `infra/aws/nonprod/network/**`, `adr/001-nonprod-vpc.md`, `clarify.md`, `tasks.md`, `plan.md`, `implement.md` | 서울 리전 NonProd VPC, 2개 AZ, Public/Private/Data subnet 기준선을 설계한다. | VPC/subnet/route table/IGW 기준선이 문서와 Terraform/콘솔 체크리스트로 고정되고, Terraform 1.6.6 `fmt -check`/`validate`, `git diff --check`, 변경 범위 secret scan이 통과했다. 실제 AWS `plan/apply`는 실행하지 않았다. |
+| T040 | M005 | Blocked | platform-decision | Platform | Codex | Q-013, Q-023 | `clarify.md`, `research.md`, `plan.md`, `adr/002-ecs-fargate.md` | 내부 service discovery/mTLS 구현 제품과 서비스별 SLO/RTO/RPO를 확정한다. | 내부 주소·인증서 회전 방식과 운영 출시 gate가 수치로 결정된다. |
+| T041 | M005 | [x] | infra/ecs-foundation | Platform | 사용자 | T039, Q-012 | AWS Console, `infra/aws/foundation-status.md`, 관련 spec/ADR | NonProd ECR repository/lifecycle, 단일 ECS Fargate cluster, ECS service-linked role, 공통 task execution role, 서비스별 task role/Security Group/7일 Log Group, NAT Gateway/private route를 구성한다. | `bff`, `auth`, `core`, `ai`, `realtime-stt` ECR과 기반 리소스가 사용자 제공 현황에 기록되고, 공통 execution role과 서비스별 task role 경계가 구분된다. |
+| T042 | M005 | [ ] | infra/data | Platform/Data | TBD | T041, T040 | future `infra/**`, Secrets Manager/Parameter Store, RDS/ElastiCache/KMS 설정과 runbook | HA Redis, 서비스별 RDS, KMS/Secrets와 backup을 구성한다. | encryption, failover, backup/restore와 서비스별 task role 최소 권한을 검증한다. |
+| T043 | M005 | [ ] | image/ecr | Platform/Service Owners | TBD | T041 | `bff`, `auth`, `backend`, `ai` Dockerfiles와 CI/ECR 배포 문서 | BFF/Auth/Core/AI 이미지를 빌드해 immutable Git commit SHA tag로 각 ECR repository에 push한다. | 네 이미지 digest와 commit SHA 대응이 기록되고 scan-on-push 결과를 확인한다. Inspector enhanced ECR scanning은 NonProd에서 비활성 상태를 유지한다. |
+| T044 | M005 | Deferred | realtime-stt | Realtime | TBD | T041, 별도 승인 | future `realtime-stt/**`, ECR/Task Definition/ECS Service 문서 | `realtime-stt`는 독립 ECR/서비스 경계를 유지하되 이번 NonProd ECS 배포에서는 Task Definition과 ECS Service 생성을 보류한다. | ECR lifecycle만 유지되고 배포 재개 조건과 별도 리소스/secret/scale 기준이 후속 task에 기록된다. |
+| T045 | M005 | [ ] | edge | Platform/Frontend | TBD | T041, T043, Q-024 | S3/CloudFront/WAF/Route 53, ALB Target Group/Listener 설정과 future `infra/**` | Frontend S3+CloudFront/WAF와 사용자→Route 53→CloudFront/WAF→ALB→BFF 경로를 구성한다. | Public ALB가 public subnet에 있고 BFF target port `8081`/health check, HTTP(S) target protocol과 CloudFront/WAF 우회 차단이 검증된다. |
+| T046 | M005 | [ ] | ecs/task-definition | Platform/Service Owners | TBD | T042, T043 | 서비스별 ECS Task Definition, IAM/secret/log 설정과 future `infra/**` | BFF/Auth/Core/AI Task Definition을 서비스별 task role, 공통 execution role, 7일 Log Group과 함께 등록한다. | 이미지 digest/SHA, CPU·memory, port, health check, secret 참조, execution/task role 분리가 revision별로 검증된다. |
+| T047 | M005 | [ ] | internal-network | Platform/Security | TBD | T040, T042, T046 | service discovery, Security Group, Secrets Manager/Parameter Store, mTLS 설정과 ADR/runbook | BFF→Auth `8082`, BFF→Core `8080`, Core→AI `8000` discovery와 최소 허용 SG/secret 경계를 확정·구성한다. | public 우회 경로가 없고 source SG와 workload identity가 일치하는 호출만 성공하며 secret 원문이 Task Definition/로그에 노출되지 않는다. |
+| T048 | M005 | [ ] | ecs/service | Platform | TBD | T045, T046, T047 | ECS Service/ALB 설정과 future `infra/**` | BFF/Auth/Core/AI ECS Service를 만들고 Fargate Task를 2개 AZ private app subnet에 배치한다. | 서비스별 desired count와 AZ 배치, ALB→BFF 및 내부 호출, rolling deployment와 task replacement가 검증된다. |
+| T049 | M005 | [ ] | observability/autoscaling | Platform | TBD | T048, Q-013 | CloudWatch dashboards/alarms, Service Auto Scaling, runbooks | health check, 7일 로그, 경보와 서비스별 autoscaling을 검증한다. | login/refresh/logout/session/Auth/Core/AI/LiveKit/KMS SLO alert, token/PII log scan과 scale-out/in 검증이 통과한다. |
+| T052 | M005 | [ ] | resilience | Integration | TBD | T049, Q-025 | failure tests, `implement.md` | ECS Task/AZ/NAT/Redis/Auth/Core/AI/LiveKit/KMS 장애 훈련을 수행한다. | `plan.md` failure behavior와 RTO/RPO 기준을 충족하거나 출시를 차단한다. NAT Gateway 개수와 AZ route/장애 경계도 확인한다. |
+| T053 | M005 | [ ] | infra/production-iac | Platform | TBD | T052, Q-026 | future Terraform modules/environment variables, Production runbook | 현재 VPC Terraform을 보존하면서 ECS/ALB/IAM/SG/CloudWatch를 모듈화하고 검증된 설계를 별도 Production 계정/리소스에 적용할 준비를 한다. | NonProd/Production 변수와 state/account 경계 및 tag migration이 분리되고 Production plan이 NonProd 리소스를 참조·변경하지 않는다. |
 | T050 | M006 | [ ] | architecture | Architecture | TBD | M005 | future service specs | 관측된 부하·변경·장애 경계로 첫 추출 도메인을 선택한다. | 분리 가치, API/event, DB ownership, SLO와 rollback이 새 feature spec에 승인된다. |
 | T051 | M006 | [ ] | extraction | Domain Owner | TBD | T050 | future service code/infra | 선택 도메인을 Strangler 방식으로 하나만 추출한다. | dual-run/reconciliation/rollback을 통과하고 다른 도메인 DB를 직접 조회하지 않는다. |
 
@@ -63,4 +70,4 @@
 - Browser session cutover 뒤에는 direct Backend rollback을 사용하지 않는다. 신규 BFF release의 readiness를 내려 drain하고 같은 cookie/Redis/Token Vault 계약의 안정 BFF release로 traffic weight를 복원한다.
 - Auth DB 전환은 source-of-truth 전환 전 dual-write/reconciliation 또는 검증된 export/import를 사용하고 기존 table을 즉시 삭제하지 않는다.
 - issuer 전환은 `kid`/issuer가 구분되는 dual validation을 사용하고 신규 token 발급을 먼저 되돌린다. force push나 migration rollback SQL에 의존하지 않는다.
-- EKS 전환은 deployment/traffic weight를 되돌리되 Redis/RDS/KMS 데이터는 보존하고 원인 분석 전 자동 파괴하지 않는다.
+- ECS 전환은 이전 Task Definition revision/ECS deployment와 ALB traffic을 복원하되 Redis/RDS/KMS 데이터는 보존하고 원인 분석 전 자동 파괴하지 않는다.

@@ -2,7 +2,7 @@
 
 ## Scope
 
-이 runbook은 T023 Browser session cutover의 제한된 rollout/rollback 기준이다. EKS/CloudWatch·Prometheus 배포 자체는 Q-011~Q-013과 T041~T045 범위이며, 여기서는 애플리케이션이 제공해야 하는 readiness drain, 저카디널리티 metric과 판단 기준을 고정한다.
+이 runbook은 T023 Browser session cutover의 제한된 rollout/rollback 기준이다. ECS Fargate/ALB/CloudWatch 배포 자체는 Q-013/Q-023과 T041~T052 범위이며, 여기서는 애플리케이션이 제공해야 하는 readiness drain, 저카디널리티 metric과 판단 기준을 고정한다.
 
 ## Non-Negotiable Boundaries
 
@@ -20,7 +20,7 @@
 | `BFF_AUTH_ISSUER` | `https://auth.meetingmind.internal` | 새 Token Bundle metadata issuer. legacy rollback은 `meetingmind-core-legacy`를 함께 설정한다. |
 | `MEETINGMIND_AUTH_VALIDATION_MODE` | `DUAL` | Core가 `LEGACY_ONLY`, `DUAL`, `TARGET_ONLY` 중 하나로 legacy/target issuer 수용 범위를 결정한다. |
 
-traffic percentage는 EKS ingress/deployment controller가 소유한다. 애플리케이션 flag가 임의 사용자 ID, cookie 또는 header로 canary를 선택하지 않는다.
+traffic percentage는 ALB와 ECS deployment 구성이 소유한다. 애플리케이션 flag가 임의 사용자 ID, cookie 또는 header로 canary를 선택하지 않는다.
 
 ## Auth Service Cutover Order
 
@@ -69,7 +69,7 @@ metric label에는 path variable, user/session ID, email, token, provider body�
 ## Rollback Procedure
 
 1. 신규 release에 `BFF_ACCEPT_BROWSER_TRAFFIC=false`를 적용해 readiness를 `DOWN`으로 만들고 신규 요청을 drain한다.
-2. ingress/deployment traffic weight를 마지막 안정 BFF release 100%, 신규 release 0%로 복원한다.
+2. ALB traffic과 ECS Service를 마지막 안정 BFF Task Definition revision 100%, 신규 revision 0%로 복원한다.
 3. 안정 release의 liveness/readiness, login→session bootstrap→보호 API→logout smoke를 확인한다.
 4. Redis session과 encrypted Token Vault namespace/key/schema를 그대로 보존하고 cleanup 또는 migration rollback을 실행하지 않는다.
 5. current Backend compatibility API/DB 상태와 refresh/logout 결과를 확인한다.

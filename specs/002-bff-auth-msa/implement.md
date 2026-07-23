@@ -40,11 +40,11 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - `POL-SESSION-01`과 `NFR-SEC-02` 충돌을 브라우저 무토큰, BFF 암호문, Auth hash의 세 역할로 해소했다.
 - 일반 세션 유휴 60분/절대 12시간, Remember me 7일 sliding 유휴/14일 절대 만료를 정책 기준선으로 확정했다.
 - 별도 Spring Boot Web BFF, Spring Session Redis, encrypted Token Vault, 내부 비대칭 access/JWKS 방향을 문서화했다.
-- AWS EKS 단일 리전 Multi-AZ와 LiveKit Cloud, 서비스별 DB 소유권과 failure behavior를 문서화했다.
+- AWS EKS 단일 리전 Multi-AZ와 LiveKit Cloud, 서비스별 DB 소유권과 failure behavior를 문서화했다. 이 당시 EKS 선택은 2026-07-23 ADR 002에서 ECS Fargate로 대체됐다.
 - 현재 Backend token API는 Phase 1 compatibility/rollback 대상으로 보존하고 목표 browser 계약에서는 public refresh를 제거했다.
 - 독립 `bff` Gradle 프로젝트를 Java 21/Spring Boot 3.5.14로 추가했다. 기존 Backend와 같은 버전을 사용해 별도 version 선택을 만들지 않았다.
 - `spring-boot-starter-actuator`, `spring-boot-starter-data-redis`, `spring-session-data-redis`는 T010의 health/probe와 외부 세션 저장소를 구현하기 위해 추가했다. security/proxy/회복성 라이브러리는 후속 task 전까지 추가하지 않았다.
-- 운영 readiness에는 Redis를 포함하고 liveness에서는 제외했다. Redis 장애 시 Pod 재시작 반복 대신 traffic 수용만 중지하는 경계를 적용했다.
+- 운영 readiness에는 Redis를 포함하고 liveness에서는 제외했다. Redis 장애 시 container/Task 재시작 반복 대신 traffic 수용만 중지하는 경계를 적용했다.
 - 로컬 Compose에 Redis와 `bff` profile을 추가하고 BFF Docker image와 GitHub Actions BFF test/container scan 경계를 연결했다.
 - Spring Security는 health와 CSRF bootstrap만 익명 허용하고 나머지 요청을 인증 대상으로 고정했다. 인증되지 않은 요청은 redirect 없이 `401`, 인증된 상태 변경 요청의 CSRF 누락은 `403`으로 처리한다.
 - `GET /api/v1/auth/csrf`는 session 기반 token, header/parameter 이름을 반환하며 `Cache-Control: no-store`를 적용했다.
@@ -55,7 +55,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - AWS KMS 연동에는 공식 AWS SDK for Java v2 `kms`와 JDK URL Connection client를 추가했다. JCA만으로 AWS request signing/workload credential/KMS API를 안전하게 대체할 수 없어 새 의존성이 필요하며, 선택 시점 공식 v2 release `2.46.8` BOM으로 모듈 버전을 고정했다.
 - Redis Token Vault는 session Redis와 다른 namespace를 사용하고 ciphertext, encrypted data key와 비밀이 아닌 조회 metadata만 JSON으로 저장한다. 생성은 NX, rotation은 expected version과 현재 serialized value를 Lua compare-and-set한 뒤 TTL까지 한 명령으로 교체한다.
 - 암호화가 실패하면 Redis 쓰기를 시작하지 않고 CAS 경쟁에서 패하면 기존 bundle을 유지한다. 복호화/AAD/KMS/key mismatch는 token이나 provider raw error가 없는 고정 `TokenVaultException.Code`로 fail closed한다.
-- local/test key가 비어 있거나 256-bit가 아니면 임시 key나 평문 fallback 없이 시작을 거부하고, 운영은 KMS provider와 EKS workload IAM을 사용한다.
+- local/test key가 비어 있거나 256-bit가 아니면 임시 key나 평문 fallback 없이 시작을 거부하고, 운영은 KMS provider와 BFF ECS Task Role을 사용한다.
 - `data-model.md`에는 물리 암호화/AAD 경계를 추가했다. 기존 ERD의 `encryptedPayload`, `encryptedDataKey`, `keyId`, `version` 필드로 표현 가능해 ERD 변경은 없고, Browser/Auth API shape도 바뀌지 않아 contracts 변경은 없다.
 - 현재 Backend 전용 RestClient는 설정된 http(s) origin과 코드에 고정된 `signup|login|google` 경로만 사용한다. Browser의 `rememberMe`는 Backend request로 전달하지 않으며 User-Agent는 제어문자를 제거하고 256자로 제한한다.
 - 입력 검증에는 이미 사용하는 Spring Boot validation starter를 BFF에 추가했다. email/필수값/credential·문자열 상한을 BFF 신뢰 경계에서 먼저 검사하고 Backend의 기존 password/Google 검증은 그대로 유지한다.
@@ -99,7 +99,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - T030은 refresh credential을 AuthSession별 하나의 family로 고정하고 BFF single-flight 밖의 grace를 허용하지 않는다. rotation은 credential row lock, 이전 `usedAt`/`replacementId`, 새 leaf insert와 AuthSession 갱신을 원자 처리하며 사용된 credential 재사용 시 해당 기기 family와 AuthSession을 `REFRESH_REUSE`로 폐기한다.
 - Access는 AWS KMS 비반출 RSA-2048 key의 `RS256`으로 서명하고 `meetingmind-core|ai|livekit` 단일 audience별 10분 JWT를 발급한다. 필수 header/claim, 60초 skew, 90일 rotation, 1시간 overlap과 5분 JWKS cache를 Auth 계약에 고정하고 업무 RBAC/ACL은 token에 넣지 않는다.
 - 로그아웃의 DB revoke와 `AuthSessionRevokedV1` transactional outbox를 함께 커밋한다. BFF/Resource Service는 at-least-once event를 idempotent 처리해 `sid`를 `denyUntil`까지 로컬 denylist에 유지하며 중앙 Auth/Redis 매 요청 조회를 추가하지 않는다.
-- 내부 endpoint는 mTLS SPIFFE workload identity, NetworkPolicy와 principal/endpoint allowlist를 동시에 요구한다. 인증서 제품은 Q-012/T040에 남기되 shared secret/client credential 방식으로 계약을 되돌리지 않는다.
+- 내부 endpoint는 mTLS SPIFFE workload identity, 서비스별 Security Group과 principal/endpoint allowlist를 동시에 요구한다. 인증서 제품은 Q-023/T040에 남기되 shared secret/client credential 방식으로 계약을 되돌리지 않는다.
 - 모든 기기 로그아웃은 최근 10분 `authenticatedAt` 또는 local 비밀번호/새 Google credential 재인증을 요구한다. Q-016 결정과 T032 Auth revoke-all/outbox, T035 session index를 선행한 뒤 T024에서 실제 UI/API를 연결했다.
 - target Token Bundle을 audience별 access expiry와 schema version 2로 확장하고 AuthSession `refreshFamilyId`, AuthOutboxEvent를 data model/ERD에 추가했다. 이는 future Auth DB와 Vault document의 forward-only 변경이며 현재 Backend DB나 BFF runtime code는 T030에서 수정하지 않았다.
 - `auth`를 Java 21/Spring Boot 3.5.14 독립 Gradle 프로젝트와 비루트 Docker image로 추가했다. 기존 Java 운영 스택과 같은 버전을 사용하고 health/JDBC/Flyway/PostgreSQL 외에 T031 범위를 넘는 인증·키 의존성은 추가하지 않았다.
@@ -262,7 +262,9 @@ Refresh rotation은 기존 V1의 `usedAt/replacementId` check, replacement FK와
 
 ## Open Implementation Gates
 
-- Q-011~Q-013 AWS region, EKS/IaC/node, SLO/RTO/RPO.
-- mTLS/SPIFFE 인증서 발급·회전 제품과 event transport 제품 선택은 Q-012/T040에서 한다. identity/event 의미는 T030 계약을 유지한다.
+- 2026-07-21: T039 NonProd network design을 시작했다. 서울 리전(`ap-northeast-2`), VPC `10.20.0.0/16`, 2개 AZ의 Public `/24`, Private app `/20`, Data `/24` subnet 기준을 `infra/aws/nonprod/network/**`와 `adr/001-nonprod-vpc.md`에 기록했다. 사용자가 예산은 필요하면 늘릴 수 있으므로 비용을 이유로 계획을 임의 변경하지 말라고 정정해, 비용/Free Tier 문구를 계획 변경 요인이 아니라 별도 운영 모니터링 맥락으로 분리했다. 첨부된 AWS foundation 진행 현황은 `infra/aws/foundation-status.md`에 정리했다. 2026-07-23 공식 Terraform 1.6.6 Docker 이미지에서 `fmt -check -recursive`와 AWS provider 초기화 후 `validate`가 통과했다. 실제 AWS `plan/apply`와 콘솔 검증은 실행하지 않았다.
+- 2026-07-23: NonProd 배포 플랫폼을 EKS에서 ECS Fargate로 변경했다. `adr/002-ecs-fargate.md`가 기존 EKS 결정을 대체하며, 사용자가 완료로 확정한 ECR/lifecycle, 단일 ECS cluster, service-linked role, 공통 execution role, 서비스별 task role/SG/7일 Log Group, NAT/private route 상태를 T041과 `infra/aws/foundation-status.md`에 기록했다. 이 변경은 문서만 갱신했으며 AWS 리소스와 애플리케이션 코드는 변경하지 않았다. API endpoint/payload와 데이터 모델은 영향이 없어 유지했고 contract 파일은 배포 플랫폼 annotation만 ECS Security Group/ALB 경계로 갱신했다. `analyze.md`는 당시 검증 결과를 보존하는 읽기 전용 역사 기록이므로 수정하지 않았다.
+- Q-013/Q-023 service discovery, mTLS/SPIFFE 제품, SLO/RTO/RPO.
+- mTLS/SPIFFE 인증서 발급·회전 제품과 event transport 제품 선택은 Q-023/T040에서 한다. identity/event 의미는 T030 계약을 유지한다.
 - Auth outbox transport publisher/consumer, Phase 1 revoke 실패의 암호화된 durable retry queue와 운영 경보는 T045 출시 gate다.
 - T035에서 T033 Resource validator를 실제 Core 요청 경로의 `DUAL` resolver에 연결했다. legacy issuer 종료는 7일 관측 뒤 Core `TARGET_ONLY` 전환과 별도 운영 승인이 필요하다.
