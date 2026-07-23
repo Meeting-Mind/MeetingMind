@@ -19,6 +19,7 @@ ext {
 dependencies {
     implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
     implementation platform('software.amazon.awssdk:bom:2.46.8')
+    implementation platform('io.netty:netty-bom:4.1.136.Final')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation "org.apache.tomcat.embed:tomcat-embed-core:${tomcatVersion}"

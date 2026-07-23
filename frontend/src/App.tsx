@@ -1033,6 +1033,7 @@ const WorkspaceHome = () => {
           </div>
           <button
             className="bg-foreground text-background px-4 py-2 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors inline-flex items-center gap-2"
+            data-testid="create-space-trigger"
             onClick={() => {
               setCreateError("");
               setCreateOpen(true);
@@ -1109,10 +1110,10 @@ const WorkspaceHome = () => {
             }
           }}
         >
-          <div className="w-full max-w-md bg-card rounded-xl border border-border shadow-2xl">
+          <div aria-labelledby="create-space-dialog-title" className="w-full max-w-md bg-card rounded-xl border border-border shadow-2xl" data-testid="create-space-dialog" role="dialog">
             <div className="px-6 py-5 border-b border-border flex items-start justify-between gap-4">
               <div>
-                <h2 className="font-semibold text-foreground">New Space</h2>
+                <h2 className="font-semibold text-foreground" id="create-space-dialog-title">New Space</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">Create a new collaboration space.</p>
               </div>
               <button
@@ -1130,6 +1131,7 @@ const WorkspaceHome = () => {
                 <input
                   aria-labelledby="create-space-name-label"
                   className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  data-testid="create-space-name"
                   maxLength={120}
                   onChange={(event) => setCreateName(event.target.value)}
                   placeholder="e.g. Q3 Launch"
@@ -1141,6 +1143,7 @@ const WorkspaceHome = () => {
                 <textarea
                   aria-labelledby="create-space-description-label"
                   className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
+                  data-testid="create-space-description"
                   maxLength={500}
                   onChange={(event) => setCreateDescription(event.target.value)}
                   placeholder="What is this project about?"
@@ -1160,6 +1163,7 @@ const WorkspaceHome = () => {
                 </button>
                 <button
                   className="px-4 py-2 rounded-md text-sm font-semibold bg-foreground text-background hover:bg-foreground/90 transition-colors"
+                  data-testid="create-space-submit"
                   disabled={createPending}
                   type="submit"
                 >
@@ -7443,7 +7447,7 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-background flex" data-testid="sign-in-page">
       {/* Left — Brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-foreground flex-col justify-between p-12">
         <div className="flex items-center gap-2.5">
@@ -7522,6 +7526,7 @@ const LoginPage = () => {
             <div>
               <div id="auth-email-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Work Email</div>
               <input
+                data-testid="sign-in-email"
                 id="auth-email"
                 aria-labelledby="auth-email-label"
                 name="email"
@@ -7541,6 +7546,7 @@ const LoginPage = () => {
                 <button type="button" className="text-xs text-primary hover:underline">Forgot password?</button>
               </div>
               <input
+                data-testid="sign-in-password"
                 id="auth-password"
                 aria-labelledby="auth-password-label"
                 name="password"
@@ -7553,9 +7559,10 @@ const LoginPage = () => {
                 className="w-full px-3 py-2.5 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
               />
             </div>
-            {error && <p className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+            {error && <p className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2" data-testid="sign-in-error">{error}</p>}
             <button
               type="submit"
+              data-testid="sign-in-submit"
               disabled={loading}
               className="w-full py-2.5 rounded-lg bg-foreground text-background text-sm font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
