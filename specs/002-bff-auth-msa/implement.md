@@ -2,7 +2,7 @@
 
 ## Scope
 
-M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 T020~T023 Browser session cutover와 M004의 T030 Auth 보안 shared contract, T031 foundation, T032 credential/session/revoke runtime, T033 KMS signing/JWKS/Resource validator, T034 Auth 데이터 이전, T035 BFF→Auth/Core cutover, T036 CI security hardening 및 T024 모든 기기 로그아웃까지 구현했다.
+M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 T020~T023 Browser session cutover와 M004의 T030 Auth 보안 shared contract, T031 foundation, T032 credential/session/revoke runtime, T033 KMS signing/JWKS/Resource validator, T034 Auth 데이터 이전, T035 BFF→Auth/Core cutover, T036 CI security hardening, T037 CI dependency sync 및 T024 모든 기기 로그아웃까지 구현했다.
 
 ## Work Allocation
 
@@ -27,6 +27,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | 2026-07-17 | T032 Auth Runtime | Auth Service | Codex | `auth/src/main/**`, `auth/src/test/**`, Compose/CI/root 및 Auth 계약/data/plan/analyze | local/Google 자격 검증, refresh family rotation/reuse, revoke-all, 감사/outbox와 workload/fail-closed signer 경계 구현 |
 | 2026-07-17 | T033 Auth Keys/JWKS | Auth Service | Codex | `auth/**`, `backend/**/auth/target/**`, Compose/env 및 Auth 계약/data/plan/tasks/analyze | AWS KMS RS256 signer, rotation key ring, 내부 JWKS와 비활성 Resource validator 구현 |
 | 2026-07-18 | T036 CI Security Hardening | Integration | Codex | `bff/build.gradle`, `auth/build.gradle`, `.gitleaksignore`, 관련 spec/plan/tasks/implement | BFF/Auth 수정 가능 취약점 제거와 테스트 fixture Gitleaks 오탐 정밀 예외 처리 |
+| 2026-07-23 | T037 CI Dependency Sync | Integration | Codex | `frontend/package-lock.json`, `backend/build.gradle`, `auth/build.gradle`, `tasks.md`, `implement.md` | 병합에서 누락된 Frontend peer lock 항목 복원과 Core/Auth PostgreSQL JDBC 취약점 수정 |
 | 2026-07-18 | T034 Auth Data Migration | Data | Codex | Core V13, `auth/src/migration/**`, PostgreSQL tests, migration runbook과 Core/Auth data/ERD/plan/tasks | 문자열 업무 PK를 보존한 UUID projection, 반복 가능한 User/AuthIdentity offline 이전과 exact reconciliation 구현 |
 | 2026-07-18 | T035 Preparation | Integration | Codex | BFF/Auth/Core runtime, Frontend identity comparisons, contracts/data/plan/tasks/analyze | external/internal User ID 불일치와 신규 Auth User projection 공백을 발견하고 blocking Q-020/Q-021 및 순차 구현 경계 정의 |
 | 2026-07-18 | T035 Auth Cutover | Integration | Codex | BFF Auth/Token Vault/session/proxy, Core validator/projection, Compose/CI/E2E/contracts/runbook | target Auth client, actual AuthSession/Auth UUID index, audience bundle v2, deterministic dual validation과 동기 Core User projection 구현·검증 |
@@ -136,6 +137,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - Core internal projection은 BFF workload와 `meetingmind-core` target JWT를 함께 검증하고 `sub == authUserId`, `resourceUserId == "user-" + authUserId` ownership 아래 표시 정보를 멱등 upsert한다. local/test header는 명시적 비운영 profile에서만 허용한다.
 - T036은 CI Trivy가 탐지한 BFF/Auth의 `jackson-databind 2.21.2` HIGH 2건과 `tomcat-embed-core 10.1.54` HIGH 3건/CRITICAL 3건을 이미 Backend에서 검증한 Jackson `2.21.4`, Tomcat `10.1.55` 전체 모듈 정렬로 해소했다. 새 라이브러리나 API/DB 계약은 추가하지 않았다.
 - Gitleaks가 탐지한 10건은 모두 커밋된 고정 테스트 master key 또는 잘못된 key 길이 negative fixture였다. 경로·규칙 전체를 허용하지 않고 기존 `.gitleaksignore` 정책대로 commit/path/rule/line fingerprint만 등록해 이후 실제 secret 탐지를 유지했다.
+- T037은 `origin/dev` 통합 뒤 Frontend `package.json`과 lockfile이 어긋나 `npm ci`가 요구한 `@emnapi/core@1.11.2`, `@emnapi/runtime@1.11.2` 항목만 기존 무결성 정보로 복원했다. 동시에 Backend/Auth의 PostgreSQL JDBC를 `42.7.11`에서 CVE 수정 버전 `42.7.12`로 올렸으며 API, 데이터 모델과 DB migration은 변경하지 않았다.
 - T024 Auth 재인증은 현재 AuthSession/User 결합과 provider별 credential을 검증하고 Auth 서버 시각만 반환한다. local/Google 모두 새 User, identity, AuthSession, refresh/access를 만들지 않으며 실패 감사만 남긴다.
 - BFF는 최근 인증이 없으면 `403 REAUTHENTICATION_REQUIRED`를 반환하고, 재인증 성공 시 Auth의 durable revoke-all을 먼저 호출한다. 이후 Auth UUID principal index의 다른 BffSession/Token Bundle을 정리하고 현재 request session을 마지막에 무효화하며 indexed 정리 실패는 `503`으로 성공을 위장하지 않는다.
 - Frontend는 현재 세션 로그아웃과 별도로 확인 modal을 제공한다. 첫 logout-all이 최근 인증을 요구할 때만 비밀번호 또는 Google step-up을 수행하고 body 없는 logout-all을 정확히 한 번 재시도하며, `204` 뒤에만 전역 사용자 상태를 지운다.
@@ -222,6 +224,10 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | T036 Trivy image scan | Pass | Trivy `0.72.0`, `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL`; BFF/Auth 모두 Alpine 0건, JAR 0건 |
 | T036 repository secret scan | Pass | Gitleaks `8.30.1`이 현재 브랜치 HEAD 전체 이력 57 commits/약 3.44 MB를 검사해 `no leaks found` |
 | T036 diff validation | Pass | `git diff --check` 통과 |
+| T037 Frontend dependency/install | Pass | 누락 peer lock 2건만 복원한 뒤 CI와 동일한 `npm ci` 성공 |
+| T037 Frontend regression | Pass | ESLint 0 errors/기존 warnings 7건, Vitest 4 files/32 tests, TypeScript+Vite production build 성공; 기존 bundle size warning만 존재 |
+| T037 Backend/Auth regression | Pass | Backend와 Auth에서 각각 `./gradlew test`; 두 서비스 모두 `BUILD SUCCESSFUL` |
+| T037 container security | Pass | Backend/Auth 이미지 build 성공, Trivy `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL`에서 두 이미지 모두 Alpine 0건/JAR 0건 |
 | T024 Auth PostgreSQL integration | Pass | 실제 PostgreSQL에서 malformed/subject mismatch/wrong local·Google credential을 무변경 거부하고 local/Google 성공 시 새 AuthSession/token 없이 Auth 서버 시각만 갱신한 뒤 전체 revoke/outbox를 검증 |
 | T024 BFF Redis integration | Pass | 실제 Redis에 동일 Auth UUID의 BffSession 2개를 만들고 stale logout-all `403`→재인증→`204`, 두 cookie 후속 보호 요청 `401`, principal index와 Token Vault 0건을 검증 |
 | T024 BFF full regression/package | Pass | `./gradlew test bootJar`; 82 tests, 6 environment-gated skipped, 0 failures/errors와 독립 bootJar 생성 |
