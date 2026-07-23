@@ -112,6 +112,26 @@ class SpaceControllerTest {
         });
     }
 
+    @Test
+    void createInstantMeetingStartsReusableLiveRoomSession() {
+        TestContext context = newContext();
+        var space = context.controller.createSpace(
+                "Bearer access-token",
+                new CreateSpaceRequest("MeetingMind", null)
+        );
+
+        var meeting = context.controller.createInstantMeeting("Bearer access-token", space.id());
+        var meetings = context.controller.listMeetings("Bearer access-token", space.id(), "IN_PROGRESS", null, null);
+
+        assertThat(meeting.status()).isEqualTo("IN_PROGRESS");
+        assertThat(meeting.roomCode()).isEqualTo("space-room-" + space.id());
+        assertThat(meetings.meetings()).singleElement().satisfies(createdMeeting -> {
+            assertThat(createdMeeting.id()).isEqualTo(meeting.id());
+            assertThat(createdMeeting.status()).isEqualTo("IN_PROGRESS");
+            assertThat(createdMeeting.myRole()).isEqualTo("HOST");
+        });
+    }
+
     private TestContext newContext() {
         AuthService authService = mock(AuthService.class);
         when(authService.currentUser("Bearer access-token"))

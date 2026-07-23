@@ -1,7 +1,11 @@
 package com.meetingmind.demo.websocket;
 
-import com.meetingmind.demo.service.PcmResampler;
+import com.meetingmind.demo.service.AudioFrame;
+import com.meetingmind.demo.service.AudioFrameNormalizer;
+import com.meetingmind.demo.service.LiveKitEgressAudioFrameFactory;
+import com.meetingmind.demo.service.SttAudioIngress;
 import com.meetingmind.demo.service.SttSessionRegistry;
+import com.meetingmind.demo.service.SttSessionContext;
 import com.meetingmind.demo.service.SttStreamClient;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -9,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
@@ -28,11 +33,28 @@ public class EgressAudioWebSocketHandler extends BinaryWebSocketHandler {
     // 정상 음성으로 들리는 거 확인되면 이 필드/메서드 통째로 제거한다.
     private static final Path DEBUG_DIR = Path.of("output", "debug-audio");
     private final Map<String, ByteArrayOutputStream> debug16k = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> frameSequences = new ConcurrentHashMap<>();
+    private final boolean debugAudioDumpEnabled;
 
     private final SttSessionRegistry sessionRegistry;
+    private final SttAudioIngress audioIngress;
+    private final LiveKitEgressAudioFrameFactory audioFrameFactory;
+    private final AudioFrameNormalizer audioFrameNormalizer;
 
-    public EgressAudioWebSocketHandler(SttSessionRegistry sessionRegistry) {
+    public EgressAudioWebSocketHandler(
+            SttSessionRegistry sessionRegistry,
+            SttAudioIngress audioIngress,
+            LiveKitEgressAudioFrameFactory audioFrameFactory,
+            AudioFrameNormalizer audioFrameNormalizer
+    ) {
         this.sessionRegistry = sessionRegistry;
+        this.audioIngress = audioIngress;
+        this.audioFrameFactory = audioFrameFactory;
+        this.audioFrameNormalizer = audioFrameNormalizer;
+        this.debugAudioDumpEnabled = com.meetingmind.demo.config.DotenvConfig
+                .optional("STT_DEBUG_AUDIO_DUMP")
+                .map(Boolean::parseBoolean)
+                .orElse(false);
     }
 
     @Override
@@ -43,20 +65,44 @@ public class EgressAudioWebSocketHandler extends BinaryWebSocketHandler {
             return;
         }
 
+        SttSessionContext context = sessionRegistry.getSessionContext(sessionId);
+        if (context == null) {
+            return;
+        }
+
         byte[] pcm48k = new byte[message.getPayloadLength()];
         message.getPayload().get(pcm48k);
-        byte[] pcm16k = PcmResampler.downsample48kTo16kMono(pcm48k);
+        long sequence = frameSequences
+                .computeIfAbsent(sessionId, ignored -> new AtomicLong())
+                .getAndIncrement();
 
-        debug16k.computeIfAbsent(sessionId, ignored -> new ByteArrayOutputStream()).writeBytes(pcm16k);
+        AudioFrame normalized;
+        try {
+            normalized = audioFrameNormalizer.normalize(
+                    audioFrameFactory.create(context, sequence, System.currentTimeMillis(), pcm48k)
+            );
+        } catch (IllegalArgumentException exception) {
+            log.warn("Dropped invalid egress audio frame for session {}: {}", sessionId, exception.getMessage());
+            return;
+        }
 
-        client.sendAudio(pcm16k);
+        if (debugAudioDumpEnabled) {
+            debug16k.computeIfAbsent(sessionId, ignored -> new ByteArrayOutputStream()).writeBytes(normalized.pcm16le());
+        }
+        audioIngress.submit(normalized);
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, org.springframework.web.socket.CloseStatus status) {
         String sessionId = extractSessionId(session);
-        dumpWav(sessionId, debug16k.remove(sessionId));
+        audioIngress.finish(sessionId);
+        if (debugAudioDumpEnabled) {
+            dumpWav(sessionId, debug16k.remove(sessionId));
+        }
         sessionRegistry.onEgressClosed(sessionId);
+        if (sessionRegistry.getStreamClient(sessionId) == null) {
+            frameSequences.remove(sessionId);
+        }
     }
 
     private void dumpWav(String sessionId, ByteArrayOutputStream buffer) {

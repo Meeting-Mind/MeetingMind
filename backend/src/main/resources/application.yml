@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: meetingmind-backend
+  # 공통 Compose 값은 루트 .env, Backend 전용 값은 backend/.env에서 읽는다.
+  # backend/.env가 같은 키를 정의하면 로컬 서비스 설정이 우선한다.
+  config:
+    import: optional:file:../.env[.properties],optional:file:./.env[.properties]
   profiles:
     default: local
   flyway:
@@ -29,6 +33,7 @@ meetingmind:
       allowed-principals: ${MEETINGMIND_CORE_ALLOWED_PRINCIPALS:spiffe://meetingmind.internal/ns/meetingmind/sa/meetingmind-bff}
       allow-test-principal-header: ${MEETINGMIND_CORE_ALLOW_TEST_PRINCIPAL_HEADER:false}
   ai:
+    base-url: ${MEETINGMIND_AI_BASE_URL:http://localhost:8000}
     service-token: ${AI_INTERNAL_SERVICE_TOKEN:}
 
 ---

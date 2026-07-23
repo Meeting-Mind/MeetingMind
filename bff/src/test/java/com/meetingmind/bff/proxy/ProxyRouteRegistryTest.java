@@ -30,6 +30,12 @@ class ProxyRouteRegistryTest {
                         .orElseThrow()
                         .service())
                 .isEqualTo(DownstreamService.LIVEKIT);
+        assertThat(registry.resolve(
+                                HttpMethod.POST,
+                                "/api/v1/meetings/" + meetingId + "/transcription/stop")
+                        .orElseThrow()
+                        .service())
+                .isEqualTo(DownstreamService.LIVEKIT);
     }
 
     @Test

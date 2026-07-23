@@ -16,6 +16,7 @@ import java.util.UUID;
 public class Meeting {
     @Id String id;
     @Column(name = "space_id", nullable = false) String spaceId;
+    @Column(name = "room_code") String roomCode;
     @Column(nullable = false) String title;
     @Column String description;
     @Column(name = "scheduled_at") OffsetDateTime scheduledAt;
@@ -36,15 +37,23 @@ public class Meeting {
     public Meeting(String id, String spaceId, String title, OffsetDateTime scheduledAt, String joinCode,
                    OffsetDateTime startedAt, OffsetDateTime endedAt, MeetingStatus status, String failureReason,
                    String retentionPolicy, Instant deletedAt, String deletedBy) {
-        this(id, spaceId, title, null, scheduledAt, scheduledAt.plusHours(1), joinCode,
+        this(id, spaceId, null, title, null, scheduledAt, scheduledAt.plusHours(1), joinCode,
                 startedAt, endedAt, status, failureReason, retentionPolicy, deletedAt, deletedBy);
     }
 
     public Meeting(String id, String spaceId, String title, String description, OffsetDateTime scheduledAt,
                    OffsetDateTime scheduledEndAt, String joinCode, OffsetDateTime startedAt, OffsetDateTime endedAt,
                    MeetingStatus status, String failureReason, String retentionPolicy, Instant deletedAt, String deletedBy) {
+        this(id, spaceId, null, title, description, scheduledAt, scheduledEndAt, joinCode, startedAt, endedAt, status,
+                failureReason, retentionPolicy, deletedAt, deletedBy);
+    }
+
+    public Meeting(String id, String spaceId, String roomCode, String title, String description, OffsetDateTime scheduledAt,
+                   OffsetDateTime scheduledEndAt, String joinCode, OffsetDateTime startedAt, OffsetDateTime endedAt,
+                   MeetingStatus status, String failureReason, String retentionPolicy, Instant deletedAt, String deletedBy) {
         this.id = id;
         this.spaceId = spaceId;
+        this.roomCode = roomCode;
         this.title = title;
         this.description = description;
         this.scheduledAt = scheduledAt;
@@ -65,13 +74,26 @@ public class Meeting {
 
     static Meeting scheduled(String id, String spaceId, String title, String description, OffsetDateTime scheduledAt,
                              OffsetDateTime scheduledEndAt) {
-        return new Meeting(id, spaceId, title, description, scheduledAt, scheduledEndAt,
+        return scheduled(id, spaceId, null, title, description, scheduledAt, scheduledEndAt);
+    }
+
+    static Meeting scheduled(String id, String spaceId, String roomCode, String title, String description, OffsetDateTime scheduledAt,
+                             OffsetDateTime scheduledEndAt) {
+        return new Meeting(id, spaceId, roomCode, title, description, scheduledAt, scheduledEndAt,
                 UUID.randomUUID().toString().replace("-", ""),
                 null, null, MeetingStatus.SCHEDULED, null, "DAYS_30", null, null);
     }
 
+    static Meeting instant(String id, String spaceId, String roomCode, String title, String description, OffsetDateTime startedAt,
+                           OffsetDateTime scheduledEndAt) {
+        return new Meeting(id, spaceId, roomCode, title, description, startedAt, scheduledEndAt,
+                UUID.randomUUID().toString().replace("-", ""),
+                startedAt, null, MeetingStatus.IN_PROGRESS, null, "DAYS_30", null, null);
+    }
+
     public String id() { return id; }
     public String spaceId() { return spaceId; }
+    public String roomCode() { return roomCode; }
     public String title() { return title; }
     public String description() { return description; }
     public OffsetDateTime scheduledAt() { return scheduledAt; }

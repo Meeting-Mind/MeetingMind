@@ -207,6 +207,28 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return meeting;
     }
 
+    @Override
+    synchronized Meeting createInstantMeeting(
+            String spaceId,
+            String roomCode,
+            String title,
+            String description,
+            OffsetDateTime startedAt,
+            OffsetDateTime scheduledEndAt
+    ) {
+        Meeting meeting = Meeting.instant(
+                "meeting-" + UUID.randomUUID(),
+                spaceId,
+                roomCode,
+                title,
+                description,
+                startedAt,
+                scheduledEndAt
+        );
+        meetingsById.put(meeting.id(), meeting);
+        return meeting;
+    }
+
     synchronized Optional<Meeting> findMeetingById(String meetingId) {
         return Optional.ofNullable(meetingsById.get(meetingId)).filter(meeting -> !meeting.deleted());
     }
@@ -269,7 +291,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     ) {
         Meeting current = findMeetingById(meetingId).orElseThrow();
         Meeting updated = new Meeting(
-                current.id(), current.spaceId(), title, description, scheduledAt, scheduledEndAt, current.joinCode(), startedAt, endedAt,
+                current.id(), current.spaceId(), current.roomCode(), title, description, scheduledAt, scheduledEndAt, current.joinCode(), startedAt, endedAt,
                 status, current.failureReason(), current.retentionPolicy(), current.deletedAt(), current.deletedBy()
         );
         meetingsById.put(meetingId, updated);
@@ -285,7 +307,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     ) {
         Meeting current = meetingsById.get(meetingId);
         Meeting deleted = new Meeting(
-                current.id(), current.spaceId(), current.title(), current.description(), current.scheduledAt(), current.scheduledEndAt(), current.joinCode(),
+                current.id(), current.spaceId(), current.roomCode(), current.title(), current.description(), current.scheduledAt(), current.scheduledEndAt(), current.joinCode(),
                 current.startedAt(), current.endedAt(), status, current.failureReason(), current.retentionPolicy(),
                 deletedAt, deletedBy
         );

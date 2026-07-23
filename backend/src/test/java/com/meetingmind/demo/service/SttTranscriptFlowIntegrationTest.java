@@ -2,9 +2,12 @@ package com.meetingmind.demo.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.meetingmind.demo.service.SttProvider;
 import com.meetingmind.demo.service.SttSessionRegistry;
 import com.meetingmind.demo.service.SttStreamClient;
-import com.meetingmind.demo.service.SttStreamClientFactory;
+import com.meetingmind.demo.service.TranscriptEvent;
+import com.meetingmind.demo.service.TranscriptEventType;
+import com.meetingmind.demo.service.SttSessionContext;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.time.Instant;
@@ -46,7 +49,7 @@ class SttTranscriptFlowIntegrationTest {
     private SttSessionRegistry sessionRegistry;
 
     @Autowired
-    private CapturingSttStreamClientFactory streamClientFactory;
+    private CapturingSttProvider streamClientFactory;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -127,18 +130,27 @@ class SttTranscriptFlowIntegrationTest {
 
         @Bean
         @Primary
-        CapturingSttStreamClientFactory capturingSttStreamClientFactory() {
-            return new CapturingSttStreamClientFactory();
+        CapturingSttProvider capturingSttProvider() {
+            return new CapturingSttProvider();
         }
     }
 
-    static class CapturingSttStreamClientFactory implements SttStreamClientFactory {
+    static class CapturingSttProvider implements SttProvider {
 
         private final AtomicReference<CapturingSttStreamClient> latest = new AtomicReference<>();
 
         @Override
-        public SttStreamClient create(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError) {
-            CapturingSttStreamClient client = new CapturingSttStreamClient(onFinalTranscript, onPartialTranscript, onError);
+        public String providerId() {
+            return "fake-clova";
+        }
+
+        @Override
+        public SttStreamClient createClient(
+                SttSessionContext context,
+                Consumer<TranscriptEvent> onTranscriptEvent,
+                Consumer<Throwable> onError
+        ) {
+            CapturingSttStreamClient client = new CapturingSttStreamClient(context, onTranscriptEvent, onError);
             latest.set(client);
             return client;
         }
@@ -150,24 +162,34 @@ class SttTranscriptFlowIntegrationTest {
 
     static class CapturingSttStreamClient implements SttStreamClient {
 
-        private final Consumer<String> onFinalTranscript;
-        private final Consumer<String> onPartialTranscript;
+        private final SttSessionContext context;
+        private final Consumer<TranscriptEvent> onTranscriptEvent;
         @SuppressWarnings("unused")
         private final Consumer<Throwable> onError;
         private boolean closed;
 
-        CapturingSttStreamClient(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError) {
-            this.onFinalTranscript = onFinalTranscript;
-            this.onPartialTranscript = onPartialTranscript;
+        CapturingSttStreamClient(
+                SttSessionContext context,
+                Consumer<TranscriptEvent> onTranscriptEvent,
+                Consumer<Throwable> onError
+        ) {
+            this.context = context;
+            this.onTranscriptEvent = onTranscriptEvent;
             this.onError = onError;
         }
 
         void emitTranscript(String text) {
-            onFinalTranscript.accept(text);
+            onTranscriptEvent.accept(new TranscriptEvent(
+                    context.sessionId(), context.meetingId(), "fake-clova", UUID.randomUUID().toString(), null,
+                    null, context.trackId(), TranscriptEventType.FINAL, text, 1, 0, 0L, null, true
+            ));
         }
 
         void emitPartialTranscript(String text) {
-            onPartialTranscript.accept(text);
+            onTranscriptEvent.accept(new TranscriptEvent(
+                    context.sessionId(), context.meetingId(), "fake-clova", UUID.randomUUID().toString(), null,
+                    null, context.trackId(), TranscriptEventType.PARTIAL, text, 1, 0, null, null, false
+            ));
         }
 
         boolean closed() {

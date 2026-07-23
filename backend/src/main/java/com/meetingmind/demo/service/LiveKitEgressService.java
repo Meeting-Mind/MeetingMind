@@ -4,12 +4,18 @@ import com.meetingmind.demo.config.DotenvConfig;
 import io.livekit.server.EgressServiceClient;
 import java.io.IOException;
 import livekit.LivekitEgress;
+import okhttp3.ResponseBody;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import retrofit2.Call;
 import retrofit2.Response;
 
 @Service
 public class LiveKitEgressService {
+
+    private static final Logger log = LoggerFactory.getLogger(LiveKitEgressService.class);
+    private static final String EGRESS_AUDIO_PATH = "/ws/egress-audio/";
 
     public String startTrackEgress(String roomName, String trackId, String websocketUrl) {
         Call<LivekitEgress.EgressInfo> call = client().startTrackEgress(roomName, websocketUrl, trackId);
@@ -38,15 +44,46 @@ public class LiveKitEgressService {
         return host;
     }
 
+    public static String egressWebSocketUrl(String publicBaseUrl, String sessionId) {
+        String baseUrl = publicBaseUrl == null ? "" : publicBaseUrl.trim();
+        if (baseUrl.startsWith("https://")) {
+            baseUrl = "wss://" + baseUrl.substring("https://".length());
+        } else if (baseUrl.startsWith("http://")) {
+            baseUrl = "ws://" + baseUrl.substring("http://".length());
+        }
+        if (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        return baseUrl + EGRESS_AUDIO_PATH + sessionId;
+    }
+
     private LivekitEgress.EgressInfo execute(Call<LivekitEgress.EgressInfo> call, String errorMessage) {
         try {
             Response<LivekitEgress.EgressInfo> response = call.execute();
             if (!response.isSuccessful() || response.body() == null) {
-                throw new IllegalStateException(errorMessage + " (HTTP " + response.code() + ")");
+                String detail = responseErrorDetail(response.errorBody());
+                log.warn("{} responseCode={} responseBody={}", errorMessage, response.code(), detail);
+                throw new IllegalStateException(errorMessage + " (HTTP " + response.code() + ", " + detail + ")");
             }
             return response.body();
         } catch (IOException exception) {
+            log.warn("{} ioError={}", errorMessage, exception.getMessage(), exception);
             throw new IllegalStateException(errorMessage, exception);
+        }
+    }
+
+    private String responseErrorDetail(ResponseBody errorBody) {
+        if (errorBody == null) {
+            return "empty error body";
+        }
+        try (errorBody) {
+            String text = errorBody.string();
+            if (text == null || text.isBlank()) {
+                return "empty error body";
+            }
+            return text.length() > 500 ? text.substring(0, 500) : text;
+        } catch (IOException exception) {
+            return "unreadable error body: " + exception.getMessage();
         }
     }
 }

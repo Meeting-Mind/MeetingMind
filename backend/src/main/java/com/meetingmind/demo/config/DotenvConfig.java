@@ -7,10 +7,15 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public final class DotenvConfig {
 
-    private static final Path DOTENV_PATH = Path.of(".env");
+    private static final List<Path> DOTENV_PATHS = List.of(
+            Path.of("backend", ".env"),
+            Path.of(".env"),
+            Path.of("..", ".env")
+    );
 
     private DotenvConfig() {
     }
@@ -38,30 +43,45 @@ public final class DotenvConfig {
         throw new IllegalStateException(String.join(" 또는 ", keys) + " 환경변수가 설정되지 않았습니다.");
     }
 
+    public static Optional<String> optional(String key) {
+        Map<String, String> dotenv = loadDotEnv();
+        String value = System.getenv(key);
+        if (value != null && !value.isBlank()) {
+            return Optional.of(value);
+        }
+        String fileValue = dotenv.get(key);
+        if (fileValue != null && !fileValue.isBlank()) {
+            return Optional.of(fileValue);
+        }
+        return Optional.empty();
+    }
+
     private static Map<String, String> loadDotEnv() {
         Map<String, String> values = new HashMap<>();
 
-        if (!Files.exists(DOTENV_PATH)) {
-            return values;
-        }
-
-        try {
-            List<String> lines = Files.readAllLines(DOTENV_PATH, StandardCharsets.UTF_8);
-
-            for (String line : lines) {
-                String trimmed = line.trim();
-
-                if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains("=")) {
-                    continue;
-                }
-
-                int separatorIndex = trimmed.indexOf('=');
-                String key = trimmed.substring(0, separatorIndex).trim();
-                String value = trimmed.substring(separatorIndex + 1).trim();
-                values.put(key, stripQuotes(value));
+        for (Path dotenvPath : DOTENV_PATHS) {
+            if (!Files.exists(dotenvPath)) {
+                continue;
             }
-        } catch (IOException exception) {
-            throw new IllegalStateException(".env 파일을 읽는 중 오류가 발생했습니다.", exception);
+
+            try {
+                List<String> lines = Files.readAllLines(dotenvPath, StandardCharsets.UTF_8);
+
+                for (String line : lines) {
+                    String trimmed = line.trim();
+
+                    if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains("=")) {
+                        continue;
+                    }
+
+                    int separatorIndex = trimmed.indexOf('=');
+                    String key = trimmed.substring(0, separatorIndex).trim();
+                    String value = trimmed.substring(separatorIndex + 1).trim();
+                    values.putIfAbsent(key, stripQuotes(value));
+                }
+            } catch (IOException exception) {
+                throw new IllegalStateException(dotenvPath + " 파일을 읽는 중 오류가 발생했습니다.", exception);
+            }
         }
 
         return values;

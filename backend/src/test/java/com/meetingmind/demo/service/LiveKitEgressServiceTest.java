@@ -19,4 +19,12 @@ class LiveKitEgressServiceTest {
         assertThat(LiveKitEgressService.egressApiUrl("https://livekit.example.test"))
                 .isEqualTo("https://livekit.example.test");
     }
+
+    @Test
+    void convertsPublicIngressBaseUrlToWebSocketUrl() {
+        assertThat(LiveKitEgressService.egressWebSocketUrl("https://example.ngrok-free.dev", "session-1"))
+                .isEqualTo("wss://example.ngrok-free.dev/ws/egress-audio/session-1");
+        assertThat(LiveKitEgressService.egressWebSocketUrl("http://127.0.0.1:8080/", "session-2"))
+                .isEqualTo("ws://127.0.0.1:8080/ws/egress-audio/session-2");
+    }
 }

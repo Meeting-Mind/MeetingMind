@@ -61,10 +61,14 @@ class HttpMeetingAiGatewayClientTest {
     @Test
     void callsTheInternalTermEndpointWithAuthorizedMeetingScope() throws Exception {
         AtomicReference<String> receivedPath = new AtomicReference<>();
+        AtomicReference<String> receivedToken = new AtomicReference<>();
+        AtomicReference<String> receivedTraceId = new AtomicReference<>();
         AtomicReference<String> receivedBody = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/internal/meeting-ai/explain-term", exchange -> {
             receivedPath.set(exchange.getRequestURI().getPath());
+            receivedToken.set(exchange.getRequestHeaders().getFirst("X-MeetingMind-Service-Token"));
+            receivedTraceId.set(exchange.getRequestHeaders().getFirst("X-Request-ID"));
             receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] response = ("{\"term\":\"RAG\",\"explanation\":\"회의 검색 방식입니다.\","
                     + "\"sourceType\":\"transcript\",\"sources\":[],\"unsupported\":false,"
@@ -87,6 +91,8 @@ class HttpMeetingAiGatewayClientTest {
 
             assertThat(response.explanation()).isEqualTo("회의 검색 방식입니다.");
             assertThat(receivedPath.get()).isEqualTo("/api/internal/meeting-ai/explain-term");
+            assertThat(receivedToken.get()).isEqualTo("internal-test-token");
+            assertThat(receivedTraceId.get()).isNotBlank();
             assertThat(receivedBody.get()).contains("\"projectId\":\"space-1\"");
             assertThat(receivedBody.get()).contains("\"meetingId\":\"meeting-1\"");
         } finally {

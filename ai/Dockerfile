@@ -11,6 +11,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --requirement requirements.txt
 COPY --chown=meetingmind:meetingmind app app
+COPY --chown=meetingmind:meetingmind onprem_poc_smoke.py onprem_poc_validate.py onprem_poc_run.sh onprem_poc_prepare_eval_db.sh ./
+RUN chown meetingmind:meetingmind /app && chmod +x /app/onprem_poc_run.sh /app/onprem_poc_prepare_eval_db.sh
 
 USER meetingmind
 EXPOSE 8000

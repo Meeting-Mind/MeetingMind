@@ -35,7 +35,8 @@ public class MeetingLiveKitTokenService {
         meetingAccessPolicy.requireLiveKitAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
 
         try {
-            LiveKitTokenResponse token = liveKitTokenService.issueToken(meetingId, user.id(), user.displayName());
+            String roomName = workspaceDomainService.meetingRoomName(meetingId);
+            LiveKitTokenResponse token = liveKitTokenService.issueToken(roomName, user.id(), user.displayName());
             return new MeetingLiveKitTokenResponse(
                     token.serverUrl(),
                     token.participantToken(),

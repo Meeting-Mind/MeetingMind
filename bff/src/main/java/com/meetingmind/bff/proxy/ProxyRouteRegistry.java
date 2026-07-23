@@ -44,6 +44,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.DELETE, SPACE, DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/meetings", DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/instant-meetings", DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/members", DownstreamService.CORE),
             route(HttpMethod.POST, INVITATIONS, DownstreamService.CORE),
             route(HttpMethod.POST, INVITATIONS + "/" + INVITATION_ID + "/accept", DownstreamService.CORE),
@@ -96,6 +97,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.POST, MEETING + "/task-candidates/generate", DownstreamService.AI),
             route(HttpMethod.POST, MEETING + "/livekit-token", DownstreamService.LIVEKIT),
             route(HttpMethod.POST, MEETING + "/transcription/start", DownstreamService.LIVEKIT),
+            route(HttpMethod.POST, MEETING + "/transcription/stop", DownstreamService.LIVEKIT),
             route(HttpMethod.POST, MEETING + "/transcription/" + UUID + "/stop", DownstreamService.LIVEKIT));
 
     public Optional<ProxyRoute> resolve(HttpMethod method, String path) {

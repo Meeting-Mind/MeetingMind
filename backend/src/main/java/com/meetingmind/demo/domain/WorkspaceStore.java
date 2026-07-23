@@ -57,6 +57,15 @@ public abstract class WorkspaceStore {
             String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt
     );
 
+    abstract Meeting createInstantMeeting(
+            String spaceId,
+            String roomCode,
+            String title,
+            String description,
+            OffsetDateTime startedAt,
+            OffsetDateTime scheduledEndAt
+    );
+
     Meeting createMeeting(String spaceId, String title, OffsetDateTime scheduledAt) {
         return createMeeting(spaceId, title, null, scheduledAt, scheduledAt.plusHours(1));
     }

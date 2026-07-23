@@ -5,6 +5,7 @@ import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.CreateMeetingRequest;
 import com.meetingmind.demo.dto.CreateMeetingResponse;
+import com.meetingmind.demo.dto.CreateInstantMeetingResponse;
 import com.meetingmind.demo.dto.CreateProjectKnowledgeRequest;
 import com.meetingmind.demo.dto.CreateSpaceRequest;
 import com.meetingmind.demo.dto.CreateSpaceResponse;
@@ -162,6 +163,22 @@ public class SpaceController {
         return new CreateMeetingResponse(
                 result.meeting().id(),
                 result.meeting().status().name(),
+                result.meeting().joinCode(),
+                "/meetings/" + result.meeting().id() + "?joinCode=" + result.meeting().joinCode()
+        );
+    }
+
+    @PostMapping("/{spaceId}/instant-meetings")
+    public CreateInstantMeetingResponse createInstantMeeting(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        WorkspaceDomainService.MeetingCreationResult result = workspaceDomainService.createInstantMeeting(user.id(), spaceId);
+        return new CreateInstantMeetingResponse(
+                result.meeting().id(),
+                result.meeting().status().name(),
+                result.meeting().roomCode(),
                 result.meeting().joinCode(),
                 "/meetings/" + result.meeting().id() + "?joinCode=" + result.meeting().joinCode()
         );

@@ -2,7 +2,12 @@ package com.meetingmind.demo.dto;
 
 import java.util.List;
 
-public record MeetingDialogueResponse(String meetingId, String status, List<Row> rows, List<Partial> partials) {
+public record MeetingDialogueResponse(
+        String meetingId,
+        String status,
+        List<Row> rows,
+        List<Partial> partials
+) {
 
     public record Row(
             String segmentId,

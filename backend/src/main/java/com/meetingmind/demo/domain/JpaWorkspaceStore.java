@@ -125,6 +125,19 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
+    Meeting createInstantMeeting(
+            String spaceId,
+            String roomCode,
+            String title,
+            String description,
+            OffsetDateTime startedAt,
+            OffsetDateTime scheduledEndAt
+    ) {
+        Meeting meeting = Meeting.instant("meeting-" + UUID.randomUUID(), spaceId, roomCode, title, description, startedAt, scheduledEndAt);
+        return persistence.saveMeeting(meeting, hashJoinCode(meeting.joinCode()));
+    }
+
+    @Override
     Optional<Meeting> findMeetingById(String meetingId) {
         return persistence.findMeeting(meetingId);
     }

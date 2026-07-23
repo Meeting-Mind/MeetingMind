@@ -78,6 +78,36 @@ class BffProxyControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void proxiesInstantMeetingCreationRoute() throws Exception {
+        doAnswer(invocation -> {
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
+                    return call.execute("Bearer internal-access");
+                })
+                .when(tokenManager)
+                .execute(any(), anyString(), any(AuthorizedDownstreamCall.class));
+        when(downstreamClient.execute(eq(DownstreamService.CORE), any(), eq("Bearer internal-access")))
+                .thenReturn(new ProxyResponse(
+                        HttpStatus.CREATED,
+                        MediaType.APPLICATION_JSON,
+                        null,
+                        null,
+                        "{\"meetingId\":\"meeting-123\"}".getBytes(StandardCharsets.UTF_8)));
+
+        mvc.perform(post("/api/v1/spaces/space-123e4567-e89b-12d3-a456-426614174000/instant-meetings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated())
+                .andExpect(content().json("{\"meetingId\":\"meeting-123\"}"));
+
+        ArgumentCaptor<ProxyRequest> request = ArgumentCaptor.forClass(ProxyRequest.class);
+        verify(downstreamClient).execute(
+                eq(DownstreamService.CORE), request.capture(), eq("Bearer internal-access"));
+        org.assertj.core.api.Assertions.assertThat(request.getValue().path())
+                .isEqualTo("/api/v1/spaces/space-123e4567-e89b-12d3-a456-426614174000/instant-meetings");
+    }
+
+    @Test
     void rejectsUnknownUrlAndMethodBeforeTokenOrDownstreamUse() throws Exception {
         mvc.perform(post("/api/v1/auth/refresh").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isNotFound())

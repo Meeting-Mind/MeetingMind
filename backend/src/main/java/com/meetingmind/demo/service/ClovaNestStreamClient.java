@@ -37,7 +37,11 @@ public class ClovaNestStreamClient implements SttStreamClient {
     private final AtomicInteger seqId = new AtomicInteger(0);
     private byte[] pendingAudio;
 
-    public ClovaNestStreamClient(Consumer<String> onFinalTranscript, Consumer<String> onPartialTranscript, Consumer<Throwable> onError) {
+    public ClovaNestStreamClient(
+            Consumer<SttTranscriptChunk> onFinalTranscript,
+            Consumer<SttTranscriptChunk> onPartialTranscript,
+            Consumer<Throwable> onError
+    ) {
         String secretKey = DotenvConfig.require("CLOVA_SPEECH_SECRET");
 
         this.channel = NettyChannelBuilder.forAddress(HOST, PORT)
@@ -55,12 +59,12 @@ public class ClovaNestStreamClient implements SttStreamClient {
             public void onNext(NestResponse response) {
                 String contents = response.getContents();
                 log.info("CLOVA nest response: {}", contents);
-                Transcription transcription = extractTranscription(contents);
+                SttTranscriptChunk transcription = extractTranscription(contents);
                 if (transcription != null) {
-                    if (transcription.epFlag()) {
-                        onFinalTranscript.accept(transcription.text());
+                    if (transcription.finalChunk()) {
+                        onFinalTranscript.accept(transcription);
                     } else {
-                        onPartialTranscript.accept(transcription.text());
+                        onPartialTranscript.accept(transcription);
                     }
                 } else if (isRecognitionFailure(contents)) {
                     onError.accept(new IllegalStateException("CLOVA recognition request failed"));
@@ -125,14 +129,17 @@ public class ClovaNestStreamClient implements SttStreamClient {
         }
     }
 
-    record Transcription(String text, boolean epFlag) {
+    record Transcription(String text, boolean epFlag, int position, int startTimestamp, int endTimestamp) {
+        SttTranscriptChunk toChunk() {
+            return new SttTranscriptChunk(text, epFlag, position, startTimestamp, endTimestamp);
+        }
     }
 
     // epFlag=true는 Clova가 자연스러운 발화 경계(pause)를 감지해 문장을 확정했다는 뜻.
     // false는 아직 듣는 중인 중간(partial) 결과. 확정 응답이 text 없이 epFlag만 오는 경우가
     // 실측 확인됐으므로(경계 신호만 오고 실제 텍스트는 그 직전 partial에 있음), text가 비어도
     // epFlag=true면 버리지 않고 그대로 넘긴다 - 호출부(SttSessionRegistry)가 마지막 partial로 채운다.
-    static Transcription extractTranscription(String contents) {
+    static SttTranscriptChunk extractTranscription(String contents) {
         try {
             JsonNode response = OBJECT_MAPPER.readTree(contents);
             if (!hasResponseType(response, "transcription")) {
@@ -141,10 +148,13 @@ public class ClovaNestStreamClient implements SttStreamClient {
             JsonNode transcriptionNode = response.path("transcription");
             String text = transcriptionNode.path("text").asText("").trim();
             boolean epFlag = transcriptionNode.path("epFlag").asBoolean(true);
+            int position = transcriptionNode.path("position").asInt(-1);
+            int startTimestamp = transcriptionNode.path("startTimestamp").asInt(0);
+            int endTimestamp = transcriptionNode.path("endTimestamp").asInt(startTimestamp);
             if (text.isEmpty() && !epFlag) {
                 return null;
             }
-            return new Transcription(text, epFlag);
+            return new Transcription(text, epFlag, position, startTimestamp, endTimestamp).toChunk();
         } catch (Exception ignored) {
             return null;
         }

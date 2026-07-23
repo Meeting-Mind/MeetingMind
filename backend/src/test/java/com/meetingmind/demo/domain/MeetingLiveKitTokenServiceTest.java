@@ -57,6 +57,19 @@ class MeetingLiveKitTokenServiceTest {
     }
 
     @Test
+    void issueMeetingTokenUsesSpaceRoomCodeForInstantMeeting() {
+        TestContext context = newContext("user-owner", "오너");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createInstantMeeting(owner.id(), space.space().id());
+
+        MeetingLiveKitTokenResponse response = context.service.issueMeetingToken("Bearer access-token", meeting.meeting().id());
+
+        assertThat(response.roomName()).isEqualTo("space-room-" + space.space().id());
+        verify(context.liveKit).issueToken("space-room-" + space.space().id(), owner.id(), "오너");
+    }
+
+    @Test
     void issueMeetingTokenRejectsUserWithoutMeetingParticipant() {
         TestContext context = newContext("user-outsider", "외부인");
         User owner = context.user("user-owner");

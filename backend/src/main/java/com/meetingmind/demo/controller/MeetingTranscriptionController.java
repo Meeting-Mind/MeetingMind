@@ -10,8 +10,11 @@ import com.meetingmind.demo.dto.MeetingTranscriptionStartResponse;
 import com.meetingmind.demo.dto.MeetingTranscriptStatusResponse;
 import com.meetingmind.demo.dto.StartMeetingTranscriptionRequest;
 import com.meetingmind.demo.service.LiveKitEgressService;
+import com.meetingmind.demo.service.SttProvider;
 import com.meetingmind.demo.service.SttSessionRegistry;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,21 +28,25 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/meetings")
 public class MeetingTranscriptionController {
 
+    private static final Logger log = LoggerFactory.getLogger(MeetingTranscriptionController.class);
     private final AuthService authService;
     private final WorkspaceDomainService workspaceDomainService;
     private final SttSessionRegistry sessionRegistry;
     private final LiveKitEgressService liveKitEgressService;
+    private final SttProvider sttProvider;
 
     public MeetingTranscriptionController(
             AuthService authService,
             WorkspaceDomainService workspaceDomainService,
             SttSessionRegistry sessionRegistry,
-            LiveKitEgressService liveKitEgressService
+            LiveKitEgressService liveKitEgressService,
+            SttProvider sttProvider
     ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
         this.sessionRegistry = sessionRegistry;
         this.liveKitEgressService = liveKitEgressService;
+        this.sttProvider = sttProvider;
     }
 
     @PostMapping("/{meetingId}/transcription/start")
@@ -49,14 +56,15 @@ public class MeetingTranscriptionController {
             @Valid @RequestBody StartMeetingTranscriptionRequest request
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
-        workspaceDomainService.startMeetingTranscript(user.id(), meetingId, "clova-nest");
+        workspaceDomainService.startMeetingTranscript(user.id(), meetingId, sttProvider.providerId());
 
         String sessionId = null;
         try {
-            sessionId = sessionRegistry.createMeetingSession(meetingId, meetingId, user.displayName());
+            String roomName = workspaceDomainService.meetingRoomName(meetingId);
+            sessionId = sessionRegistry.createMeetingSession(meetingId, roomName, user.displayName(), request.trackId());
             String publicWsBaseUrl = com.meetingmind.demo.config.DotenvConfig.require("PUBLIC_WS_BASE_URL");
             String egressId = liveKitEgressService.startTrackEgress(
-                    meetingId, request.trackId(), publicWsBaseUrl + "/ws/egress-audio/" + sessionId
+                    roomName, request.trackId(), LiveKitEgressService.egressWebSocketUrl(publicWsBaseUrl, sessionId)
             );
             sessionRegistry.setEgressId(sessionId, egressId);
             return new MeetingTranscriptionStartResponse(meetingId, TranscriptStatus.PROCESSING.name(), sessionId, egressId);
@@ -66,6 +74,14 @@ public class MeetingTranscriptionController {
             } else {
                 sessionRegistry.failAndClose(sessionId);
             }
+            log.warn(
+                    "Failed to start meeting transcription. meetingId={} trackId={} sessionId={} reason={}",
+                    meetingId,
+                    request.trackId(),
+                    sessionId,
+                    exception.getMessage(),
+                    exception
+            );
             throw new AuthorizationException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "STT_PROVIDER_UNAVAILABLE",
@@ -81,6 +97,23 @@ public class MeetingTranscriptionController {
             @PathVariable String sessionId
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
+        return stopActiveSession(user, meetingId, sessionId);
+    }
+
+    @PostMapping("/{meetingId}/transcription/stop")
+    public MeetingTranscriptStatusResponse stopActive(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        String sessionId = sessionRegistry.findActiveMeetingSessionId(meetingId);
+        if (sessionId == null) {
+            throw new AuthorizationException(HttpStatus.NOT_FOUND, "STT_SESSION_NOT_FOUND", "STT 세션을 찾을 수 없습니다.");
+        }
+        return stopActiveSession(user, meetingId, sessionId);
+    }
+
+    private MeetingTranscriptStatusResponse stopActiveSession(AuthUserResponse user, String meetingId, String sessionId) {
         workspaceDomainService.requireTranscriptManagement(user.id(), meetingId);
         if (!sessionRegistry.belongsToMeeting(sessionId, meetingId)) {
             throw new AuthorizationException(HttpStatus.NOT_FOUND, "STT_SESSION_NOT_FOUND", "STT 세션을 찾을 수 없습니다.");
@@ -88,10 +121,19 @@ public class MeetingTranscriptionController {
         String egressId = sessionRegistry.getEgressId(sessionId);
         try {
             if (egressId != null) {
+                sessionRegistry.markStopping(sessionId);
                 liveKitEgressService.stopEgress(egressId);
             }
         } catch (IllegalStateException exception) {
             sessionRegistry.failAndClose(sessionId);
+            log.warn(
+                    "Failed to stop meeting transcription. meetingId={} sessionId={} egressId={} reason={}",
+                    meetingId,
+                    sessionId,
+                    egressId,
+                    exception.getMessage(),
+                    exception
+            );
             throw new AuthorizationException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "STT_PROVIDER_UNAVAILABLE",
