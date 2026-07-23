@@ -42,8 +42,8 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - 현재 Google Identity Services credential을 서버에서 검증하고 BFF 세션으로 전환
 - Auth Service를 기존 Backend에서 점진 추출하고 내부 access/refresh/JWKS 경계를 제공
 - AWS `ap-northeast-2` ECS Fargate 단일 리전 Multi-AZ, LiveKit Cloud를 목표로 한 배포·장애 격리 설계
-- NonProd 단일 ECS 클러스터에서 BFF/Auth/Core/AI/Realtime STT를 서비스별 ECS Service, Task Definition, Task Role, Security Group, CloudWatch Log Group으로 격리
-- 구조상 독립 서비스인 `realtime-stt`를 ECS Fargate 서비스로 배포하고 Core에서만 접근하도록 격리
+- NonProd 단일 ECS 클러스터에서 BFF/Auth/Core/AI를 서비스별 ECS Service, Task Definition, Task Role, Security Group, CloudWatch Log Group으로 격리
+- 구조상 독립 서비스인 `realtime-stt`의 ECR 경계 유지. 단, 현재 NonProd 배포 범위에서는 보류
 - AI/LiveKit 장애 시 Space/Meeting 핵심 기능의 graceful degradation
 
 ### Out of Scope
@@ -56,7 +56,7 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - 범용 기업 OIDC/SAML 로그인 구현
 - Refresh 탈취 재사용 시 token family 전체 폐기의 세부 알고리즘
 - JWT 알고리즘, claim 전체, KMS 서명키 교체 주기의 최종 운영값
-- `realtime-stt` ECS Service/Task Definition 배포 및 Core 연동
+- `realtime-stt` ECS Service/Task Definition 배포
 
 ## User Stories
 
@@ -84,7 +84,7 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 
 ## Non-Functional Requirements
 
-- NFR-BFF-001: Web BFF/Auth/Core/AI/Realtime STT는 각각 독립된 ECS Service와 Task Definition으로 배포·수평 확장이 가능해야 한다.
+- NFR-BFF-001: Web BFF/Auth/Core/AI는 각각 독립된 ECS Service와 Task Definition으로 배포·수평 확장이 가능해야 한다.
 - NFR-BFF-002: 운영 BFF 세션은 전용 HA Redis에 두고 sticky session에 의존하지 않아야 한다.
 - NFR-BFF-003: 운영 Token Bundle은 AWS KMS 기반 암호문으로만 저장하고 평문 token/secret을 로그에 남기지 않아야 한다.
 - NFR-BFF-004: BFF의 downstream 호출은 서비스별 timeout, circuit breaker, bulkhead와 허용 목적지 목록을 가져야 한다.
@@ -93,7 +93,7 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - NFR-BFF-007: Auth Service 장애 시 이미 유효한 access token은 만료 전까지 Resource Service가 로컬 검증할 수 있어야 한다.
 - NFR-BFF-008: AI 또는 LiveKit Cloud 장애는 핵심 Space/Meeting CRUD 성공으로 위장하거나 mock 성공으로 대체하지 않아야 한다.
 - NFR-BFF-009: Frontend, BFF, Auth, Core의 인증 계약과 negative test가 CI에서 검증되어야 한다.
-- NFR-BFF-010: BFF/Auth/Core/AI/Realtime STT는 서비스별 Task Role과 Security Group으로 최소 권한·최소 통신 경계를 가져야 한다. 공통 Task Execution Role은 이미지 pull과 로그 전송 같은 실행 권한으로 제한한다.
+- NFR-BFF-010: BFF/Auth/Core/AI는 서비스별 Task Role과 Security Group으로 최소 권한·최소 통신 경계를 가져야 한다. 공통 Task Execution Role은 이미지 pull과 로그 전송 같은 실행 권한으로 제한한다.
 - NFR-BFF-011: NonProd Fargate Task는 2개 AZ의 private app subnet에 배치하고 public ALB만 public subnet에 두어야 한다.
 
 ## Data and Permission Rules

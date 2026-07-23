@@ -44,14 +44,13 @@
 
 ## Immediate Next Steps
 
-- BFF/Auth/Core/AI/STT image build and ECR push
+- BFF/Auth/Core/AI image build and ECR push
 - 서비스별 Task Definition 등록
 - Public ALB, Target Group과 Listener 구성
-- BFF/Auth/Core/AI/STT ECS Service 생성과 2개 AZ private app subnet 배치
-- BFF→Auth/Core, Core→AI, Core→STT service discovery 확정
+- BFF/Auth/Core/AI ECS Service 생성과 2개 AZ private app subnet 배치
+- BFF→Auth/Core, Core→AI service discovery 확정
 - Secrets Manager/Parameter Store 연동
 - health check, logs, alarms와 Service Auto Scaling 검증
-- `realtime-stt`는 독립 서비스로 배포 준비 중이며 컨테이너 포트는 `8083`
-- STT 배포 전 Actuator health endpoint, STT 전용 DB/Secrets, Core SG→STT SG TCP 8083 허용 검증 필요
+- `realtime-stt` ECS 배포는 deferred
 
 초기 VPC console 절차는 `infra/aws/nonprod/network/console-checklist.md`, 현재 작업 상태는 `specs/002-bff-auth-msa/tasks.md`를 기준으로 한다.

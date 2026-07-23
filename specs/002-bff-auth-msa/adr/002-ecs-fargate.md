@@ -9,19 +9,19 @@
 
 ## Context
 
-MeetingMind는 `ap-northeast-2` 단일 리전 Multi-AZ에서 BFF/Auth/Core/AI/Realtime STT를 독립 배포하고 서비스 장애와 AWS 권한을 격리해야 한다. 기존 계획은 EKS였지만 현재 팀과 워크로드에는 Kubernetes control plane, node 전략, upgrade와 Kubernetes 운영 체계가 추가 복잡도를 만든다.
+MeetingMind는 `ap-northeast-2` 단일 리전 Multi-AZ에서 BFF/Auth/Core/AI를 독립 배포하고 서비스 장애와 AWS 권한을 격리해야 한다. 기존 계획은 EKS였지만 현재 팀과 워크로드에는 Kubernetes control plane, node 전략, upgrade와 Kubernetes 운영 체계가 추가 복잡도를 만든다.
 
 기존 NonProd VPC의 public/private/data subnet, route table, NAT Gateway와 S3 Gateway Endpoint는 컨테이너 오케스트레이터와 독립적인 네트워크 경계이므로 재사용할 수 있다. 현재 VPC Terraform도 ECS Fargate와 충돌하지 않는다.
 
 ## Decision
 
 - NonProd는 전용 단일 ECS Fargate 클러스터를 사용한다.
-- BFF/Auth/Core/AI/Realtime STT는 각각 별도의 ECS Service, Task Definition, Task Role, Security Group과 CloudWatch Log Group을 사용한다.
-- `realtime-stt`는 독립 ECR repository와 ECS Service/Task Definition을 사용한다. 컨테이너 포트는 `8083`이며 public ALB에 노출하지 않고 Core SG에서만 접근한다.
+- BFF/Auth/Core/AI는 각각 별도의 ECS Service, Task Definition, Task Role, Security Group과 CloudWatch Log Group을 사용한다.
+- `realtime-stt`는 독립 ECR repository와 서비스 경계를 유지하지만 이번 NonProd 배포에서는 Task Definition과 ECS Service 생성을 보류한다.
 - 공통 ECS Task Execution Role은 ECR image pull과 CloudWatch Logs 전송 등 task 실행 권한만 가진다. 애플리케이션의 KMS/Secrets/데이터 접근은 서비스별 Task Role에 둔다.
 - Fargate Task는 2개 AZ의 private app subnet에 배치하고 public ALB는 public subnet에 배치한다. private outbound는 기존 NAT Gateway를 사용한다.
 - Frontend는 S3 + CloudFront + WAF로 제공한다. API 요청 경로는 사용자 → Route 53 → CloudFront/WAF → ALB → BFF다.
-- Security Group에서 허용할 TCP 포트는 ALB→BFF `8081`, BFF→Auth `8082`, BFF→Core `8080`, Core→AI `8000`, Core→STT `8083`이다. ALB Target Group의 HTTP(S) protocol과 CloudFront origin 제한은 Q-024, 서비스 discovery와 mTLS/SPIFFE 제품은 Q-023에서 확정한다.
+- Security Group에서 허용할 TCP 포트는 ALB→BFF `8081`, BFF→Auth `8082`, BFF→Core `8080`, Core→AI `8000`이다. ALB Target Group의 HTTP(S) protocol과 CloudFront origin 제한은 Q-024, 서비스 discovery와 mTLS/SPIFFE 제품은 Q-023에서 확정한다.
 - ECR repository는 `bff`, `auth`, `core`, `ai`, `realtime-stt`로 분리한다. immutable tag와 Git commit SHA를 사용하고 NonProd는 기본 scan-on-push만 활성화한다. 비용을 고려해 Inspector enhanced ECR scanning은 비활성화한다.
 - NonProd CloudWatch Log Group 보존 기간은 7일이다.
 - 수작업 NonProd 리소스 태그는 `Project=meetingmind`, `Environment=nonprod`, `ManagedBy=manual`, `Service=<서비스명>`을 따른다.
