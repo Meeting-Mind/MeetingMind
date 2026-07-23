@@ -1,5 +1,5 @@
 server:
-  port: 8081
+  port: ${STT_SERVER_PORT:8083}
 
 spring:
   application:

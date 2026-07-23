@@ -17,5 +17,5 @@ WORKDIR /app
 COPY --from=build --chown=meetingmind:meetingmind /workspace/app.jar /app/app.jar
 
 USER meetingmind
-EXPOSE 8081
+EXPOSE 8083
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

@@ -1,4 +1,4 @@
-package com.meetingmind.demo.service;
+package com.meetingmind.demo.gateway;
 
 public class TranscriptionGatewayException extends RuntimeException {
 

@@ -4,6 +4,8 @@ import com.meetingmind.stt.config.DotenvConfig;
 import com.meetingmind.stt.domain.MeetingTranscript;
 import com.meetingmind.stt.domain.TranscriptSegment;
 import com.meetingmind.stt.domain.TranscriptionSession;
+import com.meetingmind.stt.dto.ActiveSessionResponse;
+import com.meetingmind.stt.dto.PartialResponse;
 import com.meetingmind.stt.dto.StartTranscriptionRequest;
 import com.meetingmind.stt.dto.TranscriptResponse;
 import com.meetingmind.stt.dto.TranscriptionStartResponse;
@@ -15,12 +17,14 @@ import com.meetingmind.stt.service.SttSessionRegistry;
 import com.meetingmind.stt.service.TranscriptionCoordinator;
 import com.meetingmind.stt.websocket.EgressTokenService;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -83,10 +87,16 @@ public class InternalTranscriptionController {
     }
 
     @PostMapping("/transcriptions/{sessionId}/stop")
-    public TranscriptionStatusResponse stop(@PathVariable String sessionId) {
+    public TranscriptionStatusResponse stop(
+            @PathVariable String sessionId,
+            @RequestParam(required = false) String meetingId
+    ) {
         TranscriptionSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STT 세션을 찾을 수 없습니다."));
-        String meetingId = session.meetingId();
+        if (meetingId != null && !meetingId.equals(session.meetingId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "STT 세션을 찾을 수 없습니다.");
+        }
+        meetingId = session.meetingId();
 
         switch (session.status()) {
             case COMPLETED, FAILED -> {
@@ -133,6 +143,18 @@ public class InternalTranscriptionController {
     public TranscriptionStatusResponse status(@PathVariable String meetingId) {
         MeetingTranscript transcript = transcriptionCoordinator.getTranscript(meetingId);
         return new TranscriptionStatusResponse(meetingId, transcript.status().name());
+    }
+
+    @GetMapping("/meetings/{meetingId}/active-session")
+    public ActiveSessionResponse activeSession(@PathVariable String meetingId) {
+        return new ActiveSessionResponse(sessionRegistry.findActiveMeetingSessionId(meetingId));
+    }
+
+    @GetMapping("/meetings/{meetingId}/partials")
+    public List<PartialResponse> partials(@PathVariable String meetingId) {
+        return sessionRegistry.getMeetingPartials(meetingId).stream()
+                .map(partial -> new PartialResponse(partial.speakerLabel(), partial.text()))
+                .toList();
     }
 
     private TranscriptResponse.Segment toSegment(TranscriptSegment segment) {

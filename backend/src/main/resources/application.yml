@@ -36,7 +36,8 @@ meetingmind:
     base-url: ${MEETINGMIND_AI_BASE_URL:http://localhost:8000}
     service-token: ${AI_INTERNAL_SERVICE_TOKEN:}
   stt:
-    base-url: ${MEETINGMIND_STT_BASE_URL:http://localhost:8081}
+    gateway-mode: ${STT_GATEWAY_MODE:in-process}
+    base-url: ${MEETINGMIND_STT_BASE_URL:http://localhost:8083}
     service-token: ${STT_INTERNAL_SERVICE_TOKEN:}
 
 ---
