@@ -187,6 +187,30 @@ jobs:
       - name: Run AI unit tests
         run: python -m unittest discover -s tests
 
+  stt:
+    name: Realtime STT Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: stt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Test and package Realtime STT
+        run: ./gradlew clean test bootJar
+
+      - name: Verify bootJar
+        run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
+
   migration:
     name: PostgreSQL Migration
     runs-on: ubuntu-latest
@@ -289,6 +313,7 @@ jobs:
       - bff
       - auth
       - ai
+      - stt
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -296,6 +321,7 @@ jobs:
       bff_digest: ${{ steps.digests.outputs.bff }}
       auth_digest: ${{ steps.digests.outputs.auth }}
       ai_digest: ${{ steps.digests.outputs.ai }}
+      stt_digest: ${{ steps.digests.outputs.stt }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -312,6 +338,9 @@ jobs:
       - name: Build AI image
         run: docker build --tag meetingmind-ai:ci ai
 
+      - name: Build Realtime STT image
+        run: docker build --tag meetingmind-stt:ci stt
+
       - name: Capture image content digests
         id: digests
         run: |
@@ -319,6 +348,7 @@ jobs:
           echo "bff=$(docker image inspect meetingmind-bff:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "auth=$(docker image inspect meetingmind-auth:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "ai=$(docker image inspect meetingmind-ai:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          echo "stt=$(docker image inspect meetingmind-stt:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
 
       - name: Install checksum-verified Trivy
         env:
@@ -343,6 +373,9 @@ jobs:
 
       - name: Scan AI image
         run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-ai:ci
+
+      - name: Scan Realtime STT image
+        run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-stt:ci
 
   secrets:
     name: Secret Scan
@@ -386,6 +419,7 @@ jobs:
       - auth
       - frontend
       - ai
+      - stt
       - migration
       - playwright
       - containers
@@ -400,6 +434,7 @@ jobs:
           AUTH_RESULT: ${{ needs.auth.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           AI_RESULT: ${{ needs.ai.result }}
+          STT_RESULT: ${{ needs.stt.result }}
           MIGRATION_RESULT: ${{ needs.migration.result }}
           PLAYWRIGHT_RESULT: ${{ needs.playwright.result }}
           CONTAINERS_RESULT: ${{ needs.containers.result }}
@@ -408,6 +443,7 @@ jobs:
           BFF_DIGEST: ${{ needs.containers.outputs.bff_digest }}
           AUTH_DIGEST: ${{ needs.containers.outputs.auth_digest }}
           AI_DIGEST: ${{ needs.containers.outputs.ai_digest }}
+          STT_DIGEST: ${{ needs.containers.outputs.stt_digest }}
         run: |
           {
             echo "## MeetingMind CI"
@@ -419,6 +455,7 @@ jobs:
             echo "| Auth Service | PostgreSQL migration + least-privilege + bootJar | ${AUTH_RESULT} |"
             echo "| Frontend | lint + unit + build | ${FRONTEND_RESULT} |"
             echo "| AI | compile + unit | ${AI_RESULT} |"
+            echo "| Realtime STT | test + bootJar | ${STT_RESULT} |"
             echo "| PostgreSQL | Flyway V1-V10 + pgvector | ${MIGRATION_RESULT} |"
             echo "| Playwright | login + meeting allow/deny | ${PLAYWRIGHT_RESULT} |"
             echo "| Containers | build + HIGH/CRITICAL scan | ${CONTAINERS_RESULT} |"
@@ -430,6 +467,7 @@ jobs:
             echo "- Web BFF: \`${BFF_DIGEST:-not-produced}\`"
             echo "- Auth Service: \`${AUTH_DIGEST:-not-produced}\`"
             echo "- AI: \`${AI_DIGEST:-not-produced}\`"
+            echo "- Realtime STT: \`${STT_DIGEST:-not-produced}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce required results
@@ -440,6 +478,7 @@ jobs:
             ${{ needs.auth.result }}
             ${{ needs.frontend.result }}
             ${{ needs.ai.result }}
+            ${{ needs.stt.result }}
             ${{ needs.migration.result }}
             ${{ needs.playwright.result }}
             ${{ needs.containers.result }}
