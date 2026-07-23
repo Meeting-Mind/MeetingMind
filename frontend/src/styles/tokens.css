@@ -1,0 +1,57 @@
+:root {
+  --app-scale: 1;
+  --app-scale-inverse: 1;
+  --app-font-sans: "SUIT Variable", "Pretendard Variable", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --app-bg: #f8fbff;
+  --app-canvas: #f3f7fc;
+  --app-surface: #ffffff;
+  --app-surface-soft: #f5f9ff;
+  --app-surface-muted: #eef5fd;
+  --app-line: #d8e5f7;
+  --app-line-strong: #bfd2ee;
+  --app-text: #102a5c;
+  --app-text-strong: #0c234c;
+  --app-muted: #5b7198;
+  --app-subtle: #7890ae;
+  --app-accent: #175ab7;
+  --app-accent-strong: #0c3d87;
+  --app-accent-soft: #e8f1ff;
+  --app-green: #16856a;
+  --app-green-soft: #e9f7f1;
+  --app-orange: #e87722;
+  --app-orange-soft: #fff3e8;
+  --app-blue-soft: #e8f1ff;
+  --app-danger: #b42318;
+  --app-red-soft: #fff0ed;
+  --app-focus-ring: 0 0 0 3px rgba(23, 90, 183, 0.24);
+  --app-shadow-sm: 0 3px 10px rgba(16, 42, 92, 0.05);
+  --app-shadow: 0 12px 32px rgba(16, 42, 92, 0.08);
+  --app-shadow-lg: 0 24px 56px rgba(16, 42, 92, 0.16);
+  --app-radius-xl: 16px;
+  --app-radius-lg: 12px;
+  --app-radius-md: 8px;
+  --app-radius-sm: 6px;
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+  --app-space-8: 32px;
+  --app-layer-sticky: 100;
+  --app-layer-popover: 400;
+  --app-layer-modal: 800;
+  --app-layer-toast: 1000;
+  --app-duration-fast: 120ms;
+  --app-duration-normal: 200ms;
+  --app-duration-slow: 320ms;
+  --app-ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --app-duration-fast: 1ms;
+    --app-duration-normal: 1ms;
+    --app-duration-slow: 1ms;
+  }
+}

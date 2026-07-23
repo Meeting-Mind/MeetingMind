@@ -58,7 +58,7 @@ export function GoogleCredentialButton({
       })
       .catch(() => {
         if (active) {
-          onError("Google 로그인 스크립트를 불러오지 못했습니다.");
+          onError("Unable to load the Google sign-in script.");
         }
       });
     return () => {
@@ -78,7 +78,7 @@ export function GoogleCredentialButton({
           return;
         }
         if (!response.credential) {
-          onError("Google 인증 응답을 확인하지 못했습니다.");
+          onError("Unable to verify the Google credential response.");
           return;
         }
         onCredential(response.credential);
@@ -96,7 +96,7 @@ export function GoogleCredentialButton({
   return (
     <div
       aria-disabled={disabled}
-      className={`auth-modal-button${disabled ? " disabled" : ""}`}
+      className={`google-credential-button${disabled ? " disabled" : ""}`}
       ref={buttonRef}
     />
   );

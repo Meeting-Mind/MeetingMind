@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { fetchCalendarEvents } from "../api/workspace";
+import { fetchCalendarEvents } from "../api/calendar";
 import type { AuthSession } from "../auth/session";
+import { PageHeader } from "../components/common/PageHeader";
+import { StatusBadge } from "../components/common/StatusBadge";
+import { AppShell } from "../components/layout/AppShell";
+import { TargetDataGate } from "../components/layout/TargetDataGate";
+import { isTargetDataReady } from "../components/layout/targetDataGateModel";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
+import type { WorkspaceDataSource } from "../app/workspaceTypes";
 import type { CalendarEvent as ApiCalendarEvent, DashboardSummaryResponse, MeetingStatus, WorkspaceData } from "../types";
 
-type WorkspaceDataSource = "workspace-api" | "workspace-api-partial" | "legacy-api" | "mock-fallback";
 type CalendarView = "month" | "week" | "day";
 type DisplayCalendarEvent = {
   id: string;
@@ -61,12 +66,7 @@ function parseUpdatedRank(value: string) {
 }
 
 function buildProjectOverviewHref(space: WorkspaceData["workspaceHome"]["spaces"][number]) {
-  const params = new URLSearchParams({
-    spaceId: space.id,
-    project: space.name
-  });
-
-  return `/project-overview?${params.toString()}`;
+  return `/spaces/${encodeURIComponent(space.id)}`;
 }
 
 function meetingStatusLabel(status: MeetingStatus) {
@@ -83,29 +83,15 @@ function meetingStatusLabel(status: MeetingStatus) {
 }
 
 function buildMeetingDestination(space: WorkspaceData["workspaceHome"]["spaces"][number], meeting: DisplayCalendarEvent) {
-  const path = meeting.state === "예정" ? "/live-meeting" : "/report-agent";
-  const params = new URLSearchParams({
-    spaceId: space.id,
-    project: space.name,
-    meetingId: meeting.meetingId,
-    meeting: meeting.title,
-    round: ""
-  });
-  return `${path}?${params.toString()}`;
+  const suffix = meeting.state === "예정" ? "/live/prejoin" : "/report";
+  return `/spaces/${encodeURIComponent(space.id)}/meetings/${encodeURIComponent(meeting.meetingId)}${suffix}`;
 }
 
 function buildReportDestination(
   space: WorkspaceData["workspaceHome"]["spaces"][number],
   report: DashboardSummaryResponse["latestReports"][number]
 ) {
-  const params = new URLSearchParams({
-    spaceId: space.id,
-    project: space.name,
-    meetingId: report.meetingId,
-    meeting: report.meetingTitle,
-    round: ""
-  });
-  return `/report-agent?${params.toString()}`;
+  return `/spaces/${encodeURIComponent(space.id)}/meetings/${encodeURIComponent(report.meetingId)}/report`;
 }
 
 function formatDateLabel(date: Date) {
@@ -405,11 +391,15 @@ export function WorkspaceHomePage({
       })
     : null;
 
-  return (
-    <div className="workspace-catalog-shell workspace-catalog-home-shell">
-      <WorkspaceSidebar activeItem="catalog" onCreateProject={onCreateProject} />
+  if (!isTargetDataReady(dataSource)) {
+    return <TargetDataGate contentClassName="workspace-catalog-main workspace-catalog-home-main" dataSource={dataSource} onCreateProject={onCreateProject}>{null}</TargetDataGate>;
+  }
 
-      <main className="workspace-catalog-main workspace-catalog-home-main">
+  return (
+    <AppShell
+      contentClassName="workspace-catalog-main workspace-catalog-home-main"
+      sidebar={<WorkspaceSidebar activeItem="catalog" onCreateProject={onCreateProject} />}
+    >
         <div className="workspace-catalog-topbar">
           <div className="workspace-catalog-data-source" title="개발용 데이터 소스">
             {dataSource === "workspace-api"
@@ -447,6 +437,14 @@ export function WorkspaceHomePage({
           </div>
         </div>
 
+        <PageHeader
+          breadcrumb={<strong>워크스페이스</strong>}
+          description="회의에서 정리된 결정과 태스크를 다음 업무로 연결합니다."
+          eyebrow="Workspace"
+          meta={<span className="workspace-home-count">프로젝트 {data.spaces.length}개</span>}
+          title="지금 진행 중인 일을 한눈에 확인하세요"
+        />
+
         <section className="dashboard-summary-grid">
           <article>
             <span>프로젝트</span>
@@ -480,7 +478,10 @@ export function WorkspaceHomePage({
               {todayMeetingHref ? <Link to={todayMeetingHref}>회의 열기</Link> : null}
             </div>
             {todayMeeting && todaySpace ? (
-              <p>{todaySpace.name} · {formatTimeLabel(new Date(todayMeeting.startsAt))} · {meetingStatusLabel(todayMeeting.status)}</p>
+              <p>
+                {todaySpace.name} · {formatTimeLabel(new Date(todayMeeting.startsAt))} ·
+                <StatusBadge context="meeting" label={meetingStatusLabel(todayMeeting.status)} status={todayMeeting.status} />
+              </p>
             ) : (
               <p>접근 가능한 오늘 회의가 없습니다.</p>
             )}
@@ -493,12 +494,12 @@ export function WorkspaceHomePage({
                 <strong>최근 활동</strong>
               </div>
             </div>
-            {dashboardRecent.map((item) => (
+            {dashboardRecent.length ? dashboardRecent.map((item) => (
               <div key={`${item.title}-${item.meta}`} className="workspace-dashboard-activity-row">
                 <strong>{item.title}</strong>
                 <span>{item.meta}</span>
               </div>
-            ))}
+            )) : <p className="workspace-dashboard-empty">최근 활동이 없습니다.</p>}
           </div>
         </section>
 
@@ -508,15 +509,15 @@ export function WorkspaceHomePage({
               <span>Action Items</span>
               <strong>미완료 작업 요약</strong>
             </div>
-            <Link to="/project-overview">프로젝트 개요</Link>
+            <Link to="/spaces">프로젝트 목록</Link>
           </div>
           <div className="workspace-action-summary-list">
-            {dashboardActionItems.map((item) => (
+            {dashboardActionItems.length ? dashboardActionItems.map((item) => (
               <div key={`${item.title}-${item.meta}`} className="workspace-action-summary-row">
                 <strong>{item.title}</strong>
                 <span>{item.meta}</span>
               </div>
-            ))}
+            )) : <p className="workspace-action-summary-empty">현재 미완료 작업이 없습니다.</p>}
           </div>
         </section>
 
@@ -586,28 +587,45 @@ export function WorkspaceHomePage({
           <strong>프로젝트 {filteredSpaces.length}개</strong>
         </div>
 
-        <section className="workspace-catalog-grid">
-          {filteredSpaces.map((space, index) => (
-            <Link key={space.id} className="workspace-catalog-card" to={buildProjectOverviewHref(space)}>
-              <div className="workspace-catalog-card-time">
-                <span className="workspace-catalog-time-dot" />
-                <strong>{space.updatedAt}</strong>
-              </div>
-
-              <h2>{space.name}</h2>
-              <div className={`workspace-catalog-tag tone-${(index % 3) + 1}`}>{space.meetings}</div>
-              <p>{space.description}</p>
-
-              <div className="workspace-catalog-card-footer">
-                <div className="workspace-catalog-avatars" aria-hidden="true">
-                  <span className={`workspace-catalog-avatar tone-${(index % 3) + 1}`}>{space.name.slice(0, 1)}</span>
-                  <strong>{space.members}</strong>
+        {filteredSpaces.length ? (
+          <section className="workspace-catalog-grid" aria-label="프로젝트 목록">
+            {filteredSpaces.map((space, index) => (
+              <Link key={space.id} className="workspace-catalog-card" to={buildProjectOverviewHref(space)}>
+                <div className="workspace-catalog-card-time">
+                  <span className="workspace-catalog-time-dot" />
+                  <strong>{space.updatedAt}</strong>
                 </div>
-                <span className="workspace-catalog-date">Project AI</span>
-              </div>
-            </Link>
-          ))}
-        </section>
+
+                <h2>{space.name}</h2>
+                <div className={`workspace-catalog-tag tone-${(index % 3) + 1}`}>{space.meetings}</div>
+                <p>{space.description}</p>
+
+                <div className="workspace-catalog-card-footer">
+                  <div className="workspace-catalog-avatars" aria-hidden="true">
+                    <span className={`workspace-catalog-avatar tone-${(index % 3) + 1}`}>{space.name.slice(0, 1)}</span>
+                    <strong>{space.members}</strong>
+                  </div>
+                  <span className="workspace-catalog-date">Project AI</span>
+                </div>
+              </Link>
+            ))}
+          </section>
+        ) : (
+          <section className="workspace-catalog-empty" aria-live="polite">
+            <strong>조건에 맞는 프로젝트가 없습니다.</strong>
+            <p>검색어 또는 필터를 바꾸면 다른 프로젝트를 확인할 수 있습니다.</p>
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setFilterBy("전체");
+                setSortBy("recent");
+              }}
+              type="button"
+            >
+              필터 초기화
+            </button>
+          </section>
+        )}
 
         <section className="workspace-calendar-shell">
           <div className="workspace-dashboard-section-head">
@@ -660,7 +678,10 @@ export function WorkspaceHomePage({
                       return space ? (
                         <Link key={event.id} to={buildMeetingDestination(space, event)}>
                           <strong>{formatTimeLabel(event.startsAt)} {event.title}</strong>
-                          <small>{event.projectName} · {event.state}</small>
+                          <small>
+                            {event.projectName} ·
+                            <StatusBadge context="meeting" label={event.state} status={event.state} />
+                          </small>
                         </Link>
                       ) : null;
                     })
@@ -774,7 +795,6 @@ export function WorkspaceHomePage({
             검색 결과 {filteredSpaces.length}개 · 회의 {totalMeetings}건
           </span>
         </section>
-      </main>
-    </div>
+    </AppShell>
   );
 }

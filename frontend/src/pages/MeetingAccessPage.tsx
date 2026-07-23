@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   approveMeetingJoinRequest,
@@ -6,8 +6,10 @@ import {
   fetchMeetingJoinRequests,
   fetchMeetingParticipants,
   rejectMeetingJoinRequest
-} from "../api/workspace";
+} from "../api/meetingAccess";
 import type { AuthSession } from "../auth/session";
+import { RoleBadge } from "../components/common/RoleBadge";
+import { StatusBadge } from "../components/common/StatusBadge";
 import type { MeetingJoinRequestSummary, MeetingRole } from "../types";
 
 type AccessState = "idle" | "checking" | "submitting" | "pending" | "allowed" | "denied";
@@ -24,7 +26,7 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [reviewingRequestId, setReviewingRequestId] = useState("");
 
-  async function loadJoinRequests(targetMeetingId: string) {
+  const loadJoinRequests = useCallback(async (targetMeetingId: string) => {
     setRequestsLoading(true);
     try {
       const response = await fetchMeetingJoinRequests(session, targetMeetingId);
@@ -34,9 +36,9 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
     } finally {
       setRequestsLoading(false);
     }
-  }
+  }, [session]);
 
-  async function checkAccess(targetMeetingId: string) {
+  const checkAccess = useCallback(async (targetMeetingId: string) => {
     if (!targetMeetingId) {
       setAccessState("denied");
       setMessage("확인할 회의 ID가 없습니다. 회의 URL 또는 참가 코드를 먼저 제출해주세요.");
@@ -67,7 +69,7 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
           : "현재 이 회의에 접근할 수 없습니다. 참가 신청이 필요합니다."
       );
     }
-  }
+  }, [loadJoinRequests, requestId, session]);
 
   useEffect(() => {
     document.body.className = "app-theme meeting-access-body";
@@ -80,7 +82,7 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
     if (meetingId) {
       void checkAccess(meetingId);
     }
-  }, []);
+  }, [checkAccess, meetingId]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -126,8 +128,8 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
     }
   }
 
-  const accessLabel = accessRole === "MANAGER_OVERRIDE" ? "OWNER/ADMIN override" : accessRole;
   const canReviewRequests = accessRole === "HOST" || accessRole === "MANAGER_OVERRIDE";
+  const accessStatusValue = accessState === "allowed" ? "ACTIVE" : accessState === "denied" ? "REVOKED" : accessState === "idle" ? "DRAFT" : "PENDING";
   const liveMeetingHref = meetingId
     ? `/live-meeting?${new URLSearchParams({ meetingId }).toString()}`
     : "/live-meeting";
@@ -159,7 +161,12 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
                 <span>참가 신청</span>
                 <h2 id="meeting-access-form-title">회의 URL 또는 코드</h2>
               </div>
-              <span className={`meeting-access-state ${accessState}`}>{getStateLabel(accessState)}</span>
+              <StatusBadge
+                className={`meeting-access-state ${accessState}`}
+                context="access"
+                label={getStateLabel(accessState)}
+                status={accessStatusValue}
+              />
             </div>
 
             <form className="meeting-access-form" onSubmit={handleSubmit}>
@@ -217,7 +224,11 @@ export function MeetingAccessPage({ session }: { session: AuthSession }) {
             <div className={`meeting-access-verdict ${accessState}`}>
               <span>현재 판정</span>
               <strong>{accessState === "allowed" ? "접근 가능" : accessState === "pending" ? "승인 대기" : "접근 전 확인 필요"}</strong>
-              <p>{accessLabel ? `${accessLabel} 권한으로 확인됨` : "승인 전에는 회의 데이터와 AI 컨텍스트가 차단됩니다."}</p>
+              {accessRole ? (
+                <RoleBadge role={accessRole} scope="meeting" />
+              ) : (
+                <p>승인 전에는 회의 데이터와 AI 컨텍스트가 차단됩니다.</p>
+              )}
             </div>
 
             <div className="meeting-access-boundary">

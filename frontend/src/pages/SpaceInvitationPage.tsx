@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { acceptSpaceInvitation, declineSpaceInvitation } from "../api/workspace";
+import { acceptSpaceInvitation, declineSpaceInvitation } from "../api/spaces";
 import type { AuthSession } from "../auth/session";
+import { StatusBadge } from "../components/common/StatusBadge";
 
 type InvitationResolution = "ready" | "submitting" | "accepted" | "declined" | "error";
 
@@ -57,6 +58,16 @@ export function SpaceInvitationPage({ session }: { session: AuthSession }) {
   }
 
   const isComplete = resolution === "accepted" || resolution === "declined";
+  const resolutionStatus = resolution === "accepted" ? "COMPLETED" : resolution === "declined" ? "ARCHIVED" : resolution === "error" ? "FAILED" : resolution === "submitting" ? "PROCESSING" : "PENDING";
+  const resolutionLabel = resolution === "accepted"
+    ? "수락됨"
+    : resolution === "declined"
+      ? "거절됨"
+      : resolution === "error"
+        ? "처리 실패"
+        : resolution === "submitting"
+          ? "처리 중"
+          : "응답 대기";
 
   return (
     <div className="space-invitation-shell">
@@ -76,6 +87,7 @@ export function SpaceInvitationPage({ session }: { session: AuthSession }) {
           <p className="space-invitation-kicker">Space invitation</p>
           <h1 id="space-invitation-title">Space 초대 응답</h1>
           <p>현재 로그인한 이메일로 발급된 Space 초대인지 확인한 뒤 수락하거나 거절할 수 있습니다.</p>
+          <StatusBadge context="generic" label={resolutionLabel} status={resolutionStatus} />
 
           {message ? <p className={`space-invitation-message ${resolution}`} role={resolution === "error" ? "alert" : undefined}>{message}</p> : null}
 

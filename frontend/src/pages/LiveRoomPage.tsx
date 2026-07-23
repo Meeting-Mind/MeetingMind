@@ -6,36 +6,32 @@ import {
   type Participant,
   type TrackPublication
 } from "livekit-client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-  explainMeetingTerm,
   fetchMeetingDialogue,
   startMeetingTranscription,
   stopMeetingTranscription
-} from "../api/workspace";
-import { bffFetch } from "../auth/csrf";
+} from "../api/transcripts";
+import { ApiRequestError } from "../api/client";
+import { fetchMeetingLiveKitToken } from "../api/live";
+import { explainMeetingTerm } from "../api/terms";
 import type { AuthSession } from "../auth/session";
+import { DataState } from "../components/common/DataState";
+import { RoleBadge } from "../components/common/RoleBadge";
+import { StatusBadge } from "../components/common/StatusBadge";
 import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
-import type { TermExplanationResponse, WorkspaceData } from "../types";
+import type { MeetingDetailResponse, TermExplanationResponse, WorkspaceData } from "../types";
 
 const PREJOIN_STORAGE_KEY = "meetingmind-prejoin";
 
-type RoomTokenResponse = {
-  serverUrl: string;
-  participantToken: string;
-  roomName: string;
-  identity: string;
-  name: string;
-};
-
-// final로 확정된 말풍선. 한 번 messages 배열에 들어간 뒤로는 절대 수정하지 않는다.
 type SttMessage = {
   key: string;
   speakerLabel: string;
   displayName: string;
   time: string;
   text: string;
+  isPartial?: boolean;
 };
 
 // 지금 화자가 말하고 있는 중이라 아직 확정되지 않은 말풍선. final이 오면 사라지고
@@ -48,6 +44,22 @@ type SttPartialMessage = {
 };
 
 type SttConnectionStatus = "idle" | "connecting" | "connected" | "disconnected";
+
+function isTranscriptionAlreadyProcessingError(cause: unknown) {
+  return cause instanceof ApiRequestError
+    && cause.status === 409
+    && cause.code === "TRANSCRIPTION_ALREADY_PROCESSING";
+}
+
+function sttUnavailableMessage(cause: unknown) {
+  if (cause instanceof ApiRequestError && cause.code === "STT_PROVIDER_UNAVAILABLE") {
+    return "실시간 회의 연결을 일시적으로 사용할 수 없습니다. LiveKit 또는 STT 연동 상태를 확인한 뒤 다시 시도해 주세요.";
+  }
+  if (cause instanceof Error && cause.message) {
+    return cause.message;
+  }
+  return "실시간 전사를 시작하지 못했습니다.";
+}
 
 function formatTranscriptTime(startMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(startMs / 1_000));
@@ -313,7 +325,7 @@ function ParticipantTile({
           {!participant.isMicrophoneEnabled ? <span className="lk-live-room-muted-badge">음소거</span> : null}
           <strong>{participant.name}</strong>
         </div>
-        <span>{participant.role}</span>
+        <RoleBadge label={participant.role} role={participant.role} scope="meeting" />
       </div>
     </article>
   );
@@ -321,16 +333,21 @@ function ParticipantTile({
 
 export function LiveRoomPage({
   liveMeeting: fallbackLiveMeeting,
-  meetingAi,
-  session
+  meetingAi: _meetingAi,
+  meetingContext,
+  session,
+  strictApi = false
 }: {
   liveMeeting: WorkspaceData["liveMeeting"];
   meetingAi: WorkspaceData["meetingAi"];
+  meetingContext?: MeetingDetailResponse;
   session: AuthSession;
+  strictApi?: boolean;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const meetingId = new URLSearchParams(location.search).get("meetingId");
+  const routeParams = useParams<{ spaceId: string; meetingId: string }>();
+  const meetingId = routeParams.meetingId ?? new URLSearchParams(location.search).get("meetingId");
   const { liveMeeting, error: liveMeetingError } = useLiveMeetingDetail(session, meetingId, fallbackLiveMeeting);
   const roomRef = useRef<Room | null>(null);
   const [roomReady, setRoomReady] = useState(false);
@@ -441,7 +458,7 @@ export function LiveRoomPage({
         const activePartial = dialogue.partials[0] ?? null;
         setCurrentPartialMessage((previous) => {
           if (!activePartial) {
-            return null;
+            return newRows.length === 0 && dialogue.status === "PROCESSING" ? previous : null;
           }
           const displayName = activePartial.speakerName || activePartial.speakerLabel;
           if (previous && previous.speakerLabel === activePartial.speakerLabel) {
@@ -450,7 +467,9 @@ export function LiveRoomPage({
           return { speakerLabel: activePartial.speakerLabel, displayName, time: formatNowTime(), text: activePartial.text };
         });
 
-        if (sttConnectionStatusRef.current === "disconnected") {
+        if (dialogue.status === "FAILED") {
+          showSttStatus("disconnected", false);
+        } else if (sttConnectionStatusRef.current !== "connected") {
           showSttStatus("connected", true);
         }
       } catch {
@@ -467,7 +486,7 @@ export function LiveRoomPage({
     };
   }, [roomReady, meetingId, session]);
 
-  async function startSttStream(targetMeetingId: string, trackId: string) {
+  const startSttStream = useCallback(async (targetMeetingId: string, trackId: string) => {
     showSttStatus("connecting", false);
     try {
       const data = await startMeetingTranscription(session, targetMeetingId, {
@@ -477,12 +496,18 @@ export function LiveRoomPage({
       sttSessionIdRef.current = data.sessionId;
       showSttStatus("connected", true);
     } catch (error) {
+      if (isTranscriptionAlreadyProcessingError(error)) {
+        sttSessionIdRef.current = null;
+        showSttStatus("connected", true);
+        return;
+      }
       console.warn("[LiveRoomPage] STT stream start failed", error);
+      setRoomError(sttUnavailableMessage(error));
       showSttStatus("disconnected", false);
     }
-  }
+  }, [session]);
 
-  function stopSttStream() {
+  const stopSttStream = useCallback(() => {
     const sessionId = sttSessionIdRef.current;
     sttSessionIdRef.current = null;
 
@@ -491,7 +516,7 @@ export function LiveRoomPage({
     }
 
     void stopMeetingTranscription(session, meetingId, sessionId).catch(() => {});
-  }
+  }, [meetingId, session]);
 
   function toggleBookmark(key: string) {
     setBookmarkedKeys((previous) => {
@@ -595,22 +620,7 @@ export function LiveRoomPage({
         if (!meetingId) {
           throw new Error("회의 ID가 없어 LiveKit 접근 권한을 확인할 수 없습니다.");
         }
-        let tokenResponse: Response;
-        try {
-          tokenResponse = await bffFetch(
-            `/api/v1/meetings/${encodeURIComponent(meetingId)}/livekit-token`,
-            { method: "POST" }
-          );
-        } catch (error) {
-          throw new Error(`토큰 API 연결 실패: ${formatRoomError(error, "백엔드 토큰 요청에 실패했습니다.")}`);
-        }
-
-        if (!tokenResponse.ok) {
-          const message = await tokenResponse.text();
-          throw new Error(message || `LiveKit 토큰 요청 실패 (${tokenResponse.status})`);
-        }
-
-        const connection = (await tokenResponse.json()) as RoomTokenResponse;
+        const connection = await fetchMeetingLiveKitToken(session, meetingId);
         const room = new Room({
           adaptiveStream: true,
           dynacast: true
@@ -680,7 +690,7 @@ export function LiveRoomPage({
         sttStatusHideTimerRef.current = null;
       }
     };
-  }, [meetingId, participantProfile, roleLookup, session]);
+  }, [meetingId, participantProfile, roleLookup, session, startSttStream, stopSttStream]);
 
   async function handleToggleMicrophone() {
     const room = roomRef.current;
@@ -692,8 +702,12 @@ export function LiveRoomPage({
     try {
       await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
       setParticipantCards(buildParticipantCards(room, roleLookup, participantProfile));
-    } catch {
-      setRoomError("마이크 상태를 변경하지 못했습니다.");
+    } catch (cause) {
+      setRoomError(
+        cause instanceof Error && cause.message
+          ? `마이크 상태를 변경하지 못했습니다. ${cause.message}`
+          : "마이크 상태를 변경하지 못했습니다."
+      );
     }
   }
 
@@ -707,8 +721,12 @@ export function LiveRoomPage({
     try {
       await room.localParticipant.setCameraEnabled(!room.localParticipant.isCameraEnabled);
       setParticipantCards(buildParticipantCards(room, roleLookup, participantProfile));
-    } catch {
-      setRoomError("카메라 상태를 변경하지 못했습니다.");
+    } catch (cause) {
+      setRoomError(
+        cause instanceof Error && cause.message
+          ? `카메라 상태를 변경하지 못했습니다. ${cause.message}`
+          : "카메라 상태를 변경하지 못했습니다."
+      );
     }
   }
 
@@ -747,7 +765,7 @@ export function LiveRoomPage({
 
   // 확정된 메시지(절대 안 바뀜) 뒤에, 지금 말하는 중인 partial 말풍선을 하나만 붙인다.
   const liveTranscriptEntries = useMemo(() => {
-    const entries = messages.map((message) => ({ ...message, isPartial: false }));
+    const entries = messages.map((message) => ({ ...message, isPartial: message.isPartial ?? false }));
     if (currentPartialMessage) {
       entries.push({
         key: `partial-${currentPartialMessage.speakerLabel}`,
@@ -782,6 +800,20 @@ export function LiveRoomPage({
           ? "STT 연결이 끊어졌습니다."
           : "";
 
+  if (strictApi && liveMeetingError) {
+    return (
+      <div className="lk-live-room-shell">
+        <DataState
+          actionLabel="프로젝트 회의로"
+          onAction={() => navigate(`/spaces/${encodeURIComponent(meetingContext?.spaceId ?? routeParams.spaceId ?? "")}/meetings`)}
+          state="error"
+          title="회의실 정보를 불러오지 못했습니다"
+          description={liveMeetingError}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="lk-live-room-shell">
       <div className="lk-live-room-frame">
@@ -791,14 +823,21 @@ export function LiveRoomPage({
               live-room / <span>{liveMeeting.overview.title}</span>
             </p>
             <strong>{liveMeeting.overview.title}</strong>
-            <span>실시간 카메라 화면과 발표 화면, STT 요약을 한 번에 확인하는 회의실입니다.</span>
+            <span>회의에 집중하면서 발화 기록과 참가자 상태를 확인하세요.</span>
           </div>
-          <div className="lk-live-room-status">
+          <div className="lk-live-room-status" aria-label="회의 상태">
             {liveMeetingError ? (
               <span className="live-meeting-data-warning" title={liveMeetingError}>
                 임시 데이터 표시 중
               </span>
             ) : null}
+            <StatusBadge
+              className={`lk-live-room-connection ${connectionStateLabel === "실시간 연결됨" ? "is-connected" : ""}`}
+              context="generic"
+              label={connectionStateLabel}
+              status={connectionStateLabel === "실시간 연결됨" ? "ACTIVE" : "PROCESSING"}
+            />
+            <span className="lk-live-room-participant-count">참가자 {participantCards.length}명</span>
             <button className="lk-live-room-top-leave" onClick={() => handleLeave("/spaces")} type="button">
               나가기
             </button>
@@ -806,7 +845,7 @@ export function LiveRoomPage({
         </header>
 
         <main className="lk-live-room-layout">
-          <section className="lk-live-room-main">
+          <section aria-label="실시간 회의 화면" className="lk-live-room-main">
             <div className="lk-live-room-stage">
               <span className="lk-live-room-stage-chip">
                 {activeScreenShare ? `${activeScreenShare.name} 화면 공유` : "참가자 카메라"}
@@ -877,10 +916,13 @@ export function LiveRoomPage({
             {meetingAiNotice ? <div className="lk-live-room-inline-notice">{meetingAiNotice}</div> : null}
           </section>
 
-          <aside className="lk-live-room-sidebar">
+          <aside aria-label="실시간 회의 기록" className="lk-live-room-sidebar">
             <div className="lk-live-room-sidebar-head">
-              <strong>실시간 STT</strong>
-              <span>LIVE</span>
+              <div>
+                <span className="lk-live-room-sidebar-kicker">Meeting record</span>
+                <strong>실시간 자막</strong>
+              </div>
+              <span className="lk-live-room-live-badge"><span aria-hidden="true" />LIVE</span>
             </div>
 
             {sttStatusBannerVisible ? (
@@ -960,6 +1002,7 @@ export function LiveRoomPage({
 
             <form className="lk-live-room-sidebar-search" onSubmit={(event) => event.preventDefault()}>
               <input
+                aria-label="실시간 자막 검색"
                 onChange={(event) => setSttSearchQuery(event.target.value)}
                 placeholder="회의 기록 검색..."
                 type="text"
