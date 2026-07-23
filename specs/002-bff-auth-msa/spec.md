@@ -2,7 +2,7 @@
 
 ## Summary
 
-MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별도 Spring Boot Web BFF의 서버 세션으로 인증을 전환한 뒤, Auth Service와 업무 서비스를 AWS EKS 단일 리전 Multi-AZ에 점진적으로 분리한다.
+MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별도 Spring Boot Web BFF의 서버 세션으로 인증을 전환한 뒤, Auth Service와 업무 서비스를 AWS ECS Fargate 단일 리전 Multi-AZ에 점진적으로 분리한다.
 
 ## Requirement Sources
 
@@ -41,7 +41,9 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - 현재 세션 로그아웃과 모든 기기 로그아웃
 - 현재 Google Identity Services credential을 서버에서 검증하고 BFF 세션으로 전환
 - Auth Service를 기존 Backend에서 점진 추출하고 내부 access/refresh/JWKS 경계를 제공
-- AWS EKS 단일 리전 Multi-AZ, LiveKit Cloud를 목표로 한 배포·장애 격리 설계
+- AWS `ap-northeast-2` ECS Fargate 단일 리전 Multi-AZ, LiveKit Cloud를 목표로 한 배포·장애 격리 설계
+- NonProd 단일 ECS 클러스터에서 BFF/Auth/Core/AI를 서비스별 ECS Service, Task Definition, Task Role, Security Group, CloudWatch Log Group으로 격리
+- 구조상 독립 서비스인 `realtime-stt`의 ECR 경계 유지. 단, 현재 NonProd 배포 범위에서는 보류
 - AI/LiveKit 장애 시 Space/Meeting 핵심 기능의 graceful degradation
 
 ### Out of Scope
@@ -54,7 +56,7 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - 범용 기업 OIDC/SAML 로그인 구현
 - Refresh 탈취 재사용 시 token family 전체 폐기의 세부 알고리즘
 - JWT 알고리즘, claim 전체, KMS 서명키 교체 주기의 최종 운영값
-- EKS 프로비저닝 도구와 node 운영 방식의 최종 선택
+- `realtime-stt` ECS Service/Task Definition 배포
 
 ## User Stories
 
@@ -63,6 +65,7 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 3. As a 웹 사용자, I want 로그아웃 즉시 현재 또는 모든 기기 세션을 종료하고 싶다, so that 분실 기기와 공유 브라우저 접근을 차단할 수 있다.
 4. As a 운영자, I want Auth/AI/Realtime/Core 장애가 독립적으로 격리되길 원한다, so that 한 기능 장애가 전체 MeetingMind 장애로 번지지 않는다.
 5. As a 서비스 개발자, I want 브라우저 계약을 유지한 채 Backend 기능을 순차 분리하고 싶다, so that big-bang 전환 없이 MSA로 이동할 수 있다.
+6. As a 운영자, I want 서비스별 AWS 권한·네트워크·로그 경계와 Multi-AZ 배치를 갖고 싶다, so that 한 서비스의 권한 또는 장애가 다른 서비스로 확산되지 않는다.
 
 ## Functional Requirements
 
@@ -81,15 +84,17 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 
 ## Non-Functional Requirements
 
-- NFR-BFF-001: Web BFF/Auth/Core/AI는 독립 배포와 수평 확장이 가능해야 한다.
+- NFR-BFF-001: Web BFF/Auth/Core/AI는 각각 독립된 ECS Service와 Task Definition으로 배포·수평 확장이 가능해야 한다.
 - NFR-BFF-002: 운영 BFF 세션은 전용 HA Redis에 두고 sticky session에 의존하지 않아야 한다.
 - NFR-BFF-003: 운영 Token Bundle은 AWS KMS 기반 암호문으로만 저장하고 평문 token/secret을 로그에 남기지 않아야 한다.
 - NFR-BFF-004: BFF의 downstream 호출은 서비스별 timeout, circuit breaker, bulkhead와 허용 목적지 목록을 가져야 한다.
-- NFR-BFF-005: EKS Pod/AZ 장애 시 남은 Pod가 BFF 요청을 수용하고 유효 세션을 복원해야 한다.
+- NFR-BFF-005: Fargate Task/AZ 장애 시 다른 AZ의 정상 Task가 BFF 요청을 수용하고 유효 세션을 복원해야 한다.
 - NFR-BFF-006: Redis 장애 시 쿠키 자체를 신뢰하는 fallback을 사용하지 않고 fail closed해야 한다.
 - NFR-BFF-007: Auth Service 장애 시 이미 유효한 access token은 만료 전까지 Resource Service가 로컬 검증할 수 있어야 한다.
 - NFR-BFF-008: AI 또는 LiveKit Cloud 장애는 핵심 Space/Meeting CRUD 성공으로 위장하거나 mock 성공으로 대체하지 않아야 한다.
 - NFR-BFF-009: Frontend, BFF, Auth, Core의 인증 계약과 negative test가 CI에서 검증되어야 한다.
+- NFR-BFF-010: BFF/Auth/Core/AI는 서비스별 Task Role과 Security Group으로 최소 권한·최소 통신 경계를 가져야 한다. 공통 Task Execution Role은 이미지 pull과 로그 전송 같은 실행 권한으로 제한한다.
+- NFR-BFF-011: NonProd Fargate Task는 2개 AZ의 private app subnet에 배치하고 public ALB만 public subnet에 두어야 한다.
 
 ## Data and Permission Rules
 
@@ -105,10 +110,10 @@ MeetingMind 웹 클라이언트에서 access/refresh token을 제거하고 별�
 - AC-002: Browser-BFF와 BFF-Auth API 계약이 분리되어 있고 public refresh endpoint가 목표 계약에 없다.
 - AC-003: 세션/Token Bundle/AuthSession의 관계와 보존·암호화·폐기 규칙이 데이터 모델과 ERD에 일치한다.
 - AC-004: `Web BFF → Auth Service → 도메인 서비스` 점진 전환 순서와 호환·롤백 경계가 계획과 tasks에 있다.
-- AC-005: AWS EKS 단일 리전 Multi-AZ와 LiveKit Cloud 결정, 서비스 장애별 degradation이 계획에 있다.
+- AC-005: AWS ECS Fargate 단일 리전 Multi-AZ와 LiveKit Cloud 결정, 서비스별 IAM/네트워크/로그 격리 및 장애별 degradation이 계획에 있다.
 - AC-006: 구현 전 차단 질문과 검증 기준이 `clarify.md`, `tasks.md`, `analyze.md`에서 추적된다.
 - AC-007: BFF/Auth 런타임 이미지는 수정 가능한 HIGH/CRITICAL 취약점이 없고, 저장소 전체 이력 secret scan은 실제 secret과 테스트 fixture 오탐을 fingerprint 단위로 구분해 통과해야 한다.
 
 ## Open Questions
 
-- Q-003: AWS 리전, 서비스별 SLO/RTO/RPO, EKS/IaC와 mTLS/SPIFFE 구현 제품을 `clarify.md` Q-011~Q-013에서 결정한다.
+- Q-003: AWS 리전과 ECS Fargate 배포 플랫폼은 결정됐다. 서비스 discovery/내부 workload 인증, edge 우회 차단/target protocol, NAT Gateway AZ 경계, 공용 tag/IaC 수렴과 서비스별 SLO/RTO/RPO는 `clarify.md` Q-013, Q-023~Q-026에서 결정한다.
