@@ -47,7 +47,7 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P0`
 - 측정지표/기준: HTTPS/TLS 적용
 - 비고: -
-- 상세 기준: 모든 운영 트래픽은 HTTPS/TLS를 사용한다. BFF/Auth/Resource Service 내부 호출은 mTLS와 SPIFFE workload identity로 양방향 인증하고 NetworkPolicy와 endpoint allowlist를 함께 적용한다.
+- 상세 기준: 모든 운영 트래픽은 HTTPS/TLS를 사용한다. BFF/Auth/Resource Service 내부 호출은 mTLS와 SPIFFE workload identity로 양방향 인증하고 서비스별 Security Group과 endpoint allowlist를 함께 적용한다.
 - 측정 방법: 배포 URL, API 요청, mixed content 여부를 확인한다.
 - 적용/예외 조건: 로컬 개발 환경은 예외로 둘 수 있다.
 - 검증 주기: 배포 전/인프라 변경 시
@@ -307,11 +307,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P2`
 - 측정지표/기준: 무상태 서버/스케일아웃
 - 비고: -
-- 상세 기준: Web BFF와 업무 서비스는 EKS에서 수평 확장 가능하게 구성하고 브라우저 세션은 BFF 전용 Redis, 영속 업무 데이터는 서비스 소유 DB에 둔다. LiveKit 미디어 평면은 LiveKit Cloud로 분리한다.
-- 측정 방법: EKS 복수 Pod에서 sticky session 없이 요청 분산, Pod 재시작, 세션 유지와 서비스별 scale-out 테스트로 확인한다.
+- 상세 기준: Web BFF와 업무 서비스는 ECS Fargate의 독립 ECS Service로 수평 확장 가능하게 구성하고 브라우저 세션은 BFF 전용 Redis, 영속 업무 데이터는 서비스 소유 DB에 둔다. LiveKit 미디어 평면은 LiveKit Cloud로 분리한다.
+- 측정 방법: 2개 AZ private subnet의 복수 Fargate Task에서 sticky session 없이 요청 분산, Task 교체, 세션 유지와 서비스별 scale-out 테스트로 확인한다.
 - 적용/예외 조건: 장기 작업과 실시간 연결은 별도 worker/provider 특성에 맞는 상태 경계를 둔다.
 - 검증 주기: 인프라 변경 시
-- 미결정 사항: EKS node 운영 방식과 HPA 기준값
+- 미결정 사항: 서비스별 desired count와 Service Auto Scaling 기준값
 
 ### NFR-AVAIL-01 서비스 가용성 목표를 만족한다
 
@@ -319,11 +319,11 @@ Google Sheets 비기능요건(NFR) 시트의 전체 우선순위(P0/P1/P2) 상�
 - 우선순위: `P2`
 - 측정지표/기준: uptime 목표(예: 99.9%)
 - 비고: -
-- 상세 기준: AWS 단일 리전 Multi-AZ에서 Web BFF/Auth/Core/AI를 독립 배포하고 장애가 다른 기능으로 연쇄 전파되지 않도록 한다. 공용 진입점과 세션 저장소도 단일 Pod/AZ에 의존하지 않는다.
-- 측정 방법: 서비스별 업타임, 오류율, 지연, Pod/AZ 장애 주입과 부분 기능 유지 여부를 측정한다.
+- 상세 기준: AWS 단일 리전 Multi-AZ에서 Web BFF/Auth/Core/AI를 별도 ECS Service/Task Role/Security Group으로 독립 배포하고 장애가 다른 기능으로 연쇄 전파되지 않도록 한다. 공용 ALB와 세션 저장소도 단일 Task/AZ에 의존하지 않는다.
+- 측정 방법: 서비스별 업타임, 오류율, 지연, Task/AZ 장애 주입과 부분 기능 유지 여부를 측정한다.
 - 적용/예외 조건: 멀티리전 재해복구는 현재 범위 밖이며 계획 점검 시간과 LiveKit Cloud SLA 반영 여부를 별도 명시한다.
 - 검증 주기: 월간
-- 미결정 사항: 서비스별 SLO, RTO, RPO와 AWS 리전
+- 미결정 사항: 서비스별 SLO, RTO, RPO. AWS 리전은 `ap-northeast-2`로 결정됨
 
 ### NFR-AVAIL-02 외부 API 실패 시 graceful degradation한다
 

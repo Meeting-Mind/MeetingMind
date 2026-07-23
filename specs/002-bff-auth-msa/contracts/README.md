@@ -9,4 +9,4 @@
 | `bff-proxy-routes.md` | Browser ↔ Web BFF ↔ current Backend | Phase 1 compatibility | 허용 method/path, 논리 서비스 분류와 장애 응답을 고정한다. |
 | `specs/001-meetingmind-core/contracts/auth-api.md` | Browser ↔ current Backend | Current legacy compatibility | Phase 1 BFF adapter와 rollback에만 사용한다. |
 
-모든 외부 브라우저 경로는 `/api/v1/*`를 유지한다. 내부 endpoint는 ingress에 공개하지 않고 workload 인증과 NetworkPolicy를 함께 적용한다.
+모든 외부 브라우저 경로는 `/api/v1/*`를 유지한다. 내부 endpoint는 public ALB에 공개하지 않고 workload 인증과 서비스별 Security Group을 함께 적용한다.

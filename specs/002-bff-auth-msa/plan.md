@@ -31,27 +31,41 @@
 
 ```mermaid
 flowchart LR
-    Browser["React Browser"] -->|"__Host-mm-session + CSRF"| Edge["CloudFront/WAF + EKS Ingress"]
-    Edge --> BFF["Spring Web BFF"]
+    Browser["User Browser"] --> Route53["Route 53"]
+    Route53 --> Edge["CloudFront + WAF"]
+    Edge -->|"static assets"| S3["Frontend S3"]
+    Edge -->|"API origin"| ALB["Public ALB"]
+    ALB -->|"target port 8081"| BFF["BFF ECS Service"]
     BFF --> Session["BFF Redis Session"]
     BFF --> Vault["Encrypted Token Vault"]
-    BFF -->|"Bearer access"| Auth["Auth Service"]
-    BFF -->|"Bearer access"| Core["Core Resource API"]
-    BFF -->|"Bearer access"| AI["AI Service"]
-    BFF -->|"meeting-scoped token request"| LiveKit["LiveKit Cloud"]
+    BFF -->|"TCP 8082"| Auth["Auth ECS Service"]
+    BFF -->|"TCP 8080"| Core["Core ECS Service"]
+    Core -->|"TCP 8000"| AI["AI ECS Service"]
+    Core -->|"meeting-scoped token request"| LiveKit["LiveKit Cloud"]
     Auth --> AuthDb["Auth-owned PostgreSQL"]
     Core --> CoreDb["Core-owned PostgreSQL"]
     Vault --> Kms["AWS KMS"]
+    ECR["ECR immutable SHA images"] --> BFF
+    ECR --> Auth
+    ECR --> Core
+    ECR --> AI
+    Deferred["realtime-stt ECR / deploy deferred"] -.-> ECR
 ```
 
 - Frontend: token/storage/header 로직을 제거하고 session bootstrap, CSRF, logout과 최종 401 처리만 담당한다.
 - Web BFF: 브라우저의 유일한 API origin이며 Spring Security/Session, Token Manager, downstream allowlist, 응답 조합과 장애 격리를 담당한다.
 - Auth Service: User/AuthIdentity/AuthSession, 자격 검증, access/refresh 발급·회전·폐기와 JWKS를 소유한다.
 - Core Resource API: Space/Meeting/권한/AI source 선필터를 유지하고 access JWT subject 이후 최신 RBAC/ACL을 자신의 DB에서 평가한다.
-- AI: 기존 FastAPI를 독립 EKS workload로 배포하며 public 브라우저 호출을 허용하지 않는다.
+- AI: 기존 FastAPI를 독립 ECS Service로 배포하며 Core의 TCP `8000` 호출만 허용하고 public 브라우저 호출을 허용하지 않는다.
 - LiveKit: LiveKit Cloud를 사용하며 참가자 token은 Core 권한 검증 뒤 제한적으로 발급한다.
 - Data: BFF session Redis, Auth DB, Core DB를 논리적으로 분리하고 신규 서비스는 다른 서비스 DB를 직접 조회하지 않는다.
-- Platform: AWS EKS 단일 리전 Multi-AZ, 복수 Pod, HPA/PDB/probe/NetworkPolicy와 관리형 ElastiCache/RDS/KMS를 목표로 한다.
+- Platform: 서울 `ap-northeast-2`의 NonProd 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI를 각각 ECS Service와 Task Definition으로 운영한다. Fargate Task는 2개 AZ의 private app subnet, public ALB는 public subnet에 배치하고 private outbound는 NAT Gateway를 사용한다.
+- Isolation: 각 서비스는 별도 Task Role, Security Group, 7일 보존 CloudWatch Log Group을 가진다. 공통 ECS Task Execution Role은 ECR pull과 로그 전송 등 실행 권한으로 제한한다.
+- Images: ECR repository는 `bff`, `auth`, `core`, `ai`, `realtime-stt`로 분리하고 immutable tag와 Git commit SHA를 사용한다. NonProd는 기본 scan-on-push만 사용하고 Inspector enhanced ECR scanning은 비활성화한다.
+- Frontend/Edge: React 정적 자산은 S3에 배포하고 Route 53 → CloudFront/WAF → ALB → BFF 경로로 API 요청을 전달한다.
+- Deferred: `realtime-stt`는 구조상 독립 서비스와 ECR 경계를 유지하지만 이번 NonProd ECS 배포에서는 ECS Service/Task Definition 생성을 보류한다.
+- Reuse/IaC: 기존 VPC, public/private/data subnet, route table, NAT Gateway와 S3 Gateway Endpoint를 재사용한다. 현재 VPC Terraform은 보존하고 장기적으로 ECS/ALB/IAM/Security Group/CloudWatch를 모듈 및 환경별 변수로 전환한다.
+- Tags: 수작업 NonProd 리소스는 `Project=meetingmind`, `Environment=nonprod`, `ManagedBy=manual`, `Service=<서비스명>`을 사용한다. 공용 리소스의 `Service` 값은 리소스별 공통 명칭을 별도 확정한다.
 
 ## Technical Decisions
 
@@ -61,15 +75,15 @@ flowchart LR
 | Web entry | 별도 Spring Boot Web BFF | Spring Security/Session 재사용과 Java 운영 스택 일관성을 유지한다. | 기존 Backend 통합, Node BFF |
 | Browser auth | Opaque server session cookie + CSRF | token을 브라우저에서 제거하고 logout/refresh 책임을 BFF로 통합한다. | Web Storage, refresh cookie only |
 | Session lifetime | 기본 60분 idle/12시간 absolute, Remember me 7일 sliding/14일 absolute | 일반 업무 세션과 명시적 장기 로그인의 보안·UX를 분리하고 절대 상한을 유지한다. | 모든 세션 60분 idle, Remember me 14일 단일 TTL |
-| Session store | BFF 전용 Redis | EKS 복수 Pod에서 sticky session 없이 세션을 공유한다. | Spring Session JDBC |
+| Session store | BFF 전용 Redis | ECS 복수 Task에서 sticky session 없이 세션을 공유한다. | Spring Session JDBC |
 | Token storage | AES-256-GCM envelope encryption + AWS KMS data key | BFF는 refresh를 재사용할 수 있어야 하지만 저장소에는 ciphertext/encrypted data key만 남기고 bundle/session/version 바인딩 위변조를 거부한다. | 평문 Redis, hash-only BFF, token 직접 KMS Encrypt |
 | Phase 1 auth integration | 현재 Backend 전용 allowlist compatibility client | Browser 계약을 tokenless session으로 먼저 전환하고 기존 인증/rollback 경로를 보존한다. | Backend token 응답 Browser 전달, Auth Service 즉시 추출 |
 | Service access | KMS RSA-2048 `RS256`, 단일 audience별 10분 JWT + JWKS | Resource Service가 Auth Service에 매 요청 의존하지 않고 로컬 검증하며 다른 서비스 token 재사용을 막는다. | ES256, shared HMAC, opaque introspection |
 | Refresh reuse | AuthSession별 1회용 family, grace 없음 | BFF single-flight로 정상 동시성을 처리하고 재사용이 감지된 의심 기기만 전체 폐기한다. | 이전 token만 거부, 사용자 전체 폐기, grace window |
 | Access revoke | Auth transactional outbox + `sid` event + Resource local denylist | 중앙 조회 장애 전파 없이 로그아웃 access를 빠르게 차단하고 최악의 잔여 위험을 10분 TTL+60초 skew로 제한한다. | 매 요청 중앙 denylist/introspection, short JWT only |
-| Workload auth | mTLS SPIFFE identity + NetworkPolicy/allowlist | shared secret 없이 workload를 상호 인증하고 principal 단위 최소 권한을 적용한다. | OAuth client credentials, 자체 요청 서명 |
+| Workload auth | mTLS SPIFFE identity + Security Group/allowlist | shared secret 없이 workload를 상호 인증하고 principal 단위 최소 권한을 적용한다. 구체 discovery/인증서 제품은 Q-023에서 확정한다. | OAuth client credentials, 자체 요청 서명 |
 | Google auth | 기존 ID credential 검증 유지 | 현재 요구는 Google API 권한이 아닌 로그인이다. | 즉시 Authorization Code/OIDC |
-| Deployment | AWS EKS, single-region Multi-AZ | 장기 확장성과 서비스별 독립 배포를 선택했다. | ECS Fargate, multi-region |
+| Deployment | AWS ECS Fargate, single-region Multi-AZ | Kubernetes control plane과 EC2 node 운영 없이 서비스별 독립 배포·스케일링·장애 격리를 제공한다. | EKS, ECS on EC2, multi-region |
 | Media | LiveKit Cloud | UDP/TURN/media node 운영을 애플리케이션 장애 경계에서 분리한다. | Self-host LiveKit |
 | Data ownership | Database per service target | 공유 DB 변경과 장애 전파를 줄인다. | Shared schema |
 | User ID bridge | Core 문자열 PK 유지 + `auth_user_id UUID` projection | 업무 FK 재작성 없이 Auth/JWT UUID subject와 Core 사용자를 결정적으로 연결한다. | legacy subject 유지, Core PK/FK 일괄 UUID 전환 |
@@ -107,7 +121,7 @@ flowchart LR
 - Auth PostgreSQL은 Core DB와 다른 database/volume을 사용한다. 로컬 Compose도 별도 PostgreSQL service로 장애·수명 경계를 분리한다.
 - Flyway migrator와 runtime login role을 분리한다. migrator만 schema/DDL과 Flyway history를 소유한다. runtime은 업무 table의 `SELECT/INSERT/UPDATE`, 감사 table의 `SELECT/INSERT`만 가지며 `DELETE`와 future table default privilege는 후속 보존 기능에서 별도 승인한다.
 - V1 forward-only migration은 `auth_users`, `auth_identities`, `auth_sessions`, `auth_refresh_credentials`, `session_audits`, `auth_outbox_events`와 T030 lineage/outbox 제약을 생성하고 V2는 이미 적용된 V1을 수정하지 않은 채 runtime 권한을 table별 최소 범위로 축소한다.
-- readiness는 DB health를 포함해 신규 traffic을 차단하고 liveness는 process 상태만 포함해 DB 장애로 Pod 재시작이 반복되지 않게 한다.
+- readiness는 DB health를 포함해 신규 traffic을 차단하고 liveness는 process 상태만 포함해 DB 장애로 Task 재시작이 반복되지 않게 한다.
 - T031은 health/probe와 schema foundation만 제공한다. login/refresh/revoke와 transactional outbox producer는 T032, KMS signing/JWKS는 T033에서 구현하며 transport publisher는 T045 출시 gate로 둔다.
 
 #### T032 Runtime Boundary
@@ -170,8 +184,8 @@ flowchart LR
 - Token: 브라우저·URL·로그에 노출하지 않고 BFF 암호문/Auth hash 역할을 분리한다.
 - Key: AWS KMS RSA-2048 `RS256`, 90일 rotation, 1시간 overlap과 5분 JWKS cache를 적용하고 private key를 반출하지 않는다.
 - Key ring: `kid`와 KMS key ID, 공개 기간만 환경 설정으로 주입한다. 정기 rotation은 새 공개키 5분 선게시 후 active 전환, 이전 공개키 1시간 overlap 순서를 시작 시 검증하며 emergency mode만 침해 key 즉시 제거를 허용한다.
-- Workload: 내부 호출은 mTLS SPIFFE identity, NetworkPolicy와 principal/endpoint allowlist를 모두 통과해야 한다.
-- Secrets: EKS workload는 정적 AWS key 대신 workload IAM을 사용하고 secret/KMS 권한을 최소화한다.
+- Workload: 내부 호출은 mTLS SPIFFE identity, 서비스별 Security Group과 principal/endpoint allowlist를 모두 통과해야 한다.
+- Secrets: Fargate Task는 정적 AWS key 대신 서비스별 Task Role을 사용하고 secret/KMS 권한을 최소화한다. 공통 Task Execution Role에 애플리케이션 데이터 권한을 부여하지 않는다.
 - Authorization: BFF 인증과 Resource Service RBAC/ACL을 분리하고 MeetingMind 헌법의 AI 권한 선필터를 유지한다.
 - Logout: revoke가 실패해도 BFF 로컬 세션/쿠키는 삭제하되 실패를 감사·재처리 대상으로 남긴다.
 
@@ -179,14 +193,14 @@ flowchart LR
 
 | Failure | Expected Behavior | Isolation Mechanism |
 | --- | --- | --- |
-| BFF Pod 1개 종료 | 다른 Pod가 Redis 세션으로 요청 처리 | replica, readiness, PDB, no sticky session |
+| BFF Task 1개 종료 | 다른 Task가 Redis 세션으로 요청 처리 | ECS desired count, ALB health check, no sticky session |
 | Redis unavailable | 인증 요청 fail closed, cookie 자체 신뢰 금지 | timeout, HA Redis, alert |
 | Auth Service unavailable | 유효 access는 만료 전까지 Core가 로컬 검증, login/refresh는 실패 | local JWT validation, circuit breaker |
 | Core unavailable | 해당 Core API만 고정 503, AI/LiveKit 성공으로 위장 금지 | service circuit/bulkhead |
 | AI unavailable | AI 기능만 `AI_PROVIDER_UNAVAILABLE`, CRUD 유지 | existing AI error contract, bulkhead |
 | LiveKit Cloud unavailable | 회의 입장 unavailable, 회의 metadata/report는 유지 | provider timeout/circuit breaker |
 | KMS unavailable | 신규 token encrypt/decrypt/refresh fail closed, 평문 fallback 금지 | timeout, alert, bounded in-process access lifetime |
-| AZ 장애 | 다른 AZ Pod/managed data replica로 복구 | Multi-AZ placement, PDB, managed failover |
+| AZ 장애 | 다른 AZ Task/managed data replica로 복구 | Multi-AZ subnet placement, ECS rescheduling, managed failover |
 
 ## Parallel Work Plan
 
@@ -200,7 +214,7 @@ flowchart LR
 | Frontend | 사용자 | Codex | token 저장 제거, session bootstrap, logout | `frontend/src/auth/**`, API clients, `App.tsx` | Browser-BFF contract, BFF endpoints |
 | Backend compatibility | 사용자 | Codex | 현재 Backend token/API를 BFF internal client로 안전하게 수용 | `backend/**`, `bff/**` | BFF foundation |
 | Auth Service | 사용자 | Codex | User/AuthIdentity/AuthSession 추출, JWT/JWKS/refresh/revoke outbox | future `auth/**` | T030, BFF compatibility |
-| Platform | 사용자 | Codex | EKS, Redis, RDS, KMS, ingress, observability | future `infra/**`, Dockerfiles | Q-011~Q-013, service images |
+| Platform | 사용자 | Codex | ECS Fargate, ALB, ECR, IAM, Security Group, CloudWatch, Redis/RDS/KMS | future `infra/**`, Dockerfiles | Q-013, Q-023~Q-026, service images |
 
 ## Conflict Boundaries
 
@@ -229,8 +243,13 @@ flowchart LR
 6. current/all-device logout과 expiry/refresh 회귀를 검증한다.
 7. T030 refresh/JWT/revoke/workload 계약에 따라 Auth Service를 추출한다.
 8. Core가 Auth JWKS로 access를 로컬 검증하고 기존 Auth package 호환 경로를 종료한다.
-9. EKS에 BFF/Auth/Core/AI를 독립 배포하고 Redis/RDS/KMS/ingress를 연결한다.
-10. 장애·부하 관측 결과를 기준으로 Realtime/Meeting/Workspace를 순차 추출한다.
+9. NonProd VPC를 `ap-northeast-2`에 만들고 2개 AZ의 Public/Private/Data subnet을 검증한다.
+10. NonProd 단일 ECS Fargate 클러스터, ECR, NAT/private route, 공통 execution role과 서비스별 task role/security group/log group 기준선을 확인한다.
+11. BFF/Auth/Core/AI 이미지를 immutable Git SHA tag로 ECR에 push하고 서비스별 Task Definition을 등록한다.
+12. Public ALB/Target Group/Listener와 ECS Service를 구성하고 Fargate Task를 2개 AZ private app subnet에 배치한다.
+13. 내부 service discovery, Secrets Manager/Parameter Store, mTLS/SPIFFE 구현과 서비스별 SLO/RTO/RPO를 확정·연결한다.
+14. NonProd health/log/alarm/autoscaling/AZ 장애 검증 뒤 같은 Terraform 모듈과 환경별 변수 구조를 별도 Production 계정에 적용한다.
+15. `realtime-stt` 배포는 보류하고 장애·부하 관측 결과를 기준으로 후속 추출 순서를 결정한다.
 
 ## Test Plan
 
@@ -240,8 +259,8 @@ flowchart LR
 - Frontend unit: bootstrap loading, authenticated/unauthenticated, final 401, logout UI, token storage 미사용.
 - Integration: Browser→BFF→현재 Backend, 이후 Browser→BFF→Auth/Core 두 경로를 같은 외부 계약으로 검증한다.
 - Security: CSRF, CORS, cookie flags, token log/response/storage scan, unknown route/method proxy 거부.
-- Resilience: BFF Pod 교체, Redis/Auth/Core/AI/LiveKit/KMS timeout과 circuit open, 부분 기능 유지.
-- EKS: readiness/liveness, rolling update, PDB, HPA, AZ placement, NetworkPolicy와 workload IAM.
+- Resilience: BFF Task 교체, Redis/Auth/Core/AI/LiveKit/KMS timeout과 circuit open, 부분 기능 유지.
+- ECS Fargate: ALB health check, rolling deployment, desired count, Service Auto Scaling, 2개 AZ private subnet 배치, 서비스별 Security Group/Task Role과 7일 로그 보존.
 - Regression: `cd frontend && npm run test && npm run build`, `cd backend && ./gradlew test`, `cd ai && python -m compileall app`와 기존 권한 negative case.
 
 ## Rollout Plan
@@ -261,7 +280,7 @@ flowchart LR
 
 - Frontend token 저장과 Bearer header를 제거하고 same-origin BFF만 호출한다.
 - 오류율, login 성공률, refresh 성공률, Redis session과 logout 결과를 관측한다.
-- rollback은 신규 BFF Pod를 readiness에서 drain하고 같은 session/Vault 계약의 안정 BFF deployment로 ingress traffic weight를 복원한다. Frontend direct Backend와 Browser token 재노출은 rollback 수단으로 사용하지 않는다.
+- rollback은 신규 BFF Task를 ALB target에서 drain하고 같은 session/Vault 계약의 안정 Task Definition revision으로 ECS Service를 되돌린다. Frontend direct Backend와 Browser token 재노출은 rollback 수단으로 사용하지 않는다.
 
 ### Phase 3 — Auth Service Extraction
 
@@ -282,7 +301,7 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 4. BFF target 로그인은 Auth Service가 발급한 실제 `authSessionId`와 Auth User UUID를 session에 저장한다. Spring Session Redis의 principal/user index를 활성화해 T024가 사용자 전체 BffSession을 조회할 수 있게 한다.
 5. Core는 JWT header profile로 legacy HS256과 target `RS256/at+jwt/kid`를 먼저 분류하고 선택된 validator 하나만 실행한다. target 검증 실패를 legacy validator로 재시도하지 않아 downgrade를 막는다.
 6. target JWT `sub` UUID는 Core `users.auth_user_id`로 resource User를 찾고 기존 문자열 업무 FK를 사용한다. BFF는 target 인증 성공 뒤 Core target access+workload identity로 멱등 projection을 만들고 성공 후에만 Browser session을 만든다.
-7. local/CI는 test source signer와 test workload principal만 사용하고 runtime image에는 signer/private key를 넣지 않는다. 운영 mTLS 제품과 KMS/EKS 연결은 Q-012/T040 이후 출시 gate다.
+7. local/CI는 test source signer와 test workload principal만 사용하고 runtime image에는 signer/private key를 넣지 않는다. 운영 mTLS 제품과 KMS/ECS Task Role 연결은 Q-023/T040 이후 출시 gate다.
 8. 기존 직렬화 session/Token Bundle은 추측 변환하지 않고 강제 재로그인한다. 새 schema v1/v2는 같은 release에서 legacy/target provider rollback을 지원하되 provider 실패를 자동 fallback하지 않는다.
 9. 통합 검증은 Auth actual session/refresh/revoke, BFF audience selection·single-flight, 실제 Redis Auth UUID index, Core dual/target-only validation과 실제 PostgreSQL projection, Browser token 무노출과 명시적 legacy rollback을 포함한다.
 
@@ -296,10 +315,13 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 6. legacy provider에서는 Auth 전체 revoke가 불가능하므로 local-only 성공을 만들지 않고 기능 사용 불가로 fail closed한다.
 7. 실제 PostgreSQL에서 재인증 결합/무세션 생성/전체 revoke를, 실제 Redis에서 두 BffSession/Token Bundle 삭제와 다른 cookie의 다음 요청 차단을 검증한다.
 
-### Phase 4 — AWS EKS Production Baseline
+### Phase 4 — AWS ECS Fargate NonProd Baseline
 
-- single-region Multi-AZ EKS, managed Redis/RDS/KMS, ingress/CloudFront/WAF와 observability를 구성한다.
-- 최소 2 replica, probe, PDB, HPA와 failure drill을 통과한 서비스만 운영 전환한다.
+- 기존 `ap-northeast-2` VPC의 Public/Private/Data subnet, route table, NAT Gateway와 S3 Gateway Endpoint를 재사용한다.
+- NonProd 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI를 별도 ECS Service, Task Definition, Task Role, Security Group, 7일 CloudWatch Log Group으로 격리한다.
+- Frontend S3 + CloudFront/WAF, public ALB와 Target Group/Listener, private subnet의 Fargate Task를 연결한다.
+- immutable Git SHA ECR image, ALB/ECS health check, 로그·경보·Service Auto Scaling과 Multi-AZ failure drill을 통과한 서비스만 운영 전환한다.
+- NonProd 검증 뒤 ECS/ALB/IAM/Security Group/CloudWatch Terraform 모듈과 환경별 변수를 만들어 별도 Production 계정과 리소스에 같은 설계를 적용한다.
 
 ### Phase 5 — Domain Extraction
 
@@ -313,5 +335,5 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 | 1 BFF compatibility | M001 문서 합의, 현재 auth E2E 고정 | token 무노출/CSRF/refresh/logout 통합 테스트 | 안정 BFF release와 현재 Backend compatibility API/DB 보존 |
 | 2 Browser cutover | BFF 호환 E2E와 관측 지표 준비 | login/refresh/logout 오류율과 session 복원 기준 충족 | 신규 BFF readiness drain, 안정 BFF traffic 100% 복원, Redis/Vault 데이터 보존 |
 | 3 Auth extraction | T030 계약 완료, Auth DB migration 검증 | refresh reuse/revoke event/mTLS, dual validation/reconciliation/JWKS rotation 통과 | 신규 issuer 발급 중지, legacy issuer/DB 읽기 보존 |
-| 4 EKS baseline | Q-011~Q-013 결정, IaC review | AZ/Pod/data/provider failure drill과 SLO 통과 | 이전 deployment/traffic weight 복원, 데이터 파괴 금지 |
+| 4 ECS Fargate baseline | ECS 기반 리소스 inventory 확인, Q-013/Q-023~Q-026 결정 | ALB/ECS Task/AZ/data/provider failure drill과 SLO 통과 | 이전 Task Definition revision/ECS deployment 복원, 데이터 파괴 금지 |
 | 5 Domain extraction | 관측 근거와 별도 feature spec | API/event reconciliation와 독립 SLO 통과 | strangler route를 Core로 복원, forward-only 데이터 보존 |

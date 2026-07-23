@@ -13,7 +13,7 @@
 
 ## Boundary Rules
 
-- public ingress에 노출하지 않고 BFF workload identity와 NetworkPolicy allowlist를 함께 적용한다.
+- public ALB에 노출하지 않고 BFF workload identity와 Security Group allowlist를 함께 적용한다.
 - 사용자 인증에는 `Authorization: Bearer {meetingmind-core access}`를 사용하고 workload 인증에는 mTLS SPIFFE identity를 사용한다. 둘 중 하나라도 실패하면 거부한다.
 - 로컬/CI profile에서만 명시적으로 활성화한 test workload principal header를 허용하며 운영 profile은 이를 무시한다.
 - Core는 Auth DB, BFF Redis, Token Vault를 직접 조회하지 않는다.

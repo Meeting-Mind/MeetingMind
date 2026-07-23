@@ -4,7 +4,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented through T035 BFF/Core cutover; production mTLS/KMS/EKS wiring remains T040+ |
+| Status | Implemented through T035 BFF/Core cutover; production mTLS/KMS/ECS Fargate wiring remains T040+ |
 | Owner | Auth Service |
 | Base path | `/internal/v1/auth` |
 | Consumers | Web BFF only for login/refresh/revoke; Resource Services for JWKS only |
@@ -13,7 +13,7 @@
 ## Boundary Rules
 
 - 이 API는 public ingress에 노출하지 않는다.
-- mTLS SPIFFE workload identity, NetworkPolicy와 목적지/principal allowlist를 모두 적용한다.
+- mTLS SPIFFE workload identity, 서비스별 Security Group과 목적지/principal allowlist를 모두 적용한다.
 - access/refresh는 이 내부 응답에만 존재하며 body/header/log/tracing을 redaction한다.
 - Browser cookie/CSRF를 이 API의 인증 수단으로 사용하지 않는다.
 - Error는 provider raw body, credential 존재 여부, token 원문을 노출하지 않는다.
@@ -272,7 +272,7 @@ T033 Resource validator는 JWKS를 최대 5분 메모리 cache하고 ETag 재검
 - `/internal/v1/auth/signup|login|google|refresh|revoke|reauthenticate|revoke-all`은 Web BFF principal만 호출할 수 있다.
 - JWKS는 등록된 Resource Service와 Web BFF principal만 호출할 수 있다.
 - public ingress는 `/internal/**`와 JWKS internal route를 라우팅하지 않는다.
-- NetworkPolicy로 caller/callee namespace와 service account 경계를 제한하고 애플리케이션은 신뢰 프록시가 검증한 principal만 allowlist와 대조한다.
+- Security Group으로 caller/callee ECS Service 경계를 제한하고 애플리케이션은 신뢰 프록시가 검증한 principal만 allowlist와 대조한다.
 - 인증서 발급·자동 회전 제품은 Q-012/T040에서 선택하되 shared client secret, Browser cookie나 사용자 access JWT를 workload 인증 대용으로 사용하지 않는다.
 
 ## Compatibility Adapter
