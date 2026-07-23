@@ -41,6 +41,7 @@ flowchart LR
     BFF -->|"TCP 8082"| Auth["Auth ECS Service"]
     BFF -->|"TCP 8080"| Core["Core ECS Service"]
     Core -->|"TCP 8000"| AI["AI ECS Service"]
+    Core -->|"TCP 8083"| STT["Realtime STT ECS Service"]
     Core -->|"meeting-scoped token request"| LiveKit["LiveKit Cloud"]
     Auth --> AuthDb["Auth-owned PostgreSQL"]
     Core --> CoreDb["Core-owned PostgreSQL"]
@@ -49,7 +50,7 @@ flowchart LR
     ECR --> Auth
     ECR --> Core
     ECR --> AI
-    Deferred["realtime-stt ECR / deploy deferred"] -.-> ECR
+    ECR --> STT
 ```
 
 - Frontend: token/storage/header 로직을 제거하고 session bootstrap, CSRF, logout과 최종 401 처리만 담당한다.
@@ -57,13 +58,14 @@ flowchart LR
 - Auth Service: User/AuthIdentity/AuthSession, 자격 검증, access/refresh 발급·회전·폐기와 JWKS를 소유한다.
 - Core Resource API: Space/Meeting/권한/AI source 선필터를 유지하고 access JWT subject 이후 최신 RBAC/ACL을 자신의 DB에서 평가한다.
 - AI: 기존 FastAPI를 독립 ECS Service로 배포하며 Core의 TCP `8000` 호출만 허용하고 public 브라우저 호출을 허용하지 않는다.
+- Realtime STT: `stt/` 독립 Spring Boot 서비스를 ECS Service로 배포하며 컨테이너 포트 `8083`, Core의 TCP `8083` 호출만 허용한다. LiveKit/STT provider secret과 STT DB는 서비스 경계 안에서 관리한다.
 - LiveKit: LiveKit Cloud를 사용하며 참가자 token은 Core 권한 검증 뒤 제한적으로 발급한다.
 - Data: BFF session Redis, Auth DB, Core DB를 논리적으로 분리하고 신규 서비스는 다른 서비스 DB를 직접 조회하지 않는다.
-- Platform: 서울 `ap-northeast-2`의 NonProd 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI를 각각 ECS Service와 Task Definition으로 운영한다. Fargate Task는 2개 AZ의 private app subnet, public ALB는 public subnet에 배치하고 private outbound는 NAT Gateway를 사용한다.
+- Platform: 서울 `ap-northeast-2`의 NonProd 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI/Realtime STT를 각각 ECS Service와 Task Definition으로 운영한다. Fargate Task는 2개 AZ의 private app subnet, public ALB는 public subnet에 배치하고 private outbound는 NAT Gateway를 사용한다.
 - Isolation: 각 서비스는 별도 Task Role, Security Group, 7일 보존 CloudWatch Log Group을 가진다. 공통 ECS Task Execution Role은 ECR pull과 로그 전송 등 실행 권한으로 제한한다.
 - Images: ECR repository는 `bff`, `auth`, `core`, `ai`, `realtime-stt`로 분리하고 immutable tag와 Git commit SHA를 사용한다. NonProd는 기본 scan-on-push만 사용하고 Inspector enhanced ECR scanning은 비활성화한다.
 - Frontend/Edge: React 정적 자산은 S3에 배포하고 Route 53 → CloudFront/WAF → ALB → BFF 경로로 API 요청을 전달한다.
-- Deferred: `realtime-stt`는 구조상 독립 서비스와 ECR 경계를 유지하지만 이번 NonProd ECS 배포에서는 ECS Service/Task Definition 생성을 보류한다.
+- Realtime STT rollout: 코드와 Dockerfile은 `stt/`에 준비되어 있다. 배포 전 Actuator liveness/readiness, STT DB migration, Secrets Manager, Core→STT service discovery와 workload identity를 검증한다. 외부 ALB에는 직접 연결하지 않는다.
 - Reuse/IaC: 기존 VPC, public/private/data subnet, route table, NAT Gateway와 S3 Gateway Endpoint를 재사용한다. 현재 VPC Terraform은 보존하고 장기적으로 ECS/ALB/IAM/Security Group/CloudWatch를 모듈 및 환경별 변수로 전환한다.
 - Tags: 수작업 NonProd 리소스는 `Project=meetingmind`, `Environment=nonprod`, `ManagedBy=manual`, `Service=<서비스명>`을 사용한다. 공용 리소스의 `Service` 값은 리소스별 공통 명칭을 별도 확정한다.
 
@@ -245,11 +247,11 @@ flowchart LR
 8. Core가 Auth JWKS로 access를 로컬 검증하고 기존 Auth package 호환 경로를 종료한다.
 9. NonProd VPC를 `ap-northeast-2`에 만들고 2개 AZ의 Public/Private/Data subnet을 검증한다.
 10. NonProd 단일 ECS Fargate 클러스터, ECR, NAT/private route, 공통 execution role과 서비스별 task role/security group/log group 기준선을 확인한다.
-11. BFF/Auth/Core/AI 이미지를 immutable Git SHA tag로 ECR에 push하고 서비스별 Task Definition을 등록한다.
+11. BFF/Auth/Core/AI/STT 이미지를 immutable Git SHA tag로 ECR에 push하고 서비스별 Task Definition을 등록한다.
 12. Public ALB/Target Group/Listener와 ECS Service를 구성하고 Fargate Task를 2개 AZ private app subnet에 배치한다.
 13. 내부 service discovery, Secrets Manager/Parameter Store, mTLS/SPIFFE 구현과 서비스별 SLO/RTO/RPO를 확정·연결한다.
 14. NonProd health/log/alarm/autoscaling/AZ 장애 검증 뒤 같은 Terraform 모듈과 환경별 변수 구조를 별도 Production 계정에 적용한다.
-15. `realtime-stt` 배포는 보류하고 장애·부하 관측 결과를 기준으로 후속 추출 순서를 결정한다.
+15. Realtime STT를 Core 전용 내부 서비스로 배포하고 STT session start→audio→stop 및 task replacement를 검증한다.
 
 ## Test Plan
 
