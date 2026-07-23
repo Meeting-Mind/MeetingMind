@@ -28,7 +28,7 @@ export function GoogleLoginModal({
       const session = await loginWithGoogle(credential);
       onSuccess(session);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Google 로그인을 완료하지 못했습니다.");
+      setError(exception instanceof Error ? exception.message : "Unable to complete Google sign-in.");
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export function GoogleLoginModal({
           : await loginWithPassword({ email: email.trim(), password });
       onSuccess(session);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "로그인 요청을 처리하지 못했습니다.");
+      setError(exception instanceof Error ? exception.message : "Unable to process the sign-in request.");
     } finally {
       setLoading(false);
     }
@@ -63,28 +63,28 @@ export function GoogleLoginModal({
   return (
     <div className="auth-modal-backdrop" role="presentation">
       <section aria-labelledby="auth-modal-title" aria-modal="true" className="auth-modal" role="dialog">
-        <button aria-label="로그인 모달 닫기" className="auth-modal-close" onClick={onClose} type="button">
+        <button aria-label="Close sign-in modal" className="auth-modal-close" onClick={onClose} type="button">
           ×
         </button>
 
         <p className="auth-modal-kicker">Sign In Required</p>
-        <h2 id="auth-modal-title">로그인 후 이용할 수 있습니다</h2>
-        <p className="auth-modal-copy">프로젝트 생성, 회의 입장, 워크스페이스 접근은 로그인 후 진행됩니다.</p>
+        <h2 id="auth-modal-title">Sign in to continue</h2>
+        <p className="auth-modal-copy">Creating projects, joining meetings, and opening workspaces requires an authenticated session.</p>
         {notice ? <div className="auth-modal-session-notice" role="status">{notice}</div> : null}
 
-        <div className="auth-modal-tabs" role="tablist" aria-label="인증 방식">
+        <div className="auth-modal-tabs" role="tablist" aria-label="Authentication mode">
           <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")} type="button">
-            로그인
+            Sign in
           </button>
           <button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")} type="button">
-            회원가입
+            Sign up
           </button>
         </div>
 
         <form className="auth-modal-form" onSubmit={handlePasswordSubmit}>
           {mode === "signup" ? (
             <label>
-              이름
+              Name
               <input
                 autoComplete="name"
                 onChange={(event) => setDisplayName(event.target.value)}
@@ -95,7 +95,7 @@ export function GoogleLoginModal({
             </label>
           ) : null}
           <label>
-            이메일
+            Email
             <input
               autoComplete="email"
               onChange={(event) => setEmail(event.target.value)}
@@ -105,7 +105,7 @@ export function GoogleLoginModal({
             />
           </label>
           <label>
-            비밀번호
+            Password
             <input
               autoComplete={mode === "signup" ? "new-password" : "current-password"}
               minLength={8}
@@ -116,20 +116,20 @@ export function GoogleLoginModal({
             />
           </label>
           <button className="auth-modal-submit" disabled={loading} type="submit">
-            {mode === "signup" ? "계정 만들기" : "로그인"}
+            {mode === "signup" ? "Create account" : "Sign in"}
           </button>
         </form>
 
         {!clientId ? (
           <div className="auth-modal-warning">
-            <strong>Google 로그인 설정이 필요합니다.</strong>
-            <span>`frontend/.env`에 `VITE_GOOGLE_CLIENT_ID`를 추가해주세요.</span>
+            <strong>Google sign-in is not configured.</strong>
+            <span>Add `VITE_GOOGLE_CLIENT_ID` to `frontend/.env`.</span>
           </div>
         ) : null}
 
         {error ? <div className="auth-modal-warning">{error}</div> : null}
 
-        <div className="auth-modal-divider">또는</div>
+        <div className="auth-modal-divider">or</div>
         {clientId ? (
           <GoogleCredentialButton
             clientId={clientId}

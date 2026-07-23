@@ -22,7 +22,7 @@ class ClovaNestStreamClientTest {
                 """;
 
         assertThat(ClovaNestStreamClient.extractTranscription(transcription))
-                .isEqualTo(new ClovaNestStreamClient.Transcription("회의 전사 결과입니다.", true));
+                .isEqualTo(new SttTranscriptChunk("회의 전사 결과입니다.", true, -1, 0, 0));
     }
 
     @Test
@@ -31,7 +31,7 @@ class ClovaNestStreamClientTest {
                 {"responseType":["transcription"],"transcription":{"text":"화자 정보 없이 확정된 문장입니다."}}
                 """;
 
-        assertThat(ClovaNestStreamClient.extractTranscription(transcription).epFlag()).isTrue();
+        assertThat(ClovaNestStreamClient.extractTranscription(transcription).finalChunk()).isTrue();
     }
 
     @Test
@@ -41,7 +41,7 @@ class ClovaNestStreamClientTest {
                 """;
 
         assertThat(ClovaNestStreamClient.extractTranscription(transcription))
-                .isEqualTo(new ClovaNestStreamClient.Transcription("듣는 중", false));
+                .isEqualTo(new SttTranscriptChunk("듣는 중", false, -1, 0, 0));
     }
 
     @Test
@@ -60,7 +60,17 @@ class ClovaNestStreamClientTest {
                 """;
 
         assertThat(ClovaNestStreamClient.extractTranscription(transcription))
-                .isEqualTo(new ClovaNestStreamClient.Transcription("", true));
+                .isEqualTo(new SttTranscriptChunk("", true, -1, 0, 0));
+    }
+
+    @Test
+    void extractsTimingMetadata() {
+        String transcription = """
+                {"responseType":["transcription"],"transcription":{"text":"회의", "epFlag":false, "position":12, "startTimestamp":401, "endTimestamp":800}}
+                """;
+
+        assertThat(ClovaNestStreamClient.extractTranscription(transcription))
+                .isEqualTo(new SttTranscriptChunk("회의", false, 12, 401, 800));
     }
 
     @Test

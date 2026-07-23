@@ -1139,6 +1139,777 @@
 - WorkspaceHome은 최신 확정 회의록의 제목, 원본 회의, version, 확정일을 표시하고 해당 Report Agent로 이동한다. target summary가 없을 때는 빈 상태를 표시하며 mock 보고서를 최신 확정본으로 위장하지 않는다.
 - Verification: `WorkspaceDomainServiceTest`는 private meeting report의 owner-only 노출을, `DashboardControllerTest`는 API field mapping을 검증한다.
 
+## M057 Landing Flow Alignment
+
+- 2026-07-21: LandingPage를 실제 MeetingMind 사용자 흐름으로 교체했다. 첫 화면은 회의 생성 또는 참가, 자막과 회의록 검토, Space 지식과 태스크 활용의 3단계만 설명한다.
+- 제품 미리보기는 회의, 자막, 확정 회의록, 태스크, Project AI 출처를 읽기 전용 흐름 카드로 보여준다. 데스크톱에서는 각 카드 열이 느리게 순환하고 hover 시 멈추며, 모바일과 reduced-motion 설정에서는 정적으로 표시한다. 예시 데이터가 실제 결과가 아님을 명시했고, 가짜 후기와 legacy 화면 링크를 제거했다.
+- 직접 이동 CTA는 `/spaces`와 `/meeting-access`만 사용한다. Meeting AI와 Project AI의 검색 범위, 회의별 접근 제어, 출처 기반 답변, 보관 정책을 화면에 반영했다.
+- 권한·출처·보관 정책 카드는 공용 `FlippingCard`로 앞면 요약과 뒷면 세부 기준을 제공한다. hover/focus는 미리보기, click은 고정 토글이며 keyboard의 Enter/Space와 `aria-pressed`를 지원한다.
+- 제품 흐름 미리보기의 상태 라벨에는 공용 `PrismRevealText`를 적용했다. 초기 표시 순간에만 파랑 계열이 텍스트를 지나가며, reduced-motion 설정에서는 즉시 정적 텍스트로 표시한다.
+- 비교 검토용 `/opening-preview`를 추가했다. 기존 `/` LandingPage는 변경하지 않았으며, 첫 화면은 `MeetingMind` 제품명·가치 문구와 회의 대화가 프로젝트 지식으로 축적되는 생성 이미지로 구성한다. 아래 스크롤에는 회의-보고서-프로젝트 지식 흐름, 기록이 정리된 지식으로 이어지는 생성 이미지, Meeting AI/Project AI의 접근 범위와 출처 기준을 제공한다. 가짜 제품 화면과 스크롤 안내 문구는 제거했다.
+- 첫 화면 제품명에는 `motion/react` 기반 `MorphingText`를 적용했다. 각 글자는 blur·scale·수직 이동으로 들어오고, 값 변경 시 같은 위치의 글자가 `layoutId`로 이어진다. 컨테이너는 전체 텍스트의 `aria-label`을 제공하고 각 글자는 보조 기술에서 숨긴다. reduced-motion에서는 애니메이션을 생략한다.
+- 제품명 아래 문구는 `회의를 기록합니다.`, `결정을 정리합니다.`, `태스크를 연결합니다.`, `프로젝트 지식으로 남깁니다.`를 3초마다 순환한다. reduced-motion에서는 첫 문구를 고정한다.
+- 랜딩(`/`)과 비교 검토용 오프닝(`/opening-preview`)의 색상은 파랑·흰색 계열로 통일했다. route, CTA, 앵커, 제품 흐름 문구는 유지하고 버튼 색 대비와 8px 작업 표면 반경을 함께 정리했다.
+- Verification: `cd frontend && npm run build && npm run lint`, desktop/mobile 수동 화면 검토, `git diff --check` passed. Vite의 기존 500 kB chunk-size warning과 기존 lint warning 7건 외 새 오류는 없다.
+
+## M058 Frontend Product Architecture Design
+
+- 2026-07-21: 전면 프론트 리팩토링 구현 전 설계 기준선을 `frontend-refactor-plan.md`에 추가했다. 현재 `App.tsx` route 구조, `ProjectOverviewPage.tsx`와 `ReportAgentPage.tsx`의 과밀 책임, `WorkspaceSidebar.tsx`의 legacy query navigation, `types.ts`의 target status enum, `requirements/permissions.md`, `requirements/status-values.md`를 기준으로 작성했다.
+- 추가 범위는 State Model, Navigation Architecture, Interaction Guideline, Permission UX, Information Hierarchy, Design Token Plan, AppShell Architecture, Component Architecture, Refactoring Priority, Implementation Guardrails다.
+- 현재 frontend는 React Router, `motion`, vanilla CSS 기반이며 Tailwind와 shadcn/ui는 설치되어 있지 않다. 따라서 design token은 Tailwind/shadcn으로 이식 가능한 목표값으로만 정의했고, 실제 dependency 도입은 후속 task에서 별도 결정하도록 남겼다.
+- UI 구현, CSS 수정, Tailwind 설정 변경, 컴포넌트 수정은 하지 않았다.
+- Verification: 현재 route/type/page 구조와 기존 `frontend-refactor-plan.md` target route를 대조했고, `git diff --check` passed.
+
+## M059 Frontend Common State Components
+
+- 2026-07-21: Refactoring Priority 1번만 구현했다. `DataState`, `ConfirmDialog`, `StatusBadge`, `RoleBadge`와 barrel export를 `frontend/src/components/common/`에 추가했다.
+- `DataState`는 loading, empty, error, forbidden, not-found, conflict, session-expired를 구분한다. 기본 문구는 `frontend-refactor-plan.md`의 화면 상태와 오류 흐름을 따른다.
+- `ConfirmDialog`는 destructive 또는 권한 영향 action에 재사용할 수 있도록 default/danger variant, loading lock, Escape close, dialog aria 속성을 제공한다.
+- `StatusBadge`는 현재 `types.ts`의 Meeting, Transcript, Report, Task, Invitation, JoinRequest, Participant, DomainTerm status와 문서 상태 모델에 나온 published/archive/attachment 계열 상태를 표시한다.
+- `RoleBadge`는 Space role과 Meeting role을 합치지 않고 별도 badge로 표시한다. `REVOKED` access status는 회수 상태로 분리한다.
+- 기존 화면 연결, route 변경, API 변경, 인증 변경, 비즈니스 로직 이동은 하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only.
+
+## M060 Frontend AppShell Foundation
+
+- 2026-07-21: Refactoring Priority 2번 기준으로 `frontend/src/components/layout/`에 `ProtectedRoute`, `AppShell`, layout export와 CSS를 추가했다. `ProtectedRoute`는 `App.tsx` inline 함수에서 그대로 분리했고, 로그인 요청과 원래 주소 복귀 동작은 유지했다.
+- `AppShell`은 sidebar, topbar, content slot만 가진 최소 구조다. 새 상태관리나 route 변경 없이 `/spaces`의 기존 `WorkspaceSidebar`, topbar, 본문 section을 감싸는 공통 골격으로 사용했다.
+- `WorkspaceHomePage`는 기존 비즈니스 로직, API 호출, 회의 생성 흐름, 알림 panel 동작을 유지한 채 바깥 wrapper만 `AppShell`로 교체했다. 이 단계에서는 TeamMembers, Terms, ProjectOverview 같은 legacy page는 옮기지 않았다.
+- `/common-components-preview`도 같은 `AppShell` 위로 옮겼다. 좌측 섹션 nav, 상단 breadcrumb와 진입 action을 추가해 공통 컴포넌트 검수 화면이 실제 앱 탐색 패턴을 따르도록 맞췄다.
+- `common.css`의 버튼/다이얼로그 인터랙션은 `emil-design-eng` 기준에 맞춰 조정했다. hover는 fine pointer에서만 작동하고, active scale은 `0.97`, dialog enter는 `scale(0.96)` + opacity로 시작한다.
+- 비즈니스 로직, API 계약, 인증 구조, 기존 주요 route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Frontend build has the existing >500 kB chunk-size warning only, lint has the existing 7 warnings only.
+
+## M061 AppShell Visual Foundation
+
+- 2026-07-21: 새로 설치한 `design-taste-frontend`와 `redesign-existing-projects` 기준을 현재 vanilla CSS/React 구조에 적용해 `/spaces`의 AppShell 작업 표면을 점검했다. 제품 기준은 `frontend-refactor-plan.md`의 AppShell slot, blue/white token, current location과 next action 표시 원칙을 따랐다.
+- `frontend/src/components/layout/AppShell.tsx`를 sidebar/content slot만 가진 공통 레이아웃으로 추가하고, `frontend/src/components/layout/ProtectedRoute.tsx`로 인증 보호 경계를 분리했다. `WorkspaceHomePage`의 기존 sidebar와 본문은 해당 셸에 연결했다. API 호출, 인증 판정, 권한, route, 상태 소유 로직은 변경하지 않았다.
+- AppShell 기반 화면의 전역 token을 blue/white 작업 표면으로 통일하고, 기존 `0.75` 전역 transform scale을 `1`로 되돌렸다. `body.app-theme`와 document overflow는 브라우저 기본 반응형 흐름을 사용하도록 평면 배경·자동 스크롤로 정리했다. 이는 레이아웃 표시 규칙만 바꾸며 API, 인증, 권한, route, 데이터 구조는 변경하지 않는다.
+- `/spaces`에 한해 248px sidebar, 독립 content scroll, 8px 작업 표면, blue/white token, keyboard focus, hover/active feedback, reduced-motion 규칙을 적용했다. 기존 Sidebar 메뉴와 프로젝트 생성 modal의 동작은 유지했다.
+- 이번 단계에서는 TeamMembers, Terms, ProjectOverview, Meeting 화면을 새 셸로 옮기지 않았다. 다음 Sidebar 단계에서 메뉴 정보 구조와 role/context 표시를 별도로 정리한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. 기존 500 kB chunk-size warning과 기존 lint warning 7건 외 새 오류는 없다.
+
+## M062 Workspace Sidebar Navigation
+
+- 2026-07-21: `WorkspaceSidebar`의 기존 query href, active/disabled 메뉴, 프로젝트 생성 callback과 modal 동작을 유지한 채 Sidebar 정보를 워크스페이스 생성, 탐색, 현재 작업공간, 권한 범위 안내로 나눴다.
+- 실제 구독 상태를 조회하지 않는 `구독이 곧 만료됩니다` 문구는 제거했다. 대신 현재 project/회의 지식이 접근 가능한 권한 범위 안에서 표시된다는 안내를 둬서 사용자의 위치와 데이터 범위를 설명한다. 새 route, API, 권한 판정은 추가하지 않았다.
+- `/spaces`의 AppShell에서는 blue/white 작업 표면과 8px radius, keyboard focus, reduced-motion 규칙을 사용한다. 작은 화면에서는 프로젝트 생성·현재 작업공간 보조 정보는 접고 핵심 탐색만 유지한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. 기존 Vite chunk-size warning과 lint warning 7건 외 새 오류는 없다.
+
+## M063 Spaces Workspace Home
+
+- 2026-07-21: `/spaces`의 기존 API-driven 상태와 callback을 유지하면서 화면 제목과 설명을 추가하고, 프로젝트 수 요약, 오늘 회의, 최근 활동, 미완료 작업, 최신 확정 회의록, 프로젝트 검색·목록, 캘린더 순으로 정보 우선순위를 정리했다. 이는 `frontend-refactor-plan.md`의 Spaces 정보 계층을 실제 화면에 반영한 것이다.
+- 검색·필터 결과가 없을 때 필터 초기화 action을 제공하고, 최근 활동과 미완료 작업이 없을 때 성공을 가장하지 않는 빈 상태 문구를 표시한다. 데이터가 없는 경우를 위해 새 API나 mock 데이터를 추가하지 않았다.
+- `/spaces` AppShell에 blue/white 작업 표면, 8px work-surface radius, 제한된 hover lift, keyboard focus, mobile grid 재배치, reduced-motion 규칙을 적용했다. 링크, API, 인증, 권한, route, 회의 생성·캘린더 상태 흐름은 변경하지 않았다.
+- Visual check: 인증 세션 없이 `/spaces`에 접근하면 기존 로그인 요구 모달로 보호되며, 보호 우회나 mock 성공을 추가하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. 기존 Vite chunk-size warning과 lint warning 7건 외 새 오류는 없다.
+
+## M064 Project Home Shell
+
+- 2026-07-21: 설계 문서의 Project Home route인 `/project-overview`를 기존 query 기반 주소와 함께 유지하면서 `AppShell` 안으로 옮겼다. Sidebar는 현재 프로젝트명을 표시하고 `프로젝트 개요` 메뉴를 활성 상태로 보여준다.
+- 프로젝트 제목·상태·설명, 다음 회의, 회차별 회의 흐름, 회의 운영/ACL, 칸반, Project AI, 공식 Project Knowledge의 기존 기능과 상태 흐름은 삭제하거나 mock으로 바꾸지 않았다. CSS 계층만 blue/white 작업 표면, 8px work-surface radius, 권한 범위 표시, keyboard focus 기준으로 정리했다.
+- 다음 회의와 접근 가능한 회의가 없을 때 기존 안내 상태를 유지하며, Project AI에는 Project Knowledge와 접근 가능한 Meeting record 범위를 계속 표시한다. 회의, ACL, task, AI API와 callback 계약은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. 기존 Vite chunk-size warning과 lint warning 7건 외 새 오류는 없다.
+
+## M065 Meetings Surface
+
+- 2026-07-21: Project Home의 회의 영역에 접근 가능한 전체·예정·진행 중·완료 건수 요약을 추가하고, `Meetings` kicker와 `회의 목록과 상태` 제목으로 목적을 분명히 했다. 상태 수는 기존 `accessibleMeetings`에서 계산하며 별도 API나 mock을 추가하지 않았다.
+- 회의 운영 영역의 생성·수정·상태 변경·삭제 확인·ACL 부여/회수와 참가 코드 결과는 기존 callback과 권한 disable 조건을 유지한 채 blue/white compact form으로 정리했다. 전체보기 모달에는 검색 결과 없음 상태를 추가했다.
+- 회의 상태 badge, default-deny 안내, 마지막 active HOST 보호, Meeting AI/Project AI 범위 로직은 변경하지 않았다. 작은 화면에서는 생성/수정 폼과 modal 목록을 한 열로 전환하고 focus outline을 유지한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. 기존 Vite chunk-size warning과 lint warning 7건 외 새 오류는 없다.
+
+## M066 Meeting Context and Prejoin
+
+- 2026-07-21: 별도 Meeting Detail route가 없는 현재 route 계약을 유지하면서 `/live-meeting`을 회의 컨텍스트와 Prejoin 경계 화면으로 정리했다. 회의 제목·예정 시각·현재 사용자·Meeting role/OWNER/ADMIN override·접근 결과를 우선 표시한다.
+- 영상 미리보기, 마이크/카메라 토글, 장치 재설정, 참가자 대기 상태, 시작 전 체크리스트, 입장/참가 신청 이동은 기존 JSX와 state/callback을 유지하고 blue/white 정보 패널과 집중형 영상 무대로 스타일만 변경했다.
+- 접근 확인 중/거부 상태와 미디어 권한 실패 상태를 성공 상태와 분리했다. `sessionStorage` prejoin payload와 `/live-room` 이동 계약은 변경하지 않았다. 새 route/API/mock 성공 처리는 추가하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. 기존 Vite chunk-size warning과 lint warning 7건 외 새 오류는 없다.
+
+## M067 Live Meeting Surface
+
+- 2026-07-21: 현재 `/live-room` route와 `LiveRoomPage`의 실제 흐름을 기준으로 LiveMeetingLayout을 정리했다. 상단에는 회의 제목, LiveKit 연결 상태, 참가자 수, 나가기 action을 두고, 중앙에는 영상 무대와 참가자 목록, 하단에는 마이크·카메라·화면 공유·Meeting AI 제어를 배치했다. 우측에는 실시간 자막, 선택 용어 설명, 검색을 작업 패널로 고정했다.
+- 연결 상태는 기존 `connectionStateLabel` state를 그대로 사용해 `연결 중`, `실시간 연결됨`, `재연결 중`, `연결 종료`, `연결 실패`를 사용자에게 노출한다. 자막이 없거나 검색 결과가 없는 경우 기존 빈 상태를 유지하며, 실제 STT/API 성공을 mock으로 표시하지 않는다.
+- `LiveRoomPage`의 LiveKit token/connect/disconnect, participant snapshot, STT polling/start/stop, 용어 설명, bookmark, Meeting AI notice, 나가기 route와 오류 처리는 변경하지 않았다. 변경은 연결 상태·참가자 수의 표시와 접근성 label, scoped CSS에 한정했다.
+- 데스크톱은 영상과 자막의 2열, 1200px 이하에서는 세로 흐름, 680px 이하에서는 모바일 제어 2열로 전환한다. video surface는 짙은 navy, 작업 패널은 blue/white token과 8px radius를 사용하며 reduced-motion에서 transition/animation을 끈다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Build의 기존 Vite 500 kB chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M068 Transcript Surface
+
+- 2026-07-21: 현재 route 구조에 독립 Transcript route가 없고, 실제 전사 원문은 `/meeting-ai?meetingId=...`의 왼쪽 영역에 있으므로 route/API를 추가하지 않고 해당 화면을 Transcript 중심으로 정리했다. 원문을 주 콘텐츠로 두고, 현재 회의 검색 범위·결정사항·Action Item을 순서대로 배치했다.
+- Meeting AI는 오른쪽 보조 패널로 유지하고, 기존 `meetingId` query, `chatMeetingAi` 호출, source 표시, unsupported/오류 메시지, 추천 질문과 입력 동작은 변경하지 않았다. 전사·결정사항·Action Item은 기존 `WorkspaceData` 값만 사용한다.
+- 전사 영역에 의미 있는 heading, list/listitem, section label, AI loading `aria-live`를 추가했다. 기존 시각용 placeholder line은 제거하고 현재 데이터가 실제로 확인 가능한 기록임을 설명하는 상태 문구로 바꿨다. 이로써 미확인 전사나 AI 성공을 시각적으로 가장하지 않는다.
+- blue/white 작업 화면, 8px surface radius, compact typography, desktop 2열과 1000px 이하 세로 흐름, 620px 이하 발화 정보 재배치, focus-visible과 reduced-motion을 적용했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Build의 기존 Vite 500 kB chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M069 Report Workspace Surface
+
+- 2026-07-21: 현재 `/report-agent`의 실제 보고서 편집 화면을 기준으로 공식 보고서 본문을 왼쪽 주 콘텐츠로 고정하고, 보고서 편집 Agent·회의록 candidate·버전 이력·태스크 후보를 오른쪽 검토 패널로 정리했다. 보고서 흐름에서 사용자가 먼저 확인해야 하는 본문과 확정 전 검토 작업을 분리한 것이다.
+- 기존 `reportState`, `reportCandidate`, `reportHistory`, `taskCandidates` 상태를 그대로 사용해 `공식 회의록`, `확정 전 candidate`, `편집 중` 상태를 표시한다. 상태 배지는 저장·확정 로직을 새로 만들거나 기존 상태를 추측하지 않는다.
+- `updateMeetingReport`, `confirmMeetingReport`, `restoreMeetingReport`, `downloadMeetingReport`, AI 편집, 태스크 후보 추출·확정·제외와 기존 query route/API는 변경하지 않았다. 보고서 본문, Agent, candidate panel에 aria label과 focus-visible 규칙을 추가했다.
+- blue/white 작업 화면, 8px surface radius, compact document table, 데스크톱 2열·1120px 이하 세로 전환·720px 이하 문서 메타 재배치, reduced-motion을 적용했다. 기존 모달·이력 선택·다운로드 UI의 동작은 유지했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Build의 기존 Vite 500 kB chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M070 Task Candidate Review Surface
+
+- 2026-07-21: 별도 Task Candidates route가 없는 현재 구조에서 `/report-agent` 우측 검토 패널의 태스크 후보 영역을 명확한 작업 표면으로 정리했다. `Task candidates / 태스크 후보 검토` heading을 추가하고 회의 근거 기반 범위를 표시했다.
+- 후보가 없을 때는 성공이나 후보 0건을 단정하지 않고, `회의 근거에서 후보를 추출하면 내용을 검토한 뒤 칸반에 등록할 수 있습니다`라는 다음 행동 안내를 표시한다. 후보가 있는 경우 검토 대기·등록 승인·등록 제외 상태를 색과 상태 문구로 구분한다.
+- 후보별 source ID, 제목·설명·담당자·마감일 입력, 칸반 등록·등록 제외·칸반에서 보기 action과 `canConfirmTaskCandidates` disabled 조건은 기존 그대로 유지했다. API, callback, route와 데이터 구조는 변경하지 않았다.
+- `aria-label`을 후보 카드와 검토 영역에 추가하고 blue/white 작업 표면, 8px radius, 후보 상태별 색, focus-visible을 적용했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Build의 기존 Vite 500 kB chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M071 Meeting AI Surface
+
+- 2026-07-21: 기존 `/meeting-ai?meetingId=...`의 Meeting AI 보조 패널을 현재 회의 전용 검색 범위가 먼저 보이는 구조로 정리했다. 고정 회차 문구는 제거하고 `현재 회의 전용 · Project 전체 미포함`으로 표시해 실제 회의와 어긋나는 안내를 방지했다.
+- 각 AI 답변의 source를 `근거` 목록으로 표시하고, 근거 부족 응답은 `관련도 부족` 또는 `근거 없음` 상태로 분리했다. 답변 대화는 `role=log`, 근거는 list/listitem, 회의 ID 누락·API 오류는 live alert로 접근성 정보를 보강했다.
+- `chatMeetingAi` 호출, `meetingId` 검증, source 변환, unsupported reason 매핑, 추천 질문·입력·로딩 동작은 변경하지 않았다. 실제 근거가 없는 답변을 성공으로 표현하는 mock 데이터나 새 API를 추가하지 않았다.
+- AI 패널은 blue/white 작업 표면, 범위 강조, 근거 라벨, 오류 상태와 disabled control을 사용하며 기존 Transcript 화면과 함께 반응형으로 동작한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Build의 기존 Vite 500 kB chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M072 Project AI Surface
+
+- 2026-07-21: 현재 `/project-overview` 우측 Project AI 영역의 실제 흐름을 기준으로 검색 범위를 먼저 표시하도록 정리했다. `Project Knowledge`는 공식 지식만, `Meeting record`는 Backend가 접근 가능한 회의만 선필터한다는 내용을 scope panel에 유지·강조했다.
+- 답변 대화는 log로 표시하고 source tag를 `근거` 목록으로 구분했다. `unsupportedReason`이 있는 답변은 근거 부족 상태로 시각 구분하고, 검색 데이터 미준비·API 오류·답변 생성 중 상태를 live message로 전달한다.
+- `chatProjectAi`, `fetchProjectAiHistory`, `projectAiAvailable`, Backend 권한 선필터 전제, Project Knowledge CRUD, 기존 route/callback은 변경하지 않았다. 프론트에서 권한 범위를 새로 계산하거나 검색 범위를 넓히지 않았다.
+- Project AI 질문 입력 placeholder를 접근 가능한 회의와 공식 지식 기준으로 명확히 하고, disabled control과 focus-visible을 추가했다. blue/white 작업 표면과 기존 AppShell을 유지했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` passed. Build의 기존 Vite 500 kB chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M073 Project Knowledge Surface
+
+- 2026-07-21: 현재 route 구조에는 독립 Knowledge 화면이 없고 공식 Project Knowledge가 `/project-overview` 우측 패널에 있으므로, 이 패널을 Knowledge 단계의 실제 화면으로 정리했다. `/terms`의 Domain Dictionary는 용어사전이라는 별도 기능과 API 흐름을 가지므로 이번 단계에서는 수정하지 않았다.
+- Project Knowledge 종류를 사람이 읽는 `직접 등록`, `결정`, `회의록`, `외부 자료`로 표시하고 embedding 상태를 `검색 가능`, `처리 중`, `처리 대기`, `처리 실패`로 구분했다. 상태 값은 기존 `ProjectKnowledgeItem.embeddingStatus`를 그대로 사용하며 프론트에서 처리 성공을 추측하지 않는다.
+- 공식 지식 목록에 접근 가능한 empty state와 다음 행동을 추가하고, OWNER/ADMIN에게만 등록·편집 폼을 노출했다. 일반 멤버에게는 공식 지식의 관리 주체를 설명한다. 기존 `projectKnowledge`, `onCreateProjectKnowledge`, `onUpdateProjectKnowledge`, `onDeleteProjectKnowledge`, `fetchProjectKnowledgeDetail`과 권한 조건은 변경하지 않았다.
+- 폼에 종류·제목·내용의 명시적 label을 추가하고, 항목별 편집·삭제 accessible name, list/listitem, status와 focus-visible을 보강했다. blue/white 작업 표면, 8px work-surface radius, compact spacing, reduced-motion 규칙을 기존 Project Home 스타일과 맞췄다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check`를 실행한다. Build의 기존 Vite chunk-size warning과 lint warning 6건은 기준선으로 기록한다.
+
+## M074 Members Surface
+
+- 2026-07-21: 현재 `/team-members?spaceId={spaceId}`가 실제 Members 화면이므로 기존 route와 query 계약을 유지하면서 `AppShell`과 프로젝트 Sidebar 안으로 옮겼다. target `/spaces/{spaceId}/members` 전환은 route/API 변경 없이 후속 alias 작업으로 남겼다.
+- 화면 순서를 `멤버 요약·Space 초대 → 초대 방식 → Meeting 참가 승인 대기 → Owner 이양 → 멤버 Directory`로 정리했다. 이는 프로젝트 접근을 먼저 준비하고, 회의 접근 승인과 소유권 변경 같은 고위험 작업을 분리한 정보 계층이다.
+- `projectMembers`, `pendingRequests`, `inviteMeta`, `onCreateSpaceInvitation`, `onApproveRequest`, `onRejectRequest`, `onRemoveMember`, `onTransferOwner`, `onUpdateMemberRole`의 상태·callback·권한 조건은 그대로 유지했다. 프론트에서 권한을 새로 계산하거나 API 성공을 추측하지 않는다.
+- OWNER/ADMIN/MEMBER role, 활성·부재 상태, 회의 참가 승인과 Space 초대의 차이를 별도 문구와 badge로 표시했다. Owner 이양은 기존 확인 문구와 활성 멤버 조건을 유지하고, 제거·역할 변경은 기존 disabled 조건을 유지했다.
+- 초대·승인·Owner 이양·Directory에 명시적 label, `aria-label`, `role=list/table`, live error/empty state, keyboard focus를 추가했다. blue/white 작업 표면, 8px work-surface radius, desktop/tablet/mobile 재배치, reduced-motion을 적용했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check` 통과. `/team-members?spaceId=space-1`는 Vite index `200`을 반환하며, 보호 화면의 실제 데이터·권한 검증은 로그인 세션이 필요해 별도 E2E에서 확인한다. 기존 Vite chunk-size warning과 lint warning 6건을 기준선으로 기록했다.
+
+## M075 Project Settings Surface
+
+- 2026-07-21: 현재 별도 Settings route가 없고 `/project-overview`에서 설정 모달을 여는 구조이므로, route/API를 추가하지 않고 이 모달을 Project Settings surface로 정리했다. target `/spaces/{spaceId}/settings` 전환은 별도 라우팅 작업으로 남겼다.
+- 설정 화면의 정보 순서를 `프로젝트 정보 설명 → 권한 안내 → 이름·설명 수정 → 저장 상태·오류 → 프로젝트 삭제 위험 영역`으로 고정했다. 사용자는 수정 대상과 위험 작업을 먼저 구분할 수 있다.
+- `onUpdateProject`, `onDeleteProject`, `projectTitle`, `projectDescription`, 프로젝트명 확인 문구와 기존 저장·삭제 callback은 유지했다. `meetingMutationLoading`과 `meetingMutationError`를 기존 상태 표시로 사용해 저장·삭제 중과 실패를 성공처럼 보이지 않게 했다.
+- OWNER/ADMIN이 아니면 기본 정보 입력을 비활성화하고 수정 권한을 설명하며, 프로젝트 삭제는 OWNER만 활성화했다. 최종 권한 판정은 기존 서버/API에 맡기고, 프론트는 보조 안내만 제공한다.
+- 설정 모달을 blue/white 작업 표면, 8px radius, 명시적 label, focus-visible, 모바일 높이 제한, reduced-motion으로 정리했다. 위험 영역은 별도 `Danger zone`으로 분리했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check`를 실행한다. 기존 Vite chunk-size warning과 lint warning 6건은 기준선으로 기록한다.
+
+## M076 Landing Visual Compliance Pass
+
+- 2026-07-21: 새로 설치한 `.agents/skills/design-taste-frontend/SKILL.md`의 audit 기준을 현재 MeetingMind 랜딩에 적용했다. 실제 computed style에서 활성화된 gradient 3건(`body.landing-theme`, `.landing-hero`, `.landing-preview-ai-card`)을 확인하고, blue/white 업무 화면과 충돌하지 않도록 각각 평면 배경으로 바꿨다.
+- 랜딩 JSX, CTA 링크, route, API/auth/business logic은 변경하지 않았다. body는 `#f8fbff`, hero는 `#f8fbff`, AI preview는 `#f5f9ff`를 사용해 제품 preview를 구분하되 장식성 gradient와 불필요한 시각 노이즈를 제거했다.
+- Browser audit 결과 390px에서 `bodyScrollWidth=390`, page width=390, overflow 0건, active background image 0건이었다. 1440px에서도 `bodyScrollWidth=1440`, interactive element unlabeled 0건, active background image 0건이며 H1→H2→H3 heading 순서를 확인했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test`, `git diff --check`를 실행한다. 기존 Vite chunk-size warning과 lint warning 6건은 기준선으로 기록한다.
+
+## M077 Frontend Route Boundary
+
+- 2026-07-21: `App.tsx`에 섞여 있던 `Routes` 선언과 보호 route 조립을 `frontend/src/routes/AppRoutes.tsx`로 이동했다. `ComponentProps` 기반 route prop type을 사용해 page callback 계약을 중복 선언하지 않았다.
+- 기존 path, `ProtectedRoute`의 로그인 요청·원래 주소 복귀, page data, API callback, 인증·권한 판정은 그대로 유지했다. App은 인증 bootstrap, workspace 상태·mutation controller와 공통 세션 UI를 연결하고, route 선언은 별도 경계가 담당한다.
+- Verification: `/`에서 랜딩 heading과 이름 없는 interactive element 0건, 비인증 `/spaces`에서 `/` 복귀와 로그인 모달을 browser로 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check`를 통과했으며 기존 lint warning 6건과 Vite chunk-size warning만 남았다.
+
+## M078 Frontend Workspace Controller Boundary
+
+- 2026-07-21: `App.tsx`에 있던 workspace 초기 데이터, API read loader, refresh callback, read/mutation 상태를 `frontend/src/hooks/useWorkspaceController.ts`로 이동했다. 공유 타입과 순수 workspace 변환·표시 helper는 `frontend/src/app/workspaceTypes.ts`와 `frontend/src/app/workspaceModel.ts`에 두어 route/page 조립과 데이터 경계를 분리했다.
+- 기존 workspace API 호출, auth session 전달, route path, page callback, permission 판정은 변경하지 않았다. mutation handler는 동작 위험을 낮추기 위해 이번 단계에 남겨두고 다음 controller 분리 작업의 대상으로 기록한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check`를 실행한다. build 성공, 테스트 36개 통과, 새 lint 오류 없이 기존 warning 6건을 유지하는 것을 기준으로 한다.
+
+## M079 Frontend Workspace Mutation Boundary
+
+- 2026-07-21: 새로 설치한 `.agents/skills/design-taste-frontend/SKILL.md`의 component boundary와 page-thin 원칙을 적용해 `App.tsx`의 workspace mutation handler를 `frontend/src/hooks/useWorkspaceMutations.ts`로 이동했다. 프로젝트·회의·참여자·태스크·Project Knowledge·Space 멤버·초대 mutation을 한 경계에서 조립하고 App은 auth, workspace controller, route props만 연결한다.
+- API 호출, mock fallback, optimistic state update, 권한 확인, 오류 문구, 반환값과 route 이동은 이동 전 동작을 그대로 유지했다. `handleUpdateMeeting`처럼 hook 내부에서만 사용하는 함수는 App 외부로 노출하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check`를 실행한다. build 성공, 테스트 36개 통과, 새 lint 오류 없이 기존 warning 6건을 유지하는 것을 기준으로 한다.
+
+## M080 Meeting AI AppShell Integration
+
+- `MeetingAiPage`의 기존 자체 셸을 공통 `AppShell`과 `WorkspaceSidebar` 조합으로 연결했다.
+- `project`, `spaceId` query context를 사이드바 링크에 전달하고, 회의 제목을 현재 작업공간 컨텍스트로 표시한다.
+- 기존 meetingId 기반 AI 요청, 범위 안내, transcript, source 표시, 로딩/오류 상태는 변경하지 않았다.
+- `AppRoutes`에서 기존 프로젝트 생성 mutation을 사이드바에 전달해 공통 탐색에서 생성 동작이 끊기지 않도록 했다.
+- 근거: `design-taste-frontend`의 page-thin 및 consistent navigation 원칙, 제품 문서의 Meeting AI current-meeting scope 원칙.
+
+## M081 Report AppShell Integration
+
+- `ReportAgentPage`의 기존 보고서 작업 프레임을 공통 `AppShell`과 `WorkspaceSidebar` 안에 배치한다.
+- `project`, `spaceId`, `meetingId` query context와 기존 `Meeting AI` 이동 링크를 유지한다.
+- 보고서 생성·수정·확정·복원·다운로드·태스크 후보 승인 API와 상태 처리는 변경하지 않는다.
+- 근거: 보고서가 회의 후속 흐름의 공식 문서 표면이므로 현재 회의/프로젝트 위치를 공통 탐색에서 계속 보여줘야 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/report-agent?meetingId=meeting-1&project=Product%20Ops&spaceId=space-1`는 `/`와 로그인 모달로 복귀했고, 가로 overflow가 없었다. 기존 Vite chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M082 Domain Terms AppShell Integration
+
+- `DomainTermsPage`를 구형 `workspace-catalog-shell`에서 공통 `AppShell`과 `WorkspaceSidebar` 조합으로 이동했다.
+- 기존 `spaceId`/`project` 선택, 용어 조회·등록·수정·보관 API, OWNER/ADMIN 관리 권한 판정은 유지했다.
+- 실제 동작이 없는 알림 버튼을 제거해 dead control을 없애고 용어사전 작업에 집중시켰다.
+- 공통 `DataState`를 로딩·빈 목록·오류·참여 프로젝트 없음 상태에 적용하고 오류 시 재시도 action을 제공했다.
+- 근거: 공통 navigation과 작업공간 위치를 모든 보호 화면에서 동일하게 유지하고, 동작하지 않는 UI를 노출하지 않는 UX 원칙.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/terms?spaceId=space-1`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. 기존 Vite chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M083 Live Meeting Prejoin State Badges
+
+- 회의 입장 전 접근 확인 상태를 공통 `StatusBadge`로, 확인된 Meeting role을 `RoleBadge`로 표시한다.
+- 기존 `accessCheckState`, `accessRole`, default-deny 문구, 카메라·마이크 권한 처리, 입장 route와 sessionStorage 기록은 변경하지 않는다.
+- 근거: 권한 UX에서 접근 상태와 역할을 같은 시각 언어로 표현해 사용자가 입장 가능 여부와 권한 범위를 즉시 구분하도록 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/live-meeting?meetingId=meeting-1&spaceId=space-1`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. 기존 Vite chunk-size warning과 lint warning 6건 외 새 오류는 없다.
+
+## M084 Live Room State and Accessibility
+
+- 실시간 연결 상태를 `StatusBadge`, 참가자 역할을 `RoleBadge`로 표시한다.
+- 자막 검색 input에 명시적 accessible label을 추가하고, 기존 `meetingAi` prop은 `_meetingAi`로 명시해 미사용 경고만 정리한다.
+- LiveKit room 연결, STT start/stop, 참가자 제어, 자막 검색·북마크·용어 설명 동작은 변경하지 않는다.
+- 근거: 집중형 Live 레이아웃에서도 연결 상태와 역할은 즉시 읽혀야 하며, 자막 검색은 키보드·스크린리더 사용자가 목적을 알 수 있어야 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/live-room?meetingId=meeting-1`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. `_meetingAi` 정리로 lint warning은 6건에서 5건으로 줄었고, 나머지는 기존 경고다.
+
+## M085 Meeting Access State Badges
+
+- `MeetingAccessPage`의 신청 상태를 `StatusBadge`, 확인된 Meeting role을 `RoleBadge`로 표시한다.
+- 기존 join code 제출, access 재확인, HOST 승인·거절, pending/denied/allowed 상태와 권한 범위 문구는 유지한다.
+- 근거: 참가 신청과 회의 데이터 접근은 서로 다른 권한 단계이므로 상태와 역할을 분리해 보여줘야 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/meeting-access?meetingId=meeting-1`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. 새 lint 오류 없이 기존 warning 5건을 유지한다.
+
+## M086 Space Invitation State Badge
+
+- Space 초대 응답 화면에 수락·거절·처리 중·실패·응답 대기 상태를 공통 `StatusBadge`로 표시한다.
+- 초대 fragment token 제거, 수락·거절 API, 완료 후 Space 목록 이동과 오류 문구는 변경하지 않는다.
+- 근거: 초대 응답은 되돌릴 수 없는 접근 권한 변경이므로 현재 처리 결과를 버튼과 분리해 명확히 보여줘야 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/space-invitations/space-1/invite-1#token=test`는 `/`와 로그인 모달로 복귀했고 fragment token은 제거됐다. 기존 Vite chunk-size warning과 lint warning 5건 외 새 오류는 없다.
+
+## M087 Project Overview Status Language
+
+- 프로젝트 개요의 Space role, 프로젝트 진행 상태, 회의 상태, Project Knowledge embedding 상태를 공통 `RoleBadge`/`StatusBadge`로 표시한다.
+- 기존 회의 목록, Project AI, Knowledge CRUD, 권한 조건, route와 API callback은 변경하지 않는다.
+- 근거: 프로젝트 홈은 회의→보고서→태스크→지식 흐름의 중심이므로 사용자가 상태와 권한을 같은 시각 언어로 빠르게 비교할 수 있어야 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/project-overview?spaceId=space-1`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. 기존 Vite chunk-size warning과 lint warning 5건 외 새 오류는 없다.
+
+## M088 Members Status Language
+
+- 멤버 디렉터리의 Space role을 `RoleBadge`, 활성/부재 상태를 `StatusBadge`로 표시한다.
+- 초대 생성, 회의 참가 승인, Owner 이양, Space role 변경, 멤버 제거 callback과 disabled 권한 조건은 변경하지 않는다.
+- 근거: Members 화면은 권한 관리 화면이므로 역할과 현재 접근 상태를 이름만으로 읽게 하지 않고, 공통 권한 시각 언어로 비교 가능하게 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/team-members?spaceId=space-1`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. 기존 Vite chunk-size warning과 lint warning 5건 외 새 오류는 없다.
+
+## M089 Workspace Home Status Language
+
+- 오늘 회의와 캘린더 회의 상태를 공통 `StatusBadge`로 표시했다.
+- 프로젝트 검색, 정렬·필터, 캘린더 조회·범위 선택, 회의 생성과 링크 이동은 변경하지 않는다.
+- 근거: 워크스페이스 홈은 여러 프로젝트의 상태를 비교하는 화면이므로 상태 표현을 통일해 다음 행동을 빠르게 판단하게 한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 비인증 `/spaces`는 `/`와 로그인 모달로 복귀했고 가로 overflow가 없었다. 기존 Vite chunk-size warning과 lint warning 5건 외 새 오류는 없다.
+
+## M090 Space Target Route and Layout
+
+- `frontend/src/components/layout/SpaceLayout.tsx`를 추가해 Project Home의 AppShell과 Space sidebar를 하나의 layout 경계로 묶었다. `ProjectOverviewPage`는 route의 `:spaceId`를 우선 사용하고, 기존 query 기반 `/project-overview` 주소는 계속 지원한다.
+- `/spaces/:spaceId` target route를 `AppRoutes`에 연결하고, `/spaces` 프로젝트 카드와 Space sidebar의 프로젝트 개요 링크가 target route를 사용하도록 변경했다. `WorkspaceSpace.href`도 같은 canonical 주소로 맞췄다.
+- target Space가 없거나 접근 가능한 Space 목록에 없는 경우 `DataState(notFound)`를 표시하고 `/spaces`로 돌아갈 수 있게 했다. API 호출, 권한 판정, mutation, 인증 흐름은 변경하지 않았다.
+- UX 근거: Space ID를 URL에 고정하면 새로고침과 deep link에서도 현재 프로젝트 문맥을 잃지 않는다. 존재하지 않는 Space를 빈 화면으로 남기지 않아 다음 행동을 명확히 한다.
+- Product 근거: 회의·태스크·지식·AI가 모두 Space 안에서 해석된다는 제품 원칙을 route와 layout에 반영했다.
+- 유지보수 근거: legacy query alias를 제거하지 않고 `SpaceLayout` 경계만 추가해 기존 화면 기능과 후속 하위 route 분리를 동시에 지원한다.
+- Verification: browser에서 `/spaces/space-1`의 not-found 상태와 overflow 없음, `/project-overview?spaceId=space-1` alias 상태를 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. lint는 기존 warning 5건, build는 기존 Vite chunk-size warning만 남았다.
+
+## M091 Project Home Information Hierarchy
+
+- target `/spaces/:spaceId`는 `ProjectHomePage`로 연결해 프로젝트 상태 요약, 다음 회의, 열린 작업, 최근 회의, 최신 확정 회의록, Project AI 진입만 우선 표시한다. 이는 문서의 Project Home 정보 우선순위인 "현재 상태 → 다음 행동 → 최근 결과"를 따른다.
+- 기존 `ProjectOverviewPage`의 회의 CRUD, ACL, 칸반, Project Knowledge, Project AI, 설정 기능은 `/project-overview?spaceId=...` compatibility 화면에 유지한다. 새 화면에서 `전체 운영 화면`, `전체 보기`, `칸반 열기`, `Project AI 열기`가 해당 기능으로 연결되며, legacy 화면에 anchor를 추가했다.
+- API 호출, 인증·권한 판정, mutation handler, 데이터 구조는 변경하지 않았다. dashboard latest report와 현재 Space task/meeting/knowledge 상태가 없을 때는 빈 상태로 표시해 mock 성공처럼 보이지 않게 했다.
+- UX 근거: 첫 진입 화면에서 모든 운영 도구를 동시에 보여주지 않고 사용자의 다음 행동을 먼저 제시해 인지 부하를 줄인다.
+- Product 근거: 회의 → 회의록 → 태스크 → 지식 → AI 흐름의 현재 위치를 프로젝트 단위 요약으로 보여준다.
+- 유지보수 근거: 요약 화면과 기존 조작 화면을 분리해 이후 Calendar, Meetings, Tasks, AI, Knowledge target route를 독립적으로 옮길 수 있다.
+- Verification: browser에서 target not-found 상태와 `/` landing 회귀, 가로 overflow 없음, 활성 gradient 없음 확인. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space 데이터가 없는 계정이라 populated Project Home 카드의 시각 검증은 보류했다.
+
+## M092 Project Meetings Target Surface
+
+- `/spaces/:spaceId/meetings`에 `ProjectMeetingsPage`를 추가했다. Project Home에서 회의 목록을 분리하고 제목·회차·상태 검색, 상태 필터, 접근 가능한 회의 목록, 상태 배지와 회의 화면 진입을 제공한다.
+- `SpaceLayout`과 Sidebar에 현재 `회의` 메뉴를 연결했다. 회의 생성과 ACL은 아직 legacy 운영 화면이 담당하므로 `회의 만들기`와 Project Home 링크는 `/project-overview?spaceId=...#project-meetings` compatibility surface로 이동한다.
+- 회의 데이터가 없거나 Space가 유효하지 않으면 각각 empty/not-found 상태를 표시한다. API 호출, 회의 접근 권한, mutation, Live/Report route는 변경하지 않았다.
+- UX 근거: 회의 찾기와 회의 생성은 서로 다른 작업이므로 Project Home의 요약과 분리하고, 검색·상태 필터를 목록 상단에 두어 탐색 비용을 줄였다.
+- Product 근거: Space 안에서 회의가 독립된 업무 단위라는 제품 흐름을 URL과 navigation에 반영했다.
+- 유지보수 근거: 목록 surface는 조회와 navigation에 집중하고, 기존 full operation 화면을 조작 경계로 유지해 후속 Meeting Layout/Meeting Detail 분리가 가능하다.
+- Verification: browser에서 `/spaces/space-1/meetings` not-found 상태, overflow 없음, 활성 gradient 없음 확인. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없는 계정이라 populated 목록의 시각 검증은 보류했다.
+
+## M093 Project Context Routes for Members and Terms
+
+- `TeamMembersPage`와 `DomainTermsPage`가 `useParams`의 `spaceId`를 query보다 우선 사용하도록 연결했다. `AppRoutes`에 `/spaces/:spaceId/members`, `/spaces/:spaceId/terms`를 추가하고 legacy `/team-members`, `/terms`를 유지했다.
+- Project sidebar의 멤버·용어 링크는 Space context가 있을 때 target route를 사용한다. 유효하지 않은 target Space는 첫 Space로 자동 대체하지 않고 not-found 또는 empty 상태로 표시한다.
+- 초대, Owner 이양, role 변경·제거, 용어 조회·등록·수정·보관 API와 권한 판정은 변경하지 않았다.
+- UX 근거: 권한 관리와 용어는 현재 프로젝트 문맥 없이는 안전하게 해석할 수 없으므로 URL과 화면 모두에서 Space를 고정한다.
+- Product 근거: Space가 회의·지식·멤버의 상위 경계라는 제품 원칙을 navigation에 반영했다.
+- 유지보수 근거: 기존 alias를 보존한 채 params 우선 규칙을 공통화해 이후 하위 route migration을 단계적으로 진행할 수 있다.
+- Verification: browser에서 target/legacy members·terms 주소의 상태와 overflow 없음 확인. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 기존 lint warning 5건과 Vite chunk-size warning만 남았다.
+
+## M094 Project AI Target Surface
+
+- `/spaces/:spaceId/ai`에 `ProjectAiPage`를 추가했다. 기존 `chatProjectAi`와 `fetchProjectAiHistory` API를 사용해 질문·이력·응답·모델 표시를 제공하며, `SpaceLayout`과 Project AI navigation을 사용한다.
+- 화면에 `Project Knowledge + 접근 가능한 회의` 검색 범위, 권한 선필터 안내, source tag, 근거 없음/unsupported, loading, provider 오류를 구분해 표시한다. project role과 공식 지식 목록도 함께 보여준다.
+- 기존 ProjectOverview의 Project AI 조작은 compatibility 화면에 남겨 API·권한·mutation 흐름을 보존했다. 새 target 화면은 해당 화면을 직접 대체하기 위해 API 계약을 변경하지 않는다.
+- UX 근거: AI 답변보다 먼저 검색 범위와 근거 정책을 보이면 사용자가 프로젝트 전체를 검색한다고 오해하지 않는다.
+- Product 근거: Project AI는 Space의 공식 지식과 접근 가능한 회의만 검색한다는 핵심 제품 원칙을 별도 URL과 화면에 고정했다.
+- 유지보수 근거: Meeting AI와 Project AI의 route·scope·source UI를 분리해 이후 각각의 source viewer와 deep link를 독립적으로 확장할 수 있다.
+- Verification: browser에서 `/spaces/space-1/ai` not-found 상태, overflow 없음, 활성 gradient 없음 확인. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 chat/history/source interaction은 보류했다.
+
+## M095 Project Tasks Target Surface
+
+- `/spaces/:spaceId/tasks`에 `ProjectTasksPage`를 추가해 TODO, IN_PROGRESS, DONE 세 컬럼과 태스크 검색·상태 필터, 담당자·마감일·우선순위 표시를 제공한다.
+- 카드 클릭과 `태스크 관리 열기`는 기존 `/project-overview?spaceId=...#project-tasks`로 연결한다. 기존 drag, create, edit, delete mutation은 legacy 화면에 남겨 API와 권한 경계를 보존했다.
+- Space role, empty/not-found, session 범위 안내를 표시하고 mock 데이터를 실제 성공으로 위장하지 않는다.
+- UX 근거: 프로젝트 홈의 열린 작업 요약과 상세 칸반을 분리해 상태 비교와 카드 조작의 목적을 나눴다.
+- Product 근거: 회의에서 확정된 Action Item이 Project Tasks로 이어지는 제품 흐름을 별도 URL과 보드로 표현했다.
+- 유지보수 근거: 조회 surface와 기존 mutation surface를 먼저 분리해 추후 TaskCard editor/drag interaction을 독립 컴포넌트로 옮길 수 있다.
+- Verification: browser에서 `/spaces/space-1/tasks` not-found 상태, overflow 없음, 활성 gradient 없음 확인. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated board/filter interaction은 보류했다.
+
+## M096 Project Knowledge Target Surface
+
+- `/spaces/:spaceId/knowledge`에 `ProjectKnowledgePage`를 추가했다. 공식 지식의 유형, 제목, 미리보기, source 연결, embedding 상태를 표시하고 제목·내용·유형 검색과 embedding 상태 필터를 제공한다.
+- 지식 등록·수정·보관은 기존 `/project-overview?spaceId=...#project-knowledge` compatibility surface로 연결한다. legacy 화면에 Knowledge anchor를 추가했으며, 기존 API·OWNER/ADMIN 판정을 변경하지 않았다.
+- UX 근거: Project Knowledge를 일반 회의 기록과 분리하고 embedding 상태를 보여줘 AI 검색에 실제로 사용 가능한 기준인지 판단하게 한다.
+- Product 근거: Project AI가 공식 최신 상태를 기준으로 답해야 한다는 제품 원칙을 별도 Knowledge route에 반영했다.
+- 유지보수 근거: 조회/필터 surface와 편집 mutation surface를 분리해 editor drawer와 source viewer를 후속 단계에서 독립적으로 옮길 수 있다.
+- Verification: browser에서 `/spaces/space-1/knowledge` not-found 상태, overflow 없음, 활성 gradient 없음 확인. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated knowledge/filter interaction은 보류했다.
+
 - 2026-07-16: Core의 `sessionStorage + Bearer` Auth는 현재 구현과 제한된 rollback을 위한 legacy compatibility로 분류했다. 목표 Browser-BFF/Auth Service, Redis session, encrypted Token Vault, AWS EKS/LiveKit Cloud 설계와 구현 작업은 `../002-bff-auth-msa/**`에서 관리한다. 이 기록 변경은 Core code/schema를 수정하거나 기존 migration을 되돌리지 않는다.
 - 2026-07-18: `../002-bff-auth-msa` T035에서 Core 요청 경로에 deterministic legacy/target access resolver를 연결했다. target 검증 실패는 legacy로 재시도하지 않고, 유효 target UUID `sub`는 V13 `users.auth_user_id`로 기존 문자열 업무 User를 찾는다. BFF 전용 `/internal/v1/users/projection`은 target Core JWT subject, deterministic resource ID와 workload identity를 모두 검증해 신규 User를 멱등 upsert한다. V13 필드만 사용하므로 migration/ERD 관계 추가는 없으며 Backend 전체 테스트, 실제 PostgreSQL projection insert/update/conflict와 bootJar를 검증했다.
 - 2026-07-21: 사용자 결정으로 회의 채팅 텍스트 첨부파일 RAG(M035)를 이번 전달 범위에서 제외했다. upload API, extractor, retriever, Frontend, AT-001~AT-005 검증은 후속 단계에서 다시 계획한다.
+
+## M097 Meeting Detail and MeetingLayout
+
+- `useMeetingContext`가 기존 `fetchMeetingDetail`과 `fetchMeetingParticipants`를 통해 target Meeting의 상세와 참가자 권한을 읽는다. route의 `spaceId`와 API가 반환한 `detail.spaceId`가 다르면 결과를 차단해 다른 프로젝트의 회의가 화면에 섞이지 않도록 했다.
+- `MeetingLayout`을 추가해 Project sidebar 아래에 회의 breadcrumb, 상태, Space role, Meeting role, 회의 메뉴, 현재 회의 범위 안내를 고정했다. Transcript와 태스크 후보 전용 화면은 후속 milestone에서 연결한다.
+- `MeetingDetailPage`는 회의 결과 흐름, 다음 행동, 참가자별 Meeting role과 접근 상태를 표시한다. API·인증·권한·mutation 계약은 변경하지 않았고, 프로젝트 미존재, loading, API error, 참가자 empty 상태를 `DataState`로 구분했다.
+- UX 근거: 회의 상세에서 사용자가 현재 Space와 Meeting을 동시에 인지하고, 회의 → 회의록 → 후속 업무의 다음 행동을 바로 선택할 수 있어야 한다.
+- Product 근거: MeetingMind의 회의는 독립된 기록 단위가 아니라 회의록과 태스크로 이어지는 프로젝트 업무 컨텍스트다. Meeting role과 Space role을 합치지 않고 별도 표시해 권한 범위를 오해하지 않게 했다.
+- 유지보수 근거: API read boundary를 hook으로 분리하고 layout/page를 분리해 이후 prejoin, transcript, report, task candidate 화면을 같은 Meeting context 안으로 순차 이동할 수 있다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 로그인 계정에 접근 가능한 Space가 없어 `/spaces/space-1/meetings/meeting-1`은 명시적 not-found 상태로 확인했으며 가로 overflow 없음, 활성 gradient 0건을 확인했다.
+
+## M098 Meeting Target Route Connections
+
+- `/spaces/:spaceId/meetings/:meetingId` target route를 추가하고 Project Home과 Project Meetings의 실제 Meeting ID 링크가 이 상세 화면으로 먼저 진입하도록 변경했다. ID가 없는 legacy fallback 데이터는 임의 ID를 만들지 않고 기존 compatibility 주소를 유지한다.
+- `/spaces/:spaceId/meetings/:meetingId/live/prejoin`, `/live`, `/report`, `/ai` target route를 추가했다. 기존 `LiveMeetingPage`, `LiveRoomPage`, `ReportAgentPage`, `MeetingAiPage`는 path parameter를 우선 읽고, 기존 query parameter도 계속 읽는다.
+- Meeting API 요청, LiveKit/STT 동작, 보고서·AI mutation, 인증과 권한 판단은 변경하지 않았다.
+- UX 근거: 프로젝트에서 회의를 선택했을 때 사용자가 곧바로 실시간 화면이나 legacy report로 튀지 않고, 상태와 권한을 확인하는 Meeting context를 먼저 거치게 한다.
+- Product 근거: 모든 회의 산출물은 동일한 Meeting ID에 귀속되어야 하며, target URL이 이를 명시해야 transcript·report·task·AI 확장의 기준점이 된다.
+- 유지보수 근거: path/query dual-read를 사용해 기존 링크와 새 deep link를 동시에 지원하고, 향후 legacy alias redirect를 별도 단계로 옮길 수 있다.
+- Verification: target prejoin/live/report/AI 경로를 브라우저에서 직접 열어 path가 유지되고 가로 overflow가 없음을 확인했다. 실제 회의가 없어 API 오류·접근 차단 상태가 노출되었으며, fake success는 표시되지 않았다. build/lint/test/diff check도 통과했다.
+
+## M099 Meeting Task Candidate Review
+
+- `useMeetingTaskCandidates`가 기존 `fetchTaskCandidates`, `extractTaskCandidates`, `confirmTaskCandidate`, `dismissTaskCandidate`를 사용해 조회·추출·수정·확정·제외 상태를 관리한다. API 요청 형식, 후보 상태, `canConfirm` 결과는 변경하지 않았다.
+- `/spaces/{spaceId}/meetings/{meetingId}/tasks`에 `MeetingTaskCandidatesPage`를 추가하고 `MeetingLayout`의 태스크 후보 메뉴를 실제 target route로 연결했다. 후보 제목·설명·담당자·마감일을 확정 전에만 편집할 수 있고, 확정된 후보는 같은 Space의 Project Tasks로 이동한다.
+- 후보, 칸반 등록, 등록 제외, loading, error, empty 상태를 분리했다. `canConfirm=false`인 사용자는 후보를 읽을 수 있지만 입력과 확정/제외 동작은 비활성화하며, 회의 HOST/EDITOR에게 요청하도록 안내한다.
+- UX 근거: AI가 만든 실행 항목을 자동 등록하지 않고 회의 근거를 확인하는 검토 단계를 둬 잘못된 작업 생성과 권한 오해를 줄인다. 결과 상태와 다음 행동을 카드 안에 함께 배치해 검토 후 바로 칸반으로 이동할 수 있게 한다.
+- Product 근거: 회의록에서 나온 Action Item이 프로젝트 업무로 이어지는 흐름을 별도 Meeting surface로 고정한다. 후보는 현재 Meeting 범위에서만 만들어지고, 확정 이후에만 Project Tasks에 포함된다는 제품 경계를 명시한다.
+- 유지보수 근거: 태스크 후보 API 상태를 전용 hook으로 분리해 기존 `ReportAgentPage`의 보고서 편집 로직과 결합하지 않았다. 이후 보고서·AI 화면을 MeetingLayout에 옮겨도 후보 상태와 mutation 경계를 재사용할 수 있다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. browser에서 `/spaces/space-1/meetings/meeting-1/tasks`의 명시적 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. 실제 Space가 없는 계정이라 populated 후보 편집/확정 interaction은 보류했다.
+
+## M100 Meeting Result Shell
+
+- `MeetingContextLayout`을 추가해 target report와 Meeting AI가 먼저 실제 Meeting 상세·참가자 API를 확인하고, Space ID 불일치나 접근 실패를 `DataState`로 처리하도록 했다. 기존 `MeetingLayout`의 breadcrumb, Space/Meeting role, 회의 scope 문구와 navigation을 두 결과 화면에 공유한다.
+- `ReportAgentPage`와 `MeetingAiPage`에 `embedded` 표시 모드를 추가했다. target route에서는 기존 AppShell을 중첩하지 않고 MeetingLayout 안에 본문을 렌더링하며, legacy query route에서는 기존 AppShell과 WorkspaceSidebar를 그대로 사용한다.
+- 보고서 편집·버전·다운로드·확정, Meeting AI 질문·source·근거 부족·오류 상태의 API와 local state 동작은 변경하지 않았다.
+- UX 근거: 회의록과 AI를 별도 제품처럼 보여주지 않고 같은 Meeting 결과 흐름 안에 배치해 사용자가 현재 회의와 검색 범위를 잃지 않게 한다. 결과 화면에 진입하기 전에 권한과 Space 경계를 확인해 잘못된 회의 결과를 노출하지 않는다.
+- Product 근거: Meeting → Transcript → Report/Task → Meeting AI의 산출물이 하나의 회의 컨텍스트에 귀속된다는 제품 원칙을 URL과 layout으로 고정한다. Meeting AI는 여전히 현재 회의만 검색하고, Report는 해당 회의 산출물만 편집한다.
+- 유지보수 근거: wrapper와 embedded mode를 사용해 기존 호환 화면을 건드리지 않고 target migration을 진행했다. 이후 Live/Prejoin도 같은 context wrapper로 옮길 수 있다.
+- Verification: target report/AI 경로에서 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 browser로 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없는 계정이라 populated embedded 화면은 보류했다.
+
+## M101 Meeting Preparation Context Gate
+
+- `/spaces/{spaceId}/meetings/{meetingId}/live/prejoin`에 `MeetingPrejoinRoutePage`를 추가해 실제 Meeting 상세 API가 반환한 `spaceId`를 먼저 확인한다. Space가 없거나 API 접근이 실패하면 전용 입장 화면 대신 명시적인 not-found/error 상태를 표시한다.
+- 실제 회의 context가 확인된 경우에만 기존 `LiveMeetingPage`를 전용 LiveMeetingLayout으로 렌더링한다. 기존 legacy `/live-meeting` 주소는 기존 fallback 동작과 별도 경계를 유지한다.
+- target prejoin에서는 live meeting detail 요청 실패를 `strictApi` 오류 상태로 처리해 임시 fallback 데이터를 성공 화면처럼 표시하지 않는다. 카메라·마이크 점검, participant role 조회, LiveKit 진입 코드는 변경하지 않았다.
+- UX 근거: 회의 입장 전에 URL의 프로젝트와 실제 회의 소속을 확인하면 다른 프로젝트의 장치·접근 화면이 보이는 혼동을 줄인다. 실시간 화면은 일반 작업 화면보다 집중도가 중요하므로 전용 layout을 유지한다.
+- Product 근거: Live는 승인된 단일 Meeting에만 접근하는 경계이며, prejoin은 회의 시작 전 권한·장치 확인 단계다. target API 실패를 성공으로 표시하지 않아 회의 접근 신뢰성을 지킨다.
+- 유지보수 근거: route context gate와 기존 prejoin UI를 분리해 LiveKit/STT business logic을 건드리지 않았다. 이후 Live room에도 동일한 target context gate를 적용할 수 있다.
+- Verification: browser에서 target prejoin의 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 장치 점검 및 LiveKit 입장 상호작용은 보류했다.
+
+## M102 Meeting Live Room Context Gate
+
+- `/spaces/{spaceId}/meetings/{meetingId}/live`에 `MeetingLiveRoutePage`를 추가해 실제 Meeting 상세·참가자 API와 Space 소속을 먼저 확인한다. Space가 없거나 접근에 실패하면 전용 Live room 대신 명시적인 not-found/error 상태를 표시한다.
+- 실제 Meeting context가 확인된 경우에만 기존 `LiveRoomPage`를 전용 LiveMeetingLayout으로 렌더링한다. target Live room의 `strictApi` 경계는 live meeting 상세 요청 실패 시 fallback 데이터를 성공 화면으로 표시하지 않도록 처리하며, legacy `/live-room` compatibility 동작은 유지한다.
+- LiveKit token 요청·연결·참가자 상태·STT 시작/종료·자막 폴링·용어 설명·회의 제어 API와 권한 판정은 변경하지 않았다.
+- UX 근거: 실시간 회의는 일반 프로젝트 화면보다 집중도가 높으므로 실제 회의와 프로젝트 경계를 먼저 확인해 잘못된 회의실 진입을 막는다. 연결 실패를 임시 참가자 화면으로 보여주지 않아 사용자가 현재 상태를 오해하지 않게 한다.
+- Product 근거: Live room은 승인된 단일 Meeting의 실시간 발화·참가자·STT 범위만 다루는 경계다. target URL과 context gate가 이 범위를 고정해 Meeting → Transcript/Report/Task 흐름과 분리되지 않도록 한다.
+- 유지보수 근거: route gate와 기존 LiveKit/STT 화면을 분리해 실시간 business logic과 API 계약을 보존하고, compatibility alias를 유지한 채 canonical route를 단계적으로 전환할 수 있다.
+- Verification: browser에서 target Live room의 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 LiveKit 연결·STT·자막 상호작용은 보류했고 임시 Live room 성공은 표시되지 않았다.
+
+## M103 Project Calendar Target Surface
+
+- `/spaces/{spaceId}/calendar`에 `ProjectCalendarPage`를 추가해 `fetchCalendarEvents`의 실제 Space 일정만 월간 그리드에 표시한다. 일정이 없으면 empty, 조회 중이면 loading, API 실패면 retry 가능한 error 상태를 사용한다.
+- 캘린더 일정의 회의 링크는 `/spaces/{spaceId}/meetings/{meetingId}` canonical Meeting Detail로 연결하고, Space role과 프로젝트 breadcrumb를 표시한다. 기존 `/spaces`의 캘린더·회의 생성 운영 화면은 compatibility surface로 유지한다.
+- 회의 일정 API, 인증, Space 접근 범위와 회의 상세 route 계약은 변경하지 않았다.
+- UX 근거: 프로젝트 홈의 요약 캘린더와 일정 판단 화면을 분리해 날짜 비교에 필요한 공간을 확보하고, 일정에서 바로 회의 context로 이동할 수 있게 했다.
+- Product 근거: 캘린더는 Space에 속한 회의의 시간 흐름을 보여주는 탐색 계층이며, 사용자가 접근할 수 있는 일정만 표시되어야 한다.
+- 유지보수 근거: target page가 calendar read API와 상태 표시를 독립적으로 소유하고, 기존 생성·mutation surface와 분리해 이후 주/일 보기 확장을 가능하게 했다.
+- Verification: browser에서 `/spaces/space-1/calendar`의 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated 일정과 회의 링크 interaction은 보류했다.
+
+## M104 Project Settings Target Surface
+
+- `/spaces/{spaceId}/settings`에 `ProjectSettingsPage`를 추가해 프로젝트 이름·설명 수정, 권한·소유권 관리 진입, 삭제 위험 구역을 분리한다.
+- 기존 `onUpdateProject`와 `onDeleteProject` mutation handler를 그대로 사용한다. OWNER/ADMIN만 수정할 수 있고 OWNER만 삭제할 수 있으며, 삭제는 공통 `ConfirmDialog`를 거친다. Owner 이양은 기존 Members target 화면으로 연결한다.
+- API, 인증, Space role 판정, Owner transfer 계약과 project mutation business logic은 변경하지 않았다.
+- UX 근거: 일반 정보 수정과 되돌릴 수 없는 삭제를 같은 시각적 무게로 섞지 않고, 권한이 없는 사용자는 비활성 입력과 설명으로 이유를 이해하게 한다.
+- Product 근거: 프로젝트 설정은 Space 자체의 정체성과 수명주기를 관리하는 계층이며, 회의별 권한과 소유권을 혼동하지 않도록 Members 화면을 별도 진입점으로 유지한다.
+- 유지보수 근거: 설정 page는 기존 mutation callback만 조합하고 공통 ConfirmDialog·StatusBadge를 사용해 API layer와 UI 책임을 분리한다. legacy Project Overview의 기존 운영 surface는 보존한다.
+- Verification: browser에서 `/spaces/space-1/settings`의 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated 저장·삭제 interaction은 보류했다.
+
+## M105 Account Settings Target Surface
+
+- `/settings`, `/settings/account`, `/settings/security`를 `AccountSettingsPage`로 연결해 인증된 `AuthSession`의 표시 이름·이메일·계정 상태와 세션 만료 정보를 보여준다. `AuthSessionControls`에서도 계정 설정으로 직접 이동할 수 있다.
+- 현재 기기 로그아웃은 기존 `onLogout`을 사용하고, 모든 기기 로그아웃은 기존 `AllDeviceLogoutModal`과 `onLogoutAll` 재인증 흐름을 사용한다. 프로필 변경·이미지 저장 API가 없는 상태에서 저장 성공을 가장하지 않고 준비 상태를 안내한다.
+- 인증 세션, 로그아웃 API, 재인증·토큰 폐기 정책과 backend 계약은 변경하지 않았다.
+- UX 근거: 계정 정보와 프로젝트 권한을 분리해 사용자가 개인 세션 관리와 Space 운영 설정을 혼동하지 않게 한다. 모든 기기 로그아웃처럼 영향 범위가 큰 동작은 기존 확인·재인증 흐름으로 진입시킨다.
+- Product 근거: MeetingMind의 계정은 여러 Space와 회의 접근을 가로지르는 전역 주체이므로, 세션 상태를 프로젝트 화면과 분리해 현재 인증 범위와 다음 행동을 명확히 한다.
+- 유지보수 근거: AppRoutes는 기존 인증 callback만 주입하고, AccountSettingsPage는 새 인증·프로필 API를 만들지 않는다. 프로필 API가 추가되면 표시 영역에 동일한 read/write 경계를 연결할 수 있다.
+- Verification: 인증된 local session으로 `/settings/account`를 browser에서 확인했고 계정 표시명·이메일·세션 정보, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 모든 기기 로그아웃은 세션 폐기 부작용 때문에 실행하지 않았다. lint 오류는 없고 기존 warning 5건과 Vite chunk-size warning만 남았다.
+
+## M106 Project Meetings Create Surface
+
+- `ProjectMeetingsPage`의 회의 만들기 action을 target route 안에 연결했다. 제목은 필수이고 설명·시작·종료 일시는 선택이며 기존 `onCreateMeeting` callback을 호출한다. OWNER/ADMIN이 아니면 버튼을 비활성화하고 이유를 설명한다.
+- `ProjectHomePage`의 회의 만들기와 열린 작업 링크를 canonical Project Meetings/Tasks route로 연결하고, 더 이상 target 홈의 기본 action이 전체 legacy 운영 화면으로 이동하지 않도록 했다. 기존 compatibility route 자체와 API·mutation 계약은 유지한다.
+- UX 근거: 회의 목록을 확인한 뒤 같은 화면에서 생성해야 context switching이 줄어든다. 권한 없는 사용자는 action을 숨기지 않고 생성 불가 사유를 바로 확인할 수 있다.
+- Product 근거: Project Home의 역할은 프로젝트 상태 요약이고, 회의 생성·필터·목록 운영은 Project Meetings가 소유해야 한다. 회의 생성 후 Meeting Detail로 이어지는 canonical 흐름을 유지한다.
+- 유지보수 근거: 새 API나 별도 mutation을 만들지 않고 AppRoutes가 기존 callback과 loading/error 상태를 주입한다. 생성 UI는 target page에만 두어 레거시 `ProjectOverviewPage`의 큰 상태 묶음과 결합하지 않는다.
+- Verification: browser에서 `/spaces/space-1/meetings`의 명시적 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated 생성 dialog와 권한 interaction은 보류했다. lint 오류는 없고 기존 warning 5건과 Vite chunk-size warning만 남았다.
+
+## M107 Project Tasks CRUD Surface
+
+- `ProjectTasksPage`에 기존 `onCreateProjectTask`, `onMoveProjectTask`, `onDeleteProjectTask`를 연결했다. target 화면에서 제목·설명·담당자·우선순위·마감일을 입력해 생성하고, 카드에서 상태를 변경하며, 삭제는 공통 `ConfirmDialog`를 거친다.
+- OWNER/ADMIN만 생성·상태 변경·삭제할 수 있고, 그 외 사용자는 Space 범위와 제한 사유를 확인한다. target 페이지는 더 이상 태스크 운영을 위해 legacy `ProjectOverviewPage`로 이동하지 않는다.
+- API 계약, task status/priority 모델, 권한 판정, mutation 구현은 변경하지 않았다.
+- UX 근거: 칸반을 보는 화면에서 상태 변경과 삭제가 바로 가능해야 불필요한 context switching과 작업 위치 상실을 줄인다. 위험한 삭제는 확인 단계로 분리했다.
+- Product 근거: 회의에서 확정된 Action Item은 Project Tasks에서 지속 관리되어야 하므로 target route가 실제 운영 책임을 가져야 한다.
+- 유지보수 근거: page는 기존 callback만 사용하고, `AppRoutes`에서 필요한 mutation 경계를 명시적으로 주입한다. 레거시 화면은 호환 주소로 남기되 target 작업 흐름과 분리했다.
+- Verification: browser에서 `/spaces/space-1/tasks`의 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated 생성·상태 변경·삭제 interaction은 보류했다. lint 오류는 없고 기존 warning 5건과 Vite chunk-size warning만 남았다.
+
+## M108 Project Knowledge CRUD Surface
+
+- `ProjectKnowledgePage`에 기존 `onCreateProjectKnowledge`, `onUpdateProjectKnowledge`, `onDeleteProjectKnowledge`를 연결했다. target 화면에서 공식 지식을 등록·수정하고, 삭제는 공통 `ConfirmDialog`를 거친다. 유형과 embedding 상태를 같은 카드에서 확인한다.
+- OWNER/ADMIN만 관리할 수 있고, 다른 사용자는 Space 공식 출처와 제한 사유를 확인한다. target 페이지는 더 이상 지식 관리를 위해 legacy `ProjectOverviewPage`로 이동하지 않는다.
+- API 계약, embedding 상태 모델, Project AI 검색 범위, 권한 판정과 mutation 구현은 변경하지 않았다.
+- UX 근거: Project AI가 참고하는 공식 지식은 검색 화면에서 바로 관리해야 출처와 embedding 상태를 확인한 뒤 수정할 수 있다. 삭제 영향은 확인 단계에서 명시한다.
+- Product 근거: Knowledge는 회의 결과를 다음 업무에 연결하는 프로젝트 자산이므로 Project context 안에서 지속 관리되어야 한다.
+- 유지보수 근거: 기존 callback을 AppRoutes에서 주입하고 target page가 UI 상태만 소유한다. 새 API나 별도 상태 저장소를 만들지 않아 legacy와 target 간 계약이 갈라지지 않는다.
+- Verification: browser에서 `/spaces/space-1/knowledge`의 프로젝트 not-found 상태, 가로 overflow 없음, 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 실제 Space가 없어 populated 등록·수정·삭제 interaction은 보류했다. lint 오류는 없고 기존 warning 5건과 Vite chunk-size warning만 남았다.
+
+## M109 Canonical Alias and Mock Boundary
+
+- 실제 Space/Meeting ID를 알고 있는 내부 이동을 canonical `/spaces/...` target으로 정리했다. Project AI의 Knowledge 이동, workspace의 회의·보고서 이동, Live cancel, 보고서의 태스크 보드 이동은 더 이상 legacy 운영 화면을 기본 목적지로 사용하지 않는다. 전역 화면에서 Space를 특정할 수 없는 링크는 `/spaces`로 보낸다.
+- `AppRoutes`의 legacy query alias는 기존 주소를 유지하되 `spaceId`와 `meetingId`가 있는 경우 canonical target으로 redirect한다. `WorkspaceHomePage`는 workspace API가 mock fallback 상태일 때 임시 데이터를 성공 화면으로 표시하지 않고 retry 가능한 오류 상태를 보여준다.
+- API 계약, 인증, 권한 판정, mutation과 legacy route 자체는 변경하지 않았다. canonical target 전환은 내부 탐색 경계만 조정한다.
+- UX 근거: 사용자가 실제 Space/Meeting context를 알고 이동할 때 legacy query 화면으로 되돌아가지 않게 해 현재 위치와 다음 행동을 유지한다. 데이터가 없을 때 임시 성공 화면을 보여주지 않아 실제 업무 상태와 데모 상태를 혼동하지 않게 한다.
+- Product 근거: MeetingMind의 기본 객체 단위는 Space와 Meeting이며, 보고서·AI·태스크·지식은 해당 context 아래에서 열려야 한다. canonical URL이 이 제품 구조를 탐색에도 반영한다.
+- 유지보수 근거: redirect와 mock 차단을 route/page 경계에 두고 API layer와 business logic은 그대로 유지했다. legacy 외부 링크는 계속 동작하므로 단계적 migration이 가능하다.
+- Verification: Project AI, workspace meeting/report, Live cancel, report task board 내부 이동과 legacy alias redirect, `/spaces` mock fallback 경계를 browser로 확인했다. 대상 화면 가로 overflow 없음과 활성 gradient 0건을 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. lint 오류는 없고 기존 warning 5건과 Vite chunk-size warning만 남았다.
+
+## M110 Target Data Boundary
+
+- `WorkspaceDataSource`에 `loading`을 추가하고 `TargetDataGate`를 만들어 target 화면이 초기 mock 또는 legacy snapshot을 성공 데이터처럼 렌더링하지 않도록 했다. Workspace API 성공과 partial 성공만 target content를 허용하며, loading·legacy/mock 실패는 명시적인 상태와 재시도를 제공한다.
+- `SpaceLayout`, `MeetingLayout`, Workspace Home, Project target pages, Meeting target pages, Members/Terms target routes, Live prejoin/live route에 동일한 경계를 연결했다. 기존 legacy 화면은 호환용으로 유지하고, API 호출·인증·권한·상태 모델은 변경하지 않았다.
+- UX 근거: 사용자는 잠깐 보이는 임시 프로젝트나 회의 정보를 실제 데이터로 오해할 수 있으므로, 데이터 준비 전에는 위치와 상태만 표시하고 업무 content를 숨긴다. 실패 시 retry를 제공해 다음 행동을 명확히 한다.
+- Product 근거: Space와 Meeting은 실제 권한 범위의 기준 객체다. 실제 API가 확인되지 않은 상태에서 프로젝트·회의·AI·권한 정보를 보여주지 않는 것이 제품의 접근 제어와 근거 기반 원칙에 맞다.
+- 유지보수 근거: 페이지마다 중복된 mock guard를 만들지 않고 layout/gate 경계에 상태 정책을 모았다. 이후 도메인 API 분리나 client cache 도입 시에도 target 성공 조건을 한 곳에서 유지할 수 있다.
+- Verification: `/spaces/space-1` target에서 임시 데이터가 성공 화면으로 표시되지 않는 상태, 가로 overflow 없음, 활성 gradient 0건을 browser로 확인했다. `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. lint 오류는 없고 기존 warning 5건과 Vite chunk-size warning만 남았다.
+
+## M111 Target Report and Meeting AI Data Boundary
+
+- `MeetingContextLayout`이 실제 `MeetingDetailResponse`를 render callback으로 하위 target 화면에 전달하도록 확장했다. target Report/Meeting AI는 route query의 샘플 프로젝트·회의 값을 성공 데이터로 사용하지 않고 실제 Meeting 제목·상태·참여자 범위를 기준으로 표시한다.
+- target Report는 Backend report list/detail 응답이 있을 때만 제목·요약·본문을 채우고, report가 없으면 중립적인 빈 상태와 candidate 생성 안내를 표시한다. target AI는 실제 chat 응답 전까지 legacy transcript·decision·Action Item·chat sample을 표시하지 않으며, 근거 없는 report 편집 결과도 만들지 않는다. legacy `/report-agent`, `/meeting-ai` 화면은 기존 호환 동작을 유지한다.
+- API 계약, 인증, 권한, mutation, 상태 모델은 변경하지 않았다. report detail은 기존 `fetchMeetingReportDetail`을 사용하고 Meeting AI 질문은 기존 `chatMeetingAi`를 사용한다.
+- UX 근거: 회의 context가 확인되기 전의 샘플 결과는 사용자가 실제 회의 기록으로 오해할 수 있다. 데이터가 없을 때 빈 상태를 보여주고 다음 행동을 안내하면 현재 상태와 근거 범위를 정확히 이해할 수 있다.
+- Product 근거: MeetingMind의 회의록·AI는 특정 Meeting의 권한 범위와 근거에 종속된다. 실제 회의의 결과와 출처만 보여주는 것이 회의 지식 자산의 신뢰성을 보장한다.
+- 유지보수 근거: target과 legacy를 prop으로 분리하고 API layer를 재사용해 기존 외부 링크와 프로토타입 화면을 깨지 않으면서 단계적 migration을 가능하게 했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. lint 오류는 없고 기존 경고 5건과 Vite chunk-size warning만 남았다.
+
+## M112 App and API Boundaries
+
+- `App.tsx`에 흩어져 있던 legacy seed map을 `app/initialWorkspaceState.ts`로 이동해 App이 초기 상태 정의를 직접 소유하지 않도록 했다. 인증·route bootstrap과 기존 mutation callback 조립은 유지했다.
+- BFF 요청, JSON/blob 응답, 403 CSRF reset, error message 변환을 `api/client.ts`로 분리했다. 기존 구현은 `api/legacyWorkspace.ts`에 보존하고 `api/workspace.ts`는 compatibility facade로 바꿔 legacy API 계약과 `/api/workspace` snapshot을 유지한다.
+- `api/{spaces,dashboard,calendar,meetings,meetingAccess,live,transcripts,reports,tasks,ai,knowledge,terms}.ts` 도메인 경계를 추가하고 target hook/page와 mutation 호출부의 import를 해당 모듈로 전환했다. 주요 함수 구현은 각 도메인 모듈로 이동했고, `legacyWorkspace.ts`에는 legacy snapshot만 남겼다. `workspace.ts` facade는 기존 caller를 위한 호환 export로 유지한다.
+- UX 근거: 화면은 도메인 책임을 기준으로 읽을 수 있어야 하며, target page가 하나의 거대한 API 파일을 탐색하지 않아도 된다. App에서 임시 데이터 정의를 분리하면 실제 상태와 화면 bootstrap의 경계가 명확해진다.
+- Product 근거: Space, Meeting, Report, AI, Task, Knowledge는 서로 다른 사용자 흐름과 권한 범위를 가진다. API 호출도 같은 업무 단위로 읽혀야 scope 누락을 줄일 수 있다.
+- 유지보수 근거: 공통 client를 한 곳에서 유지해 CSRF/error 처리 중복을 없애고, domain import를 먼저 고정해 실제 구현 이동이 호출부 변경 없이 가능하도록 했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. lint 오류와 warning은 없고 Vite chunk-size warning만 남았다.
+
+## M113 Design Token and CSS Boundary
+
+- 공통 앱 토큰을 `frontend/src/styles/tokens.css`로 분리했다. 배경·표면·텍스트·선·accent·success·danger·radius·shadow·motion 기준을 한 곳에서 관리하고, `main.tsx`가 앱 스타일보다 먼저 로드한다.
+- 랜딩 스타일의 사용되지 않는 generic selector가 보호 화면에 영향을 주지 않도록 `html:has(body.landing-theme)`, `.landing-page a`, `.landing-page section`, `.landing-page h1~p`, `.landing-page button/input/textarea` 범위로 제한했다. 앱은 기존 `app-theme` body scope를 유지한다.
+- `app.css`에 남아 있던 보라색 primary/neutral 값을 `--app-accent`, `--app-accent-strong`, `--app-accent-soft`, `--app-text`, `--app-muted`, `--app-line`으로 치환해 앱의 파랑·흰색 제품 톤을 통일했다. API, route, 인증, 권한, 상태 모델은 변경하지 않았다.
+- UX 근거: 화면마다 다른 색 체계와 랜딩 전역 selector는 현재 위치와 상태의 의미를 흔들고, 보호 화면의 기본 여백을 예상하지 못하게 만든다. 토큰과 scope를 분리하면 상태 표현과 layout이 예측 가능해진다.
+- Product 근거: MeetingMind는 회의·보고서·태스크·Knowledge를 하나의 업무 흐름으로 연결하므로, primary action과 scope 상태가 같은 색 의미를 공유해야 한다. 랜딩의 공개 제품 설명이 내부 업무 화면의 의미를 덮어쓰면 안 된다.
+- 유지보수 근거: 토큰을 별도 파일로 두면 이후 shadcn/ui 또는 컴포넌트 스타일을 도입할 때 색·motion 기준을 한 곳에서 조정할 수 있고, 랜딩과 앱 CSS의 변경 경계를 분리할 수 있다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. build는 기존 Vite chunk-size warning만 남겼고 lint warning은 0건이다. browser에서 `/`, `/spaces`, `/spaces/space-1`, `/spaces/space-1/meetings/meeting-1`, `/spaces/space-1/tasks`, `/spaces/space-1/knowledge`, `/spaces/space-1/ai`, `/settings/account`를 확인했다. 실제 Space가 없는 세션에서는 target route가 `NOT FOUND`를 표시했으며 모든 경로의 가로 overflow와 활성 gradient는 0건이었다. landing `390x844` viewport에서도 가로 overflow가 없었다.
+
+## M114 Project Home PageHeader
+
+- 목표: Project Home에서 현재 위치, 프로젝트 이름, Space role, 다음 행동을 하나의 공통 header 계층으로 읽게 한다.
+- 수정 파일: `frontend/src/components/common/PageHeader.tsx`, `frontend/src/components/common/index.ts`, `frontend/src/components/common/common.css`, `frontend/src/pages/ProjectHomePage.tsx`.
+- 구현: `PageHeader`가 breadcrumb, eyebrow, title, description, meta, actions를 표시하도록 만들고, Project Home의 기존 역할 badge와 `다음 회의 열기`/`회의 만들기`/`프로젝트 설정` 링크를 그대로 주입했다. API 호출, route target, 권한 판정, 데이터 계산은 변경하지 않았다.
+- UX 근거: 프로젝트 화면에서 사용자가 현재 Space와 페이지 목적을 먼저 확인한 뒤 다음 회의나 설정으로 이동해야 하므로, 경로·제목·role·CTA를 같은 시선 흐름에 배치했다. breadcrumb는 전체 프로젝트 목록으로 돌아가는 상위 경로를 제공한다.
+- Product 근거: MeetingMind의 기본 업무 단위는 Space이며 Project Home은 회의·태스크·보고서·Project AI로 들어가는 허브다. 헤더가 이 Space context와 다음 행동을 함께 보여줘야 회의 결과가 다음 업무로 이어진다.
+- 유지보수 근거: 페이지별로 반복되던 header markup을 공통 컴포넌트로 분리해 이후 Project Meetings, Knowledge, AI 화면에서도 같은 정보 계층을 재사용할 수 있다. 렌더링 전용 컴포넌트라 API와 상태 소유 경계를 침범하지 않는다.
+- 영향 범위: Project Home 한 화면과 공통 header 스타일만 변경했다. 기존 legacy route, target route, API, 인증, 권한, 상태 모델은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1`의 not-found 경계, `NOT FOUND` heading, 프로젝트 목록 이동, 가로 overflow 없음(`false`)을 확인했다. 접근 가능한 Space를 임의로 생성하지 않아 populated header의 시각 검증은 보류했다.
+
+## M115 Project Meetings PageHeader
+
+- 목표: Project Meetings에서 현재 Space와 회의 목록의 목적, 현재 사용자의 Space role, 회의 생성 가능 여부를 한 번에 읽게 한다.
+- 수정 파일: `frontend/src/pages/ProjectMeetingsPage.tsx`.
+- 구현: 기존 header markup을 공통 `PageHeader`로 교체하고 `/spaces` → 현재 Space → 회의 breadcrumb, `Meetings` eyebrow, Space `RoleBadge`, 회의 생성/프로젝트 홈 action을 연결했다. 검색·상태 필터, `onCreateMeeting` mutation, 권한 비활성화, 오류·empty 상태와 기존 route target은 유지했다.
+- UX 근거: 회의 목록에서는 사용자가 먼저 어느 프로젝트의 회의인지 확인하고, 자신이 생성할 수 있는지 판단한 뒤 검색·필터를 사용해야 한다. 경로와 role을 CTA보다 앞에 두어 권한 없는 사용자의 오류 시도를 줄인다.
+- Product 근거: 회의는 Space 안에서만 해석되고, 회의록·태스크·AI로 이어지는 업무 흐름의 시작점이다. Project Meetings의 상위 context를 명시하면 잘못된 프로젝트에서 회의를 만들거나 찾는 혼동을 줄인다.
+- 유지보수 근거: Project Home과 Project Meetings가 같은 `PageHeader` API를 사용해 이후 Knowledge, AI, Members 화면도 같은 정보 계층으로 전환할 수 있다. 페이지는 API/state 소유 없이 기존 props와 handler만 연결한다.
+- 영향 범위: Project Meetings header와 공통 컴포넌트 사용만 변경했다. API, 인증, 권한 판정, 상태 모델, 검색/필터 동작, route 계약은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/meetings`의 `NOT FOUND` 경계를 확인했고 desktop `1280px`, mobile `390px` 모두 가로 overflow가 없었다. 접근 가능한 Space를 임의로 생성하지 않아 populated 목록·생성 dialog의 시각 검증은 보류했다.
+
+## M116 Project AI Scope and Source Hierarchy
+
+- 목표: Project AI에서 현재 Space, 검색 범위, 답변 근거를 질문 입력보다 먼저 이해할 수 있게 한다.
+- 수정 파일: `frontend/src/pages/ProjectAiPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 header를 `PageHeader`로 교체하고 Space breadcrumb·role badge·Project AI 설명을 연결했다. AI 응답의 source tag를 `근거` 라벨 아래에 배치하고 대화 log에 `aria-busy`를 연결했다. 모바일에서는 scope/source column이 대화보다 먼저 표시되도록 순서를 조정했다.
+- UX 근거: Project AI는 일반 채팅이 아니라 권한 범위가 제한된 검색 화면이다. 사용자가 질문 전에 검색 범위와 근거 정책을 확인해야 다른 프로젝트나 비공식 자료가 검색된다고 오해하지 않는다.
+- Product 근거: Project AI는 현재 Space의 공식 Project Knowledge와 접근 가능한 회의만 검색해야 하며, 근거가 없으면 추정하지 않는다. Scope와 citation을 화면의 고정 정보로 드러내 제품의 신뢰 원칙을 반영했다.
+- 유지보수 근거: PageHeader와 기존 `StatusBadge`/source tag 구조를 재사용했고, AI client·history hook·권한 선필터·unsupported 응답 처리는 수정하지 않았다. CSS는 기존 Project AI surface 범위에만 추가했다.
+- 영향 범위: Project AI 한 화면의 layout, 정보 표현, 접근성 attribute만 변경했다. API, 인증, 권한, route, 상태 모델, 질문 동작은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/ai`의 not-found 경계, desktop `1280px`와 mobile `390px` 가로 overflow 없음, 실제 Space 부재 시 fake AI message 미표시를 확인했다. populated Project AI 답변과 citation interaction은 실제 접근 가능한 Space가 없어 보류했다.
+
+## M117 Project Knowledge PageHeader
+
+- 목표: Project Knowledge에서 현재 Space, 공식 출처의 의미, Space role, 지식 등록 가능 여부를 한 번에 읽게 한다.
+- 수정 파일: `frontend/src/pages/ProjectKnowledgePage.tsx`.
+- 구현: 기존 header markup을 `PageHeader`로 교체하고 `/spaces` -> 현재 Space -> Knowledge breadcrumb, `Official source` eyebrow, Space RoleBadge, `지식 등록`/`프로젝트 홈` action을 연결했다. 설명에 embedding 처리 상태가 검색 가능 여부에 영향을 준다는 정보를 추가했다. 검색·embedding 상태 필터, CRUD mutation, 삭제 ConfirmDialog, 권한 비활성화와 기존 route는 유지했다.
+- UX 근거: Knowledge는 일반 문서 목록이 아니라 Project AI가 참조하는 공식 기준이다. 사용자가 목록을 보기 전에 Space context와 공식 출처의 의미, 현재 권한을 확인해야 잘못된 기준을 등록하거나 삭제하지 않는다.
+- Product 근거: MeetingMind는 회의 기록과 Project Knowledge를 구분하고, Project AI는 공식 Knowledge와 접근 가능한 회의만 검색한다. header에서 공식 source와 embedding 기준을 드러내 제품의 신뢰/검색 계약을 반영했다.
+- 유지보수 근거: Project Home/Meetings/AI와 같은 `PageHeader` API를 재사용해 페이지별 breadcrumb/title/action 중복을 줄였다. API, state, permission 계산과 mutation 경계는 기존 page props/handlers에 남겼다.
+- 영향 범위: Project Knowledge 한 화면의 header 정보 계층만 변경했다. API, 인증, 권한 판정, route, 상태 모델, CRUD 동작은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/knowledge`의 not-found 경계, desktop `1280px`와 mobile `390px` overflow 없음, 실제 Space 부재 시 fake Knowledge 미표시를 확인했다. populated Knowledge 카드와 CRUD dialog는 접근 가능한 Space가 없어 보류했다.
+
+## M118 Members Information Hierarchy
+
+- 목표: Members에서 현재 Space, 관리 목적, 멤버 운영 상태, 초대 진입을 먼저 이해하게 한다.
+- 수정 파일: `frontend/src/pages/TeamMembersPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 멤버 개요와 초대 panel을 공통 `PageHeader`로 연결하고 `/spaces` -> 현재 Space -> Members breadcrumb, `Access control` eyebrow, Space 초대 action, 전체/활성/부재/승인 대기 요약을 추가했다. 초대·회의 승인·오너 이양·멤버 검색/필터·역할 변경·제거 handler와 기존 route/API/상태 계산은 유지했다.
+- UX 근거: Members는 단순 주소록이 아니라 Space 접근 제어 화면이다. 사용자가 대상 Space와 현재 운영 상태를 확인한 뒤 초대, 승인, 소유권, 역할 관리로 내려가도록 시선 순서를 고정했다.
+- Product 근거: MeetingMind의 Space membership은 Project Knowledge·회의·AI 접근의 기반이고, Meeting join request는 Space membership과 별개다. header와 초대 영역에서 Space context를 먼저 고정해 두 권한 범위를 혼동하지 않게 했다.
+- 유지보수 근거: Project Home/Meetings/AI/Knowledge와 같은 `PageHeader` API를 재사용해 header markup과 responsive 규칙을 통일했다. 페이지의 API callback, role 계산, mutation loading/error 경계는 기존 코드에 남겼다.
+- 영향 범위: Members 한 화면의 layout과 정보 표현만 변경했다. 초대, 승인/거절, owner transfer, role update, member removal, 검색/필터, legacy alias와 target route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/members`의 not-found 경계, desktop `1280px`와 mobile `390px` overflow 없음, 실제 Space 부재 시 fake Members 미표시를 확인했다. populated 멤버 표와 초대/승인/오너 이양 interaction은 접근 가능한 Space가 없어 보류했다.
+
+## M119 Project Settings Information Hierarchy
+
+- 목표: Project Settings에서 현재 Space와 role, 기본 정보 변경, 권한 관리, 위험 작업의 순서를 명확히 한다.
+- 수정 파일: `frontend/src/pages/ProjectSettingsPage.tsx`.
+- 구현: 기존 settings header를 `PageHeader`로 교체하고 프로젝트 목록 -> 현재 Space -> Settings breadcrumb, `Project settings` eyebrow, 현재 Space `RoleBadge`, 프로젝트 홈 action을 연결했다. 설명에서 기본 정보·권한·삭제 작업의 차이를 명시했다. 저장 form, OWNER/ADMIN 권한 계산, 멤버 관리 링크, 삭제 `ConfirmDialog`, API callback과 route는 유지했다.
+- UX 근거: 설정 화면에서는 사용자가 먼저 어느 프로젝트를 변경하는지와 자신의 역할을 확인해야 한다. 그 다음 일반 변경과 되돌릴 수 없는 삭제를 분리해 실수를 줄인다.
+- Product 근거: Space가 MeetingMind의 권한 경계이며, 프로젝트 정보와 멤버/소유권은 같은 Space context에서 관리된다. header의 breadcrumb와 role 표시가 이 제품 구조를 드러낸다.
+- 유지보수 근거: Project Home/Meetings/AI/Knowledge/Members와 같은 `PageHeader` API를 재사용해 breadcrumb, title, role, action의 구현 차이를 줄였다. 비즈니스 handler와 permission state는 페이지 내부에 그대로 남겼다.
+- 영향 범위: Project Settings header와 정보 표현만 변경했다. API, 인증, 권한 판정, 저장/삭제 동작, ConfirmDialog, route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/settings`의 not-found 경계, desktop `1280px`와 mobile `390px` overflow 없음, 실제 Space 부재 시 fake 설정과 Danger zone 미표시를 확인했다. populated 저장 form과 삭제 ConfirmDialog는 접근 가능한 Space가 없어 보류했다.
+
+## M120 Account Settings Information Hierarchy
+
+- 목표: 전역 Account Settings에서 계정 context, 현재 세션 상태, 프로필 정보, 보안 action을 한 번에 이해하게 한다.
+- 수정 파일: `frontend/src/pages/AccountSettingsPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 account header를 `PageHeader`로 교체하고 워크스페이스 -> 계정 설정 breadcrumb, `Account settings` eyebrow, 활성 세션 `StatusBadge`, 워크스페이스 이동 action을 연결했다. 기존 프로필·보안/세션 surface와 현재 기기/모든 기기 로그아웃 action, 재인증 modal은 유지했다. PageHeader의 전역 화면 여백과 mobile 여백만 account scope로 추가했다.
+- UX 근거: 계정 설정은 특정 Space에 속하지 않으므로 프로젝트 탐색과 분리된 전역 context가 먼저 보여야 한다. 세션 상태를 header에 두고 프로필과 보안을 이어 배치해 사용자가 계정 정보와 위험 action을 구분한다.
+- Product 근거: MeetingMind는 프로젝트 권한과 계정/세션 보안을 별도 계층으로 운영한다. 워크스페이스 이동과 세션 상태를 header에서 분리해 Space role과 계정 상태를 혼동하지 않게 했다.
+- 유지보수 근거: Project/Meeting 화면과 같은 `PageHeader` API를 재사용해 global route도 breadcrumb/title/action/status 표현을 통일했다. 인증 session, logout callback, 재인증 modal의 책임은 변경하지 않았다.
+- 영향 범위: Account Settings의 header layout과 spacing만 변경했다. 인증, 세션 만료, 로그아웃/재인증, route, modal 동작은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/settings/account`의 PageHeader·프로필·보안/세션 정보 표시, desktop `1280px`와 mobile `390px` overflow 없음, 로그아웃 action 미실행 상태를 확인했다. 세션을 폐기하는 로그아웃 상호작용은 실행하지 않았다.
+
+## M121 Project Tasks PageHeader
+
+- 목표: Project Tasks에서 현재 Space, 사용자의 role, 태스크 관리 목적과 주요 action을 같은 정보 계층에서 이해하게 한다.
+- 수정 파일: `frontend/src/pages/ProjectTasksPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 전용 header를 `PageHeader`로 교체하고 프로젝트 목록 -> 현재 Space -> Tasks breadcrumb, `Action items` eyebrow, Space `RoleBadge`, 태스크 생성/프로젝트 홈 action을 연결했다. 기존 태스크 검색·상태 필터·칸반 이동·생성·삭제 `ConfirmDialog`, 권한 비활성화와 route는 유지했다. 사용하지 않는 Project Tasks 전용 header CSS를 제거하고 공통 반응형 header 규칙을 사용했다.
+- UX 근거: 태스크를 조작하기 전에 사용자가 어느 Space의 업무인지와 현재 권한을 확인해야 한다. 경로·목적·role을 action과 같은 헤더에 두어 잘못된 프로젝트에서 생성하거나 권한 없는 변경을 시도하는 혼동을 줄였다.
+- Product 근거: MeetingMind의 회의 결과는 Space 단위 태스크로 이어진다. Project Tasks가 Space context와 `태스크 만들기` action을 함께 보여줘 회의에서 확정된 일이 다음 업무로 연결되는 제품 흐름을 강화한다.
+- 유지보수 근거: Project Home/Meetings/AI/Knowledge/Members/Settings/Account와 같은 `PageHeader` API를 재사용해 페이지별 header 중복을 줄였다. API 호출, 상태 계산, 권한 판정, mutation handler는 기존 페이지 경계에 남겼다.
+- 영향 범위: Project Tasks의 header markup과 전용 header CSS만 변경했다. API, 인증, 권한, route, 상태 모델, 검색/필터/칸반 CRUD 동작은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/tasks`를 mobile `390px`와 desktop `1280px`로 확인했으며 현재 접근 가능한 Space가 없어 의도한 not-found 경계가 표시되고 가로 overflow는 없었다. populated board, 생성 dialog, 상태 변경/삭제 interaction은 실제 Space가 없어 보류했고 fake 태스크를 표시하지 않았다.
+
+## M122 Project Calendar PageHeader
+
+- 목표: Project Calendar에서 현재 Space, 사용자의 role, 일정 화면의 목적과 회의 목록 이동을 같은 정보 계층에서 이해하게 한다.
+- 수정 파일: `frontend/src/pages/ProjectCalendarPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 전용 header를 `PageHeader`로 교체하고 프로젝트 목록 -> 현재 Space -> 캘린더 breadcrumb, `Schedule` eyebrow, Space `RoleBadge`, 회의 목록 action을 연결했다. 기존 월 이동·오늘 이동·ACL-filtered 일정 조회·회의 상세 링크·빈 상태·오류 재시도와 route는 유지했다. 사용하지 않는 Calendar 전용 header CSS를 제거하고 공통 반응형 header 규칙을 사용했다.
+- UX 근거: 일정 화면에서는 사용자가 어느 Space의 일정인지 먼저 확인한 뒤 월을 이동하거나 회의를 선택해야 한다. 경로·목적·role을 달력 도구보다 앞에 배치해 context switching과 권한 범위 혼동을 줄였다.
+- Product 근거: MeetingMind의 Calendar는 접근 가능한 회의만 Space 시간 흐름으로 보여주는 운영 화면이다. Space context와 `회의 목록` 이동을 함께 노출해 일정 확인에서 회의 업무로 자연스럽게 이어지게 했다.
+- 유지보수 근거: Project Tasks와 동일한 `PageHeader` API와 responsive override를 재사용해 프로젝트 하위 화면의 헤더 구현 차이를 줄였다. `fetchCalendarEvents`, 날짜 계산, 상태 경계와 route 책임은 변경하지 않았다.
+- 영향 범위: Project Calendar의 header markup과 전용 header CSS만 변경했다. API, 인증, 권한, route, 일정 조회, 월 이동, 빈/오류 상태는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/calendar`를 mobile `390px`와 desktop `1280px`로 확인했으며 현재 접근 가능한 Space가 없어 의도한 not-found 경계가 표시되고 가로 overflow는 없었다. populated 달력과 회의 링크 interaction은 실제 Space가 없어 보류했고 fake 일정을 표시하지 않았다.
+
+## M123 Meeting Transcript Information Hierarchy
+
+- 목표: Meeting Transcript에서 회의 context는 상위 `MeetingLayout`이 책임지고, 본문은 전사 목적·처리 상태·검색·발화 목록에 집중하게 한다.
+- 수정 파일: `frontend/src/styles/app.css`.
+- 구현: Transcript 내부 header의 카드 border/background/shadow를 제거하고 간결한 section header로 낮췄다. 상위 MeetingLayout의 회의명·breadcrumb·role·status·meeting nav와 본문 전사 상태를 중복하지 않도록 시각 계층을 분리했으며, 640px 이하에서는 전사 검색 toolbar가 세로로 쌓이도록 유지했다. 전사 API, 검색 상태, Meeting AI route, loading/error/empty 경계는 변경하지 않았다.
+- UX 근거: 사용자는 먼저 회의 context를 확인하고 그 다음 전사 검색과 발화 내용을 읽는다. 같은 화면 안에서 회의 header와 전사 header를 같은 무게의 카드로 반복하지 않아 정보 과부하와 context switching을 줄였다.
+- Product 근거: Transcript는 Meeting AI가 현재 회의 근거를 확인하는 작업 surface이지 별도 회의가 아니다. MeetingLayout에서 회의 범위와 권한을 고정하고 본문에서는 전사 처리 상태와 발화 탐색을 우선해 회의 -> 전사 -> Meeting AI 흐름을 명확히 했다.
+- 유지보수 근거: 기존 `MeetingLayout`, `DataState`, `StatusBadge`, dialogue hook과 route를 재사용했다. 변경은 Transcript scope CSS에 한정되어 API·상태·권한 계약을 건드리지 않는다.
+- 영향 범위: Meeting Transcript의 내부 header 표현과 모바일 toolbar layout만 변경했다. 전사 데이터·검색·권한·Meeting AI 이동·loading/error/empty 동작은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/meetings/meeting-1/transcript`를 mobile `390px`와 desktop `1280px`로 확인했으며 현재 접근 가능한 Space가 없어 의도한 not-found 경계가 표시되고 가로 overflow는 없었다. populated 전사 목록과 검색 interaction은 실제 Space가 없어 보류했고 fake 전사를 표시하지 않았다.
+
+## M124 Meeting Report Context Header
+
+- 목표: Meeting Report의 상단 작업 영역이 내부 구현명 대신 사용자가 이해하는 `회의록` context와 실제 문서 제목을 먼저 보여주게 한다.
+- 수정 파일: `frontend/src/pages/ReportAgentPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: Report 작업 헤더의 `report-agent / ...` 표기를 `회의록` label과 `reportView.title` 기반 문서 제목으로 교체했다. 저장 상태, Meeting AI 이동, Markdown/DOCX/PDF 다운로드, 회의록 저장 action은 그대로 유지했고 모바일에서는 문서 제목이 헤더 너비를 넘지 않도록 ellipsis와 100% 폭 규칙을 적용했다.
+- UX 근거: 사용자는 보고서를 편집할 때 내부 컴포넌트 이름이 아니라 현재 문서와 저장 상태를 확인해야 한다. 상위 MeetingLayout의 회의 위치·권한·상태와 Report의 문서 context를 분리해 중복과 인지 부담을 줄였다.
+- Product 근거: 회의는 보고서로 확정되고, 보고서는 태스크·Knowledge·AI로 이어지는 공식 기록이다. `회의록`과 실제 제목을 작업 헤더에 고정해 공식 기록을 편집하는 화면임을 명확히 했다.
+- 유지보수 근거: 기존 report state, API callback, route, embedded data boundary를 그대로 사용하고 표시용 markup/CSS만 변경했다. fake report fallback을 추가하지 않았으며 실제 report detail이 없을 때의 빈 상태 경계를 유지했다.
+- 영향 범위: Report 작업 헤더의 텍스트 계층과 반응형 폭만 변경했다. 보고서 조회·수정·confirm·restore·download·AI 편집·task candidate mutation은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/meetings/meeting-1/report`를 mobile `390px`와 desktop `1280px`로 확인했으며 현재 접근 가능한 Space가 없어 not-found 경계가 표시되고 fake `AI 자동 생성` 내용은 표시되지 않았으며 overflow도 없었다. populated report interaction은 실제 Space가 없어 보류했다.
+
+## M125 Meeting Task Candidates Information Hierarchy
+
+- 목표: Meeting Task Candidates에서 회의 context는 상위 `MeetingLayout`이 책임지고, 본문은 후보 검토 기준·권한·검토 대기열에 집중하게 한다.
+- 수정 파일: `frontend/src/styles/app.css`.
+- 구현: 후보 화면 내부 header의 카드 border/background/shadow를 제거하고 간결한 검토 section으로 낮췄다. 상위 MeetingLayout의 회의명·breadcrumb·role·status·meeting nav와 후보 화면의 검토 목적을 분리했으며, 700px 이하에서는 재추출 action이 세로 흐름으로 내려가도록 유지했다. 후보 API, 권한 판정, 편집·확정·제외 handler, loading/error/empty 경계는 변경하지 않았다.
+- UX 근거: 후보는 회의에서 나온 실행 항목을 검토한 뒤 프로젝트 칸반으로 보내는 중간 단계다. 회의 context를 반복하는 큰 header보다 검토 기준과 권한 안내를 먼저 읽게 해야 확정 전 상태와 등록 가능 여부를 오해하지 않는다.
+- Product 근거: MeetingMind의 회의 -> 태스크 흐름은 근거 확인과 사용자 확정을 거쳐야 한다. 화면의 검토 기준·현재 회의 범위·Meeting role 안내를 독립 surface로 유지해 자동 추출 결과가 곧 공식 태스크라는 오해를 막았다.
+- 유지보수 근거: 기존 `MeetingLayout`, `StatusBadge`, `RoleBadge`, task candidate hook과 route를 재사용하고 CSS scope만 조정했다. 데이터·mutation·권한 계약은 그대로 유지된다.
+- 영향 범위: Meeting Task Candidates의 내부 header와 mobile layout만 변경했다. 후보 조회·추출·필드 수정·칸반 등록·제외·권한 제한·route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/meetings/meeting-1/tasks`를 mobile `390px`와 desktop `1280px`로 확인했으며 현재 접근 가능한 Space가 없어 not-found 경계가 표시되고 가로 overflow는 없었다. populated 후보 interaction은 실제 Space가 없어 보류했고 fake 후보를 표시하지 않았다.
+
+## M126 Meeting AI Context Boundary
+
+- 목표: target Meeting AI에서 회의 위치·권한·상태는 상위 `MeetingLayout` 하나가 책임지고, 본문은 현재 회의 범위·전사·근거·질문에 집중하게 한다.
+- 수정 파일: `frontend/src/pages/MeetingAiPage.tsx`.
+- 구현: `embedded` target에서는 내부 `meeting-ai-page-header`를 렌더링하지 않도록 분기하고, legacy `/meeting-ai`에서는 기존 topbar를 그대로 유지했다. 기존 `chatMeetingAi` 호출, `meetingId` 검사, source/unsupported/error 표시, 추천 질문과 입력 상태는 변경하지 않았다.
+- UX 근거: 같은 회의 제목과 상태가 MeetingLayout과 Meeting AI 내부 topbar에 반복되면 사용자가 두 개의 context를 가진 것으로 오해할 수 있다. target에서는 상위 탐색과 권한 context를 한 곳에 두고, AI 본문은 범위·근거·질문에 집중시켰다.
+- Product 근거: Meeting AI는 프로젝트 전체를 검색하는 기능이 아니라 현재 회의만 답하는 보조 도구다. 단일 Meeting context header를 사용하면 회의 -> 전사/근거 -> 질문 흐름과 scope 경계가 명확해진다.
+- 유지보수 근거: embedded/legacy route의 표현만 분리하고 API·hook·state·route 계약은 그대로 재사용했다. target data boundary가 제공하는 실제 Meeting이 없을 때 기존 not-found 경계를 유지하며 fake AI content를 추가하지 않았다.
+- 영향 범위: target Meeting AI의 중복 header 렌더링만 변경했다. AI API, 인증, 권한, source filtering, unsupported/error 처리, legacy compatibility route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/meetings/meeting-1/ai`를 mobile `390px`와 desktop `1280px`로 확인했으며 현재 접근 가능한 Space가 없어 not-found 경계가 표시되고 overflow는 없었다. 실제 질문/source interaction은 실제 Space가 없어 보류했으며 fake 답변을 표시하지 않았다.
+
+## M127 Domain Terms PageHeader
+
+- 목표: Domain Terms에서 현재 프로젝트, 사용자의 Space role, 용어사전 목적과 프로젝트 선택을 검색/CRUD보다 먼저 이해하게 한다.
+- 수정 파일: `frontend/src/pages/DomainTermsPage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 전용 header를 `PageHeader`로 교체하고 프로젝트 목록 -> 현재 Space -> 용어사전 breadcrumb, `Domain dictionary` eyebrow, Space `RoleBadge`, 프로젝트 선택 selector를 연결했다. 검색·상태 필터·등록/수정·활성/비활성 처리·권한 안내·empty/error 상태와 target/legacy route는 유지했다. 사용하지 않는 전용 header CSS를 제거하고 공통 반응형 header 규칙을 사용했다.
+- UX 근거: 용어는 프로젝트 문맥에 따라 의미가 달라지므로 사용자가 먼저 어느 Space를 편집하는지와 권한을 확인해야 한다. selector를 action 영역에 유지해 프로젝트 전환을 숨기지 않으면서, 검색과 CRUD가 그 다음 단계로 읽히게 했다.
+- Product 근거: MeetingMind의 용어사전은 회의 기록과 AI 검색에서 프로젝트별 의미를 맞추는 지식 기반이다. Space context와 role을 고정해 잘못된 프로젝트의 용어를 수정하거나 AI 근거 범위를 오해하는 일을 줄였다.
+- 유지보수 근거: Project 화면과 동일한 `PageHeader`/`RoleBadge` API를 사용해 breadcrumb·title·selector·role 표현을 통일했다. terms API, query parameter 선택 로직, mutation state와 route 계약은 변경하지 않았다.
+- 영향 범위: Domain Terms의 header markup과 전용 header CSS만 변경했다. 검색·필터·용어 CRUD·권한·empty/error 처리와 target/legacy route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces/space-1/terms`를 mobile `390px`와 desktop `1280px`로 확인했으며 PageHeader와 empty/not-found 경계가 표시되고 가로 overflow는 없었다. 실제 Space가 없어 populated 용어 목록과 CRUD interaction은 보류했고 fake 용어를 표시하지 않았다.
+
+## M128 Workspace Home PageHeader
+
+- 목표: Workspace Home에서 현재 전역 context, 제품의 업무 목적, 참여 프로젝트 규모를 오늘 회의·최근 활동보다 먼저 이해하게 한다.
+- 수정 파일: `frontend/src/pages/WorkspaceHomePage.tsx`, `frontend/src/styles/app.css`.
+- 구현: 기존 Workspace Home header를 `PageHeader`로 교체하고 워크스페이스 breadcrumb, `Workspace` eyebrow, 업무 목적 제목/설명, 프로젝트 수 meta를 연결했다. 기존 데이터 source 표시, 알림 panel, 오늘 회의, 최근 활동, action items, 최신 보고서, 프로젝트 목록, 캘린더와 callback은 유지했다. 사용하지 않는 전용 header CSS를 제거하고 공통 header 규칙을 사용했다.
+- UX 근거: 전역 대시보드에서는 사용자가 어느 범위의 작업을 보고 있는지와 이 화면에서 무엇을 얻는지 먼저 알아야 한다. 프로젝트 수를 title 옆 상태 정보로 두고, 오늘 해야 할 일과 최근 활동을 바로 아래에 배치해 scanning 순서를 고정했다.
+- Product 근거: MeetingMind의 핵심 흐름은 여러 Space의 회의 결과를 다음 업무로 연결하는 것이다. Workspace Home의 역할을 프로젝트·회의 집계와 다음 행동의 허브로 명확히 해 Space 상세 화면과 구분했다.
+- 유지보수 근거: 기존 `AppShell`, `TargetDataGate`, dashboard/calendar API와 state 계산을 그대로 두고 표시용 header만 `PageHeader`로 통일했다. 페이지가 API나 비즈니스 로직을 새로 소유하지 않는다.
+- 영향 범위: Workspace Home의 header markup과 전용 header CSS만 변경했다. 오늘 회의·알림·검색·필터·캘린더·프로젝트/회의 생성 route와 callback은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. 인증된 local browser에서 `/spaces`를 mobile `390px`와 desktop `1280px`로 확인했으며 PageHeader, empty 상태, overflow 없음이 확인됐다. 현재 local session 데이터가 empty여서 populated dashboard 카드와 알림/캘린더 interaction은 보류했고 fake 프로젝트·회의를 표시하지 않았다.
+
+## M129 Frontend Route and Responsive Audit
+
+- 목표: 전체 canonical/legacy route가 설계된 AppShell·SpaceLayout·MeetingLayout·특수 Live/Access/Invitation layout 경계를 유지하면서 상태·접근성·반응형 기준을 만족하는지 확인한다.
+- 수정 파일: `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: 코드 변경 없이 `AppRoutes`와 각 page/layout의 route ownership을 다시 확인했다. Workspace/Project/Meeting 화면은 공통 shell과 PageHeader/MeetingLayout을 사용하고, Live/Prejoin/Meeting Access/Space Invitation은 실시간 장치·접근 승인·초대 token이라는 별도 context를 가져 전용 layout을 유지하는 것으로 결정했다. 전체 23개 주요 route를 browser에서 확인했다.
+- UX 근거: 모든 화면을 같은 header로 만들면 Meeting live controls, invite resolution, access approval처럼 사용자 목표와 보안 상태가 다른 화면의 context가 약해진다. 공통 navigation이 필요한 업무 화면은 통일하고, 상태 중심 특수 화면은 전용 layout을 유지하는 것이 discoverability와 error prevention에 맞다.
+- Product 근거: MeetingMind는 Workspace -> Space -> Meeting의 업무 계층과 Live/Access/Invitation의 운영 경계를 함께 가진다. route별 context를 보존해야 권한 범위와 실시간 상태를 잘못 해석하지 않는다.
+- 유지보수 근거: route alias와 기존 API/상태/권한 경계를 변경하지 않고 browser 검증만 수행해 통합 위험을 늘리지 않았다. 이후 populated Space가 제공되면 같은 route matrix에서 CRUD·LiveKit·STT·AI source interaction을 확장 검증할 수 있다.
+- 영향 범위: 코드 변경은 없고 검증 문서만 갱신했다. 모든 route target, API, 인증, 권한, 상태 모델, special layout을 유지했다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint`, `cd frontend && npm run test -- --run`, `git diff --check` 통과. browser에서 주요 23개 route를 mobile `390px`와 desktop `1280px`로 열어 overflow 0건, main landmark 존재, 접근 불가/empty 상태에서 fake 성공 데이터 미표시를 확인했다. populated Space가 없어 실제 CRUD·LiveKit·STT·AI source interaction은 운영 계정 검증으로 남겼다.
+
+## M130 온프레 AI Provider 전환 PoC
+
+- 목표: 기존 FastAPI AI 서버, prompt, citation validation, PostgreSQL/pgvector retrieval, embedding worker generation/swap을 유지하면서 OpenAI 직접 호출만 provider factory 경계로 감싼다. 환경변수만으로 OpenAI와 local OpenAI-compatible text/embedding provider를 전환할 수 있게 한다.
+- 수정 파일: `backend/src/main/resources/application.yml`, `backend/src/test/java/com/meetingmind/demo/MeetingMindApplicationTest.java`, `backend/src/test/java/com/meetingmind/demo/service/HttpAiGatewayClientEndpointTest.java`, `README.md`, `ai/.env.example`, `ai/onprem.env.example`, `ai/Dockerfile`, `ai/README.md`, `ai/app/text_generation_provider.py`, `ai/app/embedding_provider.py`, `ai/app/embedding_worker.py`, `ai/app/main.py`, `ai/app/observability.py`, `ai/onprem_poc_smoke.py`, `ai/onprem_poc_validate.py`, `ai/onprem_poc_run.sh`, `ai/onprem_poc_prepare_eval_db.sh`, `ai/tests/test_embedding_worker.py`, `ai/tests/test_meeting_ai.py`, `ai/tests/test_text_generation_provider.py`, `ai/tests/test_provider_boundary.py`, `ai/tests/test_onprem_compose_wiring.py`, `ai/tests/test_onprem_poc_*.py`.
+- 구현: `TextGenerationProvider`와 `EmbeddingProvider` factory 및 provider 중심 `call_text_generation` entrypoint를 추가하고 `AI_TEXT_PROVIDER`, `AI_EMBEDDING_PROVIDER`로 `openai`/`local-openai-compatible`을 선택하게 했다. 기존 OpenAI provider는 유지했고, local provider는 OpenAI-compatible `responses` 또는 `chat-completions` text API와 `/embeddings` API를 사용한다. Meeting AI, Project AI, report, task, prompt, JSON parsing, citation validation, RAG query, chunk schema, worker claim/load/complete/swap 로직은 재사용했다. Backend AI gateway client와 internal endpoint 계약은 변경하지 않았고, `meetingmind.ai.base-url`은 기존 기본값을 유지한 채 `MEETINGMIND_AI_BASE_URL`로 명시 설정할 수 있게 yml에 선언했다. `compose.local.yml`의 `ai` profile에는 FastAPI `meetingmind-ai` 서비스와 `meetingmind-ai-worker`가 같은 provider/vector env를 받도록 연결하고, 기존 `/health`를 사용하는 `meetingmind-ai` healthcheck를 추가해 로컬 실행도 환경변수 전환 경계를 따른다. `ai/onprem.env.example`에는 최종 smoke/validator gate가 요구하는 local provider, streaming, retrieval, threshold env를 모았다. `onprem_poc_run.sh`는 첫 번째 인자 또는 `ONPREM_POC_ENV_FILE`로 명시 env file의 `KEY=VALUE`, `export KEY=VALUE`, 단순 quoted value를 로드한 뒤 smoke와 validator를 실행하고, 이미 export된 shell 환경변수를 env file 값보다 우선한다. Env loader는 shell identifier 형식 key만 허용하고 명령 치환을 실행하지 않으며, wrapper는 외부 `ONPREM_POC_MIN_STARTED_AT` 값을 신뢰하지 않고 이번 실행 시작 시각을 validator 호출에 주입해 오래된 result JSON을 최종 gate에 쓰지 못하게 한다. AI Docker image에는 `onprem_poc_smoke.py`, `onprem_poc_validate.py`, `onprem_poc_run.sh`, `onprem_poc_prepare_eval_db.sh`를 포함해 컨테이너 안에서도 같은 smoke/validator gate와 평가 DB 준비 절차를 실행할 수 있게 했다.
+- 관측/검증: local streaming chat-completions 경로에서 `ttftMs`, `totalMs`, `tokensPerSecond`, token count/estimate를 수집하고 provider 완료 로그와 smoke metric에 남긴다. `/health`에는 provider id, local base URL configured 여부와 local-compatible 판정, internal service token configured 여부, API style, stream 여부, response format mode, embedding/vector dimension 양수 일치, DB configured 여부만 노출하고 token/base URL/DSN/secret 원문은 노출하지 않는다. Provider alias인 `local`, `openai-compatible`은 health/smoke config에서 `local-openai-compatible`으로 canonicalize해 validator 기준과 맞춘다. ASGI HTTP boundary 테스트는 실제 FastAPI app을 호출해 `/health` provider config와 `/api/internal/{meeting-ai/chat,meeting-ai/explain-term,project-ai/chat,meeting-ai/generate-report,meeting-ai/extract-tasks}` service-token 인증, trace header, response shape가 유지되는지 확인한다. `/health`와 smoke safe config 테스트는 validator의 민감 필드명 denylist 기준도 함께 적용해 `token`, `base_url`, `database_url`, `dsn` 같은 raw secret/endpoint 키가 결과 키로 다시 생기지 않게 고정한다. Backend `MeetingMindApplicationTest`는 `MEETINGMIND_AI_BASE_URL`과 `AI_INTERNAL_SERVICE_TOKEN` placeholder가 Spring context의 AI gateway beans까지 주입되는지 검증한다. Backend gateway 테스트는 Meeting/term, Project AI, report, task gateway client가 `MEETINGMIND_AI_BASE_URL`로 만든 internal endpoint와 `AI_INTERNAL_SERVICE_TOKEN` header, trace header, 기존 request/response shape를 유지하는지 local HTTP server로 검증한다. `onprem_poc_smoke.py`는 네트워크 호출 전 final smoke local provider 강제, local text/embedding base URL 절대 http(s) URL, api.openai.com/userinfo/query/fragment 차단, final smoke용 streaming chat-completions 설정, placeholder가 아닌 model, embedding/vector dimension, required retrieval DB 설정, `AI_INTERNAL_SERVICE_TOKEN` 설정 여부를 preflight로 확인한 뒤 provider probe, embedding probe, retrieval latency, Meeting AI, Project AI, report, task, unsupported guard, permission guard를 실행하고, retrieval scope는 `ONPREM_POC_PROJECT_ID`와 `ONPREM_POC_ALLOWED_MEETING_IDS` raw env를 직접 읽어 미설정 상태를 기본값으로 감추지 않는다. 결과 JSON에는 schema version, UTC 시작/완료 시각, 전체 duration, preflight flag를 `run` metadata로 남긴다. `ONPREM_POC_PREFLIGHT_ONLY=true`일 때는 provider/RAG 호출 없이 safe config만 출력해 env file을 먼저 확인할 수 있고, 이 모드에서만 placeholder 모델명을 허용한다. `onprem_poc_validate.py`는 preflight-only 결과를 최종 결과로 인정하지 않으며, 최종 결과 JSON의 run metadata, wrapper 실행 시작 시각 이후 생성된 result 여부, local provider, local base URL 구성과 local-compatible 판정, model 구성, placeholder가 아닌 실제 모델명, internal service token 설정 여부, result JSON 민감 필드명 부재, text provider probe의 실제 JSON parse/shape, text provider probe와 Meeting/Project/Report/Task generation 응답에서 관측한 모델명의 설정 모델 일치, embedding provider 응답에서 관측한 모델명의 설정 모델 일치, generation response format mode와 config 일치, stream option과 embedding dimensions option boolean safe config, streaming 기반 0 이상 TTFT, 각 scenario의 전체 소요 시간 `durationMs`, provider/retrieval metric의 scenario duration 상한과 run duration 일관성, embedding provider metric, retrieval 측정/source 반환/scope config, summary scenario count/failed scenario와 retrieval requirement를 포함한 metrics 재계산 값의 일치, metrics scenario 중복/unknown 방지, citation/JSON parsing success, hallucination proxy, permission `403` guard를 gate로 판정한다. Optional TTFT와 tokens/sec threshold는 provider probe뿐 아니라 Meeting AI, Project AI, report, task generation scenario 전체에 적용한다.
+- 재사용 근거: Backend/Frontend API 계약은 변경하지 않았다. AI service의 legacy `call_openai_text` test hook과 internal endpoint shape, 기존 source scope validator, PostgreSQL/pgvector repository, embedding job queue/generation/swap, `embedding_chunks vector(1536)` 경계는 유지했다. Dimension mismatch와 local provider api.openai.com 또는 invalid base URL은 provider 초기화와 smoke preflight에서 실패시키고, 실패 메시지는 기존 worker 재색인/swap 경로와 schema migration을 먼저 사용하라고 안내한다. `test_provider_boundary.py`는 provider module 밖의 직접 provider HTTP 호출을 금지해 service/router/RAG 비즈니스 로직이 `TextGenerationProvider`와 `EmbeddingProvider` 경계를 우회하지 못하게 한다.
+- Verification: `docker compose -f compose.local.yml --profile ai config --quiet`, `cd backend && ./gradlew test`, `cd backend && ./gradlew test --tests com.meetingmind.demo.MeetingMindApplicationTest`, `cd backend && ./gradlew test --tests com.meetingmind.demo.service.HttpAiGatewayClientEndpointTest`, `cd backend && ./gradlew test --tests com.meetingmind.demo.service.HttpMeetingAiGatewayClientTest --tests com.meetingmind.demo.service.HttpAiGatewayClientEndpointTest`, `cd backend && ./gradlew test --tests com.meetingmind.demo.MeetingMindApplicationTest --tests com.meetingmind.demo.service.HttpAiGatewayClientEndpointTest --tests com.meetingmind.demo.service.HttpMeetingAiGatewayClientTest`, `docker build -q ai` (`sha256:ed1de1c80a7f076e02e33dc2824a7f939d144a5e6d5387e47435d8336c21d5a5`), `docker run --rm sha256:ed1de1c80a7f076e02e33dc2824a7f939d144a5e6d5387e47435d8336c21d5a5 python -m compileall app onprem_poc_smoke.py onprem_poc_validate.py`, `docker run --rm sha256:ed1de1c80a7f076e02e33dc2824a7f939d144a5e6d5387e47435d8336c21d5a5 test -x /app/onprem_poc_run.sh -a -x /app/onprem_poc_prepare_eval_db.sh`, `docker run --rm sha256:ed1de1c80a7f076e02e33dc2824a7f939d144a5e6d5387e47435d8336c21d5a5 ./onprem_poc_run.sh /tmp/missing-onprem.env` exit 2 확인, `cd ai && ./.venv/bin/python -m unittest discover -s tests` 185건 통과(8 skipped), `cd ai && ./.venv/bin/python -m unittest tests.test_provider_url tests.test_onprem_poc_smoke tests.test_text_generation_provider tests.test_embedding_worker` 55건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_provider_url` 2건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_provider_boundary` 1건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_compose_wiring` 2건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_frontend_boundary` 1건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_run_script` 6건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_smoke` 29건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_validate` 32건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_validate tests.test_onprem_poc_smoke tests.test_onprem_poc_run_script` 68건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_text_generation_provider` 9건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai.FastApiHttpBoundaryTest` 6건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai.HealthTest tests.test_meeting_ai.FastApiHttpBoundaryTest` 11건 통과, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_smoke tests.test_meeting_ai.HealthTest tests.test_meeting_ai.FastApiHttpBoundaryTest` 40건 통과, `cd ai && ./.venv/bin/python -m compileall app/provider_url.py tests/test_provider_url.py tests/test_onprem_poc_smoke.py tests/test_text_generation_provider.py tests/test_embedding_worker.py`, `cd ai && ./.venv/bin/python -m compileall tests/test_onprem_poc_run_script.py`, `cd ai && ./.venv/bin/python -m compileall onprem_poc_smoke.py tests/test_onprem_poc_smoke.py tests/test_onprem_poc_run_script.py`, `cd ai && ./.venv/bin/python -m compileall app onprem_poc_smoke.py onprem_poc_validate.py tests/test_onprem_poc_smoke.py tests/test_meeting_ai.py`, `cd ai && ./.venv/bin/python -m compileall app onprem_poc_smoke.py onprem_poc_validate.py tests/test_onprem_poc_postgres_integration.py`, `bash -n ai/onprem_poc_run.sh ai/onprem_poc_prepare_eval_db.sh`, `set -a && source ai/onprem.env.example && set +a && test "$AI_TEXT_PROVIDER" = local-openai-compatible && test "$AI_TEXT_STREAM" = true && test "$ONPREM_POC_REQUIRE_RETRIEVAL" = true`, `cd ai && ONPREM_POC_PREFLIGHT_ONLY=true ONPREM_POC_RESULT_PATH=/tmp/meetingmind-preflight-wrapper-run.json ./onprem_poc_run.sh ./onprem.env.example` 통과 및 `run.resultSchemaVersion: 2`, `preflightOnly: true`, `internalServiceTokenConfigured: true` safe config 출력 확인, `cd ai && ./onprem_poc_run.sh ./onprem.env.example`는 placeholder 모델명 preflight error로 exit 1 확인, `git diff --check -- ai/app/provider_url.py ai/tests/test_provider_url.py ai/tests/test_onprem_poc_smoke.py ai/tests/test_text_generation_provider.py ai/tests/test_embedding_worker.py`, `git diff --check -- ai/onprem_poc_smoke.py ai/tests/test_onprem_poc_smoke.py ai/tests/test_onprem_poc_run_script.py`, `git diff --check -- ai/tests/test_onprem_poc_smoke.py ai/tests/test_meeting_ai.py`, `git diff --check -- backend/src/main/resources/application.yml backend/src/test/java/com/meetingmind/demo/MeetingMindApplicationTest.java backend/src/test/java/com/meetingmind/demo/service/HttpAiGatewayClientEndpointTest.java README.md ai compose.local.yml specs/001-meetingmind-core/implement.md specs/001-meetingmind-core/tasks.md` 통과. 로컬 `meetingmind-postgres-local`에 빈 평가 DB `meetingmind_onprem_eval_0722_1`, `meetingmind_onprem_eval_0722_2`, `meetingmind_onprem_eval_0722_3`를 만들고 Backend migration V1~V18을 적용했다. `ONPREM_POC_EVAL_DATABASE_NAME=meetingmind_onprem_eval_script_0722 ./ai/onprem_poc_prepare_eval_db.sh`로 helper의 Docker `psql` fallback을 검증했고, 같은 DB에서 `RUN_ONPREM_POC_POSTGRES_INTEGRATION=true AI_TEST_DATABASE_URL=postgresql://meetingmind:meetingmind_local@localhost:5434/meetingmind_onprem_eval_script_0722 ./.venv/bin/python -m unittest tests.test_onprem_poc_postgres_integration` 2건 통과. `AI_TEST_DATABASE_URL=postgresql://meetingmind:meetingmind_local@localhost:5434/meetingmind_onprem_eval_0722_1 ./.venv/bin/python -m unittest tests.test_embedding_repository.PostgresEmbeddingRepositoryIntegrationTest` 통과. `RUN_ONPREM_POC_POSTGRES_INTEGRATION=true AI_TEST_DATABASE_URL=postgresql://meetingmind:meetingmind_local@localhost:5434/meetingmind_onprem_eval_0722_3 ./.venv/bin/python -m unittest tests.test_onprem_poc_postgres_integration` 2건 통과해 mock OpenAI-compatible HTTP text/embedding provider가 run metadata를 포함한 최종 result shape로 validator 판정을 수행하고, 기존 worker, 실제 pgvector retrieval probe, 9개 smoke scenario와 validator 판정을 확인했다.
+- Remaining boundary: 실제 vLLM/TGI/NIM 등 운영 local LLM endpoint와 실제 local embedding endpoint는 아직 제공되지 않았다. 따라서 T410은 완료 처리하지 않으며, `RUN_ONPREM_AI_POC_SMOKE=true` 결과 JSON이 실제 provider와 실제 PostgreSQL/pgvector DB에서 `onprem_poc_validate.py`를 통과해야 Day 2/3 온프레 PoC 완료로 본다.
+
+## M131 Figma Make Space Invitation Integration
+
+- 목표: canonical `/space-invitations/{spaceId}/{invitationId}#token=...` 화면에서 Make mock 수락/거절 상태를 제거하고 실제 Space invitation accept/decline API로 전환한다.
+- 수정 파일: `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `InvitationResponse`가 fragment의 `token`만 읽고 URL에서 즉시 제거한 뒤 `acceptSpaceInvitation`, `declineSpaceInvitation`을 호출하도록 바꿨다. 현재 로그인 계정 이메일, `spaceId`, `invitationId`, 처리 상태 badge를 실제 응답 흐름에 맞게 표시하고, 수락/거절 완료 후 `/spaces` 이동 링크를 제공한다. token이 없거나 API가 실패하면 mock 성공 대신 명시적 오류 상태를 보여준다.
+- UX 근거: Space 초대 응답은 로그인 계정과 token 검증 결과를 바로 보여줘야 잘못된 계정으로 수락하는 실수를 줄일 수 있다. 완료 전에는 수락/거절 action만 노출하고, 완료 후에는 목록 복귀만 열어 상태를 단순화했다.
+- Product 근거: MeetingMind는 Space 초대 token을 query/global state에 남기지 않고 API body에만 전달해야 한다. 권한 없는 사용자나 만료 token을 UI에서 성공처럼 보이면 안 되므로 실제 API 결과를 그대로 표시했다.
+- 유지보수 근거: 이미 존재하는 `frontend/src/api/spaces.ts` 경계를 재사용했고 별도 mock adapter를 만들지 않았다. 기존 Make layout은 유지하고 데이터/행동만 target contract로 바꿨다.
+- 영향 범위: `/space-invitations/:spaceId/:invitationId` 화면의 초대 응답 흐름만 변경했다. 다른 Space/Meeting route, 인증 구조, BFF same-origin/CSRF 정책은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint` 통과. lint는 `frontend/src/App.tsx`의 기존 unused warning 13건만 유지했고 새 오류는 없었다.
+
+## M132 Figma Make Project Settings Integration
+
+- 목표: `/spaces/{spaceId}/settings`의 Make mock 저장/삭제/토글을 제거하고 실제 Space detail/update/delete 계약에 맞춰 동작하게 한다.
+- 수정 파일: `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `ProjectSettings`가 `ShellOutletContext`의 `spaceDetail`, `spaceLoading`, `spaceError`, `reloadSpace`를 사용하도록 바꿨다. 이름/설명 폼은 `PATCH /api/v1/spaces/{spaceId}`에 연결했고, OWNER/ADMIN만 수정 가능하게 했다. 삭제는 `DELETE /api/v1/spaces/{spaceId}`에 연결했고 OWNER만 허용한다. 서버 계약이 없는 `Auto-confirm Reports`, `Live STT in Meetings`는 읽기 전용 상태로 내리고, archive action도 unavailable로 명시했다. `403`, `404`는 권한/존재 오류 문구로 분리했다.
+- UX 근거: 프로젝트 설정 화면에서는 수정 가능한 항목과 아직 서버가 없는 항목을 섞어 성공처럼 보이면 안 된다. 실제로 저장 가능한 정보는 폼으로 유지하고, 미구현 항목은 읽기 전용으로 낮춰 기대를 조정했다.
+- Product 근거: Space 수정/삭제는 role 기반 보호가 핵심이므로 최종 권한 판단은 backend 응답을 사용해야 한다. OWNER만 삭제 가능하다는 정책을 화면과 API 오류 양쪽에서 일관되게 드러냈다.
+- 유지보수 근거: AppShell이 이미 소유한 `fetchSpaceDetail` 결과와 reload callback을 재사용해 중복 fetch를 만들지 않았다. `updateSpace`, `deleteSpace`, `ApiRequestError`만 연결해 최소 변경으로 끝냈다.
+- 영향 범위: `/spaces/:spaceId/settings` 화면의 프로젝트 정보 저장/삭제와 미구현 옵션 표시만 변경했다. 다른 프로젝트 화면, AI, LiveKit, 멤버 관리, 인증 구조는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint` 통과. lint는 `frontend/src/App.tsx`의 기존 unused warning 13건만 유지했고 새 오류는 없었다.
+
+## M133 Figma Make Account Settings Integration
+
+- 목표: `/settings`의 Make mock profile/notification/security 저장 흐름을 제거하고 실제 세션 정보와 logout/logout-all API만 연결한다.
+- 수정 파일: `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `AccountSettings`가 `AuthContext`의 실제 session을 사용해 표시 이름, 이메일, 계정 상태, idle/absolute expiry, remember-me 상태를 렌더링하도록 바꿨다. 현재 기기 로그아웃은 `logoutCurrentSession()`, 모든 기기 로그아웃은 `AllDeviceLogoutModal` + `logoutAllDevices()`에 연결했고 성공 시 세션을 비우고 `/login`으로 이동한다. 프로필 수정, 알림 설정, 비밀번호 변경/계정 삭제는 서버 계약이 없으므로 읽기 전용 안내로 내렸다.
+- UX 근거: 계정 설정에서 저장되지 않는 form과 토글을 그대로 두면 사용자가 성공을 기대하게 된다. 서버가 있는 세션 보안 action만 활성화하고 나머지는 unavailable로 명시해 오해를 줄였다.
+- Product 근거: MeetingMind의 계정 보안은 same-origin 세션과 재인증 기반 모든 기기 로그아웃이 핵심이다. 세션 만료 시각과 현재 브라우저 종료 action을 직접 보여줘 계정 보안 흐름을 명확히 했다.
+- 유지보수 근거: 기존 `logoutCurrentSession`, `logoutAllDevices`, `AllDeviceLogoutModal`, `AuthContext`를 재사용했고 새로운 API 형식을 만들지 않았다. Make layout은 유지하면서 mock 성공 처리만 제거했다.
+- 영향 범위: `/settings` 화면의 세션 표시와 로그아웃 action만 변경했다. 인증 구조, BFF CSRF 정책, 다른 Space/Meeting route는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint` 통과. lint는 `frontend/src/App.tsx`의 기존 unused warning 13건만 유지했고 새 오류는 없었다.
+
+## M134 Figma Make Terms Dictionary Integration
+
+- 목표: `/spaces/{spaceId}/terms`의 정적 용어 목록과 local add/detail 상태를 제거하고 실제 용어 사전 CRUD API로 전환한다.
+- 수정 파일: `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `TermsDictionary`가 `fetchDomainTerms`, `createDomainTerm`, `updateDomainTerm`, `archiveDomainTerm`를 사용하도록 바꿨다. 목록은 실제 `ACTIVE` 용어만 불러오고 검색은 현재 로드된 목록에서 수행한다. 선택된 용어는 상세 패널에서 실제 term/definition을 편집할 수 있으며, OWNER/ADMIN만 저장/보관할 수 있다. 기존 mock category/full/usedIn 필드는 제거하고, 대신 실제 `status`와 `updatedAt`을 보여준다. 서버 없는 필드를 성공처럼 보이지 않게 했다.
+- UX 근거: 용어 사전은 AI 근거 해석에 직접 쓰이므로 프로젝트별 실제 용어만 보여야 한다. category나 referenced-in 같은 가짜 보조정보보다 현재 정의와 수정 가능 여부를 우선 배치하는 편이 업무 화면에 맞다.
+- Product 근거: MeetingMind는 프로젝트 공식 용어를 Project AI와 Meeting AI의 해석 기준으로 사용한다. 따라서 mock 용어를 노출하면 안 되고, 최종 근거는 backend의 Space 권한과 term store를 따라야 한다.
+- 유지보수 근거: 이미 존재하는 `terms` API 모듈과 `ShellOutletContext`의 Space role을 재사용했다. 새 상태 관리나 별도 페이지를 만들지 않고 기존 Make split layout 안에서 데이터와 mutation만 교체했다.
+- 영향 범위: `/spaces/:spaceId/terms` 화면의 목록, 상세, 등록, 수정, 보관 흐름만 변경했다. 다른 Space/Meeting/AI route, 인증 구조, BFF 정책은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint` 통과. lint는 `frontend/src/App.tsx`의 기존 unused warning 13건만 유지했고 새 오류는 없었다.
+
+## M135 Figma Make Project Knowledge CRUD Integration
+
+- 목표: `/spaces/{spaceId}/knowledge`의 조회 전용 그래프 화면에 실제 지식 생성/수정/보관 흐름을 추가한다.
+- 수정 파일: `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `ProjectKnowledge`가 `createProjectKnowledge`, `updateProjectKnowledge`, `deleteProjectKnowledge`를 사용하도록 확장했다. 그래프와 폴더 구조는 유지한 채 좌측 패널에 `Add Knowledge` action을 추가했고, 우측 패널에서 새 지식 생성 또는 선택된 지식의 title/content 편집과 보관을 수행한다. OWNER/ADMIN만 mutation을 실행할 수 있고 MEMBER는 조회만 가능하다. 빈 상태에서도 생성 버튼을 바로 제공하며, 저장/보관 후에는 목록과 상세를 다시 불러와 embedding 상태와 최신 내용을 유지한다.
+- UX 근거: Project Knowledge는 단순 시각화가 아니라 공식 지식 관리 화면이므로 조회 전용 상태에 머물면 작업 흐름이 끊긴다. 같은 패널 안에서 생성/수정/보관을 처리해 그래프 문맥을 잃지 않게 했다.
+- Product 근거: MeetingMind의 Project AI는 공식 Project Knowledge를 검색 대상으로 삼는다. 따라서 mock 노드가 아니라 실제 backend 지식만 등록/수정/보관되어야 하며, 권한 없는 사용자가 수정 성공처럼 보이면 안 된다.
+- 유지보수 근거: 기존 knowledge API 모듈과 `ShellOutletContext`의 Space role을 재사용했고, 별도 페이지나 상태 라이브러리를 추가하지 않았다. 기존 그래프 빌더와 상세 fetch를 유지하면서 mutation 경계만 추가했다.
+- 영향 범위: `/spaces/:spaceId/knowledge`의 생성/수정/보관과 empty/saving/error UI만 변경했다. AI 검색, 다른 Space/Meeting route, 인증 구조는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint` 통과. lint는 `frontend/src/App.tsx`의 기존 unused warning 13건만 유지했고 새 오류는 없었다.
+
+## M136 Figma Make Meeting Actions Cleanup
+
+- 목표: `/spaces/{spaceId}/meetings`와 `/spaces/{spaceId}/meetings/{meetingId}`에 남아 있던 mock action을 실제 동작 또는 명시적 unavailable 상태로 정리한다.
+- 수정 파일: `frontend/src/App.tsx`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `MeetingList`의 `Schedule Meeting` 버튼을 실제 `createMeeting` mutation에 연결했고, 제목/설명/시작/종료 시간을 받는 생성 모달을 추가했다. 생성 성공 시 목록을 다시 불러오고 새 회의 상세로 이동한다. `Filter` 버튼은 no-op 상태를 없애고 제목/호스트/상태 기준의 실제 로컬 필터 패널로 교체했다. `MeetingOverview`의 `Invite` 버튼은 현재 canonical meeting invitation API가 없으므로 disabled 상태와 안내 문구로 내렸다.
+- UX 근거: 눌러도 아무 일도 일어나지 않는 action은 업무 화면에서 신뢰를 떨어뜨린다. 생성 가능한 기능은 바로 저장되게 하고, 아직 서버 계약이 없는 기능은 unavailable로 명시해 성공 오해를 막았다.
+- Product 근거: 회의 생성은 transcript/report/task 흐름의 시작점이므로 실제 backend mutation으로 이어져야 한다. 반면 회의 이메일 초대는 현재 `userId` 기반 participant grant 수준만 존재해 end-user invitation flow로 보이면 안 된다.
+- 유지보수 근거: 기존 `createMeeting`, `fetchMeetings`, `fetchMeetingDetail` API 모듈만 재사용했고 새 상태 관리 계층은 추가하지 않았다. 회의 목록/상세 레이아웃은 유지하면서 action 경계만 바꿨다.
+- 영향 범위: 회의 목록 상단 action, 필터 상태, 회의 상세 참가자 패널 상단 안내만 변경했다. transcript/report/task/live/AI route와 인증 구조는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run lint` 통과. build는 기존 Vite chunk size warning만 출력했고, lint는 `frontend/src/App.tsx`의 기존 unused warning 13건만 유지했다.
+
+## M137 Live STT False Failure Root Cause Fix
+
+- 목표: 실시간 회의 재입장 또는 중복 시작 시 backend가 이미 전사를 진행 중이어도 frontend가 `STT Failed`로 잘못 표시하는 문제를 근본적으로 제거한다.
+- 수정 파일: `frontend/src/api/client.ts`, `frontend/src/App.tsx`, `frontend/src/pages/LiveRoomPage.tsx`, `frontend/src/api/workspace.test.ts`, `specs/001-meetingmind-core/implement.md`.
+- 구현: BFF/API 에러 파싱에서 backend `code`를 `ApiRequestError`에 보존하도록 바꿨다. `LiveMeeting`과 `LiveRoomPage`는 `409 TRANSCRIPTION_ALREADY_PROCESSING`를 실패가 아니라 기존 전사 세션 재사용 상태로 처리한다. 또 두 화면 모두 `fetchMeetingDialogue()`의 `status`를 STT 상태의 진실값으로 사용해, polling 결과가 `PROCESSING` 또는 `COMPLETED`면 active/connected로 되돌리고 `FAILED`일 때만 실패 상태를 유지한다.
+- UX 근거: 사용자는 이미 자막이 생성 중인데 상단 배지에 `STT Failed`가 보이면 시스템이 망가졌다고 판단한다. backend 실제 상태와 UI 상태를 맞춰야 혼란이 반복되지 않는다.
+- Product 근거: MeetingMind의 live transcript는 회의 중 핵심 신뢰 지표다. 같은 회의에 대한 재접속이나 track 재발행이 전사 실패처럼 보이면 STT 기반 회의 경험 전체 신뢰가 무너진다.
+- 유지보수 근거: 호출부마다 예외 copy를 덧붙이지 않고 공통 API 에러 객체와 live 상태 판단 지점만 수정했다. 이후 같은 backend 오류 코드를 다른 화면에서도 재사용할 수 있다.
+- 영향 범위: live meeting 두 구현의 STT 상태 배지/배너와 transcription start 오류 처리만 변경했다. 인증, 라우팅, backend API 계약은 바꾸지 않았다.
+- Verification: `cd frontend && npx vitest run src/api/workspace.test.ts`, `cd frontend && npm run build`.
+
+## M138 Instant Meeting Room Reuse Backend
+
+- 목표: Space마다 같은 회의방을 반복 사용하되, transcript/report/task/Meeting AI 데이터는 회차별 `meetingId`로 계속 분리한다.
+- 수정 파일: `backend/src/main/java/com/meetingmind/demo/{controller/SpaceController.java,domain/Meeting.java,domain/WorkspaceStore.java,domain/WorkspaceDomainService.java,domain/InMemoryWorkspaceStore.java,domain/JdbcWorkspaceStore.java,domain/JpaWorkspaceStore.java,service/MeetingLiveKitTokenService.java,dto/CreateInstantMeetingResponse.java}`, `backend/src/main/resources/db/migration/V19__add_meeting_room_code.sql`, `backend/src/test/java/com/meetingmind/demo/{controller/SpaceControllerTest.java,domain/MeetingLiveKitTokenServiceTest.java}`, `specs/001-meetingmind-core/contracts/{meeting-api.md,live-stt-api.md}`, `specs/001-meetingmind-core/implement.md`, `specs/001-meetingmind-core/tasks.md`.
+- 구현: `meetings.room_code`를 추가하고, `POST /api/v1/spaces/{spaceId}/instant-meetings`가 `space-room-{spaceId}`를 재사용 room code로 가진 `IN_PROGRESS` 회의를 즉시 생성하도록 했다. 생성자는 자동으로 `HOST` participant가 된다. LiveKit token 발급은 `meeting.roomCode ?? meetingId`를 roomName으로 사용하도록 바꿨다. 이로써 같은 Space 회의방 반복 입장과 회차별 `meetingId` 분리를 동시에 유지한다.
+- UX 근거: 사용자는 매번 회의를 새로 만들지 않고 바로 같은 프로젝트 회의방에 들어가길 원한다. 반면 transcript/report/task는 회차 경계가 분리되어야 검색과 회의록이 섞이지 않는다.
+- Product 근거: MeetingMind는 회의방 자체보다 회의 결과물의 프로젝트 지식화를 다룬다. 따라서 room 재사용은 허용하되 Meeting AI와 회의 산출물 scope는 기존 `meetingId` 단위를 유지해야 한다.
+- 유지보수 근거: 새 room 테이블 없이 `meetings.room_code`와 기존 `meetingId` 계약을 재사용했다. 기존 scheduled meeting은 `roomCode`가 없으면 기존 `meetingId` roomName fallback을 써서 회귀를 줄였다.
+- 영향 범위: backend meeting 생성/LiveKit roomName 결정 경로와 관련 계약 문서만 변경했다. frontend route, AI scope 로직, 인증 구조는 이번 범위에 포함하지 않았다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.controller.SpaceControllerTest --tests com.meetingmind.demo.domain.MeetingLiveKitTokenServiceTest`.

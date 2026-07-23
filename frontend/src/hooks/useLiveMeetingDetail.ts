@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { fetchMeetingDetail, fetchMeetingParticipants } from "../api/workspace";
+import { fetchMeetingDetail } from "../api/meetings";
+import { fetchMeetingParticipants } from "../api/meetingAccess";
 import type { AuthSession } from "../auth/session";
 import type { MeetingRole, WorkspaceData } from "../types";
 
@@ -90,7 +91,7 @@ export function useLiveMeetingDetail(
     return () => {
       active = false;
     };
-  }, [session, meetingId]);
+  }, [fallback, session, meetingId]);
 
   return { liveMeeting, error };
 }

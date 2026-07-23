@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   confirmMeetingReport,
-  confirmTaskCandidate,
-  dismissTaskCandidate,
   downloadMeetingReport,
   editMeetingReportWithAi,
-  extractTaskCandidates,
   fetchMeetingReportDetail,
   fetchMeetingReports,
-  fetchTaskCandidates,
   generateReportCandidate,
   restoreMeetingReport,
   updateMeetingReport
-} from "../api/workspace";
+} from "../api/reports";
+import {
+  confirmTaskCandidate,
+  dismissTaskCandidate,
+  extractTaskCandidates,
+  fetchTaskCandidates
+} from "../api/tasks";
 import type { AuthSession } from "../auth/session";
-import type { ReportDetailResponse, ReportDownloadFormat, ReportSummary, TaskAssigneeOption, TaskCandidateSummary, WorkspaceData } from "../types";
+import { AppShell } from "../components/layout/AppShell";
+import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
+import type { MeetingDetailResponse, ReportDetailResponse, ReportDownloadFormat, ReportSummary, TaskAssigneeOption, TaskCandidateSummary, WorkspaceData } from "../types";
 
 type ChangeCommit = {
   id: string;
@@ -389,18 +393,95 @@ function buildReportView(
   return buildGeneratedReport(normalizedProject, normalizedMeeting, normalizedRound);
 }
 
+function formatMeetingDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "날짜 미정";
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "long",
+    timeZone: "Asia/Seoul"
+  }).format(date);
+}
+
+function formatMeetingTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--:--";
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul"
+  }).format(date);
+}
+
+function buildEmptyReportView(meeting: MeetingDetailResponse): ReportView {
+  const participantCount = meeting.participants.length;
+
+  return {
+    breadcrumb: meeting.title,
+    title: meeting.title,
+    dateLine: `${formatMeetingDate(meeting.scheduledAt)} · 실제 회의록 데이터`,
+    summary: "공식 회의록이 아직 없습니다. 회의 근거가 준비되면 Backend에서 불러옵니다.",
+    owner: meeting.myRole ?? "-",
+    location: "장소 미등록",
+    attendees: participantCount ? `${participantCount}명` : "미정",
+    startsAt: formatMeetingTime(meeting.scheduledAt),
+    endsAt: formatMeetingTime(meeting.scheduledEndAt),
+    subjectLines: [],
+    contentLines: [],
+    resultLines: [],
+    writer: "-",
+    writtenDate: "-",
+    decisions: [],
+    actions: [],
+    chat: [
+      createChatMessage({
+        role: "ai",
+        text: "현재 회의 범위의 Backend 회의록이 준비되면 내용을 표시합니다. 근거가 없는 내용은 생성하지 않습니다."
+      })
+    ],
+    commits: []
+  };
+}
+
+function applyReportDetailToView(current: ReportView, detail: ReportDetailResponse): ReportView {
+  const contentLines = detail.markdown
+    ? detail.markdown.split(/\r?\n/).filter((line) => line.trim() && !line.trim().startsWith("#"))
+    : [];
+
+  return {
+    ...current,
+    title: detail.title,
+    summary: detail.summary,
+    contentLines,
+    decisions: [],
+    actions: [],
+    subjectLines: []
+  };
+}
+
 export function ReportAgentPage({
   data,
-  session
+  session,
+  onCreateProject,
+  embedded = false,
+  meeting
 }: {
   data: WorkspaceData["reportAgent"];
   session: AuthSession | null;
+  onCreateProject?: (payload: { name: string; description: string }) => Promise<void>;
+  embedded?: boolean;
+  meeting?: MeetingDetailResponse;
 }) {
   const [searchParams] = useSearchParams();
+  const routeParams = useParams<{ spaceId: string; meetingId: string }>();
   const projectName = searchParams.get("project");
   const meetingTitle = searchParams.get("meeting");
-  const meetingId = searchParams.get("meetingId");
-  const spaceId = searchParams.get("spaceId");
+  const meetingId = routeParams.meetingId ?? searchParams.get("meetingId");
+  const spaceId = routeParams.spaceId ?? searchParams.get("spaceId");
   const round = searchParams.get("round");
   const meetingAiParams = new URLSearchParams();
   if (projectName) {
@@ -415,10 +496,14 @@ export function ReportAgentPage({
   if (round) {
     meetingAiParams.set("round", round);
   }
-  const meetingAiHref = meetingAiParams.toString() ? `/meeting-ai?${meetingAiParams.toString()}` : "/meeting-ai";
+  const meetingAiHref = routeParams.spaceId && routeParams.meetingId
+    ? `/spaces/${encodeURIComponent(routeParams.spaceId)}/meetings/${encodeURIComponent(routeParams.meetingId)}/ai`
+    : meetingAiParams.toString()
+      ? `/meeting-ai?${meetingAiParams.toString()}`
+      : "/meeting-ai";
   const reportView = useMemo(
-    () => buildReportView(data, projectName, meetingTitle, round),
-    [data, meetingTitle, projectName, round]
+    () => embedded && meeting ? buildEmptyReportView(meeting) : buildReportView(data, projectName, meetingTitle, round),
+    [data, embedded, meeting, meetingTitle, projectName, round]
   );
   const [reportState, setReportState] = useState<ReportView>(reportView);
   const [chatInput, setChatInput] = useState("");
@@ -554,6 +639,19 @@ export function ReportAgentPage({
         setSelectedReportId(report.id);
         setReportState((current) => ({ ...current, title: report.title, summary: report.summary }));
         setSaveLabel(`● v${report.version} ${report.status.toLowerCase()} 불러옴`);
+        fetchMeetingReportDetail(session, meetingId, report.id)
+          .then((detail) => {
+            if (!active) {
+              return;
+            }
+            setSelectedReportDetail(detail);
+            setReportState((current) => applyReportDetailToView(current, detail));
+          })
+          .catch((error) => {
+            if (active) {
+              setReportGenerationError(error instanceof Error ? error.message : "회의록 본문을 불러오지 못했습니다.");
+            }
+          });
       })
       .catch((error) => {
         if (active) {
@@ -569,7 +667,7 @@ export function ReportAgentPage({
     return `${Math.abs(seed).toString(16).slice(0, 7)}`.padEnd(7, "0");
   }
 
-  function buildPendingChange(section: EditableSection, prompt: string): { answer: string; pendingChange: PendingChange } {
+  function buildPendingChange(section: EditableSection, _prompt: string): { answer: string; pendingChange: PendingChange } {
     const relatedRound = reportState.breadcrumb.split(" — ")[0];
 
     switch (section) {
@@ -833,6 +931,7 @@ export function ReportAgentPage({
     try {
       const detail = await fetchMeetingReportDetail(session, meetingId, report.id);
       setSelectedReportDetail(detail);
+      setReportState((current) => applyReportDetailToView(current, detail));
       setSaveLabel(`● v${report.version} ${report.status.toLowerCase()} 본문을 확인 중`);
     } catch (error) {
       setSelectedReportDetail(null);
@@ -1075,6 +1174,11 @@ export function ReportAgentPage({
       return;
     }
 
+    if (embedded && meeting) {
+      setReportGenerationError("수정할 Backend 회의록이 없습니다. 먼저 회의록 candidate를 생성하거나 공식 회의록을 선택하세요.");
+      return;
+    }
+
     const result = buildPromptDrivenChange(normalized);
 
     setReportState((current) => ({
@@ -1096,18 +1200,20 @@ export function ReportAgentPage({
     setSaveLabel("● 자동 저장됨 · 방금 전");
   }
 
-  return (
-    <div className="report-agent-page">
-      <div className="report-agent-frame">
-        <header className="report-agent-header">
+  const documentStatus = reportCandidate?.status === "confirmed"
+    ? "공식 회의록"
+    : reportCandidate
+      ? "확정 전 candidate"
+      : "편집 중";
+
+  const reportWorkspace = (
+    <div className="report-agent-frame">
+        <header aria-label="회의록 작업 헤더" className="report-agent-header">
           <div className="report-agent-header-left">
-            <Link className="report-agent-logo" to="/">
-              <span className="report-agent-logo-main">meeting</span>
-              <span className="report-agent-logo-accent">mind</span>
-            </Link>
-            <p className="report-agent-breadcrumb">
-              report-agent / <span>{reportView.breadcrumb}</span>
-            </p>
+            <div className="report-agent-context">
+              <span className="report-agent-context-label">회의록</span>
+              <strong>{reportView.title || "회의록"}</strong>
+            </div>
           </div>
 
           <div className="report-agent-header-actions">
@@ -1128,8 +1234,8 @@ export function ReportAgentPage({
           </div>
         </header>
 
-        <main className="report-agent-layout">
-          <section className="report-agent-main">
+        <main aria-label="회의록 작업공간" className="report-agent-layout">
+          <section aria-label="회의록 본문" className="report-agent-main">
             <div className="report-agent-meta-row">
               <button className="report-agent-commit-trigger" onClick={() => setIsCommitListOpen(true)} type="button">
                 <span className="report-agent-commit-trigger-title">Commits</span>
@@ -1138,9 +1244,12 @@ export function ReportAgentPage({
                 </span>
               </button>
               <span className="report-agent-owner">담당: {reportView.owner}</span>
+              <span aria-live="polite" className={`report-agent-document-status ${documentStatus === "공식 회의록" ? "is-confirmed" : ""}`}>
+                {documentStatus}
+              </span>
             </div>
 
-            <article className="report-agent-sheet">
+            <article aria-label={reportState.title} className="report-agent-sheet">
               <header className="report-agent-sheet-head">
                 <div className="report-agent-doc-table">
                   <div className="report-agent-doc-row">
@@ -1276,8 +1385,8 @@ export function ReportAgentPage({
             </article>
           </section>
 
-          <aside className="report-agent-side">
-            <section className="report-agent-chat-card">
+          <aside aria-label="회의록 검토 패널" className="report-agent-side">
+            <section aria-label="보고서 편집 Agent" className="report-agent-chat-card">
               <div className="report-agent-chat-head">
                 <div className="report-agent-chat-icon">✦</div>
                 <div>
@@ -1333,7 +1442,7 @@ export function ReportAgentPage({
               </form>
             </section>
 
-            <section className="report-agent-candidate-card">
+            <section aria-label="회의록 후보 및 태스크 후보 검토" className="report-agent-candidate-card task-candidates-surface">
               <div className="report-agent-candidate-head">
                 <div>
                   <strong>Candidate Review</strong>
@@ -1415,10 +1524,18 @@ export function ReportAgentPage({
                 </div>
               ) : null}
 
+              <div className="report-agent-task-candidates-head">
+                <div>
+                  <span>Task candidates</span>
+                  <strong>태스크 후보 검토</strong>
+                </div>
+                <em>회의 근거 기반</em>
+              </div>
+
               {taskCandidates.length ? (
                 <div className="report-agent-task-candidates">
                   {taskCandidates.map((candidate) => (
-                    <div key={candidate.id} className="report-agent-task-candidate">
+                    <div aria-label={`태스크 후보: ${candidate.title}`} key={candidate.id} className={`report-agent-task-candidate is-${candidate.status}`}>
                       <div className="report-agent-task-candidate-top">
                         <strong>
                           {candidate.status === "candidate"
@@ -1473,6 +1590,7 @@ export function ReportAgentPage({
                         </label>
                       </div>
                       <button
+                        className="report-agent-task-candidate-register"
                         disabled={
                           !canConfirmTaskCandidates
                           || candidate.status !== "candidate"
@@ -1493,6 +1611,7 @@ export function ReportAgentPage({
                       </button>
                       {candidate.status === "candidate" ? (
                         <button
+                          className="report-agent-task-candidate-dismiss"
                           disabled={
                             !canConfirmTaskCandidates
                             || confirmingTaskCandidateId === candidate.id
@@ -1505,17 +1624,43 @@ export function ReportAgentPage({
                         </button>
                       ) : null}
                       {candidate.status === "registered" && spaceId ? (
-                        <Link to={`/project-overview?spaceId=${encodeURIComponent(spaceId)}`}>칸반에서 보기</Link>
+                        <Link className="report-agent-task-candidate-board-link" to={`/spaces/${encodeURIComponent(spaceId)}/tasks`}>칸반에서 보기</Link>
                       ) : null}
                     </div>
                   ))}
                 </div>
-              ) : null}
+              ) : (
+                <div className="report-agent-task-candidates-empty">
+                  <strong>태스크 후보가 아직 없습니다.</strong>
+                  <p>회의 근거에서 후보를 추출하면 내용을 검토한 뒤 칸반에 등록할 수 있습니다.</p>
+                </div>
+              )}
 
             </section>
           </aside>
         </main>
-      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return <div className="report-workspace-page report-workspace-page--embedded">{reportWorkspace}</div>;
+  }
+
+  return (
+    <AppShell
+      contentClassName="report-workspace-page"
+      sidebar={(
+        <WorkspaceSidebar
+          activeItem="none"
+          contextOverride={`${projectName ? `${projectName} · ` : ""}${reportView.title}`}
+          mode={projectName || spaceId ? "project" : "catalog"}
+          onCreateProject={onCreateProject}
+          projectName={projectName ?? undefined}
+          spaceId={spaceId ?? undefined}
+        />
+      )}
+    >
+      {reportWorkspace}
 
       {isCommitListOpen ? (
         <div aria-hidden="true" className="report-agent-commit-modal-backdrop" onClick={() => setIsCommitListOpen(false)}>
@@ -1619,6 +1764,6 @@ export function ReportAgentPage({
           </section>
         </div>
       ) : null}
-    </div>
+    </AppShell>
   );
 }

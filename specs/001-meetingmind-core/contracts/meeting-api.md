@@ -151,6 +151,66 @@ Space 내 접근 가능한 회의 목록을 조회한다.
 
 - 별도 CalendarEvent 엔티티가 필요해지면 ERD의 Draft Gap을 갱신한다.
 
+## POST /api/v1/spaces/{spaceId}/instant-meetings
+
+Space의 기본 회의방을 재사용하는 즉시 회의 session을 생성한다.
+
+### Status
+
+- Target Backend
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 또는 `ADMIN`
+
+### Data Scope
+
+- Space scope
+- 생성된 회의에는 생성자를 `HOST` participant로 등록한다.
+- 실시간 연결 room은 Space 기본 room을 사용하고, transcript/report/task/Meeting AI scope는 새 `meetingId`에 분리 저장한다.
+
+### Request
+
+None.
+
+### Validation
+
+- `spaceId` 접근 권한 확인
+- 기본 room code는 backend가 결정한다. 현재 기준은 `space-room-{spaceId}`다.
+
+### Response
+
+```json
+{
+  "id": "meeting-101",
+  "status": "IN_PROGRESS",
+  "roomCode": "space-room-space-001",
+  "joinCode": "4f97c8e2a58f4d58a4476bcb6b65c208",
+  "joinUrl": "/meetings/meeting-101?joinCode=4f97c8e2a58f4d58a4476bcb6b65c208"
+}
+```
+
+### Errors
+
+- `403 SPACE_ACCESS_DENIED`: 회의 생성 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 없음
+
+### Audit
+
+- `MEETING_CREATED`
+
+### Requirement Trace
+
+- FR-MREG-01: 회의 생성
+- FR-CALL-01: 실시간 회의 시작
+- FR-MREG-06: 회의 상태 전이
+
+### Notes
+
+- `roomCode`는 재사용되는 실시간 회의방 식별자다.
+- 반복 입장은 같은 room을 쓰되, 회차 데이터는 매번 새로운 `meetingId`에 저장한다.
+
 ## GET /api/v1/meetings/{meetingId}
 
 회의 상세를 조회한다.

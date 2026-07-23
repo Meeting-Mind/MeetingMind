@@ -313,6 +313,14 @@ export interface CreateMeetingResponse {
   joinUrl: string;
 }
 
+export interface CreateInstantMeetingResponse {
+  id: string;
+  status: MeetingStatus;
+  roomCode: string;
+  joinCode: string;
+  joinUrl: string;
+}
+
 export interface MeetingSpeakerSummary {
   id: string;
   label: string;

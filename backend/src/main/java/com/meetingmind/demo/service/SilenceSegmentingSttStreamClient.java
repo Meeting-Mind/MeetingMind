@@ -15,9 +15,9 @@ public class SilenceSegmentingSttStreamClient implements SttStreamClient {
     // 16bit PCM 기준 대략적인 무음 임계치. 방 소음 수준에 따라 조정 필요할 수 있음.
     private static final int SILENCE_RMS_THRESHOLD = 400;
 
-    private final SttStreamClientFactory factory;
-    private final Consumer<String> onFinalTranscript;
-    private final Consumer<String> onPartialTranscript;
+    private final RawSttStreamClientFactory factory;
+    private final Consumer<SttTranscriptChunk> onFinalTranscript;
+    private final Consumer<SttTranscriptChunk> onPartialTranscript;
     private final Consumer<Throwable> onError;
     private final long silenceMs;
     private final LongSupplier clock;
@@ -27,9 +27,9 @@ public class SilenceSegmentingSttStreamClient implements SttStreamClient {
     private boolean closed;
 
     public SilenceSegmentingSttStreamClient(
-            SttStreamClientFactory factory,
-            Consumer<String> onFinalTranscript,
-            Consumer<String> onPartialTranscript,
+            RawSttStreamClientFactory factory,
+            Consumer<SttTranscriptChunk> onFinalTranscript,
+            Consumer<SttTranscriptChunk> onPartialTranscript,
             Consumer<Throwable> onError
     ) {
         this(factory, onFinalTranscript, onPartialTranscript, onError, SILENCE_MS, System::currentTimeMillis);
@@ -37,9 +37,9 @@ public class SilenceSegmentingSttStreamClient implements SttStreamClient {
 
     // 테스트에서 5초 대기 없이 침묵 타임아웃을 검증할 수 있도록 시간 소스를 주입한다.
     SilenceSegmentingSttStreamClient(
-            SttStreamClientFactory factory,
-            Consumer<String> onFinalTranscript,
-            Consumer<String> onPartialTranscript,
+            RawSttStreamClientFactory factory,
+            Consumer<SttTranscriptChunk> onFinalTranscript,
+            Consumer<SttTranscriptChunk> onPartialTranscript,
             Consumer<Throwable> onError,
             long silenceMs,
             LongSupplier clock
@@ -76,6 +76,7 @@ public class SilenceSegmentingSttStreamClient implements SttStreamClient {
 
         if (now - lastVoiceAtMs >= silenceMs) {
             current.close();
+            onFinalTranscript.accept(new SttTranscriptChunk("", true, -1, 0, 0));
             current = null;
         } else {
             current.sendAudio(pcm16leMono16k);
@@ -94,6 +95,7 @@ public class SilenceSegmentingSttStreamClient implements SttStreamClient {
         closed = true;
         if (current != null) {
             current.close();
+            onFinalTranscript.accept(new SttTranscriptChunk("", true, -1, 0, 0));
             current = null;
         }
     }

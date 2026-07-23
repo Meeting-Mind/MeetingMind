@@ -24,6 +24,32 @@ README.md
 
 제품/구현 기준은 `AGENTS.md`, `.specify/memory/constitution.md`, `requirements/INDEX.md`, `specs/001-meetingmind-core/*`를 따릅니다.
 
+## 로컬 환경변수 기준
+
+환경변수는 서비스별 파일이 아니라 값의 소유권으로 나눕니다. 실제 `.env` 파일은 모두 Git에서 제외합니다.
+
+| 위치 | 소유 값 | 읽는 서비스 |
+| --- | --- | --- |
+| 루트 `.env` | Compose DB/Redis, `AI_INTERNAL_SERVICE_TOKEN`, `OPENAI_API_KEY`, AI provider/model | Compose AI, Backend AI gateway, AI worker |
+| `backend/.env` | LiveKit, ngrok callback, STT provider, Backend Google/JWT | Backend |
+| `bff/.env` | Token Vault key, BFF/Auth/Core endpoint | BFF |
+| `frontend/.env` | `VITE_*` 공개 설정만 | Frontend |
+| `auth/.env` | Auth DB, refresh hash, KMS/Auth 설정 | Auth |
+| `ai/.env` | Compose 없이 AI만 직접 실행할 때의 provider 설정 | AI |
+
+처음에는 예시 파일을 복사합니다.
+
+```bash
+cp .env.example .env
+cp backend/.env.example backend/.env
+cp bff/.env.example bff/.env
+cp frontend/.env.example frontend/.env
+```
+
+`AI_INTERNAL_SERVICE_TOKEN`은 루트 `.env` 한 곳에서만 설정합니다. Backend는 시작 시 루트 `.env`를 자동으로 읽고, `backend/.env`는 Backend 전용 값을 덮어쓸 때만 사용합니다. AI Compose는 토큰이 없으면 시작하지 않아 Backend-AI 인증 불일치를 조기에 차단합니다.
+
+OpenAI 키의 표준 이름은 `OPENAI_API_KEY`입니다. 기존 `OPEN_AI_KEY`는 로컬 호환을 위해 일시 지원하지만 새 설정에는 사용하지 않습니다.
+
 ## 실행
 
 ### 1. 로컬 데이터베이스와 세션 저장소
@@ -68,7 +94,10 @@ cd backend
 
 ```bash
 cd bff
-BFF_TOKEN_VAULT_LOCAL_KEY_BASE64="$(openssl rand -base64 32)" ./gradlew bootRun
+set -a
+source .env
+set +a
+./gradlew bootRun
 ```
 
 기본 포트는 `8081`입니다. 기존에 발급한 로컬 세션을 유지하려면 매 실행마다 새 key를 생성하지 말고 같은 값을 안전한 로컬 환경변수로 재사용합니다.
@@ -115,6 +144,34 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 필요한 주요 환경변수는 `ai/.env.example`을 기준으로 설정합니다.
+
+Docker Compose로 FastAPI AI 서버와 embedding worker를 함께 띄울 때는 `ai` profile을 사용합니다. 기본 provider는 OpenAI이며, 온프레 PoC에서는 같은 환경변수를 `local-openai-compatible`로 바꿔 전달합니다.
+최종 PoC용 전체 env 목록은 `ai/onprem.env.example`을 기준으로 채웁니다.
+
+```bash
+AI_TEXT_PROVIDER=local-openai-compatible \
+AI_TEXT_BASE_URL=http://host.docker.internal:8001/v1 \
+AI_TEXT_MODEL=qwen2.5-14b-instruct \
+AI_TEXT_API_STYLE=chat-completions \
+AI_TEXT_STREAM=true \
+AI_EMBEDDING_PROVIDER=local-openai-compatible \
+AI_EMBEDDING_BASE_URL=http://host.docker.internal:8002/v1 \
+AI_EMBEDDING_MODEL=bge-m3 \
+AI_EMBEDDING_DIMENSION=1536 \
+AI_VECTOR_DIMENSION=1536 \
+docker compose -f compose.local.yml --profile ai up --build meetingmind-ai meetingmind-ai-worker
+```
+
+`meetingmind-ai` 컨테이너는 `/health` healthcheck를 사용합니다. `text_provider`, `embedding_provider`, local endpoint configured 및 local-compatible 판정, embedding/vector dimension 일치 여부, DB/token configured 여부만 노출하며 secret, base URL, DSN 원문은 노출하지 않습니다.
+
+Spring Backend는 기존 AI Gateway client와 internal API 계약을 그대로 사용합니다. 루트 `.env`의 `AI_INTERNAL_SERVICE_TOKEN`을 자동으로 읽으므로 로컬 Backend와 Compose AI가 같은 값을 사용합니다. 기본 AI URL은 `http://localhost:8000`입니다.
+
+```bash
+cd backend
+./gradlew bootRun
+```
+
+컨테이너 네트워크 안에서 Backend를 실행하는 환경에서는 `MEETINGMIND_AI_BASE_URL=http://meetingmind-ai:8000`을 사용합니다.
 
 ## 검증
 

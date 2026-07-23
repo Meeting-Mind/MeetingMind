@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { fetchMeetingParticipants } from "../api/workspace";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { fetchMeetingParticipants } from "../api/meetingAccess";
 import type { AuthSession } from "../auth/session";
+import { RoleBadge } from "../components/common/RoleBadge";
+import { StatusBadge } from "../components/common/StatusBadge";
+import { DataState } from "../components/common/DataState";
 import { useLiveMeetingDetail } from "../hooks/useLiveMeetingDetail";
-import type { MeetingRole } from "../types";
+import type { MeetingDetailResponse, MeetingRole } from "../types";
 import type { WorkspaceData } from "../types";
 
 type WaitingParticipant = {
@@ -108,12 +111,19 @@ type AccessCheckState = "checking" | "allowed" | "denied";
 
 export function LiveMeetingPage({
   data: fallbackData,
-  session
+  session,
+  meetingContext,
+  projectNameOverride,
+  strictApi = false
 }: {
   data: WorkspaceData["liveMeeting"];
   session: AuthSession;
+  meetingContext?: MeetingDetailResponse;
+  projectNameOverride?: string;
+  strictApi?: boolean;
 }) {
   const navigate = useNavigate();
+  const routeParams = useParams<{ spaceId: string; meetingId: string }>();
   const [searchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -128,11 +138,11 @@ export function LiveMeetingPage({
   const [accessCheckState, setAccessCheckState] = useState<AccessCheckState>("checking");
   const [accessRole, setAccessRole] = useState<MeetingRole | "MANAGER_OVERRIDE" | null>(null);
   const [accessMessage, setAccessMessage] = useState("회의 접근 권한을 확인하고 있습니다.");
-  const spaceId = searchParams.get("spaceId");
-  const meetingId = searchParams.get("meetingId");
-  const projectName = searchParams.get("project") ?? "FinPilot Renewal";
+  const spaceId = routeParams.spaceId ?? searchParams.get("spaceId");
+  const meetingId = routeParams.meetingId ?? searchParams.get("meetingId");
+  const projectName = projectNameOverride ?? searchParams.get("project") ?? "FinPilot Renewal";
   const { liveMeeting: data, error: liveMeetingError } = useLiveMeetingDetail(session, meetingId, fallbackData);
-  const meetingTitle = searchParams.get("meeting") ?? data.overview.title;
+  const meetingTitle = meetingContext?.title ?? searchParams.get("meeting") ?? data.overview.title;
 
   useEffect(() => {
     let active = true;
@@ -173,11 +183,15 @@ export function LiveMeetingPage({
   }, [meetingId, session]);
 
   function handleCancelEntry() {
-    const params = new URLSearchParams({ project: projectName });
-    if (spaceId) {
-      params.set("spaceId", spaceId);
+    if (routeParams.spaceId && routeParams.meetingId) {
+      navigate(`/spaces/${encodeURIComponent(routeParams.spaceId)}/meetings/${encodeURIComponent(routeParams.meetingId)}`);
+      return;
     }
-    navigate(`/project-overview?${params.toString()}`);
+    if (spaceId) {
+      navigate(`/spaces/${encodeURIComponent(spaceId)}`);
+      return;
+    }
+    navigate("/spaces");
   }
 
   useEffect(() => {
@@ -314,6 +328,11 @@ export function LiveMeetingPage({
       })
     );
 
+    if (routeParams.spaceId && routeParams.meetingId) {
+      navigate(`/spaces/${encodeURIComponent(routeParams.spaceId)}/meetings/${encodeURIComponent(routeParams.meetingId)}/live`);
+      return;
+    }
+
     navigate(`/live-room?${new URLSearchParams({ meetingId: meetingId ?? "" }).toString()}`);
   }
 
@@ -321,6 +340,21 @@ export function LiveMeetingPage({
   const previewInitial = participantName.slice(0, 1).toUpperCase();
   const accessRoleLabel = accessRole === "MANAGER_OVERRIDE" ? "OWNER/ADMIN override" : accessRole;
   const canManageParticipants = accessRole === "HOST" || accessRole === "MANAGER_OVERRIDE";
+  const accessStatus = accessCheckState === "allowed" ? "ACTIVE" : accessCheckState === "checking" ? "PROCESSING" : "REVOKED";
+
+  if (strictApi && liveMeetingError) {
+    return (
+      <div className="meeting-prejoin-shell meeting-prejoin-gate-shell">
+        <DataState
+          actionLabel="프로젝트 회의로"
+          onAction={() => { window.location.href = `/spaces/${encodeURIComponent(meetingContext?.spaceId ?? spaceId ?? "")}/meetings`; }}
+          state="error"
+          title="회의 입장 정보를 불러오지 못했습니다"
+          description={liveMeetingError}
+        />
+      </div>
+    );
+  }
 
   if (accessCheckState !== "allowed") {
     const accessParams = new URLSearchParams();
@@ -340,7 +374,11 @@ export function LiveMeetingPage({
         </header>
         <main className="meeting-prejoin-gate-main">
           <section className={`meeting-prejoin-access-gate ${accessCheckState}`}>
-            <span>{accessCheckState === "checking" ? "권한 확인 중" : "default-deny"}</span>
+            <StatusBadge
+              context="access"
+              label={accessCheckState === "checking" ? "권한 확인 중" : "접근 차단"}
+              status={accessStatus}
+            />
             <h1>{accessCheckState === "checking" ? "회의 접근 권한 확인" : "회의에 접근할 수 없습니다"}</h1>
             <p>{accessMessage}</p>
             <div>
@@ -453,7 +491,12 @@ export function LiveMeetingPage({
           <div className="meeting-prejoin-footer-row">
             <div className="meeting-prejoin-actions">
               {canManageParticipants ? (
-                <Link className="meeting-prejoin-secondary" to="/team-members">참가 신청 관리</Link>
+                <Link
+                  className="meeting-prejoin-secondary"
+                  to={routeParams.spaceId ? `/spaces/${encodeURIComponent(routeParams.spaceId)}/members` : "/team-members"}
+                >
+                  참가 신청 관리
+                </Link>
               ) : null}
               <button className="meeting-prejoin-primary" onClick={handleStartMeeting} type="button">
                 {accessRole === "HOST" ? "회의 시작" : "회의 입장"} →
@@ -478,7 +521,7 @@ export function LiveMeetingPage({
 
             <div className="meeting-prejoin-access-note">
               <strong>참여 권한 확인됨</strong>
-              <span>{accessRoleLabel} 권한으로 입장합니다</span>
+              {accessRole ? <RoleBadge role={accessRole} scope="meeting" /> : null}
             </div>
           </section>
 

@@ -35,6 +35,16 @@ _SAFE_FIELDS = frozenset(
         "processingCount",
         "failedCount",
         "oldestPendingAgeSeconds",
+        "provider",
+        "apiStyle",
+        "stream",
+        "responseFormatMode",
+        "totalMs",
+        "ttftMs",
+        "tokensPerSecond",
+        "inputTokens",
+        "outputTokens",
+        "outputTokenEstimate",
     }
 )
 

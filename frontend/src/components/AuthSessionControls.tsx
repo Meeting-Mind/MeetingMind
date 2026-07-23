@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { AuthSession } from "../auth/session";
 import { AllDeviceLogoutModal } from "./AllDeviceLogoutModal";
 
@@ -24,20 +25,21 @@ export function AuthSessionControls({
     try {
       await onLogout();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "로그아웃을 완료하지 못했습니다. 다시 시도해 주세요.");
+      setError(exception instanceof Error ? exception.message : "Unable to sign out. Please try again.");
       setLoading(false);
     }
   }
 
   return (
-    <aside aria-label="사용자 세션" className="auth-session-controls">
+    <aside aria-label="User session" className="auth-session-controls">
       <div className="auth-session-user">
         <strong>{session.user.displayName}</strong>
         <span>{session.user.email}</span>
       </div>
       <div className="auth-session-actions">
+        <Link to="/settings/account">Account settings</Link>
         <button disabled={loading} onClick={() => void handleLogout()} type="button">
-          {loading ? "로그아웃 중..." : "로그아웃"}
+          {loading ? "Signing out..." : "Sign out"}
         </button>
         <button
           className="danger"
@@ -45,7 +47,7 @@ export function AuthSessionControls({
           onClick={() => setAllDeviceLogoutOpen(true)}
           type="button"
         >
-          모든 기기
+          All devices
         </button>
       </div>
       {error ? <p role="alert">{error}</p> : null}

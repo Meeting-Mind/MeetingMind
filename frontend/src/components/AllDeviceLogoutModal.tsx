@@ -33,7 +33,7 @@ export function AllDeviceLogoutModal({
       await reauthenticate();
       await completeLogoutAll();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "재인증을 완료하지 못했습니다.");
+      setError(exception instanceof Error ? exception.message : "Unable to complete re-authentication.");
     } finally {
       setLoading(false);
     }
@@ -51,7 +51,7 @@ export function AllDeviceLogoutModal({
       if (exception instanceof ReauthenticationRequiredError) {
         setReauthenticationRequired(true);
       } else {
-        setError(exception instanceof Error ? exception.message : "모든 기기 로그아웃을 완료하지 못했습니다.");
+        setError(exception instanceof Error ? exception.message : "Unable to sign out from all devices.");
       }
     } finally {
       setLoading(false);
@@ -75,7 +75,7 @@ export function AllDeviceLogoutModal({
     <div className="auth-modal-backdrop" role="presentation">
       <section aria-labelledby="logout-all-title" aria-modal="true" className="auth-modal" role="dialog">
         <button
-          aria-label="모든 기기 로그아웃 닫기"
+          aria-label="Close sign out from all devices modal"
           className="auth-modal-close"
           disabled={loading}
           onClick={onClose}
@@ -85,9 +85,9 @@ export function AllDeviceLogoutModal({
         </button>
 
         <p className="auth-modal-kicker">Account Security</p>
-        <h2 id="logout-all-title">모든 기기에서 로그아웃</h2>
+        <h2 id="logout-all-title">Sign out from all devices</h2>
         <p className="auth-modal-copy">
-          현재 브라우저를 포함해 로그인된 모든 기기의 세션을 종료합니다.
+          End every active session, including the one in this browser.
         </p>
 
         {!reauthenticationRequired ? (
@@ -97,16 +97,16 @@ export function AllDeviceLogoutModal({
             onClick={() => void handleInitialLogout()}
             type="button"
           >
-            {loading ? "세션 종료 중..." : "모든 기기에서 로그아웃"}
+            {loading ? "Ending sessions..." : "Sign out from all devices"}
           </button>
         ) : (
           <>
             <div className="auth-modal-session-notice" role="status">
-              계정 보호를 위해 비밀번호 또는 Google 계정으로 다시 인증해 주세요.
+              Re-authenticate with your password or Google account to protect this action.
             </div>
             <form className="auth-modal-form" onSubmit={handlePasswordReauthentication}>
               <label>
-                비밀번호
+                Password
                 <input
                   autoComplete="current-password"
                   maxLength={128}
@@ -117,13 +117,13 @@ export function AllDeviceLogoutModal({
                 />
               </label>
               <button className="auth-modal-submit" disabled={loading} type="submit">
-                {loading ? "확인 중..." : "비밀번호 확인 후 로그아웃"}
+                {loading ? "Verifying..." : "Verify password and continue"}
               </button>
             </form>
 
             {clientId ? (
               <>
-                <div className="auth-modal-divider">또는</div>
+                <div className="auth-modal-divider">or</div>
                 <GoogleCredentialButton
                   clientId={clientId}
                   disabled={loading}

@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { chatProjectAi, fetchProjectAiHistory, fetchProjectKnowledgeDetail } from "../api/workspace";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { chatProjectAi, fetchProjectAiHistory } from "../api/ai";
+import { fetchProjectKnowledgeDetail } from "../api/knowledge";
 import type { AuthSession } from "../auth/session";
+import { DataState } from "../components/common/DataState";
+import { RoleBadge } from "../components/common/RoleBadge";
+import { StatusBadge } from "../components/common/StatusBadge";
+import { AppShell } from "../components/layout/AppShell";
+import { SpaceLayout } from "../components/layout/SpaceLayout";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type {
   CreateProjectKnowledgeRequest,
@@ -33,6 +39,20 @@ function unsupportedProjectMessage(reason: UnsupportedReason | null): string {
       return "접근 가능한 프로젝트 기록에서 확인 가능한 근거가 없습니다.";
   }
 }
+
+const projectKnowledgeTypeLabels: Record<ProjectKnowledgeType, string> = {
+  decision: "결정",
+  external: "외부 자료",
+  manual: "직접 등록",
+  report: "회의록"
+};
+
+const projectKnowledgeEmbeddingLabels: Record<ProjectKnowledgeItem["embeddingStatus"], string> = {
+  COMPLETED: "검색 가능",
+  FAILED: "처리 실패",
+  PENDING: "처리 대기",
+  PROCESSING: "처리 중"
+};
 
 type ProjectMeeting = WorkspaceData["projectOverview"]["meetings"][number];
 type MeetingParticipantState = {
@@ -426,9 +446,14 @@ export function ProjectOverviewPage({
   }, []);
 
   const [searchParams] = useSearchParams();
-  const spaceId = searchParams.get("spaceId");
+  const { spaceId: routeSpaceId } = useParams<{ spaceId?: string }>();
+  const spaceId = routeSpaceId ?? searchParams.get("spaceId");
   const projectName = searchParams.get("project");
-  const viewData = buildProjectView(data, projectMeetings, spaces, spaceId, projectName);
+  const viewData = useMemo(
+    () => buildProjectView(data, projectMeetings, spaces, spaceId, projectName),
+    [data, projectMeetings, projectName, spaceId, spaces]
+  );
+  const navigate = useNavigate();
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [messages, setMessages] = useState<ProjectChatMessage[]>([
     {
@@ -521,7 +546,7 @@ export function ProjectOverviewPage({
     setEditingKnowledgeId(null);
     setKnowledgeLoading(false);
     setKnowledgeError("");
-  }, [viewData?.selectedSpace.name]);
+  }, [viewData]);
 
   useEffect(() => {
     let active = true;
@@ -562,7 +587,18 @@ export function ProjectOverviewPage({
   }, [loading, messages]);
 
   if (!viewData) {
-    return null;
+    return (
+      <AppShell
+        contentClassName="project-overview-main"
+        sidebar={<WorkspaceSidebar activeItem="catalog" onCreateProject={onCreateProject} />}
+      >
+        <DataState
+          actionLabel="프로젝트 목록으로 이동"
+          onAction={() => navigate("/spaces")}
+          state={spaceId ? "notFound" : "empty"}
+        />
+      </AppShell>
+    );
   }
 
   const canSubmit = input.trim().length > 0 && !loading && Boolean(session) && projectAiAvailable;
@@ -571,6 +607,7 @@ export function ProjectOverviewPage({
   const members = projectMembers[selectedProjectName] ?? [];
   const currentSpaceMember = members.find((member) => member.email === currentUserEmail) ?? null;
   const hasManagerOverride = currentSpaceMember?.spaceRole === "OWNER" || currentSpaceMember?.spaceRole === "ADMIN";
+  const canDeleteProject = currentSpaceMember?.spaceRole === "OWNER";
   const officialKnowledge = projectKnowledge[selectedSpaceId] ?? [];
   const accessibleMeetings = viewData.meetings.filter((meeting) => {
     if (projectAiAvailable) {
@@ -588,6 +625,12 @@ export function ProjectOverviewPage({
   const nextMeeting = accessibleMeetings.find((meeting) => meeting.state !== "완료") ?? accessibleMeetings[0] ?? null;
   const contextMeeting = accessibleMeetings.find((meeting) => meeting.state === "보고서 생성됨") ?? accessibleMeetings[0] ?? null;
   const selectedMeeting = accessibleMeetings.find((meeting) => meeting.index === selectedMeetingIndex) ?? contextMeeting;
+  const meetingStateCounts = {
+    total: accessibleMeetings.length,
+    scheduled: accessibleMeetings.filter((meeting) => meeting.state === "예정").length,
+    inProgress: accessibleMeetings.filter((meeting) => meeting.state === "진행 중").length,
+    completed: accessibleMeetings.filter((meeting) => meeting.state === "완료" || meeting.state === "보고서 생성됨").length
+  };
   const selectedMeetingKey = selectedMeeting
     ? projectAiAvailable && selectedMeeting.id
       ? `target:${selectedSpaceId}:${selectedMeeting.id}`
@@ -1052,16 +1095,12 @@ export function ProjectOverviewPage({
   }
 
   return (
-    <div className="workspace-catalog-shell project-overview-shell">
-      <WorkspaceSidebar
-        activeItem="none"
-        mode="catalog"
+    <>
+      <SpaceLayout
         onCreateProject={onCreateProject}
         projectName={viewData.selectedSpace.name}
         spaceId={viewData.selectedSpace.id}
-      />
-
-      <main className="workspace-catalog-main project-overview-main">
+      >
         <section className="project-overview-header">
           <div className="project-overview-copy">
             <p className="project-overview-breadcrumb">
@@ -1069,7 +1108,13 @@ export function ProjectOverviewPage({
             </p>
             <h1>{viewData.overviewTitle}</h1>
             <div className="project-overview-subline">
-              <span className="project-overview-state">{viewData.knowledge.heroStatus}</span>
+              <StatusBadge
+                className="project-overview-state"
+                context="generic"
+                label={viewData.knowledge.heroStatus}
+                status={viewData.knowledge.heroStatus === "진행 중" ? "IN_PROGRESS" : "COMPLETED"}
+              />
+              {currentSpaceMember ? <RoleBadge role={currentSpaceMember.spaceRole} scope="space" /> : null}
               <p>{viewData.knowledge.heroDescription}</p>
             </div>
           </div>
@@ -1108,12 +1153,21 @@ export function ProjectOverviewPage({
               </section>
             )}
 
-            <section className="project-list-section">
+            <section className="project-list-section project-meetings-section" id="project-meetings">
               <div className="project-list-head">
-                <strong>회차별 진행 흐름</strong>
+                <div className="project-list-head-copy">
+                  <span>Meetings</span>
+                  <strong>회의 목록과 상태</strong>
+                </div>
                 <button className="project-list-open" onClick={() => setIsMeetingsModalOpen(true)} type="button">
                   전체보기 ›
                 </button>
+              </div>
+              <div aria-label="회의 상태 요약" className="project-meeting-summary">
+                <span><strong>{meetingStateCounts.total}</strong> 전체</span>
+                <span><strong>{meetingStateCounts.scheduled}</strong> 예정</span>
+                <span><strong>{meetingStateCounts.inProgress}</strong> 진행 중</span>
+                <span><strong>{meetingStateCounts.completed}</strong> 완료</span>
               </div>
               <div className="project-flow-list">
                 {accessibleMeetings.length ? (
@@ -1130,7 +1184,12 @@ export function ProjectOverviewPage({
                       </div>
                       <div className="project-flow-meta">
                         <span>{meeting.date}</span>
-                        <label className={`project-flow-badge ${getMeetingStateTone(meeting)}`}>{getMeetingStateLabel(meeting)}</label>
+                        <StatusBadge
+                          className={`project-flow-badge ${getMeetingStateTone(meeting)}`}
+                          context="meeting"
+                          label={getMeetingStateLabel(meeting)}
+                          status={meeting.state}
+                        />
                       </div>
                     </Link>
                   ))
@@ -1454,7 +1513,7 @@ export function ProjectOverviewPage({
               )}
             </section>
 
-            <section className="project-list-section project-kanban-section">
+            <section className="project-list-section project-kanban-section" id="project-tasks">
               <div className="project-list-head">
                 <strong>프로젝트 칸반</strong>
                 <span>카드 {filteredProjectTasks.length}/{selectedProjectTasks.length}개</span>
@@ -1694,16 +1753,16 @@ export function ProjectOverviewPage({
           </div>
 
           <aside className="project-overview-side">
-            <section className="project-side-block ask">
+            <section aria-label="Project AI" className="project-side-block ask project-ai-surface" id="project-ai">
               <div className="project-ask-head">
                 <div className="project-ask-icon">✦</div>
                 <div className="project-ask-title">
                   <strong>프로젝트에게 물어보기</strong>
-                  <span>{modelLabel ? `모델 ${modelLabel}` : `${viewData.selectedSpace.name} 문맥 기반 응답`}</span>
+                  <span>{modelLabel ? `모델 ${modelLabel}` : `${viewData.selectedSpace.name} 접근 범위 내 응답`}</span>
                 </div>
               </div>
 
-              <div className="project-ask-prompts">
+              <div aria-label="Project AI 추천 질문" className="project-ask-prompts">
                 {viewData.knowledge.prompts.map((prompt) => (
                   <button disabled={!session || loading || !projectAiAvailable} key={prompt} onClick={() => void askProjectAi(prompt)} type="button">
                     {prompt}
@@ -1711,7 +1770,7 @@ export function ProjectOverviewPage({
                 ))}
               </div>
 
-              <div className="project-ai-source-panel">
+              <div aria-label="Project AI 검색 범위" className="project-ai-source-panel">
                 <div>
                   <strong>Project Knowledge</strong>
                   <span>Backend가 공식 지식만 선필터</span>
@@ -1723,30 +1782,30 @@ export function ProjectOverviewPage({
                 <p>응답 근거가 없으면 확인 불가로 표시됩니다.</p>
               </div>
 
-              <div ref={chatScrollRef} className="project-chat-history">
+              <div aria-label="Project AI 대화" className="project-chat-history" ref={chatScrollRef} role="log">
                 {messages.map((message, index) => (
-                  <div key={`${message.role}-${index}`} className={`project-chat-bubble ${message.role}`}>
+                  <div key={`${message.role}-${index}`} className={`project-chat-bubble ${message.role} ${message.unsupportedReason ? "is-unsupported" : ""}`}>
                     <p>{message.text}</p>
                     {message.tags?.length ? (
-                      <div className="project-chat-tags">
+                      <div aria-label="Project AI 답변 근거" className="project-chat-tags" role="list">
                         {message.tags.map((tag) => (
-                          <span key={`${message.role}-${index}-${tag}`}>{tag}</span>
+                          <span key={`${message.role}-${index}-${tag}`} role="listitem">{tag}</span>
                         ))}
                       </div>
                     ) : null}
                   </div>
                 ))}
-                {loading ? <div className="project-chat-bubble ai">답변을 정리하고 있습니다...</div> : null}
+                {loading ? <div aria-live="polite" className="project-chat-bubble ai is-loading">답변을 정리하고 있습니다...</div> : null}
               </div>
 
-              {!projectAiAvailable ? <p className="project-chat-error">프로젝트 AI 검색 데이터가 아직 준비되지 않았습니다.</p> : null}
-              {error ? <p className="project-chat-error">{error}</p> : null}
+              {!projectAiAvailable ? <p aria-live="polite" className="project-chat-error">프로젝트 AI 검색 데이터가 아직 준비되지 않았습니다.</p> : null}
+              {error ? <p aria-live="assertive" className="project-chat-error">{error}</p> : null}
 
               <form className="project-chat-form" onSubmit={handleSubmit}>
                 <input
                   aria-label="프로젝트 질문 입력"
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="무엇이든 물어보세요..."
+                  placeholder="접근 가능한 회의와 공식 지식에 대해 질문하세요..."
                   type="text"
                   value={input}
                 />
@@ -1756,53 +1815,81 @@ export function ProjectOverviewPage({
               </form>
             </section>
 
-            <section className="project-side-block project-knowledge-panel">
+            <section aria-label="공식 프로젝트 지식" className="project-side-block project-knowledge-panel knowledge-surface" id="project-knowledge">
               <div className="project-list-head">
-                <strong>공식 프로젝트 지식</strong>
-                <span>{officialKnowledge.length}건</span>
+                <div>
+                  <span className="project-section-kicker">Knowledge</span>
+                  <strong>공식 프로젝트 지식</strong>
+                </div>
+                <span className="project-knowledge-count">{officialKnowledge.length}건</span>
               </div>
-              <div className="project-knowledge-list">
+              <p className="project-knowledge-intro">Project AI가 참조할 수 있는 승인된 기준과 결정입니다.</p>
+              <div aria-label="공식 지식 목록" className="project-knowledge-list" role="list">
                 {officialKnowledge.length ? officialKnowledge.map((knowledge) => (
-                  <article key={knowledge.id}>
-                    <div>
+                  <article className="project-knowledge-item" key={knowledge.id} role="listitem">
+                    <div className="project-knowledge-item-head">
                       <strong>{knowledge.title}</strong>
-                      <span>{knowledge.type} · {knowledge.embeddingStatus.toLowerCase()}</span>
+                      <StatusBadge
+                        className={`project-knowledge-status is-${knowledge.embeddingStatus.toLowerCase()}`}
+                        context="knowledge"
+                        label={projectKnowledgeEmbeddingLabels[knowledge.embeddingStatus]}
+                        status={knowledge.embeddingStatus}
+                      />
                     </div>
+                    <span className="project-knowledge-type">{projectKnowledgeTypeLabels[knowledge.type]}</span>
                     <p>{knowledge.contentPreview}</p>
                     {hasManagerOverride ? (
                       <div className="project-knowledge-actions">
-                        <button disabled={knowledgeLoading} onClick={() => void handleEditProjectKnowledge(knowledge.id)} type="button">편집</button>
-                        <button disabled={knowledgeLoading} onClick={() => void handleDeleteProjectKnowledge(knowledge.id)} type="button">삭제</button>
+                        <button aria-label={`${knowledge.title} 편집`} disabled={knowledgeLoading} onClick={() => void handleEditProjectKnowledge(knowledge.id)} type="button">편집</button>
+                        <button aria-label={`${knowledge.title} 삭제`} disabled={knowledgeLoading} onClick={() => void handleDeleteProjectKnowledge(knowledge.id)} type="button">삭제</button>
                       </div>
                     ) : null}
                   </article>
-                )) : <p className="project-knowledge-empty">등록된 공식 지식이 없습니다.</p>}
+                )) : (
+                  <div className="project-knowledge-empty" role="status">
+                    <strong>아직 공식 지식이 없습니다.</strong>
+                    <p>{hasManagerOverride ? "첫 기준이나 결정사항을 등록하면 Project AI가 검색할 수 있습니다." : "OWNER 또는 ADMIN이 등록한 기준과 결정사항이 여기에 표시됩니다."}</p>
+                  </div>
+                )}
               </div>
               {hasManagerOverride ? (
-                <form className="project-knowledge-form" onSubmit={handleProjectKnowledgeSubmit}>
-                  <select
-                    disabled={knowledgeLoading || Boolean(editingKnowledgeId)}
-                    onChange={(event) => setKnowledgeType(event.target.value as ProjectKnowledgeType)}
-                    value={knowledgeType}
-                  >
-                    <option value="manual">manual</option>
-                    <option value="decision">decision</option>
-                    <option value="report">report</option>
-                    <option value="external">external</option>
-                  </select>
-                  <input
-                    disabled={knowledgeLoading}
-                    onChange={(event) => setKnowledgeTitle(event.target.value)}
-                    placeholder="지식 제목"
-                    value={knowledgeTitle}
-                  />
-                  <textarea
-                    disabled={knowledgeLoading}
-                    onChange={(event) => setKnowledgeContent(event.target.value)}
-                    placeholder="Project AI가 참조할 공식 지식"
-                    rows={4}
-                    value={knowledgeContent}
-                  />
+                <form aria-label="공식 프로젝트 지식 등록" className="project-knowledge-form" onSubmit={handleProjectKnowledgeSubmit}>
+                  <div className="project-knowledge-form-heading">
+                    <strong>{editingKnowledgeId ? "공식 지식 편집" : "새 공식 지식"}</strong>
+                    <span>{editingKnowledgeId ? "변경 내용을 저장하세요." : "Project AI가 참조할 기준을 남기세요."}</span>
+                  </div>
+                  <label>
+                    <span>종류</span>
+                    <select
+                      disabled={knowledgeLoading || Boolean(editingKnowledgeId)}
+                      onChange={(event) => setKnowledgeType(event.target.value as ProjectKnowledgeType)}
+                      value={knowledgeType}
+                    >
+                      <option value="manual">직접 등록</option>
+                      <option value="decision">결정</option>
+                      <option value="report">회의록</option>
+                      <option value="external">외부 자료</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>제목</span>
+                    <input
+                      disabled={knowledgeLoading}
+                      onChange={(event) => setKnowledgeTitle(event.target.value)}
+                      placeholder="예: 3분기 출시 기준"
+                      value={knowledgeTitle}
+                    />
+                  </label>
+                  <label>
+                    <span>내용</span>
+                    <textarea
+                      disabled={knowledgeLoading}
+                      onChange={(event) => setKnowledgeContent(event.target.value)}
+                      placeholder="Project AI가 참조할 공식 지식"
+                      rows={4}
+                      value={knowledgeContent}
+                    />
+                  </label>
                   <div className="project-knowledge-actions">
                     <button disabled={knowledgeLoading || !knowledgeTitle.trim() || !knowledgeContent.trim()} type="submit">
                       {knowledgeLoading ? "저장 중..." : editingKnowledgeId ? "수정 저장" : "공식 지식 등록"}
@@ -1828,7 +1915,7 @@ export function ProjectOverviewPage({
             </section>
           </aside>
         </section>
-      </main>
+      </SpaceLayout>
 
       {isMeetingsModalOpen ? (
         <div className="project-meetings-modal-backdrop" role="presentation">
@@ -1882,7 +1969,7 @@ export function ProjectOverviewPage({
             </div>
 
             <div className="project-meetings-modal-list">
-              {filteredMeetings.map((meeting, index) => (
+              {filteredMeetings.length ? filteredMeetings.map((meeting, index) => (
                 <Link
                   key={`modal-${meeting.index}`}
                   className="project-meetings-modal-row"
@@ -1899,24 +1986,33 @@ export function ProjectOverviewPage({
                     <label className={`project-flow-badge ${getMeetingStateTone(meeting)}`}>{getMeetingStateLabel(meeting)}</label>
                   </div>
                 </Link>
-              ))}
+              )) : (
+                <div className="project-meetings-modal-empty">
+                  <strong>조건에 맞는 회의가 없습니다.</strong>
+                  <p>검색어를 바꾸거나 정렬 기준을 조정해 보세요.</p>
+                </div>
+              )}
             </div>
           </section>
         </div>
       ) : null}
 
       {isProjectSettingsOpen ? (
-        <div className="project-meetings-modal-backdrop" role="presentation">
+        <div className="project-meetings-modal-backdrop settings-modal-backdrop" role="presentation">
           <section
             aria-labelledby="project-settings-modal-title"
+            aria-describedby="project-settings-modal-description"
             aria-modal="true"
-            className="project-meetings-modal project-settings-modal"
+            className="project-meetings-modal project-settings-modal settings-surface"
             role="dialog"
           >
             <div className="project-meetings-modal-top">
               <div>
-                <p className="project-meetings-modal-kicker">Project Settings</p>
+                <p className="project-meetings-modal-kicker">Settings / Project scope</p>
                 <h3 id="project-settings-modal-title">프로젝트 정보</h3>
+                <p id="project-settings-modal-description" className="project-settings-intro">
+                  프로젝트 이름과 설명을 관리합니다. 변경은 이 프로젝트의 다음 화면부터 반영됩니다.
+                </p>
               </div>
               <button
                 aria-label="프로젝트 설정 닫기"
@@ -1928,42 +2024,50 @@ export function ProjectOverviewPage({
               </button>
             </div>
 
-            <form className="workspace-project-modal-form" onSubmit={handleProjectSettingsSubmit}>
+            {!hasManagerOverride ? (
+              <p className="project-settings-permission" role="status">프로젝트 정보 수정은 OWNER 또는 ADMIN만 할 수 있습니다.</p>
+            ) : null}
+
+            <form aria-busy={meetingMutationLoading} aria-label="프로젝트 정보 수정" className="workspace-project-modal-form" onSubmit={handleProjectSettingsSubmit}>
               <label className="workspace-project-field">
                 <span>프로젝트명</span>
-                <input onChange={(event) => setProjectTitle(event.target.value)} type="text" value={projectTitle} />
+                <input disabled={!hasManagerOverride || meetingMutationLoading} onChange={(event) => setProjectTitle(event.target.value)} type="text" value={projectTitle} />
               </label>
               <label className="workspace-project-field">
                 <span>설명</span>
-                <textarea onChange={(event) => setProjectDescription(event.target.value)} value={projectDescription} />
+                <textarea disabled={!hasManagerOverride || meetingMutationLoading} onChange={(event) => setProjectDescription(event.target.value)} value={projectDescription} />
               </label>
               <div className="workspace-project-modal-actions">
                 <button className="secondary" onClick={() => setIsProjectSettingsOpen(false)} type="button">
                   취소
                 </button>
-                <button className="primary" disabled={!projectTitle.trim()} type="submit">
-                  저장
+                <button className="primary" disabled={!hasManagerOverride || meetingMutationLoading || !projectTitle.trim()} type="submit">
+                  {meetingMutationLoading ? "저장 중..." : "변경 저장"}
                 </button>
               </div>
             </form>
 
-            <section className="project-settings-danger">
+            {meetingMutationError ? <p aria-live="assertive" className="project-settings-error" role="alert">{meetingMutationError}</p> : null}
+
+            <section aria-label="프로젝트 삭제" className="project-settings-danger">
+              <span className="project-settings-section-kicker">Danger zone</span>
               <strong>프로젝트 삭제</strong>
-              <p>오너 전용 작업입니다. 현재 프론트엔드에서는 local state에서 제외하고, 실제 삭제는 target API 연결 후 서버 권한 검증을 따릅니다.</p>
+              <p>OWNER만 수행할 수 있습니다. 프로젝트 이름을 입력하면 프로젝트 목록과 접근 범위에서 제거됩니다.</p>
               <input
                 aria-label="삭제 확인 프로젝트명"
+                disabled={!canDeleteProject || meetingMutationLoading}
                 onChange={(event) => setDeleteConfirm(event.target.value)}
                 placeholder={viewData.selectedSpace.name}
                 type="text"
                 value={deleteConfirm}
               />
-              <button disabled={deleteConfirm !== viewData.selectedSpace.name} onClick={handleDeleteProject} type="button">
-                프로젝트 삭제
+              <button disabled={!canDeleteProject || meetingMutationLoading || deleteConfirm !== viewData.selectedSpace.name} onClick={handleDeleteProject} type="button">
+                {meetingMutationLoading ? "삭제 중..." : "프로젝트 삭제"}
               </button>
             </section>
           </section>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

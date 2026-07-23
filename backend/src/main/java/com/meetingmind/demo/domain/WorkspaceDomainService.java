@@ -402,6 +402,39 @@ public class WorkspaceDomainService {
         return new MeetingCreationResult(meeting, host, store.findMeetingParticipants(meeting.id()));
     }
 
+    @Transactional
+    public MeetingCreationResult createInstantMeeting(String actorUserId, String spaceId) {
+        store.lockSpace(spaceId);
+        SpaceAccessPolicy.SpaceAccessContext spaceContext = spaceAccessContext(spaceId, actorUserId);
+        spaceAccessPolicy.requireMemberManagement(spaceContext);
+        requireUser(actorUserId);
+
+        Space space = store.findSpaceById(spaceId).orElseThrow(() -> new AuthorizationException(
+                HttpStatus.NOT_FOUND,
+                "SPACE_NOT_FOUND",
+                "Space를 찾을 수 없습니다."
+        ));
+        OffsetDateTime startedAt = OffsetDateTime.now(clock);
+        OffsetDateTime scheduledEndAt = startedAt.plusHours(1);
+        String roomCode = defaultRoomCode(space.id());
+        String title = (space.name() == null || space.name().isBlank() ? "Instant meeting" : space.name().trim() + " Live Room");
+        Meeting meeting = store.createInstantMeeting(
+                space.id(),
+                roomCode,
+                title,
+                null,
+                startedAt,
+                scheduledEndAt
+        );
+        MeetingParticipant host = store.addMeetingParticipant(
+                meeting.id(),
+                actorUserId,
+                MeetingRole.HOST,
+                ParticipantType.MEMBER
+        );
+        return new MeetingCreationResult(meeting, host, store.findMeetingParticipants(meeting.id()));
+    }
+
     public List<MeetingView> listMeetings(
             String actorUserId,
             String spaceId,
@@ -1267,6 +1300,14 @@ public class WorkspaceDomainService {
         );
     }
 
+    public String meetingRoomName(String meetingId) {
+        Meeting meeting = requireMeeting(meetingId);
+        if (meeting.roomCode() != null && !meeting.roomCode().isBlank()) {
+            return meeting.roomCode();
+        }
+        return meeting.id();
+    }
+
     public MeetingAiContext meetingAiContext(String meetingId) {
         Meeting meeting = store.findMeetingById(meetingId)
                 .orElseThrow(() -> new AuthorizationException(
@@ -1769,6 +1810,10 @@ public class WorkspaceDomainService {
                         "MEETING_NOT_FOUND",
                         "회의를 찾을 수 없습니다."
                 ));
+    }
+
+    private String defaultRoomCode(String spaceId) {
+        return "space-room-" + spaceId;
     }
 
     private MeetingTranscript requireProcessingTranscript(String meetingId) {

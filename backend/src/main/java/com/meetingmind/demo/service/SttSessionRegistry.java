@@ -2,6 +2,7 @@ package com.meetingmind.demo.service;
 
 import com.meetingmind.demo.dto.TranscriptEntryResponse;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
+import com.meetingmind.demo.config.DotenvConfig;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -9,7 +10,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalTime;
 import java.time.Instant;
-import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,85 +33,161 @@ public class SttSessionRegistry {
     // ponytail: 데모 규모 동시 회의 수 가정, 방 하나당 파일 락 하나. 방 수가 많아지면 락 맵을 정리(evict)하는 로직 추가.
     private final Map<String, Object> roomFileLocks = new ConcurrentHashMap<>();
     private final WorkspaceDomainService workspaceDomainService;
-    private final SttStreamClientFactory streamClientFactory;
+    private final SttProvider sttProvider;
+    private final LiveKitEgressService liveKitEgressService;
+    private final TranscriptAssembler transcriptAssembler;
 
     public SttSessionRegistry(
             WorkspaceDomainService workspaceDomainService,
-            SttStreamClientFactory streamClientFactory
+            SttProvider sttProvider,
+            LiveKitEgressService liveKitEgressService,
+            TranscriptAssembler transcriptAssembler
     ) {
         this.workspaceDomainService = workspaceDomainService;
-        this.streamClientFactory = streamClientFactory;
+        this.sttProvider = sttProvider;
+        this.liveKitEgressService = liveKitEgressService;
+        this.transcriptAssembler = transcriptAssembler;
     }
 
     public String create(String roomName, String displayName) {
-        return create(roomName, displayName, null);
+        return create(roomName, displayName, null, null);
     }
 
     public String createMeetingSession(String meetingId, String roomName, String displayName) {
-        return create(roomName, displayName, meetingId);
+        return create(roomName, displayName, meetingId, null);
     }
 
-    private String create(String roomName, String displayName, String meetingId) {
+    public String createMeetingSession(String meetingId, String roomName, String displayName, String trackId) {
+        return create(roomName, displayName, meetingId, trackId);
+    }
+
+    private String create(String roomName, String displayName, String meetingId, String trackId) {
         String sessionId = UUID.randomUUID().toString();
         List<TranscriptEntryResponse> transcript = Collections.synchronizedList(new ArrayList<>());
-        AtomicReference<Boolean> failed = new AtomicReference<>(false);
-        AtomicReference<String> partialText = new AtomicReference<>();
+        List<RawTranscriptEvent> rawEvents = Collections.synchronizedList(new ArrayList<>());
         Instant startedAt = Instant.now();
         String speakerLabel = "stt-" + sessionId;
 
-        Consumer<String> onFinal = text -> {
-            // Clova가 확정 신호(epFlag=true)만 보내고 text는 비워서 보내는 경우가 있어서,
-            // 그럴 땐 직전까지 쌓인 partial 텍스트를 최종 결과로 사용한다.
-            String finalText = (text == null || text.isBlank()) ? partialText.get() : text;
-            partialText.set(null);
-            if (finalText == null || finalText.isBlank()) {
+        Consumer<TranscriptEvent> onTranscriptEvent = event -> {
+            if (event == null || event.type() == TranscriptEventType.ERROR) {
                 return;
             }
-            transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), displayName, finalText));
-            if (meetingId != null) {
-                int endMs = (int) Duration.between(startedAt, Instant.now()).toMillis();
-                int startMs = Math.max(0, endMs - 1_000);
-                workspaceDomainService.appendTranscriptSegment(
-                        meetingId, speakerLabel, displayName, startMs, Math.max(startMs, endMs), finalText
-                );
-            } else {
-                appendToTranscriptFile(roomName, displayName, finalText);
-            }
+            onTranscriptEvent(event, rawEvents, transcript, meetingId, roomName, displayName, speakerLabel, startedAt);
         };
-        Consumer<String> onPartial = partialText::set;
-        Consumer<Throwable> onError = ignored -> {
-            if (meetingId != null && failed.compareAndSet(false, true)) {
-                workspaceDomainService.failMeetingTranscript(meetingId);
-            }
-        };
+        Consumer<Throwable> onError = ignored -> handleProviderError(sessionId);
 
-        // 세션 하나가 통째로 침묵-발화를 반복하는 동안, 실제 Clova gRPC 연결은 침묵 5초마다
-        // 끊고 새로 여는 방식으로 문장 경계를 확정 짓는다. 자세한 이유는 클래스 주석 참고.
-        SttStreamClient client = new SilenceSegmentingSttStreamClient(streamClientFactory, onFinal, onPartial, onError);
+        SttStreamClient client = sttProvider.createClient(
+                new SttSessionContext(sessionId, meetingId, null, trackId),
+                onTranscriptEvent,
+                onError
+        );
 
         sessions.put(sessionId, new SessionState(
-                meetingId, roomName, speakerLabel, displayName, client, transcript, new AtomicReference<>(), failed, partialText
+                sessionId,
+                meetingId,
+                roomName,
+                speakerLabel,
+                displayName,
+                client,
+                transcript,
+                rawEvents,
+                new AtomicReference<>(),
+                new AtomicReference<>(trackId),
+                new AtomicReference<>(false),
+                new AtomicReference<>(false)
         ));
         return sessionId;
     }
 
-    // ponytail: 화자(트랙)당 세션 하나라 partial은 세션별로 최대 1개만 들고 있으면 됨. 여러 명이 동시에
-    // 말하는 회의라도 세션이 speakerLabel 단위로 이미 분리되어 있어 이 이상 복잡한 상태 관리는 불필요.
+    private void persistFinal(
+            AssembledTranscriptSegment finalSegment,
+            List<TranscriptEntryResponse> transcript,
+            String meetingId,
+            String roomName,
+            String displayName,
+            String speakerLabel,
+            Instant startedAt
+    ) {
+        String text = TranscriptTextSanitizer.sanitize(finalSegment.text());
+        if (text.isBlank()) {
+            return;
+        }
+        transcript.add(new TranscriptEntryResponse(LocalTime.now().format(TIME_FORMAT), displayName, text));
+        if (meetingId != null) {
+            int startMs = (int) Math.max(0, finalSegment.startedAtMs());
+            int endMs = (int) Math.max(startMs, finalSegment.endedAtMs());
+            if (endMs == 0) {
+                endMs = Math.max(startMs, (int) java.time.Duration.between(startedAt, Instant.now()).toMillis());
+            }
+            workspaceDomainService.appendTranscriptSegment(meetingId, speakerLabel, displayName, startMs, endMs, text);
+            return;
+        }
+        appendToTranscriptFile(roomName, displayName, text);
+    }
+
+    private void onTranscriptEvent(
+            TranscriptEvent event,
+            List<RawTranscriptEvent> rawEvents,
+            List<TranscriptEntryResponse> transcript,
+            String meetingId,
+            String roomName,
+            String displayName,
+            String speakerLabel,
+            Instant startedAt
+    ) {
+        String debugText = TranscriptTextSanitizer.sanitize(event.text());
+        if (!debugText.isBlank()) {
+            rawEvents.add(new RawTranscriptEvent(
+                    event.providerEventId() + "-" + event.sequence(),
+                    speakerLabel,
+                    displayName,
+                    event.isFinal(),
+                    (int) Math.max(0, event.startedAtMs()),
+                    (int) Math.max(event.startedAtMs(), event.endedAtMs() == null ? event.startedAtMs() : event.endedAtMs()),
+                    debugText
+            ));
+        }
+        TranscriptChange change = transcriptAssembler.accept(event);
+        for (AssembledTranscriptSegment finalSegment : change.finalized()) {
+            persistFinal(finalSegment, transcript, meetingId, roomName, displayName, speakerLabel, startedAt);
+        }
+    }
+
     public List<PartialTranscript> getMeetingPartials(String meetingId) {
         List<PartialTranscript> partials = new ArrayList<>();
         for (SessionState state : sessions.values()) {
             if (!meetingId.equals(state.meetingId())) {
                 continue;
             }
-            String text = state.partialText().get();
-            if (text != null && !text.isBlank()) {
-                partials.add(new PartialTranscript(state.speakerLabel(), state.displayName(), text));
-            }
+            transcriptAssembler.partials(state.sessionId()).forEach(partial ->
+                    partials.add(new PartialTranscript(state.speakerLabel(), state.displayName(), partial.text()))
+            );
         }
         return partials;
     }
 
     public record PartialTranscript(String speakerLabel, String speakerName, String text) {
+    }
+
+    public record RawTranscriptEvent(
+            String eventId,
+            String speakerLabel,
+            String speakerName,
+            boolean finalEvent,
+            int startMs,
+            int endMs,
+            String text
+    ) {
+    }
+
+    public List<RawTranscriptEvent> getSessionRawEvents(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return List.of();
+        }
+        synchronized (state.rawEvents()) {
+            return List.copyOf(state.rawEvents());
+        }
     }
 
     private void appendToTranscriptFile(String roomName, String displayName, String text) {
@@ -139,8 +215,34 @@ public class SttSessionRegistry {
         return state == null ? null : state.client();
     }
 
+    public SttSessionContext getSessionContext(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return null;
+        }
+        return new SttSessionContext(sessionId, state.meetingId(), null, state.trackId().get());
+    }
+
     public void setEgressId(String sessionId, String egressId) {
         require(sessionId).egressId().set(egressId);
+    }
+
+    public void setTrackId(String sessionId, String trackId) {
+        require(sessionId).trackId().set(trackId);
+    }
+
+    public void markStopping(String sessionId) {
+        require(sessionId).stopping().set(true);
+    }
+
+    /**
+     * The egress socket may still have queued frames while an explicit stop is
+     * closing it. Those frames must not turn a user-requested completion into a
+     * provider failure.
+     */
+    public boolean isStopping(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        return state != null && state.stopping().get();
     }
 
     public String getEgressId(String sessionId) {
@@ -177,6 +279,14 @@ public class SttSessionRegistry {
         return state != null && meetingId.equals(state.meetingId());
     }
 
+    public String findActiveMeetingSessionId(String meetingId) {
+        return sessions.values().stream()
+                .filter(state -> meetingId.equals(state.meetingId()))
+                .map(SessionState::sessionId)
+                .findFirst()
+                .orElse(null);
+    }
+
     public void onEgressClosed(String sessionId) {
         SessionState state = sessions.get(sessionId);
         if (state == null) {
@@ -184,15 +294,42 @@ public class SttSessionRegistry {
         }
 
         state.client().finishAudio();
-        if (state.meetingId() != null) {
-            close(sessionId);
+        if (state.meetingId() == null) {
+            return;
         }
+        if (!state.stopping().get()) {
+            if (restartEgress(sessionId, state)) {
+                return;
+            }
+            failAndClose(sessionId);
+            return;
+        }
+        close(sessionId);
+    }
+
+    private void handleProviderError(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null || state.stopping().get()) {
+            return;
+        }
+        failAndClose(sessionId);
     }
 
     public void close(String sessionId) {
         SessionState state = sessions.remove(sessionId);
         if (state != null) {
             state.client().close();
+            for (AssembledTranscriptSegment finalSegment : transcriptAssembler.flush(sessionId)) {
+                persistFinal(
+                        finalSegment,
+                        state.transcript(),
+                        state.meetingId(),
+                        state.roomName(),
+                        state.displayName(),
+                        state.speakerLabel(),
+                        Instant.now()
+                );
+            }
             if (state.meetingId() != null && !state.failed().get()) {
                 workspaceDomainService.completeMeetingTranscript(state.meetingId());
             }
@@ -203,6 +340,7 @@ public class SttSessionRegistry {
         SessionState state = sessions.remove(sessionId);
         if (state != null) {
             state.client().close();
+            transcriptAssembler.discard(sessionId);
             if (state.meetingId() != null && state.failed().compareAndSet(false, true)) {
                 workspaceDomainService.failMeetingTranscript(state.meetingId());
             }
@@ -218,15 +356,34 @@ public class SttSessionRegistry {
     }
 
     private record SessionState(
+            String sessionId,
             String meetingId,
             String roomName,
             String speakerLabel,
             String displayName,
             SttStreamClient client,
             List<TranscriptEntryResponse> transcript,
+            List<RawTranscriptEvent> rawEvents,
             AtomicReference<String> egressId,
-            AtomicReference<Boolean> failed,
-            AtomicReference<String> partialText
+            AtomicReference<String> trackId,
+            AtomicReference<Boolean> stopping,
+            AtomicReference<Boolean> failed
     ) {
+    }
+
+    private boolean restartEgress(String sessionId, SessionState state) {
+        String trackId = state.trackId().get();
+        if (trackId == null || trackId.isBlank()) {
+            return false;
+        }
+        try {
+            String publicWsBaseUrl = DotenvConfig.require("PUBLIC_WS_BASE_URL");
+            String websocketUrl = LiveKitEgressService.egressWebSocketUrl(publicWsBaseUrl, sessionId);
+            String egressId = liveKitEgressService.startTrackEgress(state.roomName(), trackId, websocketUrl);
+            state.egressId().set(egressId);
+            return true;
+        } catch (IllegalStateException exception) {
+            return false;
+        }
     }
 }

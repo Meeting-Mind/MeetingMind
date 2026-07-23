@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   archiveDomainTerm,
   createDomainTerm,
   fetchDomainTerms,
   updateDomainTerm
-} from "../api/workspace";
+} from "../api/terms";
 import type { AuthSession } from "../auth/session";
+import { AppShell } from "../components/layout/AppShell";
+import { DataState } from "../components/common/DataState";
+import { PageHeader } from "../components/common/PageHeader";
+import { RoleBadge } from "../components/common/RoleBadge";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import type { DomainTerm, DomainTermStatus, WorkspaceData } from "../types";
 
@@ -50,13 +54,13 @@ export function DomainTermsPage({
   spaces: WorkspaceData["workspaceHome"]["spaces"];
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedSpaceId = searchParams.get("spaceId");
+  const { spaceId: routeSpaceId } = useParams<{ spaceId?: string }>();
+  const requestedSpaceId = routeSpaceId ?? searchParams.get("spaceId");
   const requestedProjectName = searchParams.get("project");
   const selectedSpace =
     spaces.find((space) => space.id === requestedSpaceId) ??
     spaces.find((space) => space.name === requestedProjectName) ??
-    spaces[0] ??
-    null;
+    (requestedSpaceId || requestedProjectName ? null : spaces[0] ?? null);
   const [terms, setTerms] = useState<DomainTerm[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -193,41 +197,56 @@ export function DomainTermsPage({
   }
 
   return (
-    <div className="workspace-catalog-shell">
-      <WorkspaceSidebar
-        activeItem="terms"
-        contextOverride={selectedSpace?.name}
-        mode="project"
-        onCreateProject={onCreateProject}
-        projectName={selectedSpace?.name}
-        spaceId={selectedSpace?.id}
-      />
+    <AppShell
+      contentClassName="workspace-catalog-main project-detail-main domain-terms-main"
+      sidebar={(
+        <WorkspaceSidebar
+          activeItem="terms"
+          contextOverride={selectedSpace?.name}
+          mode="project"
+          onCreateProject={onCreateProject}
+          projectName={selectedSpace?.name}
+          spaceId={selectedSpace?.id}
+        />
+      )}
+    >
 
-      <main className="workspace-catalog-main project-detail-main domain-terms-main">
-        <div className="workspace-catalog-topbar">
-          <div className="workspace-catalog-top-actions" aria-hidden="true">
-            <button className="workspace-catalog-icon-button" type="button">🔔</button>
-          </div>
-        </div>
-
-        <section className="domain-terms-header">
-          <div>
-            <p className="project-overview-breadcrumb">Project <span>Domain Dictionary</span></p>
-            <h1>용어사전</h1>
-            <p>프로젝트에서 반복되는 용어와 설명을 관리합니다.</p>
-          </div>
-          <label className="domain-terms-space-picker">
-            <span>프로젝트</span>
-            <select onChange={(event) => selectSpace(event.target.value)} value={selectedSpace?.id ?? ""}>
-              {spaces.map((space) => (
-                <option key={space.id} value={space.id}>{space.name}</option>
-              ))}
-            </select>
-          </label>
-        </section>
+        <PageHeader
+          actions={(
+            <label className="domain-terms-space-picker">
+              <span>프로젝트 선택</span>
+              <select onChange={(event) => selectSpace(event.target.value)} value={selectedSpace?.id ?? ""}>
+                {spaces.map((space) => (
+                  <option key={space.id} value={space.id}>{space.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          breadcrumb={(
+            <>
+              <Link to="/spaces">프로젝트 목록</Link>
+              <span aria-hidden="true">/</span>
+              {selectedSpace ? (
+                <>
+                  <Link to={`/spaces/${encodeURIComponent(selectedSpace.id)}`}>{selectedSpace.name}</Link>
+                  <span aria-hidden="true">/</span>
+                </>
+              ) : null}
+              <strong>용어사전</strong>
+            </>
+          )}
+          description="프로젝트에서 반복되는 용어와 설명을 관리하고 회의 지식의 의미를 맞춥니다."
+          eyebrow="Domain dictionary"
+          meta={currentMember ? <RoleBadge role={currentMember.spaceRole} scope="space" /> : null}
+          title="용어사전"
+        />
 
         {!selectedSpace ? (
-          <section className="domain-terms-empty"><strong>참여 중인 프로젝트가 없습니다.</strong></section>
+          <DataState
+            description="프로젝트에 참여하면 용어를 등록하고 회의 지식에 연결할 수 있습니다."
+            state={requestedSpaceId || requestedProjectName ? "notFound" : "empty"}
+            title="참여 중인 프로젝트가 없습니다."
+          />
         ) : (
           <>
             <section className="domain-terms-toolbar" aria-label="용어사전 필터">
@@ -285,11 +304,25 @@ export function DomainTermsPage({
               <p className="domain-terms-readonly">용어사전 조회 권한이 있습니다. 등록과 수정은 Space OWNER 또는 ADMIN만 할 수 있습니다.</p>
             )}
 
-            {error ? <p className="workspace-form-error" role="alert">{error}</p> : null}
+            {error ? (
+              <DataState
+                actionLabel="다시 불러오기"
+                description={error}
+                onAction={() => void loadTerms()}
+                state="error"
+                title="용어사전을 불러오지 못했습니다."
+              />
+            ) : null}
 
             <section className="domain-terms-list" aria-busy={isLoading}>
-              {isLoading ? <p className="domain-terms-loading">용어사전을 불러오는 중입니다.</p> : null}
-              {!isLoading && terms.length === 0 ? <p className="domain-terms-empty">조건에 맞는 용어가 없습니다.</p> : null}
+              {isLoading ? <DataState state="loading" title="용어사전을 불러오는 중입니다." /> : null}
+              {!isLoading && !error && terms.length === 0 ? (
+                <DataState
+                  description={keyword ? "검색어를 바꾸거나 전체 상태로 다시 확인해 보세요." : "첫 용어를 등록하면 회의 기록과 AI 검색에서 같은 의미로 사용할 수 있습니다."}
+                  state="empty"
+                  title="조건에 맞는 용어가 없습니다."
+                />
+              ) : null}
               {terms.map((term) => {
                 const isEditing = editingId === term.id && editDraft;
                 return (
@@ -353,7 +386,6 @@ export function DomainTermsPage({
             </section>
           </>
         )}
-      </main>
-    </div>
+    </AppShell>
   );
 }

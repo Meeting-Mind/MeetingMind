@@ -272,12 +272,36 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
         jdbc.update(
                 """
                 insert into meetings (
-                    id, space_id, title, description, scheduled_at, scheduled_end_at, started_at, ended_at, status,
+                    id, space_id, room_code, title, description, scheduled_at, scheduled_end_at, started_at, ended_at, status,
                     failure_reason, retention_policy, join_code_hash
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                meeting.id(), meeting.spaceId(), meeting.title(), meeting.description(), meeting.scheduledAt(), meeting.scheduledEndAt(), meeting.startedAt(),
+                meeting.id(), meeting.spaceId(), meeting.roomCode(), meeting.title(), meeting.description(), meeting.scheduledAt(), meeting.scheduledEndAt(), meeting.startedAt(),
                 meeting.endedAt(), meeting.status().name(), meeting.failureReason(), meeting.retentionPolicy(),
+                hashJoinCode(meeting.joinCode())
+        );
+        return meeting;
+    }
+
+    @Override
+    Meeting createInstantMeeting(
+            String spaceId,
+            String roomCode,
+            String title,
+            String description,
+            OffsetDateTime startedAt,
+            OffsetDateTime scheduledEndAt
+    ) {
+        Meeting meeting = Meeting.instant("meeting-" + UUID.randomUUID(), spaceId, roomCode, title, description, startedAt, scheduledEndAt);
+        jdbc.update(
+                """
+                insert into meetings (
+                    id, space_id, room_code, title, description, scheduled_at, scheduled_end_at, started_at, ended_at, status,
+                    failure_reason, retention_policy, join_code_hash
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                meeting.id(), meeting.spaceId(), meeting.roomCode(), meeting.title(), meeting.description(), meeting.scheduledAt(), meeting.scheduledEndAt(),
+                meeting.startedAt(), meeting.endedAt(), meeting.status().name(), meeting.failureReason(), meeting.retentionPolicy(),
                 hashJoinCode(meeting.joinCode())
         );
         return meeting;
@@ -1102,7 +1126,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
 
     private static String meetingSelect() {
         return """
-                select id, space_id, title, description, scheduled_at, scheduled_end_at, started_at, ended_at,
+                select id, space_id, room_code, title, description, scheduled_at, scheduled_end_at, started_at, ended_at,
                        status, failure_reason, retention_policy, deleted_at, deleted_by
                 from meetings
                 """;
@@ -1158,7 +1182,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
 
     private static Meeting mapMeeting(ResultSet rs, int rowNum) throws SQLException {
         return new Meeting(
-                rs.getString("id"), rs.getString("space_id"), rs.getString("title"), rs.getString("description"),
+                rs.getString("id"), rs.getString("space_id"), rs.getString("room_code"), rs.getString("title"), rs.getString("description"),
                 nullableOffsetDateTime(rs, "scheduled_at"), nullableOffsetDateTime(rs, "scheduled_end_at"), null,
                 nullableOffsetDateTime(rs, "started_at"), nullableOffsetDateTime(rs, "ended_at"),
                 MeetingStatus.valueOf(rs.getString("status")), rs.getString("failure_reason"),

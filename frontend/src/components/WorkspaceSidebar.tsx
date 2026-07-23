@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, NavLink } from "react-router-dom";
 
-type SidebarItem = "none" | "catalog" | "project" | "members" | "terms";
+type SidebarItem = "none" | "catalog" | "project" | "calendar" | "meetings" | "tasks" | "ai" | "knowledge" | "members" | "terms" | "settings";
 type CreateProjectPayload = {
   name: string;
   description: string;
@@ -9,7 +9,11 @@ type CreateProjectPayload = {
 
 function buildProjectOverviewHref(projectName?: string, spaceId?: string) {
   if (!projectName && !spaceId) {
-    return "/project-overview";
+    return "/spaces";
+  }
+
+  if (spaceId) {
+    return `/spaces/${encodeURIComponent(spaceId)}`;
   }
 
   const params = new URLSearchParams();
@@ -25,7 +29,11 @@ function buildProjectOverviewHref(projectName?: string, spaceId?: string) {
 
 function buildTeamMembersHref(projectName?: string, spaceId?: string) {
   if (!projectName && !spaceId) {
-    return "/team-members";
+    return "/spaces";
+  }
+
+  if (spaceId) {
+    return `/spaces/${encodeURIComponent(spaceId)}/members`;
   }
 
   const params = new URLSearchParams();
@@ -41,7 +49,11 @@ function buildTeamMembersHref(projectName?: string, spaceId?: string) {
 
 function buildTermsHref(projectName?: string, spaceId?: string) {
   if (!projectName && !spaceId) {
-    return "/terms";
+    return "/spaces";
+  }
+
+  if (spaceId) {
+    return `/spaces/${encodeURIComponent(spaceId)}/terms`;
   }
 
   const params = new URLSearchParams();
@@ -108,24 +120,29 @@ export function WorkspaceSidebar({
 
   return (
     <>
-      <aside className="workspace-catalog-sidebar">
+      <aside aria-label="MeetingMind 작업공간" className="workspace-catalog-sidebar">
         <Link className="workspace-catalog-logo" to="/">
           <span className="workspace-catalog-logo-main">meeting</span>
           <span className="workspace-catalog-logo-accent">mind</span>
         </Link>
 
-        <button
-          className="workspace-catalog-create"
-          onClick={() => {
-            setCreateError("");
-            setIsProjectModalOpen(true);
-          }}
-          type="button"
-        >
-          + 새 프로젝트 만들기
-        </button>
+        <div className="workspace-catalog-sidebar-section">
+          <p className="workspace-catalog-section-label">워크스페이스</p>
+          <button
+            className="workspace-catalog-create"
+            onClick={() => {
+              setCreateError("");
+              setIsProjectModalOpen(true);
+            }}
+            type="button"
+          >
+            <span aria-hidden="true" className="workspace-catalog-create-mark">+</span>
+            <span>새 프로젝트 만들기</span>
+          </button>
+        </div>
 
         <nav className="workspace-catalog-nav" aria-label="워크스페이스 메뉴">
+          <p className="workspace-catalog-section-label">탐색</p>
           <NavLink
             className={`workspace-catalog-nav-item ${activeItem === primaryItem ? "active" : ""}`}
             to={mode === "project" ? projectHref : "/spaces"}
@@ -133,6 +150,51 @@ export function WorkspaceSidebar({
             <span className={`workspace-catalog-nav-icon ${activeItem === primaryItem ? "active" : ""}`} />
             <span>{mode === "project" ? "프로젝트 개요" : "회의 카탈로그"}</span>
           </NavLink>
+          {mode === "project" && spaceId ? (
+            <NavLink
+              className={`workspace-catalog-nav-item ${activeItem === "calendar" ? "active" : ""}`}
+              to={`/spaces/${encodeURIComponent(spaceId)}/calendar`}
+            >
+              <span className={`workspace-catalog-nav-icon ${activeItem === "calendar" ? "active" : ""}`} />
+              <span>캘린더</span>
+            </NavLink>
+          ) : null}
+          {mode === "project" && spaceId ? (
+            <NavLink
+              className={`workspace-catalog-nav-item ${activeItem === "meetings" ? "active" : ""}`}
+              to={`/spaces/${encodeURIComponent(spaceId)}/meetings`}
+            >
+              <span className={`workspace-catalog-nav-icon ${activeItem === "meetings" ? "active" : ""}`} />
+              <span>회의</span>
+            </NavLink>
+          ) : null}
+          {mode === "project" && spaceId ? (
+            <NavLink
+              className={`workspace-catalog-nav-item ${activeItem === "tasks" ? "active" : ""}`}
+              to={`/spaces/${encodeURIComponent(spaceId)}/tasks`}
+            >
+              <span className={`workspace-catalog-nav-icon ${activeItem === "tasks" ? "active" : ""}`} />
+              <span>태스크</span>
+            </NavLink>
+          ) : null}
+          {mode === "project" && spaceId ? (
+            <NavLink
+              className={`workspace-catalog-nav-item ${activeItem === "ai" ? "active" : ""}`}
+              to={`/spaces/${encodeURIComponent(spaceId)}/ai`}
+            >
+              <span className={`workspace-catalog-nav-icon ${activeItem === "ai" ? "active" : ""}`} />
+              <span>Project AI</span>
+            </NavLink>
+          ) : null}
+          {mode === "project" && spaceId ? (
+            <NavLink
+              className={`workspace-catalog-nav-item ${activeItem === "knowledge" ? "active" : ""}`}
+              to={`/spaces/${encodeURIComponent(spaceId)}/knowledge`}
+            >
+              <span className={`workspace-catalog-nav-icon ${activeItem === "knowledge" ? "active" : ""}`} />
+              <span>Knowledge</span>
+            </NavLink>
+          ) : null}
           {disableMembers ? (
             <span className="workspace-catalog-nav-item disabled" aria-disabled="true">
               <span className="workspace-catalog-nav-icon disabled" />
@@ -148,21 +210,35 @@ export function WorkspaceSidebar({
             <span className={`workspace-catalog-nav-icon ${activeItem === "terms" ? "active" : ""}`} />
             <span>용어사전</span>
           </NavLink>
+          {mode === "project" && spaceId ? (
+            <NavLink
+              className={`workspace-catalog-nav-item ${activeItem === "settings" ? "active" : ""}`}
+              to={`/spaces/${encodeURIComponent(spaceId)}/settings`}
+            >
+              <span className={`workspace-catalog-nav-icon ${activeItem === "settings" ? "active" : ""}`} />
+              <span>설정</span>
+            </NavLink>
+          ) : null}
           <NavLink className="workspace-catalog-nav-item" to="/meeting-access">
             <span className="workspace-catalog-nav-icon" />
             <span>회의 참가</span>
           </NavLink>
         </nav>
 
-        {contextText ? <div className="workspace-catalog-context">{contextText}</div> : null}
+        {contextText ? (
+          <section aria-label="현재 작업공간" className="workspace-catalog-context">
+            <p className="workspace-catalog-section-label">현재 작업공간</p>
+            <strong>{contextText}</strong>
+            <span>접근 가능한 회의와 프로젝트 지식</span>
+          </section>
+        ) : null}
 
-        <div className="workspace-catalog-plan">
-          <div className="workspace-catalog-plan-mark" />
-          <p>
-            당신의 <strong>MeetingMind</strong>
-            <br />
-            구독이 곧 만료됩니다
-          </p>
+        <div className="workspace-catalog-support">
+          <span className="workspace-catalog-support-mark" aria-hidden="true">?</span>
+          <div>
+            <strong>작업 범위 안내</strong>
+            <p>회의와 지식은 프로젝트 권한 범위에서만 표시됩니다.</p>
+          </div>
         </div>
       </aside>
 
@@ -176,11 +252,11 @@ export function WorkspaceSidebar({
           >
             <div className="workspace-project-modal-top">
               <div>
-                <p className="workspace-project-modal-kicker">New Project</p>
-                <h3 id="workspace-project-modal-title">새 프로젝트 만들기</h3>
+                <p className="workspace-project-modal-kicker">New Space</p>
+                <h3 id="workspace-project-modal-title">Create a new collaboration space.</h3>
               </div>
               <button
-                aria-label="새 프로젝트 모달 닫기"
+                aria-label="Close new space modal"
                 className="workspace-project-modal-close"
                 disabled={isCreating}
                 onClick={() => setIsProjectModalOpen(false)}
@@ -191,35 +267,37 @@ export function WorkspaceSidebar({
             </div>
 
             <form className="workspace-project-modal-form" onSubmit={handleCreateProject}>
-              <label className="workspace-project-field">
-                <span>프로젝트명</span>
+              <div className="workspace-project-field">
+                <div id="workspace-project-title-label">Project name</div>
                 <input
+                  aria-labelledby="workspace-project-title-label"
                   disabled={isCreating}
                   onChange={(event) => setProjectTitle(event.target.value)}
-                  placeholder="예: FinPilot Renewal"
+                  placeholder="e.g. Q3 Launch"
                   type="text"
                   value={projectTitle}
                 />
-              </label>
+              </div>
 
-              <label className="workspace-project-field">
-                <span>설명</span>
+              <div className="workspace-project-field">
+                <div id="workspace-project-description-label">Description</div>
                 <textarea
+                  aria-labelledby="workspace-project-description-label"
                   disabled={isCreating}
                   onChange={(event) => setProjectDescription(event.target.value)}
-                  placeholder="프로젝트 목표, 범위, 현재 논의 중인 흐름을 적어주세요."
+                  placeholder="What is this project about?"
                   value={projectDescription}
                 />
-              </label>
+              </div>
 
               {createError ? <p aria-live="polite" className="workspace-form-error">{createError}</p> : null}
 
               <div className="workspace-project-modal-actions">
                 <button className="secondary" disabled={isCreating} onClick={() => setIsProjectModalOpen(false)} type="button">
-                  취소
+                  Cancel
                 </button>
                 <button className="primary" disabled={!projectTitle.trim() || isCreating} type="submit">
-                  {isCreating ? "생성 중..." : "프로젝트 생성"}
+                  {isCreating ? "Creating..." : "Create Space"}
                 </button>
               </div>
             </form>

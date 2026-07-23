@@ -49,7 +49,7 @@ public class SttStreamController {
         String sessionId = sessionRegistry.create(request.roomName(), user.displayName());
         try {
             String publicWsBaseUrl = DotenvConfig.require("PUBLIC_WS_BASE_URL");
-            String websocketUrl = publicWsBaseUrl + "/ws/egress-audio/" + sessionId;
+            String websocketUrl = LiveKitEgressService.egressWebSocketUrl(publicWsBaseUrl, sessionId);
             String egressId = liveKitEgressService.startTrackEgress(request.roomName(), request.trackId(), websocketUrl);
             sessionRegistry.setEgressId(sessionId, egressId);
             return new SttStreamStartResponse(sessionId, egressId);

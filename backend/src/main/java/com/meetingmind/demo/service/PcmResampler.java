@@ -30,4 +30,29 @@ public final class PcmResampler {
 
         return out.array();
     }
+
+    public static byte[] resample16kMonoTo24kMono(byte[] pcm16leMono16k) {
+        int inputSamples = pcm16leMono16k.length / 2;
+        if (inputSamples == 0) {
+            return new byte[0];
+        }
+
+        int outputSamples = inputSamples * 3 / 2;
+        ByteBuffer in = ByteBuffer.wrap(pcm16leMono16k).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer out = ByteBuffer.allocate(outputSamples * 2).order(ByteOrder.LITTLE_ENDIAN);
+
+        for (int i = 0; i < outputSamples; i++) {
+            double sourceIndex = i * (16_000.0 / 24_000.0);
+            int leftIndex = (int) Math.floor(sourceIndex);
+            int rightIndex = Math.min(leftIndex + 1, inputSamples - 1);
+            double ratio = sourceIndex - leftIndex;
+
+            short left = in.getShort(leftIndex * 2);
+            short right = in.getShort(rightIndex * 2);
+            int interpolated = (int) Math.round(left + (right - left) * ratio);
+            out.putShort((short) interpolated);
+        }
+
+        return out.array();
+    }
 }

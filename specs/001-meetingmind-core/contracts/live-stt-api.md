@@ -133,6 +133,8 @@ None.
 ### Notes
 
 - token에는 meeting room과 사용자 identity만 포함하고 Space 전체 권한은 포함하지 않는다.
+- `meeting.roomCode`가 있으면 해당 값을 roomName으로 사용하고, 없으면 기존처럼 `meetingId`를 roomName으로 사용한다.
+- 즉시 회의는 `roomCode`를 재사용해 같은 Space 회의방으로 반복 입장할 수 있지만, transcript/report/task/AI scope는 새 `meetingId`별로 유지한다.
 
 ## POST /api/v1/meetings/{meetingId}/start
 
@@ -342,6 +344,30 @@ None.
 - `409 TRANSCRIPTION_NOT_PROCESSING`: 이미 완료되었거나 실패한 전사
 - `503 STT_PROVIDER_UNAVAILABLE`: LiveKit Egress 종료 실패. session은 `FAILED`로 전환해 무한 `PROCESSING` 상태를 남기지 않는다.
 
+## POST /api/v1/meetings/{meetingId}/transcription/stop
+
+브라우저가 `sessionId`를 복구하지 못한 경우에도, 해당 회의의 서버 활성 STT 세션을 찾아 종료한다. 일반 종료는 `/{sessionId}/stop`을 우선 사용하며 이 endpoint는 종료 복구용이다.
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER`/`ADMIN` 또는 해당 회의 `HOST`
+
+### Response
+
+```json
+{
+  "meetingId": "meeting-001",
+  "transcriptStatus": "COMPLETED"
+}
+```
+
+### Errors
+
+- `403 MEETING_ACCESS_DENIED`: 종료 권한 없음
+- `404 STT_SESSION_NOT_FOUND`: 서버에 활성 STT 세션이 없음
+- `503 STT_PROVIDER_UNAVAILABLE`: LiveKit Egress 종료 실패
+
 ## GET /api/v1/meetings/{meetingId}/dialogue
 
 화면용 다이얼로그를 조회한다. 저장 모델은 `TranscriptSegment`다.
@@ -383,6 +409,13 @@ None.
       "endMs": 4200,
       "text": "안녕하세요. 회의 시작하겠습니다."
     }
+  ],
+  "partials": [
+    {
+      "speakerLabel": "화자 1",
+      "speakerName": "김진수",
+      "text": "현재 발화 중인 문장입니다"
+    }
   ]
 }
 ```
@@ -404,6 +437,8 @@ None.
 ### Notes
 
 - `PROCESSING`에서도 이미 저장된 segment를 반환해 실시간 자막 polling을 지원한다. `COMPLETED`와 `FAILED`도 같은 shape으로 반환하며, segment가 없으면 `rows`는 빈 배열이다.
+- `partials`는 아직 확정되지 않은 현재 발화이며 DB에 저장하지 않는다. `rawEvents`와 provider 원문 이벤트는 사용자 API에 포함하지 않는다.
+- 원시 provider 이벤트는 기본 profile에서 노출하지 않는다. 진단이 필요할 때만 `stt-debug` profile과 `STT_DEBUG_TOKEN`을 명시해 `GET /internal/stt/sessions/{sessionId}/raw-events`를 사용한다. 세션 종료 후에는 in-memory 이벤트도 제거된다.
 - speaker displayName 변경은 `meeting-api.md`의 speaker 수정 endpoint를 사용한다.
 
 ## GET /api/v1/meetings/{meetingId}/transcript/download

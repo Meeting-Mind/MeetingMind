@@ -5,6 +5,7 @@ import {
   createSpaceInvitation,
   createDomainTerm,
   createTask,
+  createInstantMeeting,
   createMeeting,
   createProjectKnowledge,
   deleteMeeting,
@@ -27,6 +28,7 @@ import {
   fetchSpaceMembers,
   startMeetingTranscription,
   stopMeetingTranscription,
+  transferSpaceOwner,
   updateMeetingReport,
   restoreMeetingReport,
   updateMeeting,
@@ -109,7 +111,8 @@ describe("meeting CRUD API client", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ meetings: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "meeting-1", status: "SCHEDULED" }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "meeting-1", status: "SCHEDULED" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "meeting-2", status: "IN_PROGRESS", roomCode: "space-room-space-1" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchMeetings(session, "space-1");
@@ -119,6 +122,7 @@ describe("meeting CRUD API client", () => {
       scheduledEndAt: "2026-07-15T11:00:00+09:00",
       participantUserIds: ["user-2"]
     });
+    await createInstantMeeting(session, "space-1");
 
     const listRequest = requestAt(fetchMock, 0);
     expect(listRequest.url).toBe("/api/v1/spaces/space-1/meetings");
@@ -138,6 +142,12 @@ describe("meeting CRUD API client", () => {
         participantUserIds: ["user-2"]
       })
     );
+
+    const instantRequest = requestAt(fetchMock, 2);
+    expect(instantRequest.url).toBe("/api/v1/spaces/space-1/instant-meetings");
+    expect(instantRequest.init?.method).toBe("POST");
+    expect(instantRequest.headers.get("X-CSRF-TOKEN")).toBe("csrf-value");
+    expect(instantRequest.headers.has("Authorization")).toBe(false);
   });
 
   it("loads meeting detail and Space members through cookie-authenticated routes", async () => {
@@ -257,6 +267,27 @@ describe("meeting CRUD API client", () => {
     expect(requestAt(fetchMock, 2).headers.get("X-CSRF-TOKEN")).toBe("csrf-value");
     fetchMock.mock.calls.forEach(([, init]) => {
       expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+    });
+  });
+
+  it("preserves transcription conflict codes for live UI recovery", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "TRANSCRIPTION_ALREADY_PROCESSING",
+            message: "이미 진행 중인 전사가 있습니다."
+          }),
+          { status: 409 }
+        )
+      )
+    );
+
+    await expect(startMeetingTranscription(session, "meeting-1", { mode: "realtime", trackId: "track-1" })).rejects.toMatchObject({
+      status: 409,
+      code: "TRANSCRIPTION_ALREADY_PROCESSING",
+      message: "이미 진행 중인 전사가 있습니다."
     });
   });
 
@@ -423,6 +454,32 @@ describe("meeting CRUD API client", () => {
     );
     expect(requestAt(fetchMock, 3).init?.body).toBe(JSON.stringify({ status: "DONE", priority: "LOW", labels: [] }));
     expect(requestAt(fetchMock, 5).init?.body).toBe(JSON.stringify({ summary: "수정된 회의록 요약" }));
+  });
+
+  it("maps owner transfer confirmation to the backend contract", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ transferred: true, newOwnerMemberId: "member-2", previousOwnerRole: "ADMIN" }), {
+        status: 200
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await transferSpaceOwner(session, "space-1", {
+      targetMemberId: "member-2",
+      previousOwnerRole: "ADMIN",
+      confirmation: "TRANSFER OWNER"
+    });
+
+    const request = requestAt(fetchMock, 0);
+    expect(request.url).toBe("/api/v1/spaces/space-1/owner-transfer");
+    expect(request.init?.method).toBe("POST");
+    expect(request.headers.get("X-CSRF-TOKEN")).toBe("csrf-value");
+    expect(request.headers.has("Authorization")).toBe(false);
+    expect(request.init?.body).toBe(JSON.stringify({
+      targetMemberId: "member-2",
+      previousOwnerRole: "ADMIN",
+      confirmationText: "TRANSFER OWNER"
+    }));
   });
 
   it("uses Space-scoped term routes with query encoding and CSRF mutations", async () => {
