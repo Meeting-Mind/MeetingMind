@@ -22,11 +22,23 @@ import com.meetingmind.demo.service.SttProvider;
 import com.meetingmind.demo.service.SttSessionRegistry;
 import java.time.Instant;
 import java.util.List;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
 class MeetingTranscriptionControllerTest {
+
+    @BeforeEach
+    void configurePublicWebSocketUrl() {
+        System.setProperty("PUBLIC_WS_BASE_URL", "https://stt-test.example");
+    }
+
+    @AfterEach
+    void clearPublicWebSocketUrl() {
+        System.clearProperty("PUBLIC_WS_BASE_URL");
+    }
 
     @Test
     void startsInstantMeetingTranscriptionAgainstResolvedRoomName() {

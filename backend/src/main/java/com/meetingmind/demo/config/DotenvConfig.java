@@ -24,6 +24,12 @@ public final class DotenvConfig {
         Map<String, String> dotenv = loadDotEnv();
 
         for (String key : keys) {
+            String systemProperty = System.getProperty(key);
+
+            if (systemProperty != null && !systemProperty.isBlank()) {
+                return systemProperty;
+            }
+
             String value = System.getenv(key);
 
             if (value != null && !value.isBlank()) {
@@ -45,6 +51,10 @@ public final class DotenvConfig {
 
     public static Optional<String> optional(String key) {
         Map<String, String> dotenv = loadDotEnv();
+        String systemProperty = System.getProperty(key);
+        if (systemProperty != null && !systemProperty.isBlank()) {
+            return Optional.of(systemProperty);
+        }
         String value = System.getenv(key);
         if (value != null && !value.isBlank()) {
             return Optional.of(value);

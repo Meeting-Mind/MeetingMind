@@ -14,9 +14,21 @@ import static org.mockito.Mockito.when;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class SttSessionRegistryTest {
+
+    @BeforeEach
+    void configurePublicWebSocketUrl() {
+        System.setProperty("PUBLIC_WS_BASE_URL", "https://stt-test.example");
+    }
+
+    @AfterEach
+    void clearPublicWebSocketUrl() {
+        System.clearProperty("PUBLIC_WS_BASE_URL");
+    }
 
     @Test
     void tracksPartialTranscriptUntilFinalArrives() {
