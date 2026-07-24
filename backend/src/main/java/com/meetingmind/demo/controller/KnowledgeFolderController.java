@@ -5,9 +5,11 @@ import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.dto.KnowledgeFolderDtos;
 import com.meetingmind.demo.service.KnowledgeFolderService;
 import jakarta.validation.Valid;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@Profile({"local", "db"})
 @RequestMapping("/api/v1/spaces/{spaceId}/knowledge/folders")
 public class KnowledgeFolderController {
     private final AuthService authService;
