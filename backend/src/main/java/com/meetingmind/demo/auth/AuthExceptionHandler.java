@@ -2,7 +2,7 @@ package com.meetingmind.demo.auth;
 
 import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.observability.RequestTrace;
-import com.meetingmind.demo.service.S3ImageStorageService.ImageStorageException;
+import com.meetingmind.demo.service.LocalImageStorageService.ImageStorageException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

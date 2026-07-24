@@ -1066,9 +1066,9 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 
 ### Milestone Goal
 
-사용자가 S3에 업로드한 대표 이미지를 Workspace와 사용자 프로필에 안전하게 연결하고,
+사용자가 업로드한 대표 이미지를 Workspace와 사용자 프로필에 안전하게 연결하고,
 업무 데이터베이스에는 공개 URL만 보관한다.
 
-- [x] T431 [backend/assets] [owner: Codex] S3 기반 JPEG/PNG/WebP(5MB) 업로드 endpoint와 Space 대표 이미지 URL 모델을 추가한다. Space 이미지는 OWNER/ADMIN만 업로드할 수 있고, 프로필은 본인만 수정한다.
+- [x] T431 [backend/assets] [owner: Codex] 로컬 파일 저장 기반 JPEG/PNG/WebP(5MB) 업로드 endpoint와 Space 대표 이미지 URL 모델을 추가한다. Space 이미지는 OWNER/ADMIN만 업로드할 수 있고, 프로필은 본인만 수정한다.
 - [x] T432 [frontend/assets] [owner: Codex] 실제 런타임 `App.tsx`의 Project Settings와 Account Settings에 이미지 업로드, 미리보기, 제거, 저장 흐름을 연결한다.
 - [x] V117 [verification] [owner: Codex] Backend/Frontend compile 및 build, BFF proxy route 검증 결과를 `implement.md`에 기록한다.

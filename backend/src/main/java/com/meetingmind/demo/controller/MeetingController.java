@@ -84,6 +84,7 @@ public class MeetingController {
                                 participant.participant().id(),
                                 participant.participant().userId(),
                                 participant.user() == null ? null : participant.user().displayName(),
+                                participant.user() == null ? null : participant.user().pictureUrl(),
                                 participant.participant().role().name(),
                                 participant.participant().participantType().name().toLowerCase(),
                                 participant.participant().accessStatus().name()

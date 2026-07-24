@@ -363,7 +363,7 @@ Space 대표 이미지를 업로드하고 공개 URL을 반환한다. 실제 Spa
 
 ```json
 {
-  "imageUrl": "https://cdn.example.com/spaces/space-001/cover.webp"
+  "imageUrl": "/api/v1/assets/images/spaces/space-001/cover.webp"
 }
 ```
 
@@ -371,7 +371,7 @@ Space 대표 이미지를 업로드하고 공개 URL을 반환한다. 실제 Spa
 
 - `400`: 파일 형식 또는 크기 오류
 - `403 SPACE_ACCESS_DENIED`: 수정 권한 없음
-- `503`: 이미지 저장소 미설정 또는 일시 실패
+- `503`: 이미지 저장소 일시 실패
 
 ## DELETE /api/v1/spaces/{spaceId}
 

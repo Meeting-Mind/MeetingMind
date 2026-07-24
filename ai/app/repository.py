@@ -30,6 +30,21 @@ class RetrievalUnavailableError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class KnowledgeGraphNode:
+    id: str
+    source_type: str
+    title: str
+    source_meeting_id: str | None
+
+
+@dataclass(frozen=True)
+class KnowledgeGraphEdge:
+    from_id: str
+    to_id: str
+    similarity: float
+
+
 LOGGER = logging.getLogger("meetingmind.ai.retrieval")
 
 
@@ -353,6 +368,115 @@ class PostgresEmbeddingRepository:
 
         return merge_hybrid_candidates(vector_rows, trigram_rows, request.limit)
 
+    def knowledge_graph(
+        self,
+        project_id: str,
+        allowed_meeting_ids: list[str],
+        *,
+        similarity_threshold: float = 0.78,
+        node_limit: int = 80,
+        edge_limit: int = 160,
+    ) -> tuple[list[KnowledgeGraphNode], list[KnowledgeGraphEdge]]:
+        if not project_id:
+            return [], []
+
+        # Nodes are source-level centroids, never individual chunks. The Core-provided
+        # meeting allowlist is part of the SQL predicate so unauthorized chunks cannot
+        # participate in either edges or cluster labels.
+        centroid_cte = """
+            with eligible as (
+                select
+                    case
+                        when chunks.project_knowledge_id is not null then 'knowledge:' || chunks.project_knowledge_id
+                        else chunks.source_type || ':' || chunks.source_id
+                    end as node_id,
+                    chunks.source_type,
+                    chunks.meeting_id as source_meeting_id,
+                    case
+                        when chunks.source_type = 'transcript' then
+                            'Transcript ' || row_number() over (
+                                partition by chunks.meeting_id, chunks.source_type
+                                order by chunks.start_ms nulls last, chunks.id
+                            )
+                        when chunks.source_type = 'meetingSummary' then 'Meeting Summary'
+                        else chunks.title
+                    end as title,
+                    chunks.embedding
+                from embedding_chunks chunks
+                join embedding_jobs jobs on jobs.id = chunks.embedding_job_id
+                left join project_knowledge knowledge on knowledge.id = chunks.project_knowledge_id
+                where chunks.space_id = %s
+                  and chunks.is_active = true
+                  and jobs.status = 'COMPLETED'
+                  and chunks.embedding is not null
+                  and chunks.source_type in ('projectKnowledge', 'meetingSummary', 'decision', 'actionItem', 'report', 'glossary')
+                  and (
+                      chunks.source_type <> 'projectKnowledge'
+                      or (knowledge.status = 'PUBLISHED' and knowledge.deleted_at is null)
+                  )
+                  and (
+                      chunks.source_type <> 'transcript'
+                      or exists (
+                          select 1
+                          from meeting_transcripts transcripts
+                          where transcripts.meeting_id = chunks.meeting_id
+                            and transcripts.status = 'COMPLETED'
+                            and transcripts.purged_at is null
+                      )
+                  )
+                  and (
+                      chunks.project_knowledge_id is not null
+                      or chunks.meeting_id = any(%s::varchar[])
+                  )
+            ), centroids as (
+                select node_id, source_type, source_meeting_id, min(title) as title, avg(embedding) as centroid
+                from eligible
+                group by node_id, source_type, source_meeting_id
+                order by node_id
+                limit %s
+            )
+        """
+        try:
+            with self._connect(self._dsn, row_factory=dict_row) as connection:
+                node_rows = connection.execute(
+                    centroid_cte + "select node_id, source_type, source_meeting_id, title from centroids order by node_id",
+                    (project_id, allowed_meeting_ids, node_limit),
+                ).fetchall()
+                edge_rows = connection.execute(
+                    centroid_cte + """
+                        select left_node.node_id as from_id,
+                               right_node.node_id as to_id,
+                               1 - (left_node.centroid <=> right_node.centroid) as similarity
+                        from centroids left_node
+                        join centroids right_node on left_node.node_id < right_node.node_id
+                        where 1 - (left_node.centroid <=> right_node.centroid) >= %s
+                        order by similarity desc, from_id, to_id
+                        limit %s
+                    """,
+                    (project_id, allowed_meeting_ids, node_limit, similarity_threshold, edge_limit),
+                ).fetchall()
+        except psycopg.Error as error:
+            raise RetrievalUnavailableError("knowledge graph database unavailable") from error
+
+        nodes = [
+            KnowledgeGraphNode(
+                id=str(row["node_id"]),
+                source_type=str(row["source_type"]),
+                title=str(row["title"] or "Untitled source"),
+                source_meeting_id=row["source_meeting_id"],
+            )
+            for row in node_rows
+        ]
+        edges = [
+            KnowledgeGraphEdge(
+                from_id=str(row["from_id"]),
+                to_id=str(row["to_id"]),
+                similarity=float(row["similarity"]),
+            )
+            for row in edge_rows
+        ]
+        return nodes, edges
+
     def _load_project_knowledge_chunks(self, connection: Any, job: EmbeddingJob) -> list[RagChunk]:
         row = connection.execute(
             """
@@ -433,11 +557,11 @@ class PostgresEmbeddingRepository:
         if report:
             decisions = tuple(
                 RagTextItem(
-                    id=row["id"], sourceType="decision", title=row["title"], text=row["content"]
+                    id=row["id"], sourceType="decision", title=row["title"], text=row["rationale"] or row["title"]
                 )
                 for row in connection.execute(
                     """
-                    select id, title, content
+                    select id, title, rationale
                     from report_decisions
                     where report_id = %s
                     order by decision_order

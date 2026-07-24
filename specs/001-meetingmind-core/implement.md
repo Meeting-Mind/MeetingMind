@@ -2079,6 +2079,6 @@
 ## M042 Workspace and Profile Images
 
 - 변경 파일: Core Space/Auth model 및 controller, BFF proxy route, Frontend `App.tsx`/session/space API client, V23 migration, API·ERD·data model contract 문서.
-- 구현: 프로필과 Space 대표 이미지는 `multipart/form-data`로 S3에 업로드하고, DB에는 public delivery URL만 저장한다. 파일은 JPEG/PNG/WebP, 최대 5MB로 제한한다. Space 대표 이미지 업로드는 OWNER/ADMIN만 가능하며 프로필 수정은 현재 사용자만 가능하다.
-- 배포 설정: `S3_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`가 필요하다. `S3_PUBLIC_BASE_URL`을 지정하면 CloudFront 또는 별도 public domain URL을 반환하고, 미지정 시 S3 regional URL을 반환한다. 객체 public read/CDN 정책은 인프라에서 관리하며 secret은 저장소에 기록하지 않는다.
+- 구현: 프로필과 Space 대표 이미지는 `multipart/form-data`로 Core에 업로드하고, DB에는 delivery URL만 저장한다. 파일은 JPEG/PNG/WebP, 최대 5MB로 제한한다. Space 대표 이미지 업로드는 OWNER/ADMIN만 가능하며 프로필 수정은 현재 사용자만 가능하다.
+- 변경 결정: S3 연동은 폐기하고 로컬 파일 저장소(`MEETINGMIND_IMAGE_UPLOAD_DIR`, 기본 `.local-uploads/images`)를 사용한다. 이미지는 `/api/v1/assets/images/{profiles|spaces}/{ownerId}/{filename}` 경로로 제공하며 BFF proxy를 경유한다.
 - 검증: `cd backend && ./gradlew compileJava`, `./gradlew test --tests com.meetingmind.demo.controller.SpaceControllerTest`, `cd bff && ./gradlew compileJava && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`, `cd frontend && npm run build`, `git diff --check`를 통과했다. Frontend는 기존 Vite chunk-size warning만 남았다.

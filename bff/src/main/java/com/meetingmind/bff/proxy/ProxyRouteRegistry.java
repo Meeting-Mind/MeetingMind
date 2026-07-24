@@ -22,6 +22,9 @@ public class ProxyRouteRegistry {
     // keep the route scoped to the term segment while accepting those IDs.
     private static final String TERM_ID = "term-[A-Za-z0-9-]+";
     private static final String KNOWLEDGE_ID = "knowledge-" + UUID;
+    private static final String IMAGE_CATEGORY = "(profiles|spaces)";
+    private static final String IMAGE_OWNER_ID = "[A-Za-z0-9-]+";
+    private static final String IMAGE_FILENAME = "[0-9a-fA-F-]+\\.(jpg|png|webp)";
     private static final String INVITATION_ID = "space-invitation-" + UUID;
     private static final String MEETING_INVITATION_ID = "meeting-invitation-" + UUID;
     private static final String SPACES = "/api/v1/spaces";
@@ -45,6 +48,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.GET, SPACES, DownstreamService.CORE),
             route(HttpMethod.PATCH, "/api/v1/auth/profile", DownstreamService.CORE),
             route(HttpMethod.POST, "/api/v1/assets/profile-image", DownstreamService.CORE),
+            route(HttpMethod.GET, "/api/v1/assets/images/" + IMAGE_CATEGORY + "/" + IMAGE_OWNER_ID + "/" + IMAGE_FILENAME, DownstreamService.CORE),
             route(HttpMethod.POST, SPACES, DownstreamService.CORE),
             route(HttpMethod.GET, SPACE, DownstreamService.CORE),
             route(HttpMethod.PATCH, SPACE, DownstreamService.CORE),

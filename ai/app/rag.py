@@ -194,8 +194,12 @@ def build_transcript_chunks(
             for offset, segment in enumerate(window, start=1)
         )
         speaker_names = unique_values(speaker_name(segment) for segment in window)
-        start_ms = first_int(segment.startMs for segment in window)
-        end_ms = last_int(segment.endMs for segment in window)
+        # STT providers can occasionally emit segments out of timestamp order.
+        # Keep the chunk range valid for persistence while retaining all text.
+        start_values = [segment.startMs for segment in window if isinstance(segment.startMs, int)]
+        end_values = [segment.endMs for segment in window if isinstance(segment.endMs, int)]
+        start_ms = min(start_values) if start_values else None
+        end_ms = max(end_values) if end_values else None
         content = "\n".join(
             f"{speaker_name(segment)}: {segment.text.strip()}"
             for segment in window

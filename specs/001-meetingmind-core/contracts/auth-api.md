@@ -361,9 +361,9 @@ None.
 - 인증 필요
 - `multipart/form-data`의 `file`
 - JPEG, PNG, WebP만 허용하며 최대 5MB
-- 응답: `{ "imageUrl": "https://cdn.example.com/profiles/user-001/avatar.webp" }`
+- 응답: `{ "imageUrl": "/api/v1/assets/images/profiles/user-001/avatar.webp" }`
 - `400`: 파일 형식 또는 크기 오류
-- `503`: 이미지 저장소 미설정 또는 일시 실패
+- `503`: 이미지 저장소 일시 실패
 
 ## POST /api/v1/auth/logout
 

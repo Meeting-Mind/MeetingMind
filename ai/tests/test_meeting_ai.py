@@ -369,6 +369,45 @@ class FastApiHttpBoundaryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ok_payload["model"], "qwen2.5-14b-instruct-awq")
         self.assertIn("x-request-id", headers)
 
+    async def test_http_internal_knowledge_graph_requires_token_and_preserves_contract(self):
+        request_body = {"projectId": "space-1", "allowedMeetingIds": ["meeting-1"]}
+        response_body = {
+            "clusters": [{
+                "id": "cluster-knowledge-1",
+                "label": "권한 설계",
+                "sourceCount": 1,
+                "nodes": [{
+                    "id": "knowledge-1",
+                    "sourceType": "projectKnowledge",
+                    "title": "권한 설계",
+                    "sourceMeetingId": None,
+                    "embeddingStatus": "COMPLETED",
+                }],
+            }],
+            "edges": [],
+            "generatedAt": "2026-07-23T00:00:00Z",
+        }
+
+        with patch.dict(os.environ, {"AI_INTERNAL_SERVICE_TOKEN": "service-secret"}, clear=False):
+            missing_status, _, missing_payload = await asgi_json_request(
+                "POST", "/api/internal/knowledge/graph", request_body
+            )
+            with patch("app.main.knowledge_graph", return_value=response_body) as graph:
+                ok_status, headers, ok_payload = await asgi_json_request(
+                    "POST",
+                    "/api/internal/knowledge/graph",
+                    request_body,
+                    {"x-meetingmind-service-token": "service-secret"},
+                )
+
+        self.assertEqual(missing_status, 401)
+        self.assertEqual(missing_payload["code"], "AI_INTERNAL_UNAUTHORIZED")
+        self.assertEqual(ok_status, 200)
+        graph.assert_called_once()
+        self.assertEqual(ok_payload["clusters"][0]["nodes"][0]["sourceType"], "projectKnowledge")
+        self.assertEqual(ok_payload["generatedAt"], "2026-07-23T00:00:00Z")
+        self.assertIn("x-request-id", headers)
+
     async def test_http_internal_term_endpoint_requires_token_and_preserves_contract(self):
         request_body = {
             "projectId": "space-1",
