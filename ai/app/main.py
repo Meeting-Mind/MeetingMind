@@ -2,6 +2,7 @@ import json
 import hmac
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request as FastApiRequest
@@ -34,7 +35,13 @@ from .rag import (
     build_rag_chunks,
     chunk_to_source,
 )
-from .repository import PostgresEmbeddingRepository, PostgresRagRetriever, RetrievalUnavailableError
+from .repository import (
+    KnowledgeGraphEdge as RepositoryKnowledgeGraphEdge,
+    KnowledgeGraphNode as RepositoryKnowledgeGraphNode,
+    PostgresEmbeddingRepository,
+    PostgresRagRetriever,
+    RetrievalUnavailableError,
+)
 from .text_generation_provider import (
     DEFAULT_TIMEOUT_SECONDS as TEXT_DEFAULT_TIMEOUT_SECONDS,
     REPORT_TIMEOUT_SECONDS as TEXT_REPORT_TIMEOUT_SECONDS,
@@ -226,6 +233,64 @@ class BackendProjectAiChatRequest(BaseModel):
     allowedMeetingIds: list[str] = Field(default_factory=list)
     history: list[BackendProjectAiHistoryTurn] = Field(default_factory=list, max_length=10)
     sources: list[BackendProjectAiSource] = Field(default_factory=list)
+
+
+class KnowledgeGraphRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    allowedMeetingIds: list[str] = Field(default_factory=list)
+
+
+class KnowledgeGraphNodeResponse(BaseModel):
+    id: str
+    sourceType: Literal[
+        "projectKnowledge",
+        "meeting",
+        "transcript",
+        "meetingSummary",
+        "decision",
+        "actionItem",
+        "report",
+        "glossary",
+    ]
+    title: str
+    sourceMeetingId: str | None = None
+    embeddingStatus: Literal["COMPLETED"] = "COMPLETED"
+    entityId: str | None = None
+    nodeType: str | None = None
+    connectionCount: int = 0
+    clusterIds: list[str] = Field(default_factory=list)
+    detailTarget: dict[str, str] | None = None
+
+
+class KnowledgeGraphEdgeResponse(BaseModel):
+    from_: str = Field(alias="from")
+    to: str
+    similarity: float
+    id: str | None = None
+    edgeType: str = "SEMANTIC_SIMILARITY"
+    weight: float | None = None
+    sourceIds: list[str] = Field(default_factory=list)
+
+
+class KnowledgeGraphClusterResponse(BaseModel):
+    id: str
+    label: str
+    sourceCount: int
+    nodes: list[KnowledgeGraphNodeResponse]
+    clusterBy: str = "SIMILARITY"
+    nodeIds: list[str] = Field(default_factory=list)
+    nodeCount: int | None = None
+    keywords: list[str] = Field(default_factory=list)
+    colorKey: str = "cluster-01"
+
+
+class KnowledgeGraphResponse(BaseModel):
+    clusters: list[KnowledgeGraphClusterResponse]
+    edges: list[KnowledgeGraphEdgeResponse]
+    generatedAt: str
+    nodes: list[KnowledgeGraphNodeResponse] = Field(default_factory=list)
+    filters: dict[str, object] = Field(default_factory=dict)
+    partial: bool = False
 
 
 class GenerateReportRequest(BaseModel):
@@ -1503,6 +1568,113 @@ def backend_project_chat(payload: BackendProjectAiChatRequest) -> ProjectAiChatR
     return answer_project_chat(payload.projectId, payload.question, sources, payload.history)
 
 
+def build_knowledge_graph_response(
+    nodes: list[RepositoryKnowledgeGraphNode],
+    edges: list[RepositoryKnowledgeGraphEdge],
+) -> KnowledgeGraphResponse:
+    node_by_id = {node.id: node for node in nodes}
+    parent = {node.id: node.id for node in nodes}
+
+    def find(node_id: str) -> str:
+        while parent[node_id] != node_id:
+            parent[node_id] = parent[parent[node_id]]
+            node_id = parent[node_id]
+        return node_id
+
+    for edge in edges:
+        if edge.from_id not in parent or edge.to_id not in parent:
+            continue
+        left = find(edge.from_id)
+        right = find(edge.to_id)
+        if left != right:
+            parent[right] = left
+
+    grouped: dict[str, list[RepositoryKnowledgeGraphNode]] = {}
+    for node in nodes:
+        grouped.setdefault(find(node.id), []).append(node)
+
+    clusters: list[KnowledgeGraphClusterResponse] = []
+    node_cluster_ids: dict[str, str] = {}
+    for cluster_nodes in grouped.values():
+        ordered_nodes = sorted(cluster_nodes, key=lambda item: (item.title.casefold(), item.id))
+        cluster_id = f"cluster-{ordered_nodes[0].id}"
+        node_cluster_ids.update({node.id: cluster_id for node in ordered_nodes})
+        clusters.append(
+            KnowledgeGraphClusterResponse(
+                id=cluster_id,
+                label=ordered_nodes[0].title,
+                sourceCount=len(ordered_nodes),
+                nodes=[
+                    KnowledgeGraphNodeResponse(
+                        id=node.id,
+                        sourceType=node.source_type,
+                        title=node.title,
+                        sourceMeetingId=node.source_meeting_id,
+                        entityId=node.id.split(":", 1)[-1],
+                        nodeType=graph_node_type(node.source_type),
+                        connectionCount=sum(
+                            1 for edge in edges if node.id in (edge.from_id, edge.to_id)
+                        ),
+                        clusterIds=[cluster_id],
+                    )
+                    for node in ordered_nodes
+                ],
+                nodeIds=[node.id for node in ordered_nodes],
+                nodeCount=len(ordered_nodes),
+                colorKey=f"cluster-{(len(clusters) % 8) + 1:02d}",
+            )
+        )
+
+    response_nodes = [node for cluster in clusters for node in cluster.nodes]
+    response_edges = [
+        KnowledgeGraphEdgeResponse(
+            **{
+                "from": edge.from_id,
+                "to": edge.to_id,
+                "similarity": edge.similarity,
+                "id": f"edge:{edge.from_id}:{edge.to_id}",
+                "weight": edge.similarity,
+            }
+        )
+        for edge in edges
+        if edge.from_id in node_by_id and edge.to_id in node_by_id
+    ]
+    return KnowledgeGraphResponse(
+        clusters=sorted(clusters, key=lambda item: (-item.sourceCount, item.label.casefold(), item.id)),
+        edges=response_edges,
+        generatedAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        nodes=response_nodes,
+        filters={"appliedNodeTypes": sorted({node.nodeType for node in response_nodes if node.nodeType}), "truncated": False},
+    )
+
+
+def graph_node_type(source_type: str) -> str:
+    return {
+        "projectKnowledge": "PROJECT_KNOWLEDGE",
+        "meetingSummary": "MEETING",
+        "meeting": "MEETING",
+        "transcript": "MEETING",
+        "report": "REPORT",
+        "decision": "DECISION",
+        "actionItem": "ACTION",
+        "glossary": "PROJECT_KNOWLEDGE",
+    }.get(source_type, "PROJECT_KNOWLEDGE")
+
+
+def knowledge_graph(payload: KnowledgeGraphRequest) -> KnowledgeGraphResponse:
+    dsn = get_env("AI_DATABASE_URL")
+    if not dsn:
+        raise provider_unavailable()
+    try:
+        nodes, edges = PostgresEmbeddingRepository(dsn).knowledge_graph(
+            payload.projectId,
+            list(dict.fromkeys(payload.allowedMeetingIds)),
+        )
+    except (RetrievalUnavailableError, ValueError) as error:
+        raise provider_unavailable() from error
+    return build_knowledge_graph_response(nodes, edges)
+
+
 def answer_project_chat(
     project_id: str,
     question: str,
@@ -1815,5 +1987,13 @@ def project_ai_chat(payload: ProjectAiChatRequest) -> ProjectAiChatResponse:
 def backend_project_ai_chat(payload: BackendProjectAiChatRequest) -> ProjectAiChatResponse:
     try:
         return observe_ai_endpoint("project-ai.chat.internal", lambda: backend_project_chat(payload))
+    except HTTPException as error:
+        raise as_provider_unavailable(error) from error
+
+
+@app.post("/api/internal/knowledge/graph", response_model=KnowledgeGraphResponse)
+def backend_knowledge_graph(payload: KnowledgeGraphRequest) -> KnowledgeGraphResponse:
+    try:
+        return observe_ai_endpoint("knowledge.graph.internal", lambda: knowledge_graph(payload))
     except HTTPException as error:
         raise as_provider_unavailable(error) from error
