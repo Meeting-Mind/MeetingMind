@@ -236,6 +236,7 @@ public class SpaceController {
                             member.member().userId(),
                             memberUser == null ? null : memberUser.displayName(),
                             memberUser == null ? null : memberUser.email(),
+                            memberUser == null ? null : memberUser.pictureUrl(),
                             member.member().role().name(),
                             member.member().joinedAt().toString()
                     );

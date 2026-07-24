@@ -253,6 +253,27 @@ function participantInitials(name: string) {
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function ProfileAvatar({
+  pictureUrl,
+  initials,
+  className,
+  alt = ""
+}: {
+  pictureUrl?: string | null;
+  initials: string;
+  className: string;
+  alt?: string;
+}) {
+  const src = pictureUrl?.trim();
+  return src ? (
+    <img alt={alt} className={`${className} object-cover`} src={src} />
+  ) : (
+    <div aria-hidden="true" className={`${className} flex items-center justify-center bg-muted text-foreground`}>
+      {initials}
+    </div>
+  );
+}
+
 function formatMeetingSchedule(detail: MeetingDetailResponse | null) {
   if (!detail) {
     return "회의 정보를 확인하는 중입니다.";
@@ -2024,10 +2045,10 @@ const ProjectHome = () => {
             <div className="space-y-2.5">
               {members.length > 0 ? members.slice(0, 5).map((member) => {
                 const name = member.displayName?.trim() || member.email || "Unknown";
-                const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "MM";
+                const initials = participantInitials(name);
                 return (
                   <div key={member.id} className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground shrink-0">{initials}</div>
+                    <ProfileAvatar alt={name} className="w-7 h-7 rounded-full shrink-0 text-xs font-medium" initials={initials} pictureUrl={member.pictureUrl} />
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium truncate block">{name}</span>
                     </div>
@@ -3023,7 +3044,7 @@ const MeetingParticipants = () => {
             const name = participant.displayName?.trim() || participant.email?.trim() || participant.userId;
             return (
               <div className="flex items-center gap-3 py-4" key={participant.id}>
-                <div aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-foreground">{name.charAt(0).toUpperCase()}</div>
+                <ProfileAvatar alt={name} className="h-9 w-9 shrink-0 rounded-md text-sm font-semibold" initials={participantInitials(name)} pictureUrl={participant.pictureUrl} />
                 <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-foreground">{name}</p><p className="truncate text-xs text-muted-foreground">{participant.role === "HOST" ? "Host" : participant.participantType === "member" ? "Member" : "Guest"}</p></div>
               </div>
             );
@@ -3895,12 +3916,8 @@ const ProjectTasks = () => {
       member.userId,
       {
         name: member.displayName?.trim() || member.email || "Unknown",
-        initials: (member.displayName?.trim() || member.email || "MM")
-          .split(/\s+/)
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((part) => part[0]?.toUpperCase() ?? "")
-          .join("") || "MM"
+        initials: participantInitials(member.displayName?.trim() || member.email || "MM"),
+        pictureUrl: member.pictureUrl
       }
     ])
   );
@@ -4046,9 +4063,7 @@ const ProjectTasks = () => {
                           <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${priorityStyle[task.priority]}`}>{priorityLabel(task.priority)}</span>
                           <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded border border-border bg-muted/30">{chip}</span>
                         </div>
-                        <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
-                          {assignee?.initials ?? "—"}
-                        </div>
+                        {assignee ? <ProfileAvatar alt={assignee.name} className="w-6 h-6 rounded-full text-[10px] font-bold shrink-0" initials={assignee.initials} pictureUrl={assignee.pictureUrl} /> : <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">—</div>}
                       </div>
                     </div>
                   );
@@ -5829,7 +5844,7 @@ const ProjectMembers = () => {
   function memberIdentity(member: SpaceMembersResponse["members"][number]) {
     const name = member.displayName?.trim() || member.email || member.userId;
     const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "MM";
-    return { name, initials };
+    return { name, initials, pictureUrl: member.pictureUrl };
   }
 
   function joinedLabel(value: string) {
@@ -5984,7 +5999,7 @@ const ProjectMembers = () => {
             return (
             <div key={m.id} className="px-5 py-3.5 grid grid-cols-12 gap-4 items-center hover:bg-muted/20 transition-colors group">
               <div className="col-span-5 flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-foreground shrink-0">{initials}</div>
+                <ProfileAvatar alt={name} className="w-8 h-8 rounded-full text-xs font-bold shrink-0" initials={initials} pictureUrl={m.pictureUrl} />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground truncate">{name}</div>
                   <div className="text-xs text-muted-foreground truncate">{m.email}</div>

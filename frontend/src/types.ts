@@ -232,6 +232,7 @@ export interface MeetingParticipantSummary {
   userId: string;
   displayName?: string | null;
   email?: string | null;
+  pictureUrl?: string | null;
   role: MeetingRole;
   participantType: ParticipantType;
   accessStatus: ParticipantAccessStatus;
@@ -475,6 +476,7 @@ export interface SpaceMemberSummary {
   userId: string;
   displayName: string | null;
   email: string | null;
+  pictureUrl: string | null;
   role: SpaceRole;
   joinedAt: ApiDateTime;
 }

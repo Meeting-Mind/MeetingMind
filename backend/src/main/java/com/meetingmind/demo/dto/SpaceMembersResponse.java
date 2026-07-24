@@ -8,6 +8,7 @@ public record SpaceMembersResponse(List<Member> members) {
             String userId,
             String displayName,
             String email,
+            String pictureUrl,
             String role,
             String joinedAt
     ) {

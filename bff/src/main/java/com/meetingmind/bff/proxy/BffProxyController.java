@@ -2,13 +2,13 @@ package com.meetingmind.bff.proxy;
 
 import com.meetingmind.bff.auth.BffTokenManager;
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.util.Arrays;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,8 +30,7 @@ public class BffProxyController {
 
     @RequestMapping("/api/v1/**")
     public ResponseEntity<byte[]> proxy(
-            HttpServletRequest request,
-            @RequestBody(required = false) byte[] body) {
+            HttpServletRequest request) throws IOException {
         HttpMethod method = HttpMethod.valueOf(request.getMethod());
         String path = request.getRequestURI();
         ProxyRoute route = routeRegistry.resolve(method, path)
@@ -42,7 +41,7 @@ public class BffProxyController {
                 query(request),
                 request.getHeader(HttpHeaders.CONTENT_TYPE),
                 request.getHeader(HttpHeaders.ACCEPT),
-                body);
+                request.getInputStream().readAllBytes());
         ProxyResponse response = tokenManager.execute(
                 request,
                 route.service().audience(),

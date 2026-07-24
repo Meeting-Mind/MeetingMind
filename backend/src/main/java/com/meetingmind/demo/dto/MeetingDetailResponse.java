@@ -20,6 +20,7 @@ public record MeetingDetailResponse(
             String participantId,
             String userId,
             String displayName,
+            String pictureUrl,
             String role,
             String participantType,
             String accessStatus
