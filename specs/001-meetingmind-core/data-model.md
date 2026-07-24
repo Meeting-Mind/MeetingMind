@@ -48,7 +48,7 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `id`
 - `name`
 - `description`
-- `imageUrl`: nullable 대표 이미지 공개 URL. 객체 파일은 S3 또는 CDN에 저장하며 DB에는 URL만 저장한다.
+- `imageUrl`: nullable 대표 이미지 delivery URL. 객체 파일은 로컬 이미지 저장소에 저장하며 DB에는 URL만 저장한다.
 - `createdBy`
 - `createdAt`
 - `updatedAt`: Space 이름 또는 설명 수정 시각

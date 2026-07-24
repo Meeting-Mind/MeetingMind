@@ -5,6 +5,9 @@ spring:
 
 meetingmind:
   bff:
+    downstream:
+      core:
+        read-timeout: ${BFF_CORE_READ_TIMEOUT:30s}
     session-cookie:
       name: ${BFF_SESSION_COOKIE_NAME:mm-session}
       secure: ${BFF_SESSION_COOKIE_SECURE:false}

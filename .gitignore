@@ -15,6 +15,7 @@ backend/target/
 backend/.gradle/
 backend/build/
 backend/bin/
+backend/.local-uploads/
 bff/.gradle/
 bff/build/
 bff/bin/
