@@ -1,6 +1,21 @@
 server:
   port: ${STT_SERVER_PORT:8083}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
+
 spring:
   application:
     name: meetingmind-stt
