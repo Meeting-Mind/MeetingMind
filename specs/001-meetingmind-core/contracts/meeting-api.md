@@ -758,11 +758,9 @@ None.
 
 회의 초대 링크를 생성한다. 회의 초대는 특정 회의 접근권만 부여하며 SpaceMember를 만들지 않는다.
 
-> Superseded: D-010에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다. URL/코드 기반 `MeetingJoinRequest`가 대체한다.
-
 ### Status
 
-- Superseded
+- Active. 로그인 후 수락하는 bearer token 초대 링크는 해당 회의 `VIEWER` 권한을 즉시 부여한다.
 
 ### Auth and Permissions
 
@@ -785,10 +783,8 @@ None.
 
 ### Validation
 
-- `email`: required, email format
-- `meetingRole`: `HOST`, `EDITOR`, `VIEWER`
-- `participantType`: `member`, `guest`
-- `guest` participant는 SpaceMember를 생성하지 않는다.
+- 초대 링크 token은 원문을 저장하지 않고 hash만 저장한다.
+- guest participant는 SpaceMember를 생성하지 않는다.
 
 ### Response
 
@@ -825,11 +821,9 @@ None.
 
 회의 초대를 수락하고 `MeetingParticipant`를 생성한다.
 
-> Superseded: D-022에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다.
-
 ### Status
 
-- Superseded
+- Active. 로그인한 사용자가 유효한 token을 제시할 때 수락할 수 있다.
 
 ### Auth and Permissions
 
@@ -888,11 +882,9 @@ None.
 
 회의 초대를 거절한다.
 
-> Superseded: D-022에 따라 현재 사용자-facing 흐름에서는 사용하지 않는다.
-
 ### Status
 
-- Superseded
+- Active.
 
 ### Auth and Permissions
 

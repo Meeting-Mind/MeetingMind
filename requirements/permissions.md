@@ -43,7 +43,7 @@
 - Project AI는 사용자가 참여 권한을 가진 회의만 검색 대상에 포함한다.
 - 회의 게스트는 특정 회의의 `MeetingParticipant`로 등록된 사용자이며, 지정된 회의 밖의 STT, AI 보고서, Meeting AI, 회의 파일, 대화 내용에는 접근할 수 없다.
 - `MeetingParticipant`는 특정 회의 접근권만 부여하며 프로젝트 전체 접근권을 만들지 않는다. 프로젝트 전체 접근권은 프로젝트 총괄이 `SpaceMember` 또는 Space invitation으로 명시 인가한 사용자에게만 부여한다.
-- 사용자-facing 회의 참여 흐름은 회의 URL 또는 참가 코드로 `MeetingJoinRequest`를 만들고 active `HOST`가 승인하는 방식이다. Space `OWNER`/`ADMIN`은 회의 ACL 관리 override로 승인/거절할 수 있다.
+- `MeetingInvitation`은 로그인 후 수락하는 bearer token 링크이며, 수락 시 즉시 해당 회의 `VIEWER` 권한을 부여한다. 일반 회의 URL 또는 참가 코드는 `MeetingJoinRequest`를 만들고 active `HOST`가 승인하는 방식이다. Space `OWNER`/`ADMIN`은 회의 ACL 관리 override로 승인/거절할 수 있다.
 - 참가 신청 승인 전에는 회의 접근권이 없으며, 승인 시 `VIEWER` MeetingParticipant만 생성한다. 신청자가 SpaceMember가 아니면 `participantType=guest`이며 SpaceMember를 만들지 않는다.
 - MeetingParticipant 직접 추가는 OWNER/ADMIN/active HOST의 운영상 ACL 조정에만 사용하고 일반적인 신규 참여 흐름으로 노출하지 않는다.
 - Project Knowledge는 `SpaceMember`인 오너/관리자/일반 멤버가 조회할 수 있으며, 회의 게스트는 기본 접근할 수 없다.

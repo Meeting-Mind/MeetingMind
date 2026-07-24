@@ -3,6 +3,7 @@ import { jsonHeaders, requestJson } from "./client";
 import type {
   CreateProjectKnowledgeRequest,
   DeleteProjectKnowledgeResponse,
+  KnowledgeGraphResponse,
   ProjectKnowledgeDetailResponse,
   ProjectKnowledgeListResponse,
   ProjectKnowledgeMutationResponse,
@@ -11,6 +12,25 @@ import type {
 
 export async function fetchProjectKnowledge(_session: AuthSession, spaceId: string): Promise<ProjectKnowledgeListResponse> {
   return requestJson<ProjectKnowledgeListResponse>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge`, {
+    headers: undefined
+  });
+}
+
+export interface KnowledgeGraphFilters {
+  meetingIds?: string[];
+  nodeTypes?: string[];
+}
+
+export async function fetchKnowledgeGraph(
+  _session: AuthSession,
+  spaceId: string,
+  filters: KnowledgeGraphFilters = {}
+): Promise<KnowledgeGraphResponse> {
+  const params = new URLSearchParams();
+  filters.meetingIds?.forEach((id) => params.append("meetingIds", id));
+  filters.nodeTypes?.forEach((type) => params.append("nodeTypes", type));
+  const query = params.toString();
+  return requestJson<KnowledgeGraphResponse>(`${`/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge/graph`}${query ? `?${query}` : ""}`, {
     headers: undefined
   });
 }
@@ -56,5 +76,16 @@ export async function deleteProjectKnowledge(
   return requestJson<DeleteProjectKnowledgeResponse>(
     `/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
     { method: "DELETE", headers: jsonHeaders() }
+  );
+}
+
+export async function restoreProjectKnowledge(
+  _session: AuthSession,
+  spaceId: string,
+  knowledgeId: string
+): Promise<DeleteProjectKnowledgeResponse> {
+  return requestJson<DeleteProjectKnowledgeResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/knowledge/${encodeURIComponent(knowledgeId)}/restore`,
+    { method: "POST", headers: jsonHeaders() }
   );
 }

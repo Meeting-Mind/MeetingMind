@@ -33,6 +33,7 @@ declare global {
 
 const scriptId = "meetingmind-google-identity";
 let scriptRequest: Promise<GoogleIdentityApi> | null = null;
+let initializedClientId: string | null = null;
 
 export function GoogleCredentialButton({
   clientId,
@@ -46,7 +47,14 @@ export function GoogleCredentialButton({
   onError: (message: string) => void;
 }) {
   const buttonRef = useRef<HTMLDivElement | null>(null);
+  const disabledRef = useRef(disabled);
+  const onCredentialRef = useRef(onCredential);
+  const onErrorRef = useRef(onError);
   const [google, setGoogle] = useState<GoogleIdentityApi | null>(window.google ?? null);
+
+  disabledRef.current = disabled;
+  onCredentialRef.current = onCredential;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let active = true;
@@ -71,19 +79,22 @@ export function GoogleCredentialButton({
       return;
     }
     buttonRef.current.innerHTML = "";
-    google.accounts.id.initialize({
-      client_id: clientId,
-      callback: (response) => {
-        if (disabled) {
-          return;
+    if (initializedClientId !== clientId) {
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          if (disabledRef.current) {
+            return;
+          }
+          if (!response.credential) {
+            onErrorRef.current("Unable to verify the Google credential response.");
+            return;
+          }
+          onCredentialRef.current(response.credential);
         }
-        if (!response.credential) {
-          onError("Unable to verify the Google credential response.");
-          return;
-        }
-        onCredential(response.credential);
-      }
-    });
+      });
+      initializedClientId = clientId;
+    }
     google.accounts.id.renderButton(buttonRef.current, {
       theme: "outline",
       size: "large",
@@ -91,7 +102,15 @@ export function GoogleCredentialButton({
       text: "continue_with",
       width: 320
     });
-  }, [clientId, disabled, google, onCredential, onError]);
+  }, [clientId, google]);
+
+  useEffect(() => {
+    return () => {
+      if (buttonRef.current) {
+        buttonRef.current.innerHTML = "";
+      }
+    };
+  }, []);
 
   return (
     <div

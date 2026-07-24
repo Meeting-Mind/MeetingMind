@@ -65,6 +65,20 @@ public class JpaWorkspacePersistence {
                 .getResultList());
     }
 
+    public List<SpaceInvitation> findPendingSpaceInvitations(String email) {
+        return entityManager.createQuery(
+                        "select i from SpaceInvitation i where lower(i.email) = lower(:email) "
+                                + "and i.status = 'PENDING' order by i.expiresAt, i.id",
+                        SpaceInvitation.class)
+                .setParameter("email", email)
+                .getResultList();
+    }
+
+    public List<SpaceInvitation> findSpaceInvitations(String spaceId) {
+        return entityManager.createQuery("select i from SpaceInvitation i where i.spaceId = :spaceId order by i.expiresAt desc, i.id", SpaceInvitation.class)
+                .setParameter("spaceId", spaceId).getResultList();
+    }
+
     public SpaceMember saveSpaceMember(SpaceMember member) {
         return entityManager.merge(member);
     }

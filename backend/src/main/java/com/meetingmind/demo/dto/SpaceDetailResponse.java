@@ -9,6 +9,7 @@ public record SpaceDetailResponse(
         String id,
         String name,
         String description,
+        String imageUrl,
         String role,
         List<MeetingSummary> upcomingMeetings,
         List<ReportSummary> recentReports,

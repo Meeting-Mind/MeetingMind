@@ -2,6 +2,8 @@
   --mm-common-blue-900: var(--app-text-strong, #0c234c);
   --mm-common-blue-700: var(--app-accent, #175ab7);
   --mm-common-blue-100: var(--app-accent-soft, #e8f1ff);
+  --mm-common-accent-text: var(--app-accent-text, #0c3d87);
+  --mm-common-accent-border: var(--app-accent-border, #bfd2ee);
   --mm-common-line: var(--app-line, #d8e5f7);
   --mm-common-muted: var(--app-muted, #5b7198);
   --mm-common-danger: var(--app-danger, #b42318);
@@ -44,7 +46,7 @@
 }
 
 .mm-common-button--primary:hover:not(:disabled) {
-  background: var(--app-accent-strong, #0c3d87);
+  background: var(--app-accent-hover, #0c3d87);
 }
 
 .mm-common-button--secondary {
@@ -64,7 +66,7 @@
 }
 
 .mm-common-button--danger:hover:not(:disabled) {
-  background: #941c12;
+  background: color-mix(in srgb, var(--mm-common-danger) 88%, #000);
 }
 
 .mm-page-header {
@@ -91,7 +93,7 @@
 }
 
 .mm-page-header-breadcrumb a:hover {
-  color: var(--mm-common-blue-700);
+  color: var(--app-link-hover, var(--mm-common-blue-700));
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -254,6 +256,7 @@
 .mm-data-state-actions,
 .mm-confirm-dialog-actions {
   display: flex;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
@@ -316,25 +319,25 @@
 
 .mm-status-badge--info,
 .mm-role-badge--editor {
-  border-color: #b9d1ed;
+  border-color: var(--mm-common-accent-border);
   background: var(--mm-common-blue-100);
-  color: var(--mm-common-blue-700);
+  color: var(--app-info, var(--mm-common-blue-700));
 }
 
 .mm-status-badge--positive,
 .mm-role-badge--owner,
 .mm-role-badge--host {
-  border-color: #b8ddd0;
-  background: #eefaf6;
-  color: #167057;
+  border-color: var(--app-success, #16856a);
+  background: var(--app-success-soft, #e9f7f1);
+  color: var(--app-success, #16856a);
 }
 
 .mm-status-badge--warning,
 .mm-role-badge--admin,
 .mm-role-badge--override {
-  border-color: #efd3a5;
-  background: #fff8eb;
-  color: #9a5a00;
+  border-color: var(--app-warning, #9a5a00);
+  background: var(--app-warning-soft, #fff8eb);
+  color: var(--app-warning, #9a5a00);
 }
 
 .mm-status-badge--danger,

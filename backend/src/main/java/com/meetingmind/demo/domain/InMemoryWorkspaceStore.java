@@ -23,6 +23,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     private final Map<String, Space> spacesById = new LinkedHashMap<>();
     private final Map<String, SpaceMember> spaceMembersById = new LinkedHashMap<>();
     private final Map<String, SpaceInvitation> spaceInvitationsById = new LinkedHashMap<>();
+    private final Map<String, MeetingInvitation> meetingInvitationsById = new LinkedHashMap<>();
     private final Map<String, Meeting> meetingsById = new LinkedHashMap<>();
     private final Map<String, MeetingParticipant> meetingParticipantsById = new LinkedHashMap<>();
     private final Map<String, MeetingSpeaker> meetingSpeakersById = new LinkedHashMap<>();
@@ -45,11 +46,12 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
         return Optional.ofNullable(usersById.get(userId));
     }
 
-    synchronized Space createSpace(String name, String description, String createdBy, Instant now) {
+    synchronized Space createSpace(String name, String description, String imageUrl, String createdBy, Instant now) {
         Space space = new Space(
                 "space-" + UUID.randomUUID(),
                 name,
                 description,
+                imageUrl,
                 createdBy,
                 now
         );
@@ -62,9 +64,9 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
-    synchronized Space updateSpace(String spaceId, String name, String description, Instant updatedAt) {
+    synchronized Space updateSpace(String spaceId, String name, String description, String imageUrl, Instant updatedAt) {
         Space current = findSpaceById(spaceId).orElseThrow();
-        Space updated = current.updated(name, description, updatedAt);
+        Space updated = current.updated(name, description, imageUrl, updatedAt);
         spacesById.put(spaceId, updated);
         return updated;
     }
@@ -192,6 +194,36 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
                 .findFirst();
     }
 
+    @Override
+    synchronized List<SpaceInvitation> findPendingSpaceInvitations(String email) {
+        return spaceInvitationsById.values().stream()
+                .filter(invitation -> invitation.email().equalsIgnoreCase(email))
+                .filter(invitation -> invitation.status() == InvitationStatus.PENDING)
+                .toList();
+    }
+
+    @Override
+    synchronized List<SpaceInvitation> findSpaceInvitations(String spaceId) {
+        return spaceInvitationsById.values().stream().filter(invitation -> invitation.spaceId().equals(spaceId)).toList();
+    }
+
+    @Override
+    synchronized MeetingInvitation saveMeetingInvitation(MeetingInvitation invitation) {
+        meetingInvitationsById.put(invitation.id(), invitation);
+        return invitation;
+    }
+
+    @Override
+    synchronized Optional<MeetingInvitation> findMeetingInvitationById(String meetingId, String invitationId) {
+        return Optional.ofNullable(meetingInvitationsById.get(invitationId)).filter(invitation -> invitation.meetingId().equals(meetingId));
+    }
+
+    @Override
+    synchronized Optional<MeetingInvitation> findPendingMeetingInvitation(String meetingId, String email) {
+        return meetingInvitationsById.values().stream().filter(invitation -> invitation.meetingId().equals(meetingId))
+                .filter(invitation -> invitation.email().equalsIgnoreCase(email)).filter(invitation -> invitation.status() == InvitationStatus.PENDING).findFirst();
+    }
+
     synchronized Meeting createMeeting(
             String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt
     ) {
@@ -255,6 +287,12 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
                 .filter(meeting -> meeting.spaceId().equals(spaceId))
                 .filter(meeting -> !meeting.deleted())
                 .toList();
+    }
+
+    @Override
+    synchronized List<Meeting> findAccessibleMeetings(String userId) {
+        return meetingsById.values().stream().filter(meeting -> findMeetingParticipant(meeting.id(), userId)
+                .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE).isPresent()).toList();
     }
 
     @Override

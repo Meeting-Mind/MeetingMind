@@ -18,6 +18,8 @@ class ProxyRouteRegistryTest {
     void classifiesCoreAiAndLiveKitRoutes() {
         assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces").orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
+        assertThat(registry.resolve(HttpMethod.GET, "/api/v1/meetings").orElseThrow().service())
+                .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(
                                 HttpMethod.POST,
                                 "/api/v1/meetings/" + meetingId + "/ai/chat")
@@ -57,6 +59,8 @@ class ProxyRouteRegistryTest {
                 .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces/" + spaceId).orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
+        assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces/" + spaceId + "/knowledge/graph").orElseThrow().service())
+                .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.POST, "/api/v1/spaces/" + spaceId + "/tasks").orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.PATCH,
@@ -68,6 +72,20 @@ class ProxyRouteRegistryTest {
         assertThat(registry.resolve(HttpMethod.POST,
                 "/api/v1/meetings/" + meetingId + "/reports/" + reportId + "/ai-edits").orElseThrow().service())
                 .isEqualTo(DownstreamService.AI);
+        assertThat(registry.resolve(HttpMethod.POST,
+                "/api/v1/meetings/" + meetingId + "/invitations").orElseThrow().service())
+                .isEqualTo(DownstreamService.CORE);
+        assertThat(registry.resolve(HttpMethod.POST,
+                "/api/v1/meetings/" + meetingId + "/invitations/meeting-invitation-" + UUID.randomUUID() + "/accept").orElseThrow().service())
+                .isEqualTo(DownstreamService.CORE);
+    }
+
+    @Test
+    void allowsSeededDomainTermIds() {
+        assertThat(registry.resolve(
+                        HttpMethod.DELETE,
+                        "/api/v1/spaces/" + spaceId + "/terms/term-naver-ai-93fadb8e79f1759359feaa3460468bb6"))
+                .isPresent();
     }
 
     @Test

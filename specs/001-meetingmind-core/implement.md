@@ -217,7 +217,7 @@
 - `TeamMembersPage.tsx`는 SpaceMember role/owner transfer와 회의 참가 신청을 분리해 표시한다. 실제 Backend 신청 조회/검토는 M022의 `/meeting-access?meetingId=...` 관리 화면이 담당하고, TeamMembers local 요청은 mock fallback 검증용이다.
 - Meeting ACL의 canonical role은 `VIEWER`, `EDITOR`, `HOST`이고 access status는 `ACTIVE`, `REVOKED`다. 마지막 active `HOST`의 강등/회수/제거는 금지되며, 이 상태는 UI에서도 막아야 한다.
 - Space owner/admin은 회의 ACL 없이 접근할 수 있지만, 회의 삭제는 기본적으로 `OWNER` 또는 해당 회의 `HOST` 전용이다. `ADMIN` 삭제는 명시적 예외 정책 전까지 기본 허용으로 표현하지 않는다.
-- Kanban 상태는 `TODO`, `IN_PROGRESS`, `DONE`만 사용한다. 새 drag-and-drop dependency는 추가하지 않고 기존 React/DOM 이벤트나 명시 이동 버튼 중 작은 구현을 선택한다.
+- Kanban 상태는 `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`을 사용한다. 새 drag-and-drop dependency는 추가하지 않고 기존 React/DOM 이벤트나 명시 이동 버튼 중 작은 구현을 선택한다.
 - Project AI는 공식 Project Knowledge와 회의 기록 출처를 구분해야 한다. backend 권한 선필터가 들어오기 전까지 frontend mock source도 선택 Space와 접근 가능한 회의 범위로 제한한다.
 - Backend gap: meeting participant CRUD, meeting invitation accept/decline, meeting update/delete, kanban CRUD, Space invitation/member role/owner transfer, AuditLog 저장, Project AI backend 권한 필터는 아직 target contract 또는 prototype gap 상태다.
 
@@ -1451,7 +1451,7 @@
 
 ## M095 Project Tasks Target Surface
 
-- `/spaces/:spaceId/tasks`에 `ProjectTasksPage`를 추가해 TODO, IN_PROGRESS, DONE 세 컬럼과 태스크 검색·상태 필터, 담당자·마감일·우선순위 표시를 제공한다.
+- `/spaces/:spaceId/tasks`에 `ProjectTasksPage`를 추가해 TODO, IN_PROGRESS, IN_REVIEW, DONE 상태와 태스크 검색·상태 필터, 담당자·마감일·우선순위 표시를 제공한다.
 - 카드 클릭과 `태스크 관리 열기`는 기존 `/project-overview?spaceId=...#project-tasks`로 연결한다. 기존 drag, create, edit, delete mutation은 legacy 화면에 남겨 API와 권한 경계를 보존했다.
 - Space role, empty/not-found, session 범위 안내를 표시하고 mock 데이터를 실제 성공으로 위장하지 않는다.
 - UX 근거: 프로젝트 홈의 열린 작업 요약과 상세 칸반을 분리해 상태 비교와 카드 조작의 목적을 나눴다.
@@ -1913,3 +1913,172 @@
 - 유지보수 근거: 새 room 테이블 없이 `meetings.room_code`와 기존 `meetingId` 계약을 재사용했다. 기존 scheduled meeting은 `roomCode`가 없으면 기존 `meetingId` roomName fallback을 써서 회귀를 줄였다.
 - 영향 범위: backend meeting 생성/LiveKit roomName 결정 경로와 관련 계약 문서만 변경했다. frontend route, AI scope 로직, 인증 구조는 이번 범위에 포함하지 않았다.
 - Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.controller.SpaceControllerTest --tests com.meetingmind.demo.domain.MeetingLiveKitTokenServiceTest`.
+
+## M139 Target Meeting Report Lifecycle Alignment
+
+- 목표: target `/spaces/:spaceId/meetings/:meetingId/report` 화면이 실제 `CANDIDATE -> DRAFT -> CONFIRMED` 회의록 상태와 API 결과만 표시하도록 정리한다.
+- 수정 파일: `frontend/src/pages/ReportAgentPage.tsx`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 구현: report candidate 생성, detail 조회, AI edit candidate, 수동 본문 저장, 확정, 버전 선택/복원, 다운로드를 기존 report API로 연결했다. 저장되지 않은 자동 저장 표시와 local AI apply/revert, mock commit 목록을 제거했다. 태스크 후보 편집/등록 UI는 보고서 화면에서 제거하고 canonical Meeting Task Candidate route 링크로 분리했다.
+- UX 근거: 회의록 후보와 공식 회의록, 태스크 후보는 서로 다른 상태와 다음 행동을 가진다. 한 화면에서 가짜 변경과 태스크 등록을 함께 보여주면 보고서가 실제로 저장되거나 확정된 것으로 오해할 수 있다.
+- Product 근거: 보고서는 현재 회의 근거로 생성되고 사용자가 검토 후 확정하는 공식 기록이다. 태스크 후보는 별도 검토 후에만 칸반으로 이어져야 한다.
+- 유지보수 근거: 새 API나 상태 라이브러리를 추가하지 않고 기존 `reports` API client와 이미 존재하는 Meeting Task Candidate route를 재사용했다. target route의 data boundary를 하나의 report detail 상태로 제한했다.
+- 영향 범위: target/legacy ReportAgentPage의 보고서 작업 화면만 변경했다. Backend API, BFF, 인증, 권한 계약, Task Candidate API는 변경하지 않았다.
+- Verification: `cd frontend && npm run build` 성공, `cd frontend && npm run test -- --run` 5 files/38 tests 통과, `cd frontend && npm run lint` 오류 0건. lint에는 기존 `frontend/src/App.tsx`의 unused warning 11건만 남았고, build에는 기존 Vite chunk-size warning만 출력됐다. `git diff --check` 통과. 사용자 요청에 따라 인증된 브라우저의 candidate 생성/AI 수정/저장/확정 실동작은 사용자 수동 테스트로 남긴다.
+
+## M140 Knowledge RAG Cluster Graph
+
+- 목표: Knowledge 화면을 문서 type hub가 아닌 권한 필터된 RAG source의 의미 클러스터 노드로 전환한다.
+- 결정: cluster는 별도 DB entity로 저장하지 않는다. active embedding generation을 source centroid로 집계한 read model이며, Core가 먼저 `allowedMeetingIds`를 계산한 뒤 AI가 SQL scope에 강제한다.
+- 계약: `GET /api/v1/spaces/{spaceId}/knowledge/graph`의 node/edge/cluster projection을 `contracts/knowledge-api.md`, `data-model.md`, `erd.md`에 추가했다.
+- 구현: Core `KnowledgeGraphService`가 인증 사용자 기준으로 기존 `AiSearchScopeResolver.projectScope()`를 호출해 active SpaceMember와 `allowedMeetingIds`를 선필터한다. Core는 AI internal `/api/internal/knowledge/graph`에 이 scope만 전달하며, BFF는 public graph route를 Core로만 프록시한다. AI repository는 active/COMPLETED embedding을 source centroid로 집계하고, project knowledge 또는 허용 meeting source만 SQL 조건으로 읽어 similarity edge와 connected-component cluster를 계산한다. Frontend Knowledge 화면은 source-level node/edge와 cluster folder를 표시하며 meeting node는 읽기 전용, 공식 knowledge node만 기존 CRUD detail 화면을 연다.
+- 권한/보안: raw chunk, embedding vector, 권한 밖 meeting ID는 응답에 포함하지 않는다. source metadata의 meeting link도 Core가 허용한 meeting 범위에서만 AI에 도달한다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.service.HttpAiGatewayClientEndpointTest --tests com.meetingmind.demo.MeetingMindApplicationTest`, `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`, `cd ai && ./.venv/bin/python -m unittest tests.test_knowledge_graph tests.test_meeting_ai.FastApiHttpBoundaryTest -v`, `cd ai && ./.venv/bin/python -m compileall app`, `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint` 통과했다. 로컬 pgvector DB에서 빈 Space 대상으로 `PostgresEmbeddingRepository.knowledge_graph()`를 read-only 실행해 `nodes=0 edges=0`을 확인했다. Frontend lint에는 기존 `App.tsx` unused warning 11건, build에는 기존 Vite chunk-size warning만 남았다. 인증된 populated Space의 브라우저 시각 검증은 사용자 수동 테스트로 남긴다.
+
+## M141 Active Calendar and Kanban Interaction Fix
+
+- 목표: 활성 legacy 화면의 Calendar query 계약 오류와 Kanban 카드 이동 누락을 고친다.
+- 구현: `ProjectCalendar`이 월 시작과 다음 달 시작을 `Date#toISOString()`으로 전송하도록 수정했다. `ProjectTasks`에는 브라우저 native drag event를 추가해 TODO, IN_PROGRESS, IN_REVIEW, DONE 컬럼 drop이 기존 `PATCH /api/v1/spaces/{spaceId}/tasks/{taskId}`의 status-only request를 호출하도록 연결했다. 저장 성공 뒤 `loadTasks()`로 서버 상태를 재조회하며 실패 시 카드 위치는 바꾸지 않고 오류를 표시한다.
+- UX 근거: 카드 이동은 상태 select와 같은 상태 변경이어야 하며, 실패한 이동을 완료처럼 보이면 안 된다. ISO-8601 instant는 시간대에 따라 조회 범위가 달라지는 Calendar API 계약을 안정적으로 지킨다.
+- Product 근거: FR-KAN-04의 상태 컬럼 이동을 활성 화면에서 제공하고, meeting schedule은 Space 범위의 실제 시간 흐름으로 조회한다.
+- 유지보수 근거: 새 dependency나 API를 추가하지 않고 기존 native DOM event와 task/calendar client를 재사용했다.
+- 영향 범위: `frontend/src/App.tsx`의 활성 legacy Calendar와 Kanban interaction만 변경한다. backend, BFF, 권한, route 계약은 변경하지 않는다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run` 39건 통과, `cd frontend && npm run lint` 오류 0건, `git diff --check` 통과. 기존 `App.tsx` unused warning 11건과 Vite chunk-size warning만 남았다.
+
+## M142 Task Review Status and Overview Completion
+
+- 목표: 칸반의 `In Review` 열을 실제 TaskCard 상태로 저장하고, Project Overview의 열린 태스크를 완료 처리한다.
+- 계약/데이터: `TaskCardStatus`와 `task_cards.status` check constraint에 `IN_REVIEW`를 추가했다. 기존 Flyway migration은 수정하지 않고 V20 forward migration으로 제약을 교체한다. Kanban API, data model, ERD, 상태 기준선도 같은 enum을 사용한다.
+- 구현: 활성 legacy `ProjectTasks`의 In Review column은 기존 status PATCH를 drop target으로 사용한다. Overview의 각 열린 태스크 check control은 event propagation을 멈춘 뒤 같은 PATCH에 `DONE`을 전송하고, 성공하면 Space detail을 다시 읽어 카드와 완료율을 갱신한다. 실패 시 상태를 낙관적으로 바꾸지 않고 오류만 표시한다.
+- 권한: 새로운 권한 예외는 만들지 않는다. 기존 active SpaceMember task update 권한을 서버가 그대로 검증한다.
+- Verification: `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.WorkspaceCrudServiceTest`, 새 빈 PostgreSQL DB에서 `CI_POSTGRES_URL=jdbc:postgresql://127.0.0.1:5434/meetingmind_migration_v20_test CI_POSTGRES_USER=meetingmind CI_POSTGRES_PASSWORD=... ./gradlew test --tests com.meetingmind.demo.MigrationIntegrationTest`, `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check`를 통과했다. Frontend lint는 기존 `App.tsx` unused warning 11건만 남고 오류는 없다.
+
+## M143 Knowledge Graph Viewport Fix
+
+- 문제: Knowledge 그래프 노드는 1000px 기준 좌표를 사용하지만 SVG에 viewBox가 없어, 폭이 좁은 중앙 패널에서는 노드가 화면 밖에 렌더링됐다.
+- 구현: SVG에 `viewBox="0 0 1000 700"`와 `preserveAspectRatio="none"`을 지정해 기존 노드/edge 좌표를 현재 패널 폭과 높이에 맞춰 표시한다. Knowledge 목록과 생성/상세 패널은 각 경계의 드래그 핸들로 조절하며, 목록은 200~420px, 우측 패널은 240~420px 범위로 제한하고 중앙 그래프는 남은 너비를 사용한다. 데이터, RAG scope, API 계약은 변경하지 않는다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `git diff --check`.
+
+## M144 Report Generation Readiness
+
+- 문제: 전사가 없는 회의에서도 Report 화면이 생성 버튼을 보여 실제 연동이 되지 않은 것처럼 보였고, 활성 `App.tsx` 라우트는 API 기반 Report 페이지 대신 Make 정적 mock을 렌더링하고 있었다.
+- 구현: 활성 `/spaces/{spaceId}/meetings/{meetingId}/report` 라우트를 API 기반 `ReportAgentPage`로 교체했다. Report 화면이 `GET /api/v1/meetings/{meetingId}/dialogue`의 상태와 확정 세그먼트 수를 조회한다. `COMPLETED`이고 비어 있지 않은 전사에서만 생성 버튼을 활성화하며, 처리 중·실패·빈 전사는 현재 이유를 표시한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `git diff --check`.
+
+## M145 Meeting Report Review Clarity
+
+- 목표: 실제 API 기반 Meeting Report 화면에서 전사 준비, 후보/초안/확정 상태, 근거, 공식 확정 행동을 명확히 한다.
+- 구현: `ReportAgentPage`는 공통 `StatusBadge`로 현재 report와 transcript 상태를 헤더에 표시하고 transcript 화면으로 이동할 수 있게 했다. report source ID는 편집 본문 하단 Evidence 영역에 표시한다. 후보 확정은 공통 `ConfirmDialog`를 거치며, CONFIRMED report는 저장 action을 노출하지 않는다. 중복된 candidate 생성 action은 review panel에서 제거하고 빈 상태의 `Generate report`를 유일한 생성 action으로 유지했다.
+- UX 근거: 회의록은 전사 근거를 바탕으로 생성되고 검토 후 공식 기록이 된다. 상태를 여러 곳에서 반복하거나 즉시 확정시키는 UI는 실제 저장/확정 여부를 오해하게 만든다.
+- Product 근거: `CANDIDATE -> DRAFT -> CONFIRMED` 상태 모델과 회의별 공식 report 1개 원칙을 UI가 그대로 따라야 한다. source ID는 아직 transcript 시간대 deep link 계약이 없으므로 식별자로만 표시한다.
+- 유지보수 근거: 기존 reports/transcripts API와 공통 상태·확인 컴포넌트를 재사용했다. API, 권한, route, 데이터 모델은 변경하지 않았다.
+- 영향 범위: `/spaces/:spaceId/meetings/:meetingId/report`의 실제 API 화면과 report 전용 CSS만 변경한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check` 통과. lint는 기존 `App.tsx` unused warning 12건만 유지했고 새 오류·warning은 없다. build는 기존 Vite chunk-size warning만 출력됐다.
+
+## M146 Meeting Report Workspace Design Pass
+
+- 목표: API 기반 Meeting Report를 보고서 편집과 검토가 분명한 업무형 화면으로 정리한다.
+- 구현: report 전용 CSS에서 8px 기반의 surface radius, blue/white token, compact action, 문서형 입력 표면, 360px review panel을 적용했다. 1080px 이하에서는 review panel이 본문 아래로 이동하고, 700px 이하에서는 header와 상태/action 영역이 세로로 재배치된다. 보라색 gradient와 과도한 radius는 report scope에서 제거했다.
+- UX 근거: 회의록 화면의 우선순위는 보고서 본문, 전사 근거, 검토/확정이다. 시각 장식보다 상태와 다음 행동을 가까이 두고, 좁은 화면에서는 편집 흐름을 우선하는 편이 인지 부담을 줄인다.
+- Product 근거: 화면은 CANDIDATE/DRAFT/CONFIRMED 상태와 전사 기반 근거를 명확히 보여야 하며, 이 디자인 변경은 해당 동작·권한·API 결과를 바꾸지 않는다.
+- Figma skill note: 기존 Figma Make URL은 `/make/` 형식이라 Figma MCP의 node/variable inspection 대상이 아니다. `figma-use` 및 `figma-generate-design` 지침을 따라 현재 API 화면 구조·기존 token·공통 component를 기준으로 디자인을 적용했다.
+- 영향 범위: `frontend/src/styles/app.css`의 `.report-agent-*` selector와 responsive rule만 변경한다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check` 통과. 테스트는 5 files/39 tests 통과했고, lint는 기존 `App.tsx` unused warning 12건만 유지했다. build는 기존 Vite chunk-size warning만 출력됐다.
+
+## M147 Report CSS Module Extraction
+
+- 목표: 누적된 `app.css`에서 현재 API 기반 Meeting Report의 전용 스타일을 별도 stylesheet로 분리한다.
+- 구현: `styles/report.css`를 만들고 report history, `.report-agent-*`, `.report-workspace-page` 및 task candidate review selector를 이동했다. 현재 API 화면을 덮는 design pass는 파일의 마지막에 두고, `main.tsx`가 `app.css` 다음에 `report.css`를 import해 cascade 순서를 보존한다.
+- 유지보수 근거: Report route의 시각 책임을 한 파일로 모아 selector 탐색과 변경 범위를 줄인다. 앱 전역 scale selector와 Meeting AI와 함께 쓰는 반응형 selector만 `app.css`에 남겨 다른 화면의 layout 회귀를 막는다.
+- 영향 범위: stylesheet import와 최신 Report CSS 위치만 바뀌며 API, 컴포넌트, route, 권한, 데이터는 변경하지 않는다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check` 통과. 테스트는 5 files/39 tests 통과했고, lint는 기존 `App.tsx` unused warning 12건만 유지했다. build는 기존 Vite chunk-size warning만 출력됐다.
+
+## M148 Meeting Report State-focused Workspace
+
+- 목표: 전사 준비 전의 빈 화면, 생성된 보고서, AI 수정 요청의 다음 행동을 한 화면에서 명확히 한다.
+- 구현: 전사가 준비되지 않은 경우 강조된 transcript 상태 badge와 transcript 이동 링크를 표시하고, 보고서가 없을 때는 아이콘·설명·단일 primary `Generate report` action을 제공한다. 생성된 실제 API report는 markdown heading/list를 안전한 read-only 문서 구조로 표시하며, `Edit report`를 누른 경우에만 기존 저장용 입력 폼을 연다. AI 수정 패널에는 실제 report가 있을 때만 선택 가능한 3개 예시 prompt를 제공한다.
+- UX 근거: 빈 상태에서 현재 원인과 다음 행동을 함께 보여주고, 생성 후에는 textarea보다 읽기 쉬운 문서가 먼저 보이도록 해야 회의록의 검토와 확정 흐름이 명확해진다.
+- Product 근거: 보고서는 전사 근거로 생성된 candidate를 검토한 뒤 공식 기록으로 확정하는 산출물이다. 임의 mock report를 만들지 않고 실제 report API 응답만 렌더링해 성공 상태를 가장하지 않는다.
+- 유지보수 근거: 기존 report/transcript API, `StatusBadge`, `ConfirmDialog`와 CSS scope를 재사용했다. API, route, 인증, 권한, 데이터 모델은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check` 통과. 테스트는 5 files/39 tests 통과했고, lint는 기존 `App.tsx` unused warning 12건만 유지했다. build는 기존 Vite chunk-size warning만 출력됐다.
+
+## M149 Meeting Report Header and Review Panel Boundaries
+
+- 목표: transcript 실패 상태와 report review/AI 입력의 상태 경계를 좁은 우측 panel에서도 명확히 보인다.
+- 구현: `Transcript unavailable` badge를 amber warning pill로 표시하고, report 상태 메시지는 기존 muted text로 유지했다. AI 입력은 `flex: 1` field wrapper와 shrink되지 않는 Send button으로 구성해 우측 panel에서 잘리지 않게 했으며, report가 없을 때 disabled input wrapper에 안내 tooltip을 제공한다. Review 영역은 아이콘이 있는 empty state를 사용하고, report candidate가 없으면 task candidate 이동 link를 disabled presentation으로 표시한다.
+- UX 근거: 실패 원인은 상단에서 빠르게 식별해야 하고, 비활성 입력과 빈 review 영역은 왜 행동할 수 없는지 보여줘야 한다. 좁은 panel에서 전송 action이 잘리면 사용자는 동작 가능 여부를 판단할 수 없다.
+- 유지보수 근거: `StatusBadge`와 기존 route를 재사용하고 Report 전용 CSS만 추가했다. API, route, 인증, 권한, 데이터 모델은 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check` 통과. 테스트는 5 files/39 tests 통과했고, lint는 기존 `App.tsx` unused warning 12건만 유지했다. build는 기존 Vite chunk-size warning만 출력됐다.
+
+## M150 ConfirmDialog Modal Rendering
+
+- 문제: `ConfirmDialog`는 modal DOM과 `.mm-confirm-dialog*` stylesheet를 이미 갖고 있었지만 `common.css`가 entry에서 import되지 않아 title, description, action이 일반 text처럼 출력됐다. 또한 dialog가 Report frame 안에 있어 scale/overflow 영향을 받을 수 있었다.
+- 구현: `main.tsx`가 공통 `common.css`를 token 다음에 import하도록 연결했다. `ConfirmDialog`는 `createPortal(..., document.body)`로 overlay를 root 밖에 렌더링하고, backdrop 클릭과 Escape 키는 busy 상태가 아닐 때 cancel 처리한다. 공통 action 영역은 오른쪽 정렬로 고정했고, 중복된 `Confirm action` label은 제거했다.
+- 영향 범위: 같은 공통 dialog를 사용하는 화면도 정상 modal styling과 stacking context를 공유한다. report confirm API, route, 인증, 권한, 상태 전이는 변경하지 않았다.
+- Verification: `cd frontend && npm run build`, `cd frontend && npm run test -- --run`, `cd frontend && npm run lint`, `git diff --check` 통과. 테스트는 5 files/39 tests 통과했고, lint는 기존 `App.tsx` unused warning 12건만 유지했다. build는 기존 Vite chunk-size warning만 출력됐다.
+
+## M151 Meeting Report Review Workspace
+
+- 목표: 실제 API 기반 회의록을 문서 열람, AI 수정 제안, 검토와 공식 확정의 순서로 분리한다.
+- 구현: header는 프로젝트/회의/회의록 breadcrumb, 실제 회의 일시와 참가자 수, report/transcript 상태, `전사 보기`, 더보기 메뉴, 상태별 단일 주요 action으로 구성했다. `CANDIDATE`, `DRAFT`, `CONFIRMED`는 한국어 상태로 표시하며, report 본문은 heading/list/bold만 안전하게 읽기 전용 markdown 문서로 렌더링한다. 근거는 raw source UUID 대신 `전사 근거 N개`와 canonical transcript 이동 링크만 표시한다.
+- AI 편집: AI 패널을 `AI 편집 도우미`로 바꾸고 실제 report가 있을 때만 예시 요청을 제공한다. AI 수정 결과는 즉시 현재 문서에 반영하지 않고, 이전/제안 내용 비교 후 사용자가 `보고서에 적용` 또는 `취소`를 선택하게 했다. 생성된 candidate 자체는 기존 API가 서버에 저장하므로, 취소는 현재 화면의 적용만 취소한다.
+- 검토/반응형: 우측 검토 패널은 실제 source 수와 markdown에서 읽은 결정/액션 항목 수만 사용한다. 후보가 없으면 task review 이동을 비활성 상태로 보여준다. 700px 이하에서는 `보고서`와 `AI 편집` 탭으로 한 번에 한 작업만 표시하고 주요 action을 하단에 고정한다.
+- UX 근거: 회의록의 공식 확정과 AI 제안 적용은 서로 다른 결과를 낳으므로, 초안 편집 제안을 확정 흐름과 분리해야 사용자가 저장·확정 상태를 오해하지 않는다. 좁은 화면에서는 문서와 AI를 동시에 압축하기보다 작업 맥락을 분리하는 편이 읽기와 입력을 보존한다.
+- Product 근거: 보고서는 전사 근거를 바탕으로 생성·검토·확정되는 공식 회의 기록이며, AI는 문서의 수정 제안을 보조할 뿐 무단으로 확정하지 않는다.
+- 유지보수 근거: 기존 `reports`/`transcripts` API와 target route, 공통 ConfirmDialog를 유지하고 Report 전용 stylesheet에 화면 책임을 모았다. Backend, BFF, 인증, 권한, 데이터 모델은 변경하지 않았다.
+- 계약 제한: 현재 `sourceIds`에는 timestamp, speaker, excerpt가 없어 문장 단위 source preview나 해당 시점 deep link를 만들지 않았다. report route에는 Task Candidate 상세가 없어 담당자·기한·완료 상태를 표시하지 않았다. 선택 영역만 AI에 보내는 API와 candidate discard API도 없으므로 각각 전체 보고서 수정 요청과 화면상 적용 취소만 지원한다.
+- Verification: `cd frontend && npm run build` 성공, `cd frontend && npm run test -- --run` 5 files/39 tests 통과, `cd frontend && npm run lint` 오류 0건, `git diff --check` 통과. lint에는 기존 `frontend/src/App.tsx` unused warning 12건, build에는 기존 Vite chunk-size warning만 남았다. browser에서는 인증 세션이 없어 target report route가 로그인 화면으로 보호되는 것까지 확인했으며, 실제 보고서 데이터의 시각/상호작용 검증은 사용자 수동 테스트로 남긴다.
+
+## M040 Knowledge Graph Contract Expansion
+
+- 범위: 기존 Knowledge Graph API의 additive 확장 계약, read model/ERD 경계, Topic 및 Participant 정책
+- 변경 파일: `contracts/knowledge-api.md`, `data-model.md`, `erd.md`, `clarify.md`, `tasks.md`
+- 결정: 기존 `clusters`, `edges`, `generatedAt` 응답은 유지하고 `nodes`, richer edges/clusters, filters, partial/truncated 상태와 node detail endpoint를 추가 계약으로 정의한다.
+- 권한: Backend가 SpaceMember와 MeetingParticipant를 먼저 계산하고 요청 meetingIds는 `allowedMeetingIds`와 교집합한다. detail 조회도 동일 권한을 재검사한다.
+- 개인정보: Participant node는 정책 확정 전 기본 제외한다. Topic은 Phase 1에서 서버 파생 결과로만 제공한다.
+- 구현 상태: 문서 단계만 완료했다. Backend/AI/Frontend 코드는 다음 단계에서 계약 기준으로 구현한다.
+- 검증: 신규 섹션과 D-047/D-048, T423-T426 존재 확인 및 `git diff --check`를 실행했다. 코드 테스트와 빌드는 문서 전용 변경이므로 실행하지 않았다.
+
+## T427 Backend Knowledge Graph Filters
+
+- 변경 파일: `backend/src/main/java/com/meetingmind/demo/controller/KnowledgeGraphController.java`, `backend/src/main/java/com/meetingmind/demo/service/KnowledgeGraphService.java`
+- 구현: 기존 graph route에 `meetingIds`와 `nodeTypes` query를 추가했다. Backend가 계산한 `allowedMeetingIds`와 요청 회의 ID를 교집합한 뒤 AI gateway에 전달하며, 응답에서도 보이는 node/edge를 다시 필터링한다.
+- 보안: 클라이언트 필터를 권한 경계로 사용하지 않는다. 지원하지 않는 node type은 `400 INVALID_GRAPH_FILTER`로 거부한다. Participant는 계약대로 타입만 예약하고 현재 응답에 임의로 노출하지 않는다.
+- API 영향: 기존 query 없는 호출과 기존 응답 필드는 유지한다. 새 query는 additive다.
+- 검증: `cd backend && ./gradlew compileJava` 성공, `cd backend && ./gradlew test --tests com.meetingmind.demo.service.HttpAiGatewayClientEndpointTest` 성공. `git diff --check`는 관련 변경 검증을 계속 유지한다.
+
+## T428 AI Knowledge Graph Response Extension
+
+- 변경 파일: `ai/app/main.py`
+- 구현: 기존 `clusters`, `edges`, `generatedAt`를 유지하면서 flat `nodes`와 nodeType,
+  entityId, connectionCount, clusterIds, edge id/type/weight, cluster nodeIds/nodeCount/
+  colorKey, filters/truncated metadata를 추가했다.
+- 범위: source-level centroid를 그대로 사용하고 raw chunk를 반환하지 않는다. Participant는
+  현재 source mapping에 포함하지 않는다.
+- 호환성: 기존 `meeting` source type도 허용해 기존 unit test와 저장 데이터 입력을 보존한다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_knowledge_graph` 2건 통과,
+  `python -m compileall app/main.py tests/test_knowledge_graph.py` 통과,
+  `git diff --check` 통과.
+
+## T429 Frontend Knowledge Graph Contract Integration
+
+- 변경 파일: `frontend/src/types.ts`, `frontend/src/api/knowledge.ts`, `frontend/src/App.tsx`
+- 구현: 확장 graph response의 flat `nodes`, node/cluster metadata를 optional 타입으로 추가하고, 응답에 flat nodes가 있으면 이를 우선 렌더링한다. 구 응답은 cluster nodes fallback으로 계속 지원한다.
+- 필터: API client에 `meetingIds`/`nodeTypes` query 전달을 추가했다. 권한 판단은 Backend에 남기고 Frontend는 표시·탐색 목적의 필터만 전달한다.
+- 영향: 기존 Knowledge graph 레이아웃과 folder/type/similarity cluster UI는 유지하며 인증·권한·데이터 저장 로직은 변경하지 않았다.
+- 검증: `cd frontend && npm run build` 성공. Vite chunk-size warning만 기존과 같이 남았다.
+
+## M041 Semantic Color Token Consolidation
+
+- 목표: 기존 MeetingMind 파랑 accent를 유지하면서 공통 색상 의미를 토큰으로 분리해 버튼, 링크, 상태 배지, 선택 영역의 색상 규칙을 재사용한다.
+- 변경 파일: `frontend/src/styles/tokens.css`, `frontend/src/components/common/common.css`, `frontend/src/styles/app.css`.
+- 구현: accent subtle/border/text/hover/active, link, selection, info, success, warning, danger 토큰을 추가했다. 공통 primary button hover, breadcrumb hover, info/positive/warning status 및 role badge가 semantic token을 사용하도록 연결했고, `app.css`의 반복되는 accent/text/background/status 색상값을 같은 토큰으로 치환했다.
+- 영향 범위: 기존 layout, route, API, 인증, 권한, 상태 전이는 변경하지 않았다. 개별 의미가 다른 나머지 특수 색상은 기존 값을 유지했다.
+- UX 근거: 동일 의미의 action과 상태가 화면마다 다른 색으로 보이지 않도록 공통 컴포넌트의 의미 토큰을 단일화했다.
+- 검증: `git diff --check` 통과, `cd frontend && npm run build` 성공. 기존 Vite chunk-size warning만 남았다.
+
+## M042 Workspace and Profile Images
+
+- 변경 파일: Core Space/Auth model 및 controller, BFF proxy route, Frontend `App.tsx`/session/space API client, V23 migration, API·ERD·data model contract 문서.
+- 구현: 프로필과 Space 대표 이미지는 `multipart/form-data`로 S3에 업로드하고, DB에는 public delivery URL만 저장한다. 파일은 JPEG/PNG/WebP, 최대 5MB로 제한한다. Space 대표 이미지 업로드는 OWNER/ADMIN만 가능하며 프로필 수정은 현재 사용자만 가능하다.
+- 배포 설정: `S3_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`가 필요하다. `S3_PUBLIC_BASE_URL`을 지정하면 CloudFront 또는 별도 public domain URL을 반환하고, 미지정 시 S3 regional URL을 반환한다. 객체 public read/CDN 정책은 인프라에서 관리하며 secret은 저장소에 기록하지 않는다.
+- 검증: `cd backend && ./gradlew compileJava`, `./gradlew test --tests com.meetingmind.demo.controller.SpaceControllerTest`, `cd bff && ./gradlew compileJava && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`, `cd frontend && npm run build`, `git diff --check`를 통과했다. Frontend는 기존 Vite chunk-size warning만 남았다.

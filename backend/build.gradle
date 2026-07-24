@@ -21,6 +21,8 @@ ext {
 
 dependencies {
     implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+    // Override Spring Boot's Netty patch level until the BOM includes the CVE fixes.
+    implementation platform('io.netty:netty-bom:4.1.136.Final')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
@@ -34,6 +36,9 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.4'
     implementation 'org.apache.poi:poi-ooxml:5.5.1'
     implementation 'org.apache.pdfbox:pdfbox:3.0.8'
+    implementation platform('software.amazon.awssdk:bom:2.46.8')
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:url-connection-client'
 
     implementation 'io.livekit:livekit-server:0.13.0'
     implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"

@@ -127,6 +127,17 @@ public class JdbcAuthStore implements AuthStore {
     }
 
     @Override
+    public AuthUser updateProfile(AuthUser user, String displayName, String pictureUrl) {
+        jdbc.update(
+                "update users set display_name = ?, picture_url = ? where id = ?",
+                displayName,
+                pictureUrl,
+                user.id());
+        return new AuthUser(
+                user.id(), user.email(), displayName, pictureUrl, user.status(), user.createdAt(), user.lastLoginAt());
+    }
+
+    @Override
     public AuthIdentity saveIdentity(
             String userId,
             String provider,

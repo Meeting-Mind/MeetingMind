@@ -1,6 +1,7 @@
 package com.meetingmind.demo.auth;
 
 import java.time.Instant;
+import java.net.URI;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -119,6 +120,22 @@ public class AuthService {
     }
 
     @Transactional
+    public AuthUserResponse updateProfile(String authorizationHeader, UpdateProfileRequest request) {
+        AccessTokenSubjectResolver.Subject subject = accessTokenSubjectResolver.resolve(authorizationHeader);
+        AuthUser user = (subject.target()
+                        ? store.findUserByAuthUserId(subject.authUserId())
+                        : store.findUserById(subject.resourceUserId()))
+                .orElseThrow(() -> new AuthException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "사용자를 찾을 수 없습니다."));
+        String pictureUrl = request.pictureUrl() == null || request.pictureUrl().isBlank()
+                ? null
+                : request.pictureUrl().trim();
+        if (!isHttpUrl(pictureUrl)) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "프로필 이미지는 http 또는 https URL이어야 합니다.");
+        }
+        return AuthUserResponse.from(store.updateProfile(user, request.displayName().trim(), pictureUrl));
+    }
+
+    @Transactional
     public LogoutResponse logout(String authorizationHeader, LogoutRequest request) {
         tokenService.resolveSubject(authorizationHeader);
         String refreshTokenHash = tokenService.hashRefreshToken(request.refreshToken());
@@ -161,5 +178,18 @@ public class AuthService {
 
     private AuthException invalidRefreshToken() {
         return new AuthException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_INVALID", "refresh token이 올바르지 않습니다.");
+    }
+
+    private boolean isHttpUrl(String value) {
+        if (value == null) {
+            return true;
+        }
+        try {
+            URI uri = URI.create(value);
+            return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 }

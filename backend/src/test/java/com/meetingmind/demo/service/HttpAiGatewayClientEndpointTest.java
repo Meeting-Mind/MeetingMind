@@ -3,7 +3,9 @@ package com.meetingmind.demo.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.demo.dto.KnowledgeGraphResponse;
 import com.meetingmind.demo.dto.ai.AiChatResponse;
+import com.meetingmind.demo.dto.ai.KnowledgeGraphGatewayRequest;
 import com.meetingmind.demo.dto.ai.ProjectAiGatewayChatRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayResponse;
@@ -47,6 +49,35 @@ class HttpAiGatewayClientEndpointTest {
 
             assertThat(response.answer()).isEqualTo("프로젝트 근거입니다.");
             assertThat(captured.path()).isEqualTo("/api/internal/project-ai/chat");
+            assertThat(captured.serviceToken()).isEqualTo(SERVICE_TOKEN);
+            assertThat(captured.traceId()).isNotBlank();
+            assertThat(captured.body()).contains("\"projectId\":\"space-1\"");
+            assertThat(captured.body()).contains("\"allowedMeetingIds\":[\"meeting-1\"]");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void knowledgeGraphGatewayUsesConfiguredBaseUrlAndScope() throws Exception {
+        CapturedRequest captured = new CapturedRequest();
+        HttpServer server = jsonServer(
+                "/api/internal/knowledge/graph",
+                captured,
+                "{\"clusters\":[],\"edges\":[],\"generatedAt\":\"2026-07-23T00:00:00Z\"}"
+        );
+        try {
+            HttpKnowledgeGraphGatewayClient client = new HttpKnowledgeGraphGatewayClient(
+                    HttpClient.newHttpClient(),
+                    new ObjectMapper(),
+                    baseUrl(server) + "/",
+                    SERVICE_TOKEN
+            );
+
+            KnowledgeGraphResponse response = client.graph(new KnowledgeGraphGatewayRequest("space-1", List.of("meeting-1")));
+
+            assertThat(response.clusters()).isEmpty();
+            assertThat(captured.path()).isEqualTo("/api/internal/knowledge/graph");
             assertThat(captured.serviceToken()).isEqualTo(SERVICE_TOKEN);
             assertThat(captured.traceId()).isNotBlank();
             assertThat(captured.body()).contains("\"projectId\":\"space-1\"");

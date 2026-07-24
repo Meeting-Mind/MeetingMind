@@ -3,12 +3,13 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import "./index.css";
 import "./styles/tokens.css";
-import "./styles/landing.css";
+import "./components/common/common.css";
 import "./styles/app.css";
+import "./styles/report.css";
 import "./styles/base.css";
 
 const SCALED_SHELL_SELECTOR =
-  ".workspace-catalog-shell, .app-shell, .lk-live-room-shell, .report-agent-page, .meeting-prejoin-shell, .meeting-access-shell";
+  ".workspace-catalog-shell, .app-shell, .lk-live-room-shell, .meeting-prejoin-shell, .meeting-access-shell";
 
 // ponytail: Chromium can leave the scale()'d shell composited at the pre-resize size after an
 // OS window snap/resize; forcing a transform toggle invalidates the stale layer so it repaints.

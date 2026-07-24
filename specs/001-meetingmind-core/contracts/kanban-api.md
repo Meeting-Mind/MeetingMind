@@ -31,7 +31,7 @@ Space 칸반 카드 목록을 조회한다.
 
 ### Query
 
-- `status`: optional `TODO`, `IN_PROGRESS`, `DONE`
+- `status`: optional `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`
 - `assigneeId`: optional
 - `keyword`: optional
 
@@ -185,7 +185,7 @@ Space 칸반 카드 목록을 조회한다.
 ### Validation
 
 - `taskId`가 해당 Space에 속해야 한다.
-- `status`: `TODO`, `IN_PROGRESS`, `DONE`
+- `status`: `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`
 - `assigneeId`: optional SpaceMember
 - `priority`: optional `LOW`, `MEDIUM`, `HIGH`
 - `labels`: optional 문자열 배열. 제공되면 전체 교체하며 최대 10개, 각 1~40자, 대소문자 무시 중복을 허용하지 않는다.
@@ -463,7 +463,7 @@ None.
 
 - candidate가 해당 meeting에 속해야 한다.
 - candidate는 `CANDIDATE` 상태여야 한다.
-- `title`은 공백일 수 없고 `status`는 `TODO`, `IN_PROGRESS`, `DONE` 중 하나여야 한다.
+- `title`은 공백일 수 없고 `status`는 `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` 중 하나여야 한다.
 - `description`은 optional이며 공백 문자열은 null로 정규화한다.
 - `assigneeId`가 있으면 active SpaceMember여야 한다.
 

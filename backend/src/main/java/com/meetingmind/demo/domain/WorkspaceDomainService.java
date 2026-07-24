@@ -122,9 +122,9 @@ public class WorkspaceDomainService {
                         Comparator.reverseOrder()))
                 .limit(DASHBOARD_LATEST_REPORT_LIMIT)
                 .toList();
-        List<TaskCardView> actionItems = listTaskCards(actorUserId, spaceId, null, null, null).stream()
-                .filter(view -> view.task().status() != TaskCardStatus.DONE)
-                .toList();
+        // Keep completed cards in the space summary so the UI can report
+        // completion as completed/total. Open-task lists filter DONE locally.
+        List<TaskCardView> actionItems = listTaskCards(actorUserId, spaceId, null, null, null);
         return new SpaceDetail(
                 space,
                 accessContext.membership().role(),
@@ -214,15 +214,15 @@ public class WorkspaceDomainService {
         requireUser(actorUserId);
         validateRequired(name, "Space 이름은 필수입니다.");
         Instant now = Instant.now(clock);
-        Space space = store.createSpace(name.trim(), blankToNull(description), actorUserId, now);
+        Space space = store.createSpace(name.trim(), blankToNull(description), null, actorUserId, now);
         SpaceMember owner = store.addSpaceMember(space.id(), actorUserId, SpaceRole.OWNER, now);
         return new SpaceCreationResult(space, owner);
     }
 
     @Transactional
-    public Space updateSpace(String actorUserId, String spaceId, String name, boolean namePresent, String description, boolean descriptionPresent) {
+    public Space updateSpace(String actorUserId, String spaceId, String name, boolean namePresent, String description, boolean descriptionPresent, String imageUrl, boolean imageUrlPresent) {
         requireUser(actorUserId);
-        if (!namePresent && !descriptionPresent) {
+        if (!namePresent && !descriptionPresent && !imageUrlPresent) {
             throw invalidRequest("수정할 Space 필드가 필요합니다.");
         }
         store.lockSpace(spaceId);
@@ -234,14 +234,48 @@ public class WorkspaceDomainService {
         if (namePresent && (name == null || name.isBlank())) {
             throw invalidRequest("Space 이름은 blank일 수 없습니다.");
         }
+        if (imageUrlPresent && !isHttpUrl(imageUrl)) {
+            throw invalidRequest("대표 이미지는 http 또는 https URL이어야 합니다.");
+        }
         Space updated = store.updateSpace(
                 spaceId,
                 namePresent ? name.trim() : current.name(),
                 descriptionPresent ? blankToNull(description) : current.description(),
+                imageUrlPresent ? blankToNull(imageUrl) : current.imageUrl(),
                 Instant.now(clock)
         );
         addAudit("SPACE_UPDATED", actorUserId, null, spaceId, current.name(), updated.name());
         return updated;
+    }
+
+    @Transactional
+    public Space updateSpace(
+            String actorUserId,
+            String spaceId,
+            String name,
+            boolean namePresent,
+            String description,
+            boolean descriptionPresent
+    ) {
+        return updateSpace(actorUserId, spaceId, name, namePresent, description, descriptionPresent, null, false);
+    }
+
+    public void requireSpaceMemberManagement(String actorUserId, String spaceId) {
+        requireUser(actorUserId);
+        spaceAccessPolicy.requireMemberManagement(spaceAccessContext(spaceId, actorUserId));
+    }
+
+    private boolean isHttpUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        try {
+            URI uri = URI.create(value.trim());
+            return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     @Transactional
@@ -294,6 +328,32 @@ public class WorkspaceDomainService {
         return new SpaceInvitationCreation(invitation, token);
     }
 
+    // Member-management checks use the same space lock as invitation mutations.
+    // Keep this transaction writable so PostgreSQL permits the FOR NO KEY UPDATE lock.
+    @Transactional
+    public List<SpaceInvitation> listSpaceInvitations(String actorUserId, String spaceId) {
+        requireUser(actorUserId);
+        store.lockSpace(spaceId);
+        spaceAccessPolicy.requireMemberManagement(spaceAccessContext(spaceId, actorUserId));
+        return store.findSpaceInvitations(spaceId);
+    }
+
+    @Transactional
+    public SpaceInvitationCreation resendSpaceInvitation(String actorUserId, String spaceId, String invitationId) {
+        SpaceInvitation current = store.findSpaceInvitationById(spaceId, invitationId).orElseThrow(() -> new AuthorizationException(HttpStatus.NOT_FOUND, "SPACE_NOT_FOUND", "초대를 찾을 수 없습니다."));
+        if (current.status() == InvitationStatus.PENDING) store.saveSpaceInvitation(current.expired());
+        return createSpaceInvitation(actorUserId, spaceId, current.email(), current.role().name());
+    }
+
+    @Transactional
+    public void cancelSpaceInvitation(String actorUserId, String spaceId, String invitationId) {
+        requireUser(actorUserId);
+        store.lockSpace(spaceId);
+        spaceAccessPolicy.requireMemberManagement(spaceAccessContext(spaceId, actorUserId));
+        SpaceInvitation current = store.findSpaceInvitationById(spaceId, invitationId).orElseThrow(() -> new AuthorizationException(HttpStatus.NOT_FOUND, "SPACE_NOT_FOUND", "초대를 찾을 수 없습니다."));
+        if (current.status() == InvitationStatus.PENDING) store.saveSpaceInvitation(current.declined(Instant.now(clock)));
+    }
+
     @Transactional
     public SpaceInvitationResolution resolveSpaceInvitation(
             String actorUserId,
@@ -311,9 +371,9 @@ public class WorkspaceDomainService {
         SpaceInvitation invitation = store.findSpaceInvitationById(spaceId, invitationId).orElseThrow(() -> new AuthorizationException(
                 HttpStatus.NOT_FOUND, "SPACE_NOT_FOUND", "초대를 찾을 수 없습니다."
         ));
-        if (!normalizeEmail(actorEmail).equals(invitation.email()) || !MessageDigest.isEqual(
+        if (!normalizeEmail(actorEmail).equals(invitation.email()) || (token != null && !MessageDigest.isEqual(
                 sha256(token).getBytes(StandardCharsets.UTF_8), invitation.tokenHash().getBytes(StandardCharsets.UTF_8)
-        )) {
+        ))) {
             throw new AuthorizationException(HttpStatus.FORBIDDEN, "SPACE_ACCESS_DENIED", "초대 대상이 일치하지 않습니다.");
         }
         if (invitation.status() != InvitationStatus.PENDING) {
@@ -338,6 +398,33 @@ public class WorkspaceDomainService {
         SpaceInvitation accepted = store.saveSpaceInvitation(invitation.accepted(now));
         addAudit("SPACE_INVITATION_RESOLVED", actorUserId, actorUserId, spaceId, "PENDING", "ACCEPTED");
         return new SpaceInvitationResolution(accepted, member);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PendingSpaceInvitation> listPendingSpaceInvitations(String actorUserId) {
+        requireUser(actorUserId);
+        User user = store.findUserById(actorUserId).orElseThrow();
+        return store.findPendingSpaceInvitations(normalizeEmail(user.email())).stream()
+                .filter(invitation -> store.findSpaceById(invitation.spaceId()).isPresent())
+                .map(invitation -> new PendingSpaceInvitation(
+                        invitation.id(),
+                        invitation.spaceId(),
+                        store.findSpaceById(invitation.spaceId()).orElseThrow().name(),
+                        invitation.role(),
+                        invitation.expiresAt()
+                ))
+                .toList();
+    }
+
+    @Transactional
+    public SpaceInvitationResolution resolveAuthenticatedSpaceInvitation(
+            String actorUserId,
+            String actorEmail,
+            String spaceId,
+            String invitationId,
+            boolean accept
+    ) {
+        return resolveSpaceInvitation(actorUserId, actorEmail, spaceId, invitationId, null, accept);
     }
 
     @Transactional
@@ -456,6 +543,13 @@ public class WorkspaceDomainService {
                 .filter(meeting -> statusFilter == null || meeting.status() == statusFilter)
                 .filter(meeting -> fromFilter == null || !meeting.scheduledAt().isBefore(fromFilter))
                 .filter(meeting -> toFilter == null || !meeting.scheduledAt().isAfter(toFilter))
+                .map(meeting -> new MeetingView(meeting, activeMeetingRole(meeting.id(), actorUserId), List.of()))
+                .toList();
+    }
+
+    public List<MeetingView> listAccessibleMeetings(String actorUserId) {
+        requireUser(actorUserId);
+        return store.findAccessibleMeetings(actorUserId).stream()
                 .map(meeting -> new MeetingView(meeting, activeMeetingRole(meeting.id(), actorUserId), List.of()))
                 .toList();
     }
@@ -756,7 +850,7 @@ public class WorkspaceDomainService {
     public boolean removeSpaceMember(String actorUserId, String spaceId, String memberId) {
         requireUser(actorUserId);
         store.lockSpace(spaceId);
-        spaceAccessPolicy.requireOwnerManagement(spaceAccessContext(spaceId, actorUserId));
+        spaceAccessPolicy.requireMemberManagement(spaceAccessContext(spaceId, actorUserId));
         SpaceMember target = requireSpaceMemberById(spaceId, memberId);
         if (target.role() == SpaceRole.OWNER) {
             throw new AuthorizationException(HttpStatus.CONFLICT, "INVALID_REQUEST", "OWNER는 제거할 수 없습니다.");
@@ -773,6 +867,26 @@ public class WorkspaceDomainService {
 
         store.removeSpaceMember(memberId);
         addAudit("SPACE_MEMBER_REMOVED", actorUserId, target.userId(), spaceId, target.role().name(), "REMOVED_PROJECT_ACCESS");
+        return true;
+    }
+
+    @Transactional
+    public boolean leaveSpace(String actorUserId, String spaceId) {
+        requireUser(actorUserId);
+        store.lockSpace(spaceId);
+        SpaceMember target = store.findSpaceMember(spaceId, actorUserId).orElseThrow(() -> new AuthorizationException(
+                HttpStatus.NOT_FOUND, "SPACE_MEMBER_NOT_FOUND", "Space 멤버가 아닙니다."
+        ));
+        if (target.role() == SpaceRole.OWNER) {
+            throw new AuthorizationException(HttpStatus.CONFLICT, "OWNER_TRANSFER_REQUIRED", "OWNER는 소유권을 이양한 뒤 Space를 나갈 수 있습니다.");
+        }
+        for (Meeting meeting : store.findMeetingsBySpaceId(spaceId)) {
+            store.findMeetingParticipant(meeting.id(), actorUserId)
+                    .filter(participant -> participant.participantType() == ParticipantType.MEMBER)
+                    .ifPresent(participant -> store.updateMeetingParticipantType(participant.id(), ParticipantType.GUEST));
+        }
+        store.removeSpaceMember(target.id());
+        addAudit("SPACE_MEMBER_LEFT", actorUserId, actorUserId, spaceId, target.role().name(), "REMOVED_PROJECT_ACCESS");
         return true;
     }
 
@@ -900,6 +1014,45 @@ public class WorkspaceDomainService {
         MeetingJoinRequest request = store.createMeetingJoinRequest(meeting.id(), actorUserId, Instant.now(clock));
         addAudit("MEETING_JOIN_REQUEST_CREATED", actorUserId, actorUserId, meeting.id(), "NONE", request.status().name());
         return request;
+    }
+
+    @Transactional
+    public MeetingInvitationCreation createMeetingInvitation(String actorUserId, String meetingId) {
+        requireUser(actorUserId);
+        store.lockMeeting(meetingId);
+        meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
+        Instant now = Instant.now(clock);
+        String token = invitationToken();
+        MeetingInvitation invitation = store.saveMeetingInvitation(new MeetingInvitation(
+                "meeting-invitation-" + UUID.randomUUID(), meetingId, null, MeetingRole.VIEWER,
+                ParticipantType.GUEST, InvitationStatus.PENDING, sha256(token), now.plus(Duration.ofDays(7)), null, null
+        ));
+        addAudit("MEETING_GUEST_INVITED", actorUserId, null, meetingId, null, invitation.id());
+        return new MeetingInvitationCreation(invitation, token);
+    }
+
+    @Transactional
+    public MeetingInvitationResolution resolveMeetingInvitation(String actorUserId, String meetingId, String invitationId, String token, boolean accept) {
+        requireUser(actorUserId);
+        store.lockMeeting(meetingId);
+        MeetingInvitation invitation = store.findMeetingInvitationById(meetingId, invitationId)
+                .orElseThrow(() -> new AuthorizationException(HttpStatus.NOT_FOUND, "MEETING_NOT_FOUND", "초대를 찾을 수 없습니다."));
+        if (!MessageDigest.isEqual(sha256(token).getBytes(StandardCharsets.UTF_8), invitation.tokenHash().getBytes(StandardCharsets.UTF_8))) {
+            throw new AuthorizationException(HttpStatus.FORBIDDEN, "MEETING_ACCESS_DENIED", "유효하지 않은 초대 링크입니다.");
+        }
+        if (invitation.status() == InvitationStatus.ACCEPTED) {
+            MeetingParticipant participant = store.findMeetingParticipant(meetingId, actorUserId).orElseThrow(() -> invalidRequest("수락된 초대의 참가자를 찾을 수 없습니다."));
+            return new MeetingInvitationResolution(invitation, participant);
+        }
+        if (invitation.status() != InvitationStatus.PENDING) throw invalidRequest("처리할 수 없는 초대 상태입니다.");
+        Instant now = Instant.now(clock);
+        if (!invitation.expiresAt().isAfter(now)) { store.saveMeetingInvitation(invitation.expired()); throw invalidRequest("만료된 초대입니다."); }
+        if (!accept) return new MeetingInvitationResolution(store.saveMeetingInvitation(invitation.declined(now)), null);
+        MeetingParticipant participant = store.findMeetingParticipant(meetingId, actorUserId)
+                .orElseGet(() -> store.addMeetingParticipant(meetingId, actorUserId, invitation.meetingRole(), invitation.participantType()));
+        MeetingInvitation accepted = store.saveMeetingInvitation(invitation.accepted(now));
+        addAudit("MEETING_INVITATION_ACCEPTED", actorUserId, actorUserId, meetingId, "PENDING", "ACCEPTED");
+        return new MeetingInvitationResolution(accepted, participant);
     }
 
     public List<MeetingJoinRequest> listMeetingJoinRequests(String actorUserId, String meetingId) {
@@ -1253,6 +1406,24 @@ public class WorkspaceDomainService {
         return true;
     }
 
+    @Transactional
+    public boolean restoreProjectKnowledge(String actorUserId, String spaceId, String knowledgeId) {
+        requireUser(actorUserId);
+        store.lockSpace(spaceId);
+        spaceAccessPolicy.requireMemberManagement(spaceAccessContext(spaceId, actorUserId));
+        ProjectKnowledge current = store.findProjectKnowledge(spaceId).stream()
+                .filter(knowledge -> knowledge.id().equals(knowledgeId))
+                .filter(knowledge -> knowledge.status() == KnowledgeStatus.ARCHIVED)
+                .filter(knowledge -> knowledge.deletedAt() != null)
+                .findFirst()
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND, "PROJECT_KNOWLEDGE_NOT_FOUND", "보관된 Project Knowledge를 찾을 수 없습니다."
+                ));
+        ProjectKnowledge restored = store.saveProjectKnowledge(current.restored(Instant.now(clock)));
+        addAudit("PROJECT_KNOWLEDGE_RESTORED", actorUserId, null, knowledgeId, "ARCHIVED", "PUBLISHED");
+        return restored.deletedAt() == null;
+    }
+
     public SpaceAccessPolicy.SpaceAccessContext spaceAccessContext(String spaceId, String userId) {
         return new SpaceAccessPolicy.SpaceAccessContext(
                 store.findSpaceById(spaceId).isPresent(),
@@ -1442,7 +1613,9 @@ public class WorkspaceDomainService {
 
     public void requireTranscriptManagement(String actorUserId, String meetingId) {
         requireUser(actorUserId);
-        meetingAccessPolicy.requireParticipantManagement(meetingAccessContext(meetingId, actorUserId));
+        // Any active meeting participant may contribute to the shared transcript.
+        // Host-only checks remain for participant and meeting lifecycle management.
+        meetingAccessPolicy.requireReadAccess(meetingAccessContext(meetingId, actorUserId));
     }
 
     public TaskCandidateContext taskCandidateContext(String meetingId) {
@@ -1565,8 +1738,11 @@ public class WorkspaceDomainService {
         MeetingReportStatus statusFilter = status == null || status.isBlank() ? null : parseReportStatus(status);
         return store.findMeetingReports(meetingId).stream()
                 .filter(report -> statusFilter == null
-                        ? report.status() == MeetingReportStatus.DRAFT || report.status() == MeetingReportStatus.CONFIRMED
+                        ? report.status() == MeetingReportStatus.CANDIDATE
+                                || report.status() == MeetingReportStatus.DRAFT
+                                || report.status() == MeetingReportStatus.CONFIRMED
                         : report.status() == statusFilter)
+                .sorted(java.util.Comparator.comparingInt(MeetingReport::version).reversed())
                 .toList();
     }
 
@@ -1968,6 +2144,15 @@ public class WorkspaceDomainService {
     }
 
     public record SpaceInvitationResolution(SpaceInvitation invitation, SpaceMember member) {
+    }
+
+    public record PendingSpaceInvitation(String invitationId, String spaceId, String spaceName, SpaceRole role, Instant expiresAt) {
+    }
+
+    public record MeetingInvitationCreation(MeetingInvitation invitation, String token) {
+    }
+
+    public record MeetingInvitationResolution(MeetingInvitation invitation, MeetingParticipant participant) {
     }
 
     public record MeetingCreationResult(

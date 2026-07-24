@@ -18,9 +18,12 @@ public class ProxyRouteRegistry {
     private static final String REPORT_ID = "report-" + UUID;
     private static final String TASK_CANDIDATE_ID = "task-candidate-" + UUID;
     private static final String TASK_ID = "task-" + UUID;
-    private static final String TERM_ID = "term-" + UUID;
+    // Domain terms also include imported/seeded IDs such as term-naver-ai-...;
+    // keep the route scoped to the term segment while accepting those IDs.
+    private static final String TERM_ID = "term-[A-Za-z0-9-]+";
     private static final String KNOWLEDGE_ID = "knowledge-" + UUID;
     private static final String INVITATION_ID = "space-invitation-" + UUID;
+    private static final String MEETING_INVITATION_ID = "meeting-invitation-" + UUID;
     private static final String SPACES = "/api/v1/spaces";
     private static final String SPACE = SPACES + "/" + SPACE_ID;
     private static final String TERMS = SPACE + "/terms";
@@ -30,6 +33,8 @@ public class ProxyRouteRegistry {
     private static final String KNOWLEDGE = SPACE + "/knowledge";
     private static final String KNOWLEDGE_ITEM = KNOWLEDGE + "/" + KNOWLEDGE_ID;
     private static final String INVITATIONS = SPACE + "/invitations";
+    private static final String PENDING_SPACE_INVITATIONS = SPACES + "/invitations/pending";
+    private static final String PENDING_SPACE_INVITATION = SPACES + "/invitations/" + SPACE_ID + "/" + INVITATION_ID;
     private static final String MEETINGS = "/api/v1/meetings";
     private static final String MEETING = MEETINGS + "/" + MEETING_ID;
     private static final String REPORTS = MEETING + "/reports";
@@ -38,17 +43,26 @@ public class ProxyRouteRegistry {
 
     private final List<ProxyRoute> routes = List.of(
             route(HttpMethod.GET, SPACES, DownstreamService.CORE),
+            route(HttpMethod.PATCH, "/api/v1/auth/profile", DownstreamService.CORE),
+            route(HttpMethod.POST, "/api/v1/assets/profile-image", DownstreamService.CORE),
             route(HttpMethod.POST, SPACES, DownstreamService.CORE),
             route(HttpMethod.GET, SPACE, DownstreamService.CORE),
             route(HttpMethod.PATCH, SPACE, DownstreamService.CORE),
+            route(HttpMethod.POST, SPACE + "/image", DownstreamService.CORE),
             route(HttpMethod.DELETE, SPACE, DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/instant-meetings", DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/members", DownstreamService.CORE),
             route(HttpMethod.POST, INVITATIONS, DownstreamService.CORE),
+            route(HttpMethod.GET, INVITATIONS, DownstreamService.CORE),
+            route(HttpMethod.POST, INVITATIONS + "/" + INVITATION_ID + "/resend", DownstreamService.CORE),
+            route(HttpMethod.DELETE, INVITATIONS + "/" + INVITATION_ID, DownstreamService.CORE),
             route(HttpMethod.POST, INVITATIONS + "/" + INVITATION_ID + "/accept", DownstreamService.CORE),
             route(HttpMethod.POST, INVITATIONS + "/" + INVITATION_ID + "/decline", DownstreamService.CORE),
+            route(HttpMethod.GET, PENDING_SPACE_INVITATIONS, DownstreamService.CORE),
+            route(HttpMethod.POST, PENDING_SPACE_INVITATION + "/accept", DownstreamService.CORE),
+            route(HttpMethod.POST, PENDING_SPACE_INVITATION + "/decline", DownstreamService.CORE),
             route(HttpMethod.PATCH, SPACE + "/members/" + SPACE_MEMBER_ID, DownstreamService.CORE),
             route(HttpMethod.DELETE, SPACE + "/members/" + SPACE_MEMBER_ID, DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/owner-transfer", DownstreamService.CORE),
@@ -63,6 +77,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.DELETE, TASK, DownstreamService.CORE),
             route(HttpMethod.GET, KNOWLEDGE, DownstreamService.CORE),
             route(HttpMethod.POST, KNOWLEDGE, DownstreamService.CORE),
+            route(HttpMethod.GET, KNOWLEDGE + "/graph", DownstreamService.CORE),
             route(HttpMethod.GET, KNOWLEDGE_ITEM, DownstreamService.CORE),
             route(HttpMethod.PATCH, KNOWLEDGE_ITEM, DownstreamService.CORE),
             route(HttpMethod.DELETE, KNOWLEDGE_ITEM, DownstreamService.CORE),
@@ -70,6 +85,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.GET, SPACE + "/ai/history", DownstreamService.CORE),
             route(HttpMethod.GET, "/api/v1/dashboard", DownstreamService.CORE),
             route(HttpMethod.GET, "/api/v1/calendar/events", DownstreamService.CORE),
+            route(HttpMethod.GET, MEETINGS, DownstreamService.CORE),
             route(HttpMethod.POST, MEETINGS + "/join-requests", DownstreamService.CORE),
             route(HttpMethod.GET, MEETING, DownstreamService.CORE),
             route(HttpMethod.PATCH, MEETING, DownstreamService.CORE),
@@ -77,6 +93,9 @@ public class ProxyRouteRegistry {
             route(HttpMethod.GET, MEETING + "/participants", DownstreamService.CORE),
             route(HttpMethod.POST, MEETING + "/participants", DownstreamService.CORE),
             route(HttpMethod.PATCH, MEETING + "/participants/" + MEETING_PARTICIPANT_ID, DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/invitations", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/invitations/" + MEETING_INVITATION_ID + "/accept", DownstreamService.CORE),
+            route(HttpMethod.POST, MEETING + "/invitations/" + MEETING_INVITATION_ID + "/decline", DownstreamService.CORE),
             route(HttpMethod.GET, MEETING + "/join-requests", DownstreamService.CORE),
             route(HttpMethod.POST, MEETING + "/join-requests/" + JOIN_REQUEST_ID + "/approve", DownstreamService.CORE),
             route(HttpMethod.POST, MEETING + "/join-requests/" + JOIN_REQUEST_ID + "/reject", DownstreamService.CORE),

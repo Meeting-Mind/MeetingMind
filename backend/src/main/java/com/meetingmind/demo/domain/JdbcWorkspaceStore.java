@@ -71,11 +71,11 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
-    Space createSpace(String name, String description, String createdBy, Instant now) {
-        Space space = new Space("space-" + UUID.randomUUID(), name, description, createdBy, now);
+    Space createSpace(String name, String description, String imageUrl, String createdBy, Instant now) {
+        Space space = new Space("space-" + UUID.randomUUID(), name, description, imageUrl, createdBy, now);
         jdbc.update(
-                "insert into spaces (id, name, description, created_by, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
-                space.id(), space.name(), space.description(), space.createdBy(), timestamp(space.createdAt()), timestamp(space.updatedAt())
+                "insert into spaces (id, name, description, image_url, created_by, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)",
+                space.id(), space.name(), space.description(), space.imageUrl(), space.createdBy(), timestamp(space.createdAt()), timestamp(space.updatedAt())
         );
         return space;
     }
@@ -84,7 +84,7 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     Optional<Space> findSpaceById(String spaceId) {
         return first(jdbc.query(
                 """
-                select id, name, description, created_by, created_at, updated_at
+                select id, name, description, image_url, created_by, created_at, updated_at
                 from spaces where id = ? and deleted_at is null
                 """,
                 JdbcWorkspaceStore::mapSpace,
@@ -93,10 +93,10 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
-    Space updateSpace(String spaceId, String name, String description, Instant updatedAt) {
+    Space updateSpace(String spaceId, String name, String description, String imageUrl, Instant updatedAt) {
         jdbc.update(
-                "update spaces set name = ?, description = ?, updated_at = ? where id = ? and deleted_at is null",
-                name, description, timestamp(updatedAt), spaceId
+                "update spaces set name = ?, description = ?, image_url = ?, updated_at = ? where id = ? and deleted_at is null",
+                name, description, imageUrl, timestamp(updatedAt), spaceId
         );
         return findSpaceById(spaceId).orElseThrow();
     }
@@ -267,6 +267,46 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
+    List<SpaceInvitation> findPendingSpaceInvitations(String email) {
+        return jdbc.query(
+                """
+                select id, space_id, email, role, status, token_hash, expires_at, accepted_at, declined_at
+                from space_invitations where lower(email) = lower(?) and status = 'PENDING'
+                order by expires_at, id
+                """,
+                JdbcWorkspaceStore::mapSpaceInvitation,
+                email
+        );
+    }
+
+    @Override
+    List<SpaceInvitation> findSpaceInvitations(String spaceId) {
+        return jdbc.query(
+                "select id, space_id, email, role, status, token_hash, expires_at, accepted_at, declined_at from space_invitations where space_id = ? order by expires_at desc, id",
+                JdbcWorkspaceStore::mapSpaceInvitation, spaceId);
+    }
+
+    @Override
+    MeetingInvitation saveMeetingInvitation(MeetingInvitation invitation) {
+        jdbc.update("""
+                insert into meeting_invitations (id, meeting_id, email, meeting_role, participant_type, status, token_hash, expires_at, accepted_at, declined_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict (id) do update set status = excluded.status, accepted_at = excluded.accepted_at, declined_at = excluded.declined_at
+                """, invitation.id(), invitation.meetingId(), invitation.email(), invitation.meetingRole().name(), invitation.participantType().name().toLowerCase(), invitation.status().name(), invitation.tokenHash(), timestamp(invitation.expiresAt()), timestamp(invitation.acceptedAt()), timestamp(invitation.declinedAt()));
+        return invitation;
+    }
+
+    @Override
+    Optional<MeetingInvitation> findMeetingInvitationById(String meetingId, String invitationId) {
+        return first(jdbc.query("select id, meeting_id, email, meeting_role, participant_type, status, token_hash, expires_at, accepted_at, declined_at from meeting_invitations where meeting_id = ? and id = ?", JdbcWorkspaceStore::mapMeetingInvitation, meetingId, invitationId));
+    }
+
+    @Override
+    Optional<MeetingInvitation> findPendingMeetingInvitation(String meetingId, String email) {
+        return first(jdbc.query("select id, meeting_id, email, meeting_role, participant_type, status, token_hash, expires_at, accepted_at, declined_at from meeting_invitations where meeting_id = ? and lower(email) = lower(?) and status = 'PENDING'", JdbcWorkspaceStore::mapMeetingInvitation, meetingId, email));
+    }
+
+    @Override
     Meeting createMeeting(String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt) {
         Meeting meeting = Meeting.scheduled("meeting-" + UUID.randomUUID(), spaceId, title, description, scheduledAt, scheduledEndAt);
         jdbc.update(
@@ -342,6 +382,15 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
                 JdbcWorkspaceStore::mapMeeting,
                 spaceId
         );
+    }
+
+    @Override
+    List<Meeting> findAccessibleMeetings(String userId) {
+        return jdbc.query("""
+                select distinct m.id, m.space_id, m.room_code, m.title, m.description, m.scheduled_at, m.scheduled_end_at, m.started_at, m.ended_at, m.status, m.failure_reason, m.retention_policy, m.deleted_by, m.deleted_at
+                from meetings m join meeting_participants mp on mp.meeting_id = m.id
+                where mp.user_id = ? and mp.access_status = 'ACTIVE' and m.deleted_at is null order by m.scheduled_at desc
+                """, JdbcWorkspaceStore::mapMeeting, userId);
     }
 
     @Override
@@ -1158,10 +1207,10 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
 
     private static Space mapSpace(ResultSet rs, int rowNum) throws SQLException {
         Space space = new Space(
-                rs.getString("id"), rs.getString("name"), rs.getString("description"),
+                rs.getString("id"), rs.getString("name"), rs.getString("description"), rs.getString("image_url"),
                 rs.getString("created_by"), instant(rs, "created_at")
         );
-        return space.updated(space.name(), space.description(), instant(rs, "updated_at"));
+        return space.updated(space.name(), space.description(), space.imageUrl(), instant(rs, "updated_at"));
     }
 
     private static SpaceMember mapSpaceMember(ResultSet rs, int rowNum) throws SQLException {
@@ -1178,6 +1227,13 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
                 rs.getString("token_hash"), instant(rs, "expires_at"), nullableInstant(rs, "accepted_at"),
                 nullableInstant(rs, "declined_at")
         );
+    }
+
+    private static MeetingInvitation mapMeetingInvitation(ResultSet rs, int rowNum) throws SQLException {
+        return new MeetingInvitation(rs.getString("id"), rs.getString("meeting_id"), rs.getString("email"),
+                MeetingRole.valueOf(rs.getString("meeting_role")), ParticipantType.valueOf(rs.getString("participant_type").toUpperCase()),
+                InvitationStatus.valueOf(rs.getString("status")), rs.getString("token_hash"), instant(rs, "expires_at"),
+                nullableInstant(rs, "accepted_at"), nullableInstant(rs, "declined_at"));
     }
 
     private static Meeting mapMeeting(ResultSet rs, int rowNum) throws SQLException {

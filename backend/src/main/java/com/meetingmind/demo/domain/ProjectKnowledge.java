@@ -48,6 +48,12 @@ public class ProjectKnowledge {
                 embeddingStatus(), embeddingJobId, createdAt, archivedAt, archivedAt
         );
     }
+    public ProjectKnowledge restored(Instant restoredAt) {
+        return new ProjectKnowledge(
+                id, spaceId, type(), title, content, sourceMeetingId, approvedBy, KnowledgeStatus.PUBLISHED,
+                EmbeddingStatus.PENDING, null, createdAt, restoredAt, null
+        );
+    }
     @Override public boolean equals(Object other){return other instanceof ProjectKnowledge value && Objects.equals(id,value.id);}
     @Override public int hashCode(){return Objects.hashCode(id);}
 }
