@@ -6,10 +6,12 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@Profile({"local", "db"})
 public class KnowledgeFolderService {
     private final JdbcTemplate jdbc;
 

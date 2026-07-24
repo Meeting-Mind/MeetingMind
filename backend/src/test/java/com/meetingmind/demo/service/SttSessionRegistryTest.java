@@ -105,15 +105,25 @@ class SttSessionRegistryTest {
         when(liveKitEgressService.startTrackEgress(eq("meeting-1"), eq("track-1"), anyString()))
                 .thenReturn("egress-2");
 
-        String sessionId = registry.createMeetingSession("meeting-1", "meeting-1", "Host");
-        registry.setTrackId(sessionId, "track-1");
-        registry.onEgressClosed(sessionId);
+        String previousBaseUrl = System.getProperty("PUBLIC_WS_BASE_URL");
+        System.setProperty("PUBLIC_WS_BASE_URL", "https://stt.test.example");
+        try {
+            String sessionId = registry.createMeetingSession("meeting-1", "meeting-1", "Host");
+            registry.setTrackId(sessionId, "track-1");
+            registry.onEgressClosed(sessionId);
 
-        verify(client).finishAudio();
-        verify(client, never()).close();
-        verify(liveKitEgressService).startTrackEgress(eq("meeting-1"), eq("track-1"), anyString());
-        verify(workspaceDomainService, never()).completeMeetingTranscript("meeting-1");
-        assertThatCode(() -> registry.onEgressClosed(sessionId)).doesNotThrowAnyException();
+            verify(client, never()).finishAudio();
+            verify(client, never()).close();
+            verify(liveKitEgressService).startTrackEgress(eq("meeting-1"), eq("track-1"), anyString());
+            verify(workspaceDomainService, never()).completeMeetingTranscript("meeting-1");
+            assertThatCode(() -> registry.onEgressClosed(sessionId)).doesNotThrowAnyException();
+        } finally {
+            if (previousBaseUrl == null) {
+                System.clearProperty("PUBLIC_WS_BASE_URL");
+            } else {
+                System.setProperty("PUBLIC_WS_BASE_URL", previousBaseUrl);
+            }
+        }
     }
 
     @Test
