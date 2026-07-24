@@ -30,8 +30,8 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
-    Space createSpace(String name, String description, String createdBy, Instant now) {
-        return persistence.saveSpace(new Space("space-" + UUID.randomUUID(), name, description, createdBy, now));
+    Space createSpace(String name, String description, String imageUrl, String createdBy, Instant now) {
+        return persistence.saveSpace(new Space("space-" + UUID.randomUUID(), name, description, imageUrl, createdBy, now));
     }
 
     @Override
@@ -40,9 +40,9 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
-    Space updateSpace(String spaceId, String name, String description, Instant updatedAt) {
+    Space updateSpace(String spaceId, String name, String description, String imageUrl, Instant updatedAt) {
         Space current = persistence.findSpace(spaceId).orElseThrow();
-        return persistence.saveSpace(current.updated(name, description, updatedAt));
+        return persistence.saveSpace(current.updated(name, description, imageUrl, updatedAt));
     }
 
     @Override
@@ -117,6 +117,14 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email) {
         return persistence.findPendingSpaceInvitation(spaceId, email);
     }
+
+    @Override
+    List<SpaceInvitation> findPendingSpaceInvitations(String email) {
+        return persistence.findPendingSpaceInvitations(email);
+    }
+
+    @Override
+    List<SpaceInvitation> findSpaceInvitations(String spaceId) { return persistence.findSpaceInvitations(spaceId); }
 
     @Override
     Meeting createMeeting(String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt) {

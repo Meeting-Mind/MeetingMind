@@ -106,3 +106,19 @@
 - D-044: 회의 채팅 첨부파일은 현재 전달 범위에서 제외한다. M035 재개 시 private S3-compatible object storage, 15분 단일 사용 presigned upload, completion 검증, 텍스트 추출과 `ATTACHMENT_READY` job, 삭제·만료 chunk 비활성화 정책을 별도 contract와 migration으로 확정한다.
 - D-045: Project AI 대화 이력은 `ProjectAiMessage`로 `(spaceId, userId)`별 저장한다. 목록은 최근 50개, prompt 문맥은 최근 10개 turn으로 제한한다. Backend는 chat과 history 조회 모두에서 current active SpaceMember를 다시 확인하며, AI는 이력을 비신뢰 대화 문맥으로만 사용하고 현재 검색 source와 citation을 유일한 근거로 취급한다.
 - D-046: 회의 채팅 텍스트 첨부파일 RAG(M035)는 이번 전달 범위에서 제외한다. upload API, extractor, retriever, frontend 및 통합 검증은 후속 단계에서 다시 계획한다.
+
+- D-047: Knowledge Graph Phase 1의 `Topic`은 별도 엔티티로 저장하지 않고, 권한 필터가 적용된 source snapshot에서 서버가 계산하는 파생 cluster 결과로 제공한다. 브라우저의 문자열 포함 여부로 semantic cluster를 만들지 않는다.
+- D-048: Knowledge Graph의 `Participant` node는 개인정보 표시 범위와 게스트 포함 정책이 확정되기 전까지 기본 제외한다. Phase 1 계약에는 타입을 예약하되 활성 응답에는 포함하지 않는다.
+
+## Knowledge Graph Open Questions
+
+### Q-014: Participant node 개인정보 범위
+
+- 상태: 보류
+- 결정 필요: Space member, meeting guest, speaker label 중 노출 대상과 이름/이메일/프로필 이미지 표시 범위
+- 현재 안전한 기본값: API 응답과 cluster count에서 Participant를 제외한다.
+
+### Q-015: Topic 영속화
+
+- 상태: 결정됨
+- 결정: Phase 1에서는 서버 파생 결과로만 제공하고 Topic 테이블을 만들지 않는다. Topic 편집·고정·공유가 필요해지는 시점에 별도 contract와 migration을 만든다.

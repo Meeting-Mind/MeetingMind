@@ -48,6 +48,7 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `id`
 - `name`
 - `description`
+- `imageUrl`: nullable 대표 이미지 공개 URL. 객체 파일은 S3 또는 CDN에 저장하며 DB에는 URL만 저장한다.
 - `createdBy`
 - `createdAt`
 - `updatedAt`: Space 이름 또는 설명 수정 시각
@@ -212,7 +213,7 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 - `sourceCandidateId`: AI 후보에서 생성되지 않은 일반 카드면 null, 값이 있으면 unique
 - `title`
 - `description`
-- `status`: TODO, IN_PROGRESS, DONE
+- `status`: TODO, IN_PROGRESS, IN_REVIEW, DONE
 - `priority`: LOW, MEDIUM, HIGH. 일반 카드와 AI 후보 확정 카드의 기본값은 MEDIUM
 - `labels`: 순서가 유지되는 사용자 지정 문자열 목록. 카드당 최대 10개, 각 trim 후 1~40자이며 대소문자 무시 중복은 허용하지 않음
 - `assigneeId`: active SpaceMember 사용자 id, 미지정 시 null
@@ -296,6 +297,14 @@ Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개
 - `startedAt`
 - `completedAt`
 
+### KnowledgeGraph (Read Model)
+
+- 영속 entity를 추가하지 않는다. Space의 active `EmbeddingChunk`를 요청 시 source 단위 centroid로 집계하는 API projection이다.
+- `KnowledgeCluster`: `id`, `label`, `sourceCount`, `nodes[]`
+- `KnowledgeGraphNode`: `id`, `sourceType`, `title`, `sourceMeetingId`, `embeddingStatus`
+- `KnowledgeGraphEdge`: `from`, `to`, `similarity`
+- Core permission prefilter 이후 AI가 전달받은 `spaceId`, `allowedMeetingIds`를 SQL scope에 강제한다. 원본 chunk content/vector와 권한 없는 meeting source는 응답에 포함하지 않는다.
+
 ### Data Constraints
 
 - `User.email`은 unique다.
@@ -326,6 +335,7 @@ Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개
 - 새 report를 확정할 때 기존 `CONFIRMED and isCurrent=true` report를 `isCurrent=false`로 전환하고 새 report만 `isCurrent=true`로 둔다.
 - `TaskCard.sourceCandidateId`는 nullable이지만 값이 있으면 unique다.
 - `TaskCard.priority`는 `LOW`, `MEDIUM`, `HIGH` 중 하나이며 기본값은 `MEDIUM`이다.
+- `TaskCard.status`는 `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` 중 하나다.
 - `TaskCard.labels`는 PostgreSQL `text[]`로 저장하고 application layer에서 최대 개수·문자 수·대소문자 무시 중복을 검증한다.
 - `TaskCard.deletedAt`이 null인 행만 일반 칸반 목록에 노출한다. AI candidate 중복 확정 검증은 삭제된 카드도 포함해 source uniqueness를 보존한다.
 - `TaskCandidate.status`는 `CANDIDATE`, `CONFIRMED`, `DISMISSED` 중 하나다.
@@ -459,4 +469,27 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 - 음성 원본: 기본 장기 보관 없음
 - STT 원문: 회의별 `retentionPolicy`에 따른 삭제 대상. DB 값은 `DAYS_7`, `DAYS_30`, `PERMANENT`이며 기본값은 `DAYS_30`이다. `legalHold=true`이면 자동 삭제를 보류한다.
 - 보고서/공식 지식: Space 정책에 따른 보존
+
+## Knowledge Graph Read Model Extension
+
+Phase 1에서는 `GraphNode`, `GraphEdge`, `GraphCluster`, `Topic`을 영속 엔티티로
+추가하지 않는다. 기존 Meeting, MeetingReport, Decision, ActionItem, TaskCard,
+ProjectKnowledge, DomainTerm와 active `EmbeddingChunk`를 권한 필터링한 뒤 그래프
+read model로 투영한다.
+
+- `GraphNode`: opaque `id`, `entityId`, `nodeType`, `spaceId`, optional `meetingId`,
+  표시용 title/summary, canonical status, occurredAt, clusterIds, connectionCount,
+  source references, detail target
+- `GraphEdge`: opaque `id`, `from`, `to`, `edgeType`, weight, source references
+- `GraphCluster`: id, label, clusterBy, nodeIds, nodeCount, keywords, colorKey
+- Topic: Phase 1에서는 서버 계산 파생 결과다. 별도 사용자 편집 Topic entity와
+  topic table은 후속 결정 없이는 만들지 않는다.
+- Participant node: 개인정보와 회의 참가 범위 정책이 확정되기 전에는 생성하지
+  않는다. 이름·이메일·프로필 이미지를 그래프 metadata에 기본 포함하지 않는다.
+- 그래프 filter는 조회 편의 기능이며 권한 경계가 아니다. `allowedMeetingIds`는
+  Backend가 현재 사용자 권한으로 계산하고 요청 meetingIds와 교집합한다.
+- node detail 조회는 목록 응답 이후에도 동일한 권한을 재검사한다.
+- 대규모 응답은 서버 `maxNodes`/edge 상한과 `partial`/`truncated` 상태로 표현한다.
+- 그래프 위치, zoom, 접힌 cluster 상태는 사용자별 UI preference이며 도메인 모델과
+  분리한다.
 - 회의 채팅 첨부: Meeting의 retention policy를 상속한다. `DAYS_7`/`DAYS_30`이면 `retentionUntil`을 기록하고, `PERMANENT`이면 null이다. 삭제/만료 시 object URL 발급과 RAG 검색을 즉시 중단하고 physical cleanup은 retry 가능한 비동기 작업으로 남긴다.

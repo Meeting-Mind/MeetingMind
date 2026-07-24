@@ -224,7 +224,7 @@ FR-MREG/FR-ACL/FR-KAN/FR-PBOT/FR-PERM/FR-OWN 구현은 프로젝트 상세 화�
 
 - FR-MREG-01/05/06: `/project-overview`의 회의 목록을 생성, 상태 표시, 상태 변경 후보, 회의 상세 진입이 가능한 관리 목록으로 정리한다.
 - FR-MREG-02/03, FR-ACL-01/02/03/04/05/06/07: 회의별 참여자/role UI를 추가한다. `VIEWER`, `EDITOR`, `HOST`, `ACTIVE`, `REVOKED`, owner/admin override, 마지막 active HOST 보호, 삭제 권한 제한을 화면 copy와 disabled state에 반영한다. 감사 로그는 backend target gap이므로 이번 frontend slice에서는 "기록 대상 이벤트"를 UI/문서에 남긴다.
-- FR-KAN-01~08: 프로젝트 안의 TaskCard 칸반을 추가한다. 상태는 `TODO`, `IN_PROGRESS`, `DONE`만 사용하고, drag-and-drop은 새 dependency 없이 HTML drag event 또는 명시 이동 버튼 중 기존 코드에 더 작은 방식을 선택한다.
+- FR-KAN-01~08: 프로젝트 안의 TaskCard 칸반을 추가한다. 상태는 `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`을 사용하고, drag-and-drop은 새 dependency 없이 HTML drag event 또는 명시 이동 버튼 중 기존 코드에 더 작은 방식을 선택한다.
 - FR-PBOT-01~05: Project AI 패널은 공식 Project Knowledge와 접근 가능한 meeting source를 구분해 출처를 표시한다. backend 권한 선필터가 들어오기 전까지 frontend는 prototype context임을 유지하고, 권한 밖 데이터 혼입을 피하도록 mock source를 선택 Space/허용 회의로 제한한다.
 - FR-PERM-01~05: `TeamMembersPage`의 멤버 목록/초대/요청 승인 흐름을 SpaceMember role 기준으로 정리한다. Space invitation과 Meeting invitation은 같은 UI copy로 섞지 않는다.
 - FR-OWN-01~03: owner transfer는 별도 확인 절차가 필요한 위험 작업으로 분리한다. 실제 backend transaction 전까지는 frontend local flow와 확인 모달, 후속 backend gap 기록까지만 구현한다.

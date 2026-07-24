@@ -2,6 +2,7 @@ package com.meetingmind.demo.auth;
 
 import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.observability.RequestTrace;
+import com.meetingmind.demo.service.S3ImageStorageService.ImageStorageException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,5 +38,13 @@ public class AuthExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(new AuthErrorResponse("INVALID_REQUEST", "요청값이 잘못되었습니다.", fieldErrors, RequestTrace.currentOrCreate()));
+    }
+
+    @ExceptionHandler(ImageStorageException.class)
+    public ResponseEntity<AuthErrorResponse> handleImageStorageException(ImageStorageException exception) {
+        String code = exception.status() == HttpStatus.BAD_REQUEST ? "INVALID_REQUEST" : "IMAGE_STORAGE_UNAVAILABLE";
+        return ResponseEntity
+                .status(exception.status())
+                .body(new AuthErrorResponse(code, exception.getMessage(), List.of(), RequestTrace.currentOrCreate()));
     }
 }

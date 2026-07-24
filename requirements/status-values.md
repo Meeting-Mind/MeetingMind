@@ -31,6 +31,7 @@ Google Sheets 상태값 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | TaskCandidate | 제외 | DISMISSED | 사용자가 칸반 등록 대상에서 제외한 태스크 후보. | 후보 제외 시 | task_candidates.status | FR-TASK-02 |
 | TaskCard | 할 일 | TODO | 아직 시작하지 않은 칸반 카드. | 카드 생성 기본 상태 | task_cards.status | FR-KAN-01~04 |
 | TaskCard | 진행 중 | IN_PROGRESS | 현재 처리 중인 칸반 카드. | 드래그 또는 상태 변경 | task_cards.status | FR-KAN-04 |
+| TaskCard | 검토 중 | IN_REVIEW | 완료 전 검토·승인을 기다리는 칸반 카드. | 드래그 또는 상태 변경 | task_cards.status | FR-KAN-04 |
 | TaskCard | 완료 | DONE | 작업이 완료된 칸반 카드. | 드래그 또는 상태 변경 | task_cards.status | FR-KAN-04 |
 | Invitation | 대기 | PENDING | 초대가 발송되었지만 응답 전인 상태. | 초대 생성 직후 | invitations.status | FR-PERM-02 |
 | Invitation | 수락 | ACCEPTED | 초대 대상이 초대를 수락한 상태. | 수락 시 SpaceMember/MeetingParticipant 생성 | invitations.status | FR-PERM-05 |

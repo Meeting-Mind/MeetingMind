@@ -2,31 +2,90 @@
   --app-scale: 1;
   --app-scale-inverse: 1;
   --app-font-sans: "SUIT Variable", "Pretendard Variable", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-  --app-bg: #f8fbff;
-  --app-canvas: #f3f7fc;
+  /*
+   * Accessible neutral surface scale.
+   * Text contrast on --app-bg (#f6f8fc):
+   * --app-text-strong 16.79:1, --app-text 9.74:1,
+   * --app-muted 5.77:1, --app-subtle 5.19:1.
+   */
+  --app-bg: #f6f8fc;
+  --app-canvas: #edf2f7;
   --app-surface: #ffffff;
-  --app-surface-soft: #f5f9ff;
-  --app-surface-muted: #eef5fd;
-  --app-line: #d8e5f7;
-  --app-line-strong: #bfd2ee;
-  --app-text: #102a5c;
-  --app-text-strong: #0c234c;
-  --app-muted: #5b7198;
-  --app-subtle: #7890ae;
-  --app-accent: #175ab7;
-  --app-accent-strong: #0c3d87;
-  --app-accent-soft: #e8f1ff;
-  --app-green: #16856a;
-  --app-green-soft: #e9f7f1;
-  --app-orange: #e87722;
-  --app-orange-soft: #fff3e8;
-  --app-blue-soft: #e8f1ff;
-  --app-danger: #b42318;
-  --app-red-soft: #fff0ed;
-  --app-focus-ring: 0 0 0 3px rgba(23, 90, 183, 0.24);
-  --app-shadow-sm: 0 3px 10px rgba(16, 42, 92, 0.05);
-  --app-shadow: 0 12px 32px rgba(16, 42, 92, 0.08);
-  --app-shadow-lg: 0 24px 56px rgba(16, 42, 92, 0.16);
+  --app-surface-soft: #f4f7fb;
+  --app-surface-muted: #eaf0f7;
+  --app-line: #d6e0eb;
+  --app-line-strong: #b8c7d9;
+  --app-text: #334155;
+  --app-text-strong: #0f172a;
+  --app-muted: #52637a;
+  --app-subtle: #5a6a80;
+
+  /* Product actions: the sole default CTA color. */
+  --app-accent: #4338ca;
+  --app-accent-strong: #3730a3;
+  --app-accent-soft: #eef2ff;
+  --app-accent-subtle: #f5f3ff;
+  --app-accent-border: #c7d2fe;
+  --app-accent-text: #3730a3;
+  --app-accent-hover: #3730a3;
+  --app-accent-active: #312e81;
+  --app-link: #3730a3;
+  --app-link-hover: #312e81;
+  --app-selection-bg: #e0e7ff;
+  --app-selection-text: #0f172a;
+  --app-info: #4338ca;
+  --app-info-soft: #eef2ff;
+
+  /* Functional colors keep the user’s current work context distinguishable. */
+  --app-ai: #6d28d9;
+  --app-ai-soft: #f5f3ff;
+  --app-knowledge: #0f766e;
+  --app-knowledge-soft: #f0fdfa;
+  --app-action: #1d4ed8;
+  --app-action-soft: #eff6ff;
+  --app-highlight: #e11d48;
+  --app-highlight-soft: #fff1f2;
+  --app-success: #047857;
+  --app-success-soft: #ecfdf5;
+  --app-warning: #92400e;
+  --app-warning-soft: #fffbeb;
+  --app-danger-text: #b91c1c;
+  --app-danger-soft: #fff1f2;
+  --app-green: #047857;
+  --app-green-soft: #ecfdf5;
+  --app-orange: #92400e;
+  --app-orange-soft: #fffbeb;
+  --app-blue-soft: #eff6ff;
+  --app-danger: #b91c1c;
+  --app-red-soft: #fff1f2;
+
+  /* Role aliases. Components should consume these instead of literal hex values. */
+  --color-neutral-bg: var(--app-bg);
+  --color-neutral-surface: var(--app-surface);
+  --color-neutral-surface-muted: var(--app-surface-muted);
+  --color-neutral-border: var(--app-line);
+  --color-neutral-border-strong: var(--app-line-strong);
+  --color-neutral-text-pri: var(--app-text-strong);
+  --color-neutral-text-body: var(--app-text);
+  --color-neutral-text-muted: var(--app-muted);
+  --color-accent-primary: var(--app-accent);
+  --color-accent-primary-hover: var(--app-accent-hover);
+  --color-domain-ai: var(--app-ai);
+  --color-domain-ai-soft: var(--app-ai-soft);
+  --color-domain-knowledge: var(--app-knowledge);
+  --color-domain-knowledge-soft: var(--app-knowledge-soft);
+  --color-domain-action: var(--app-action);
+  --color-domain-action-soft: var(--app-action-soft);
+  --color-status-success: var(--app-success);
+  --color-status-success-soft: var(--app-success-soft);
+  --color-status-warning: var(--app-warning);
+  --color-status-warning-soft: var(--app-warning-soft);
+  --color-status-danger: var(--app-danger);
+  --color-status-danger-soft: var(--app-danger-soft);
+  --app-focus-ring: 0 0 0 3px rgba(67, 56, 202, 0.28);
+  --app-shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.05);
+  --app-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+  --app-shadow-lg: 0 24px 56px rgba(15, 23, 42, 0.16);
   --app-radius-xl: 16px;
   --app-radius-lg: 12px;
   --app-radius-md: 8px;
@@ -46,6 +105,60 @@
   --app-duration-normal: 200ms;
   --app-duration-slow: 320ms;
   --app-ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --app-bg: #111827;
+  --app-canvas: #0f172a;
+  --app-surface: #182235;
+  --app-surface-soft: #202c40;
+  --app-surface-muted: #263247;
+  --app-line: #334155;
+  --app-line-strong: #475569;
+  --app-text: #d8e2ef;
+  --app-text-strong: #f8fafc;
+  --app-muted: #aab8ca;
+  --app-subtle: #8fa0b5;
+  --app-accent: #4f46e5;
+  --app-accent-strong: #818cf8;
+  --app-accent-soft: #242449;
+  --app-accent-subtle: #1c1c38;
+  --app-accent-border: #5552a8;
+  --app-accent-text: #c7d2fe;
+  --app-accent-hover: #6366f1;
+  --app-accent-active: #818cf8;
+  --app-link: #c7d2fe;
+  --app-link-hover: #e0e7ff;
+  --app-selection-bg: #3730a3;
+  --app-selection-text: #ffffff;
+  --app-info: #a5b4fc;
+  --app-info-soft: #242449;
+  --app-ai: #c4b5fd;
+  --app-ai-soft: #30234f;
+  --app-knowledge: #5eead4;
+  --app-knowledge-soft: #123a3a;
+  --app-action: #93c5fd;
+  --app-action-soft: #1e3a5f;
+  --app-highlight: #fda4af;
+  --app-highlight-soft: #4a1d2d;
+  --app-success: #6ee7b7;
+  --app-success-soft: #123b32;
+  --app-warning: #fcd34d;
+  --app-warning-soft: #422d0b;
+  --app-danger: #fca5a5;
+  --app-danger-text: #fca5a5;
+  --app-danger-soft: #4a1d1d;
+  --app-green: #6ee7b7;
+  --app-green-soft: #123b32;
+  --app-orange: #fcd34d;
+  --app-orange-soft: #422d0b;
+  --app-blue-soft: #1e3a5f;
+  --app-red-soft: #4a1d1d;
+  --app-focus-ring: 0 0 0 3px rgba(165, 180, 252, 0.35);
+  --app-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --app-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  --app-shadow-lg: 0 24px 56px rgba(0, 0, 0, 0.45);
 }
 
 @media (prefers-reduced-motion: reduce) {

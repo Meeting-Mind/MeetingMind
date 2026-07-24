@@ -64,11 +64,38 @@ Endpoint별 문서에는 위 공통 오류 중 해당 endpoint에서 반환 가�
 | `Transcript.status` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
 | `MeetingReport.status` | `CANDIDATE`, `DRAFT`, `CONFIRMED` |
 | `TaskCandidate.status` | `CANDIDATE`, `CONFIRMED`, `DISMISSED` |
-| `TaskCard.status` | `TODO`, `IN_PROGRESS`, `DONE` |
+| `TaskCard.status` | `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` |
 | `SpaceInvitation.status` | `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED` |
 | `MeetingJoinRequest.status` | `PENDING`, `APPROVED`, `REJECTED` |
 | `MeetingParticipant.accessStatus` | `ACTIVE`, `REVOKED` |
 | `ProjectKnowledge.embeddingStatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
+
+## Space invitation notifications
+
+로그인한 사용자는 자신의 이메일로 발송된 대기 중 Space 초대를 워크스페이스 목록에서 조회하고, 초대 토큰을 다시 노출하지 않고 수락 또는 거절할 수 있다.
+
+### GET /api/v1/spaces/invitations/pending
+
+Response:
+
+```json
+{
+  "invitations": [
+    {
+      "invitationId": "space-invitation-...",
+      "spaceId": "space-...",
+      "spaceName": "Product Space",
+      "role": "MEMBER",
+      "expiresAt": "2026-07-31T00:00:00Z"
+    }
+  ]
+}
+```
+
+### POST /api/v1/spaces/invitations/{spaceId}/{invitationId}/accept
+### POST /api/v1/spaces/invitations/{spaceId}/{invitationId}/decline
+
+현재 로그인한 사용자의 인증 이메일이 초대 대상 이메일과 일치할 때만 처리한다. 기존 초대 링크 API의 raw token을 재사용하거나 저장하지 않는다.
 
 ## Source Reference Shape
 

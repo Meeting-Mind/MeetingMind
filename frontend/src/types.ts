@@ -69,7 +69,7 @@ export type ParticipantType = "member" | "guest";
 export type ParticipantAccessStatus = "ACTIVE" | "REVOKED";
 export type TranscriptStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type MeetingReportStatus = "CANDIDATE" | "DRAFT" | "CONFIRMED";
-export type TaskCardStatus = "TODO" | "IN_PROGRESS" | "DONE";
+export type TaskCardStatus = "TODO" | "IN_PROGRESS" | "IN_REVIEW" | "DONE";
 export type TaskCardPriority = "LOW" | "MEDIUM" | "HIGH";
 export type DomainTermStatus = "ACTIVE" | "ARCHIVED";
 export type AiSourceType =
@@ -85,6 +85,7 @@ export interface SpaceSummary {
   id: string;
   name: string;
   description: string | null;
+  imageUrl: string | null;
   role: SpaceRole;
   meetingCount: number;
   updatedAt: ApiDateTime;
@@ -143,17 +144,23 @@ export interface CreateSpaceResponse {
 export interface UpdateSpaceRequest {
   name?: string;
   description?: string | null;
+  imageUrl?: string | null;
 }
 
 export interface UpdateSpaceResponse {
   id: string;
   name: string;
   description: string | null;
+  imageUrl: string | null;
   updatedAt: ApiDateTime;
 }
 
 export interface DeleteSpaceResponse {
   deleted: boolean;
+}
+
+export interface LeaveSpaceResponse {
+  left: boolean;
 }
 
 export interface MeetingSummary {
@@ -286,6 +293,20 @@ export interface ReviewMeetingJoinRequestResponse {
   status: MeetingJoinRequestStatus;
   participantId: string | null;
   participantType: ParticipantType | null;
+}
+
+export interface CreateMeetingInvitationResponse {
+  invitationId: string;
+  status: InvitationStatus;
+  expiresAt: ApiDateTime;
+  inviteToken: string;
+}
+
+export interface ResolveMeetingInvitationResponse {
+  participantId: string | null;
+  role: MeetingRole | null;
+  participantType: ParticipantType | null;
+  status: InvitationStatus;
 }
 
 export interface ResolveInvitationRequest {
@@ -481,6 +502,28 @@ export interface ResolveSpaceInvitationResponse {
   status: InvitationStatus;
 }
 
+export interface PendingSpaceInvitation {
+  invitationId: string;
+  spaceId: string;
+  spaceName: string;
+  role: Exclude<SpaceRole, "OWNER">;
+  expiresAt: ApiDateTime;
+}
+
+export interface SpaceInvitationAdmin {
+  invitationId: string;
+  email: string;
+  role: Exclude<SpaceRole, "OWNER">;
+  status: InvitationStatus;
+  expiresAt: ApiDateTime;
+}
+
+export interface SpaceInvitationAdminResponse { invitations: SpaceInvitationAdmin[]; }
+
+export interface SpaceInvitationListResponse {
+  invitations: PendingSpaceInvitation[];
+}
+
 export interface UpdateSpaceMemberRoleRequest {
   role: Exclude<SpaceRole, "OWNER">;
 }
@@ -510,6 +553,7 @@ export interface SpaceDetail {
   id: string;
   name: string;
   description: string | null;
+  imageUrl: string | null;
   role: SpaceRole;
   upcomingMeetings: MeetingSummary[];
   recentReports: ReportSummary[];
@@ -576,6 +620,40 @@ export interface ProjectKnowledgeItem {
 
 export interface ProjectKnowledgeListResponse {
   items: ProjectKnowledgeItem[];
+}
+
+export interface KnowledgeGraphNode {
+  id: string;
+  sourceType: "projectKnowledge" | "transcript" | "meetingSummary" | "decision" | "actionItem" | "report" | "glossary";
+  title: string;
+  sourceMeetingId: string | null;
+  embeddingStatus: "COMPLETED";
+  entityId?: string | null;
+  nodeType?: "MEETING" | "REPORT" | "DECISION" | "ACTION" | "TASK" | "PROJECT_KNOWLEDGE" | "TOPIC" | "PARTICIPANT" | null;
+  connectionCount?: number;
+  clusterIds?: string[];
+  detailTarget?: { kind: string; id: string } | null;
+}
+
+export interface KnowledgeGraphCluster {
+  id: string;
+  label: string;
+  sourceCount: number;
+  nodes: KnowledgeGraphNode[];
+  clusterBy?: string;
+  nodeIds?: string[];
+  nodeCount?: number;
+  keywords?: string[];
+  colorKey?: string;
+}
+
+export interface KnowledgeGraphResponse {
+  clusters: KnowledgeGraphCluster[];
+  edges: Array<{ from: string; to: string; similarity: number; id?: string; edgeType?: string; weight?: number }>;
+  generatedAt: string;
+  nodes?: KnowledgeGraphNode[];
+  filters?: { appliedNodeTypes?: string[]; truncated?: boolean };
+  partial?: boolean;
 }
 
 export interface ProjectKnowledgeDetailResponse {

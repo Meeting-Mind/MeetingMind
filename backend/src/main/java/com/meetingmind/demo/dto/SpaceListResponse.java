@@ -8,6 +8,7 @@ public record SpaceListResponse(List<SpaceSummary> spaces) {
             String id,
             String name,
             String description,
+            String imageUrl,
             String role,
             long meetingCount,
             String updatedAt

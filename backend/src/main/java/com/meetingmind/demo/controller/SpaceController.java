@@ -12,6 +12,7 @@ import com.meetingmind.demo.dto.CreateSpaceResponse;
 import com.meetingmind.demo.dto.CreateSpaceInvitationRequest;
 import com.meetingmind.demo.dto.CreateSpaceInvitationResponse;
 import com.meetingmind.demo.dto.DeleteSpaceResponse;
+import com.meetingmind.demo.dto.LeaveSpaceResponse;
 import com.meetingmind.demo.dto.DeleteProjectKnowledgeResponse;
 import com.meetingmind.demo.dto.MeetingListResponse;
 import com.meetingmind.demo.dto.ProjectAiContextCandidatesResponse;
@@ -31,6 +32,8 @@ import com.meetingmind.demo.dto.UpdateSpaceResponse;
 import com.meetingmind.demo.dto.UpdateProjectKnowledgeRequest;
 import com.meetingmind.demo.dto.ResolveInvitationRequest;
 import com.meetingmind.demo.dto.ResolveSpaceInvitationResponse;
+import com.meetingmind.demo.dto.SpaceInvitationListResponse;
+import com.meetingmind.demo.dto.SpaceInvitationAdminResponse;
 import com.meetingmind.demo.domain.User;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -68,6 +71,7 @@ public class SpaceController {
                         summary.space().id(),
                         summary.space().name(),
                         summary.space().description(),
+                        summary.space().imageUrl(),
                         summary.role().name(),
                         summary.meetingCount(),
                         summary.space().createdAt().toString()
@@ -107,6 +111,7 @@ public class SpaceController {
                 detail.space().id(),
                 detail.space().name(),
                 detail.space().description(),
+                detail.space().imageUrl(),
                 detail.role().name(),
                 detail.upcomingMeetings().stream().map(summary -> new SpaceDetailResponse.MeetingSummary(
                         summary.meeting().id(), summary.meeting().spaceId(), summary.meeting().title(),
@@ -130,9 +135,9 @@ public class SpaceController {
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
         var updated = workspaceDomainService.updateSpace(
-                user.id(), spaceId, request.name(), request.namePresent(), request.description(), request.descriptionPresent()
+                user.id(), spaceId, request.name(), request.namePresent(), request.description(), request.descriptionPresent(), request.imageUrl(), request.imageUrlPresent()
         );
-        return new UpdateSpaceResponse(updated.id(), updated.name(), updated.description(), updated.updatedAt());
+        return new UpdateSpaceResponse(updated.id(), updated.name(), updated.description(), updated.imageUrl(), updated.updatedAt());
     }
 
     @DeleteMapping("/{spaceId}")
@@ -142,6 +147,15 @@ public class SpaceController {
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
         return new DeleteSpaceResponse(workspaceDomainService.deleteSpace(user.id(), spaceId));
+    }
+
+    @PostMapping("/{spaceId}/leave")
+    public LeaveSpaceResponse leaveSpace(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new LeaveSpaceResponse(workspaceDomainService.leaveSpace(user.id(), spaceId));
     }
 
     @PostMapping("/{spaceId}/meetings")
@@ -245,6 +259,24 @@ public class SpaceController {
         );
     }
 
+    @GetMapping("/{spaceId}/invitations")
+    public SpaceInvitationAdminResponse listInvitations(@RequestHeader(value = "Authorization", required = false) String authorizationHeader, @PathVariable String spaceId) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new SpaceInvitationAdminResponse(workspaceDomainService.listSpaceInvitations(user.id(), spaceId).stream().map(i -> new SpaceInvitationAdminResponse.Invitation(i.id(), i.email(), i.role().name(), i.status().name(), i.expiresAt())).toList());
+    }
+
+    @PostMapping("/{spaceId}/invitations/{invitationId}/resend")
+    public CreateSpaceInvitationResponse resendInvitation(@RequestHeader(value = "Authorization", required = false) String authorizationHeader, @PathVariable String spaceId, @PathVariable String invitationId) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        var result = workspaceDomainService.resendSpaceInvitation(user.id(), spaceId, invitationId);
+        return new CreateSpaceInvitationResponse(result.invitation().id(), result.invitation().status().name(), result.invitation().expiresAt(), result.token());
+    }
+
+    @DeleteMapping("/{spaceId}/invitations/{invitationId}")
+    public void cancelInvitation(@RequestHeader(value = "Authorization", required = false) String authorizationHeader, @PathVariable String spaceId, @PathVariable String invitationId) {
+        workspaceDomainService.cancelSpaceInvitation(currentUser(authorizationHeader).id(), spaceId, invitationId);
+    }
+
     @PostMapping("/{spaceId}/invitations/{invitationId}/accept")
     public ResolveSpaceInvitationResponse acceptInvitation(
             @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
@@ -263,6 +295,35 @@ public class SpaceController {
             @Valid @RequestBody ResolveInvitationRequest request
     ) {
         return resolveInvitation(authorizationHeader, spaceId, invitationId, request, false);
+    }
+
+    @GetMapping("/invitations/pending")
+    public SpaceInvitationListResponse listPendingInvitations(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new SpaceInvitationListResponse(workspaceDomainService.listPendingSpaceInvitations(user.id()).stream()
+                .map(invitation -> new SpaceInvitationListResponse.Invitation(
+                        invitation.invitationId(), invitation.spaceId(), invitation.spaceName(), invitation.role().name(), invitation.expiresAt()
+                )).toList());
+    }
+
+    @PostMapping("/invitations/{spaceId}/{invitationId}/accept")
+    public ResolveSpaceInvitationResponse acceptPendingInvitation(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId,
+            @PathVariable String invitationId
+    ) {
+        return resolveAuthenticatedInvitation(authorizationHeader, spaceId, invitationId, true);
+    }
+
+    @PostMapping("/invitations/{spaceId}/{invitationId}/decline")
+    public ResolveSpaceInvitationResponse declinePendingInvitation(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId,
+            @PathVariable String invitationId
+    ) {
+        return resolveAuthenticatedInvitation(authorizationHeader, spaceId, invitationId, false);
     }
 
     @PatchMapping("/{spaceId}/members/{memberId}")
@@ -410,6 +471,16 @@ public class SpaceController {
         return new DeleteProjectKnowledgeResponse(workspaceDomainService.archiveProjectKnowledge(user.id(), spaceId, knowledgeId));
     }
 
+    @PostMapping("/{spaceId}/knowledge/{knowledgeId}/restore")
+    public DeleteProjectKnowledgeResponse restoreProjectKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String spaceId,
+            @PathVariable String knowledgeId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new DeleteProjectKnowledgeResponse(workspaceDomainService.restoreProjectKnowledge(user.id(), spaceId, knowledgeId));
+    }
+
     private AuthUserResponse currentUser(String authorizationHeader) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
         workspaceDomainService.ensureUser(user.id(), user.email(), user.displayName(), user.pictureUrl(), user.status());
@@ -451,6 +522,19 @@ public class SpaceController {
                 result.invitation().id(),
                 result.member() == null ? null : result.member().role().name(),
                 result.invitation().status().name()
+        );
+    }
+
+    private ResolveSpaceInvitationResponse resolveAuthenticatedInvitation(
+            String authorizationHeader, String spaceId, String invitationId, boolean accept
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        WorkspaceDomainService.SpaceInvitationResolution result = workspaceDomainService.resolveAuthenticatedSpaceInvitation(
+                user.id(), user.email(), spaceId, invitationId, accept
+        );
+        return new ResolveSpaceInvitationResponse(
+                result.member() == null ? null : result.member().id(), result.invitation().id(),
+                result.member() == null ? null : result.member().role().name(), result.invitation().status().name()
         );
     }
 }

@@ -18,6 +18,8 @@ public interface AuthStore {
 
     AuthUser touchLogin(AuthUser user, Instant now);
 
+    AuthUser updateProfile(AuthUser user, String displayName, String pictureUrl);
+
     AuthIdentity saveIdentity(
             String userId,
             String provider,

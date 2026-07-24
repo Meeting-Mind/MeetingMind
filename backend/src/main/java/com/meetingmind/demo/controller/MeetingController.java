@@ -9,13 +9,17 @@ import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.domain.WorkspaceDomainService.MeetingParticipantWithUser;
 import com.meetingmind.demo.dto.CreateMeetingJoinRequestRequest;
 import com.meetingmind.demo.dto.CreateMeetingJoinRequestResponse;
+import com.meetingmind.demo.dto.CreateMeetingInvitationResponse;
 import com.meetingmind.demo.dto.AddMeetingParticipantRequest;
 import com.meetingmind.demo.dto.DeleteMeetingResponse;
 import com.meetingmind.demo.dto.MeetingDetailResponse;
+import com.meetingmind.demo.dto.MeetingListResponse;
 import com.meetingmind.demo.dto.MeetingJoinRequestSummaryResponse;
 import com.meetingmind.demo.dto.MeetingParticipantMutationResponse;
 import com.meetingmind.demo.dto.MeetingParticipantsResponse;
 import com.meetingmind.demo.dto.ReviewMeetingJoinRequestResponse;
+import com.meetingmind.demo.dto.ResolveInvitationRequest;
+import com.meetingmind.demo.dto.ResolveMeetingInvitationResponse;
 import com.meetingmind.demo.dto.UpdateMeetingParticipantRequest;
 import com.meetingmind.demo.dto.UpdateMeetingRequest;
 import com.meetingmind.demo.dto.UpdateMeetingResponse;
@@ -41,6 +45,20 @@ public class MeetingController {
     public MeetingController(AuthService authService, WorkspaceDomainService workspaceDomainService) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
+    }
+
+    @GetMapping
+    public MeetingListResponse listAccessibleMeetings(@RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        return new MeetingListResponse(workspaceDomainService.listAccessibleMeetings(user.id()).stream().map(view -> new MeetingListResponse.MeetingSummary(
+                view.meeting().id(),
+                view.meeting().spaceId(),
+                view.meeting().title(),
+                view.meeting().description(),
+                view.meeting().scheduledAt() == null ? null : view.meeting().scheduledAt().toString(),
+                view.meeting().scheduledEndAt() == null ? null : view.meeting().scheduledEndAt().toString(),
+                view.meeting().status().name(),
+                view.myRole() == null ? null : view.myRole().name())).toList());
     }
 
     @GetMapping("/{meetingId}")
@@ -181,6 +199,36 @@ public class MeetingController {
         );
     }
 
+    @PostMapping("/{meetingId}/invitations")
+    public CreateMeetingInvitationResponse createInvitation(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId
+    ) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        WorkspaceDomainService.MeetingInvitationCreation result = workspaceDomainService.createMeetingInvitation(user.id(), meetingId);
+        return new CreateMeetingInvitationResponse(result.invitation().id(), result.invitation().status().name(), result.invitation().expiresAt(), result.token());
+    }
+
+    @PostMapping("/{meetingId}/invitations/{invitationId}/accept")
+    public ResolveMeetingInvitationResponse acceptInvitation(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId,
+            @PathVariable String invitationId,
+            @Valid @RequestBody ResolveInvitationRequest request
+    ) {
+        return resolveInvitation(authorizationHeader, meetingId, invitationId, request, true);
+    }
+
+    @PostMapping("/{meetingId}/invitations/{invitationId}/decline")
+    public ResolveMeetingInvitationResponse declineInvitation(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @PathVariable String meetingId,
+            @PathVariable String invitationId,
+            @Valid @RequestBody ResolveInvitationRequest request
+    ) {
+        return resolveInvitation(authorizationHeader, meetingId, invitationId, request, false);
+    }
+
     @PostMapping("/{meetingId}/join-requests/{requestId}/reject")
     public ReviewMeetingJoinRequestResponse rejectJoinRequest(
             @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
@@ -244,5 +292,11 @@ public class MeetingController {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
         workspaceDomainService.ensureUser(user.id(), user.email(), user.displayName(), user.pictureUrl(), user.status());
         return user;
+    }
+
+    private ResolveMeetingInvitationResponse resolveInvitation(String authorizationHeader, String meetingId, String invitationId, ResolveInvitationRequest request, boolean accept) {
+        AuthUserResponse user = currentUser(authorizationHeader);
+        WorkspaceDomainService.MeetingInvitationResolution result = workspaceDomainService.resolveMeetingInvitation(user.id(), meetingId, invitationId, request.token(), accept);
+        return new ResolveMeetingInvitationResponse(result.participant() == null ? null : result.participant().id(), result.participant() == null ? null : result.participant().role().name(), result.participant() == null ? null : result.participant().participantType().name().toLowerCase(), result.invitation().status().name());
     }
 }

@@ -615,9 +615,10 @@ E2E 파일은 기존 `frontend/e2e`에 추가한다.
 
 | 상태 이름 | 진입 조건 | 종료 조건 | 허용 Action | 다음 상태 |
 | --- | --- | --- | --- | --- |
-| TODO | 카드 생성 기본 상태 | 상태 변경, 삭제 | 편집, 담당자 지정, 진행으로 이동 | IN_PROGRESS, DONE, Deleted |
-| IN_PROGRESS | 드래그 또는 상태 변경 | 상태 변경, 삭제 | 편집, 완료 이동 | TODO, DONE, Deleted |
-| DONE | 완료 상태 변경 | 상태 변경, 삭제 | 편집, 재오픈 | TODO, IN_PROGRESS, Deleted |
+| TODO | 카드 생성 기본 상태 | 상태 변경, 삭제 | 편집, 담당자 지정, 진행으로 이동 | IN_PROGRESS, IN_REVIEW, DONE, Deleted |
+| IN_PROGRESS | 드래그 또는 상태 변경 | 상태 변경, 삭제 | 편집, 검토 또는 완료 이동 | TODO, IN_REVIEW, DONE, Deleted |
+| IN_REVIEW | 드래그 또는 상태 변경 | 상태 변경, 삭제 | 편집, 검토 완료 또는 재작업 이동 | TODO, IN_PROGRESS, DONE, Deleted |
+| DONE | 완료 상태 변경 | 상태 변경, 삭제 | 편집, 재오픈 | TODO, IN_PROGRESS, IN_REVIEW, Deleted |
 | Deleted | 삭제 성공 | 없음 | 목록에서 제거 | 없음 |
 
 ### 14.11 Project Knowledge

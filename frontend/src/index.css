@@ -20,16 +20,19 @@
 }
 
 :root {
-  --background: #F7F7F9; /* Very light gray, almost off-white for premium SaaS */
-  --foreground: #09090B;
-  --card: #FFFFFF;
-  --card-foreground: #09090B;
-  --primary: #0055FF; /* Bright Enterprise Blue */
-  --primary-foreground: #FFFFFF;
-  --muted: #F4F4F5;
-  --muted-foreground: #71717A;
-  --border: #E4E4E7;
-  --navy: #0A192F;
+  /* Tailwind utility colors must resolve to the MeetingMind semantic tokens.
+     The active application shell is still Tailwind-first, so changing only
+     --app-* tokens otherwise has no visual effect in its routes. */
+  --background: var(--color-neutral-bg, #f6f8fc);
+  --foreground: var(--color-neutral-text-pri, #0f172a);
+  --card: var(--color-neutral-surface, #ffffff);
+  --card-foreground: var(--color-neutral-text-pri, #0f172a);
+  --primary: var(--color-accent-primary, #4338ca);
+  --primary-foreground: #ffffff;
+  --muted: var(--color-neutral-surface-muted, #eaf0f7);
+  --muted-foreground: var(--color-neutral-text-muted, #52637a);
+  --border: var(--color-neutral-border, #d6e0eb);
+  --navy: var(--color-neutral-text-pri, #0f172a);
 
   --radius: 1rem;
 }
@@ -41,6 +44,114 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Theme changes originate from the global toggle. Keep the shell, sidebar,
+   page surfaces and SVG graph colors in the same deliberate transition. */
+html.theme-transitioning #root,
+html.theme-transitioning #root * {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-duration: 1.2s;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transitioning #root,
+  html.theme-transitioning #root * {
+    transition-duration: 0ms;
+  }
+}
+
+/*
+ * App.tsx predates the semantic token system and still contains Tailwind's
+ * stock color utilities. Keep those existing components intact, but route the
+ * product-facing color families through MeetingMind's semantic palette.
+ */
+@layer utilities {
+  .bg-indigo-50, .bg-blue-50 { background-color: var(--app-accent-soft) !important; }
+  .bg-blue-100 { background-color: color-mix(in srgb, var(--app-accent) 14%, white) !important; }
+  .bg-indigo-500, .bg-indigo-600, .bg-blue-500, .bg-blue-600 { background-color: var(--app-accent) !important; }
+  .text-indigo-500, .text-indigo-600, .text-indigo-700, .text-blue-500, .text-blue-600, .text-blue-700 { color: var(--app-accent) !important; }
+  .border-indigo-200, .border-blue-200 { border-color: var(--app-accent-border) !important; }
+
+  .bg-violet-50 { background-color: var(--app-ai-soft) !important; }
+  .text-violet-500, .text-violet-600, .text-violet-700 { color: var(--app-ai) !important; }
+  .border-violet-200 { border-color: color-mix(in srgb, var(--app-ai) 24%, white) !important; }
+
+  .bg-cyan-50 { background-color: var(--app-knowledge-soft) !important; }
+  .text-cyan-500, .text-cyan-600, .text-cyan-700 { color: var(--app-knowledge) !important; }
+  .border-cyan-200 { border-color: color-mix(in srgb, var(--app-knowledge) 24%, white) !important; }
+
+  .bg-pink-50 { background-color: var(--app-action-soft) !important; }
+  .text-pink-500, .text-pink-600, .text-pink-700 { color: var(--app-action) !important; }
+  .border-pink-200 { border-color: color-mix(in srgb, var(--app-action) 24%, white) !important; }
+
+  .bg-emerald-50, .bg-emerald-100 { background-color: var(--app-success-soft) !important; }
+  .bg-emerald-500 { background-color: var(--app-success) !important; }
+  .text-emerald-400, .text-emerald-500, .text-emerald-600, .text-emerald-700, .text-emerald-800 { color: var(--app-success) !important; }
+  .border-emerald-200, .border-emerald-500 { border-color: color-mix(in srgb, var(--app-success) 28%, white) !important; }
+
+  .bg-amber-50, .bg-amber-100 { background-color: var(--app-warning-soft) !important; }
+  .bg-amber-500, .bg-amber-600 { background-color: var(--app-warning) !important; }
+  .text-amber-500, .text-amber-600, .text-amber-700, .text-amber-800 { color: var(--app-warning) !important; }
+  .border-amber-200 { border-color: color-mix(in srgb, var(--app-warning) 30%, white) !important; }
+
+  .bg-red-50 { background-color: var(--app-danger-soft) !important; }
+  .bg-red-500, .bg-red-600 { background-color: var(--app-danger) !important; }
+  .text-red-400, .text-red-600, .text-red-700 { color: var(--app-danger) !important; }
+  .border-red-200 { border-color: color-mix(in srgb, var(--app-danger) 28%, white) !important; }
+
+  /* The active app previously used black action buttons everywhere. Keep black
+     for identity and chat surfaces, but make actual commands use the brand
+     indigo so the primary action is immediately distinguishable. */
+  .mm-active-app-shell button[class~="bg-foreground"][class~="text-background"] {
+    background-color: var(--app-accent) !important;
+  }
+
+  .mm-active-app-shell button[class~="bg-foreground"][class~="text-background"]:hover:not(:disabled) {
+    background-color: var(--app-accent-hover) !important;
+  }
+
+  .mm-active-app-shell button[class~="bg-foreground"][class~="text-background"]:focus-visible {
+    outline: none;
+    box-shadow: var(--app-focus-ring);
+  }
+
+  /* Legacy route markup still uses stock neutral utilities in a few page
+     internals. Resolve them to semantic tokens so every sidebar route follows
+     the active light/dark theme without route-specific overrides. */
+  html[data-theme="dark"] .bg-white,
+  html[data-theme="dark"] .bg-zinc-50,
+  html[data-theme="dark"] .bg-slate-50 {
+    background-color: var(--app-surface) !important;
+  }
+
+  html[data-theme="dark"] .bg-zinc-100,
+  html[data-theme="dark"] .bg-slate-100,
+  html[data-theme="dark"] .bg-gray-50 {
+    background-color: var(--app-surface-soft) !important;
+  }
+
+  html[data-theme="dark"] .border-zinc-200,
+  html[data-theme="dark"] .border-slate-200,
+  html[data-theme="dark"] .border-gray-200 {
+    border-color: var(--app-line) !important;
+  }
+
+  html[data-theme="dark"] .text-zinc-900,
+  html[data-theme="dark"] .text-zinc-800,
+  html[data-theme="dark"] .text-slate-900,
+  html[data-theme="dark"] .text-slate-800 {
+    color: var(--app-text-strong) !important;
+  }
+
+  html[data-theme="dark"] .text-zinc-600,
+  html[data-theme="dark"] .text-zinc-500,
+  html[data-theme="dark"] .text-slate-600,
+  html[data-theme="dark"] .text-slate-500,
+  html[data-theme="dark"] .text-gray-500 {
+    color: var(--app-muted) !important;
   }
 }
 

@@ -293,17 +293,20 @@ public class SttSessionRegistry {
             return;
         }
 
-        state.client().finishAudio();
         if (state.meetingId() == null) {
+            state.client().finishAudio();
             return;
         }
         if (!state.stopping().get()) {
+            // LiveKit egress can reconnect during an active meeting. Do not send
+            // Soniox's end-of-stream marker just because the transport closed.
             if (restartEgress(sessionId, state)) {
                 return;
             }
             failAndClose(sessionId);
             return;
         }
+        state.client().finishAudio();
         close(sessionId);
     }
 

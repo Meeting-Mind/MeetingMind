@@ -71,6 +71,44 @@ export async function loginWithGoogle(credential: string) {
   return authRequest("/api/v1/auth/google", { credential, rememberMe: false });
 }
 
+export async function updateProfile({
+  displayName,
+  pictureUrl
+}: {
+  displayName: string;
+  pictureUrl: string | null;
+}): Promise<AuthUser> {
+  const response = await bffFetch("/api/v1/auth/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName, pictureUrl })
+  });
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new Error(message || `프로필 저장 실패 (${response.status})`);
+  }
+  const user = (await response.json()) as Partial<AuthUser>;
+  if (!isAuthUser(user)) {
+    throw new Error("프로필 저장 응답이 올바르지 않습니다.");
+  }
+  return user;
+}
+
+export async function uploadProfileImage(file: File): Promise<string> {
+  const body = new FormData();
+  body.append("file", file);
+  const response = await bffFetch("/api/v1/assets/profile-image", { method: "POST", body });
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new Error(message || `프로필 이미지 업로드 실패 (${response.status})`);
+  }
+  const payload = (await response.json()) as { imageUrl?: unknown };
+  if (typeof payload.imageUrl !== "string" || !payload.imageUrl) {
+    throw new Error("프로필 이미지 업로드 응답이 올바르지 않습니다.");
+  }
+  return payload.imageUrl;
+}
+
 export async function logoutCurrentSession(): Promise<void> {
   let response: Response;
   try {

@@ -79,6 +79,68 @@ Space의 공식 Project Knowledge 목록을 조회한다.
 
 - 목록 조회는 embedding content 전체를 노출하지 않는다.
 
+## GET /api/v1/spaces/{spaceId}/knowledge/graph
+
+Space의 RAG source를 의미 유사도 기준으로 묶어 Knowledge 화면에 표시한다.
+
+### Status
+
+- Implemented: Core permission prefilter + BFF Core route + AI source-centroid clustering + Frontend graph
+
+### Auth and Permissions
+
+- 인증 필요
+- active SpaceMember만 조회 가능하다. 회의 게스트는 조회할 수 없다.
+- Core는 ProjectKnowledge와 사용자가 읽을 수 있는 meeting만 먼저 판별하고 `allowedMeetingIds`를 AI에 전달한다.
+
+### Data Scope
+
+- active embedding generation의 `projectKnowledge` source와 권한 통과 meeting-owned source만 사용한다.
+- raw RAG chunk는 반환하지 않는다. 하나의 source에 여러 chunk가 있으면 source centroid로 집계한다.
+- cluster는 저장 entity가 아니라 현재 active embedding snapshot에서 계산하는 read model이다.
+
+### Response
+
+```json
+{
+  "clusters": [
+    {
+      "id": "cluster-6bf2c1",
+      "label": "권한 설계",
+      "sourceCount": 3,
+      "nodes": [
+        {
+          "id": "knowledge-001",
+          "sourceType": "projectKnowledge",
+          "title": "권한 설계 메모",
+          "sourceMeetingId": null,
+          "embeddingStatus": "COMPLETED"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "knowledge-001",
+      "to": "report-001",
+      "similarity": 0.84
+    }
+  ],
+  "generatedAt": "2026-07-23T12:00:00Z"
+}
+```
+
+### Errors
+
+- `403 SPACE_ACCESS_DENIED`: SpaceMember가 아님
+- `404 SPACE_NOT_FOUND`: Space 없음
+- `503 KNOWLEDGE_GRAPH_UNAVAILABLE`: embedding retrieval 또는 clustering을 수행할 수 없음
+
+### Notes
+
+- 유사도 threshold와 cluster 알고리즘은 AI 서버의 내부 구현이다. 현재 active source centroid cosine similarity `0.78` 이상 edge의 connected component를 cluster로 사용한다. API는 cluster label, source node, edge만 노출한다.
+- sourceMeetingId는 사용자가 해당 원본 회의를 읽을 수 있을 때만 반환한다.
+
 ## GET /api/v1/spaces/{spaceId}/knowledge/{knowledgeId}
 
 공식 Project Knowledge 원문을 조회한다. 수정 화면은 목록의 `contentPreview` 대신 이 응답을 사용한다.
@@ -535,3 +597,115 @@ None.
 ### Notes
 
 - 기본 구현은 hard delete보다 archive를 우선한다.
+
+## Knowledge Graph Extension: Phase 1 Contract
+
+기존 `GET /api/v1/spaces/{spaceId}/knowledge/graph`의 `clusters`, `edges`,
+`generatedAt` 필드는 유지한다. 아래 필드는 additive하게 확장할 수 있으며, 기존
+클라이언트는 알 수 없는 필드를 무시할 수 있어야 한다. 권한 필터는 그래프 생성
+전에 Core에서 수행한다.
+
+### Query
+
+선택적 query parameter:
+
+- `query`: 제목·요약 검색어
+- `nodeTypes[]`: `MEETING`, `REPORT`, `DECISION`, `ACTION`, `TASK`, `PROJECT_KNOWLEDGE`, `TOPIC`, `PARTICIPANT`
+- `statuses[]`: 원본 엔티티의 canonical status
+- `meetingIds[]`: 요청 범위. 서버가 계산한 `allowedMeetingIds`와 교집합 처리한다.
+- `dateFrom`, `dateTo`: ISO-8601 instant 범위
+- `clusterBy`: `TYPE`, `TOPIC`, `PROJECT`, `MEETING_SERIES`, `SIMILARITY`
+- `includeIsolated`: 연결되지 않은 허용 노드 포함 여부. 기본값 `true`
+- `maxNodes`: 서버 상한 내에서만 허용한다.
+
+클라이언트의 query/filter는 보안 경계가 아니다. 요청한 `meetingIds`가 권한 없는
+회의를 포함해도 응답에는 포함하지 않는다.
+
+### Additive Response
+
+```json
+{
+  "nodes": [
+    {
+      "id": "gn:v1:opaque-node-id",
+      "entityId": "entity-001",
+      "nodeType": "DECISION",
+      "spaceId": "space-001",
+      "meetingId": "meeting-001",
+      "title": "베타 출시 일정 확정",
+      "summary": "다음 달 둘째 주에 베타를 시작한다.",
+      "status": "CONFIRMED",
+      "occurredAt": "2026-07-24T06:00:00Z",
+      "clusterIds": ["cluster-topic-ai-search"],
+      "connectionCount": 2,
+      "source": { "kind": "TRANSCRIPT", "sourceIds": ["segment-001"] },
+      "detailTarget": { "kind": "MEETING_REPORT", "id": "report-001" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-001",
+      "from": "gn:v1:meeting-001",
+      "to": "gn:v1:decision-001",
+      "edgeType": "MEETING_DERIVED_DECISION",
+      "weight": 1.0,
+      "sourceIds": ["segment-001"]
+    }
+  ],
+  "clusters": [
+    {
+      "id": "cluster-topic-ai-search",
+      "label": "AI 검색",
+      "clusterBy": "TOPIC",
+      "nodeIds": ["gn:v1:decision-001"],
+      "nodeCount": 1,
+      "keywords": ["검색", "베타"],
+      "colorKey": "cluster-04"
+    }
+  ],
+  "filters": { "appliedNodeTypes": ["DECISION"], "truncated": false },
+  "partial": false,
+  "generatedAt": "2026-07-24T06:00:00Z"
+}
+```
+
+`id`는 표시 텍스트를 조합해 만들지 않는 안정적인 opaque graph ID다. 클라이언트는
+ID 내부를 파싱하지 않고 `entityId`, `nodeType`, `detailTarget`을 사용한다.
+
+### Node and Edge Types
+
+노드 타입은 `MEETING`, `REPORT`, `DECISION`, `ACTION`, `TASK`,
+`PROJECT_KNOWLEDGE`, `TOPIC`, `PARTICIPANT`다. `PARTICIPANT`는 아래 개인정보
+결정이 확정되기 전까지 응답에서 제외한다.
+
+엣지 타입은 `MEETING_DERIVED_REPORT`, `MEETING_DERIVED_DECISION`,
+`DECISION_DERIVED_ACTION`, `ACTION_DERIVED_TASK`, `MEETING_PUBLISHED_KNOWLEDGE`,
+`REPORT_PUBLISHED_KNOWLEDGE`, `SHARED_TOPIC`, `KNOWLEDGE_REFERENCED_BY`,
+`PARTICIPANT_INVOLVED`다. 임베딩 유사도 엣지는 `SEMANTIC_SIMILARITY`로 구분하며,
+도메인 관계와 같은 의미로 취급하지 않는다.
+
+### Cluster Rules
+
+`clusterBy` 우선순위는 사용자가 선택한 기준, 서버 Topic/semantic 결과,
+Project/Space, 회의 시리즈·업무 흐름 순이다. Phase 1의 Topic은 서버가 계산한
+파생 결과이며, 브라우저의 단순 문자열 포함 여부로 클러스터를 만들지 않는다.
+클러스터 ID와 `colorKey`는 권한 범위별 응답에서만 의미가 있으며 색상 자체를
+계약으로 고정하지 않는다.
+
+### GET Node Detail
+
+`GET /api/v1/spaces/{spaceId}/knowledge/graph/nodes/{nodeId}`
+
+그래프 응답과 동일한 권한 필터를 다시 적용한다. 존재하지만 접근할 수 없는
+노드는 `404 GRAPH_NODE_NOT_FOUND`로 처리해 존재 여부를 노출하지 않는다. 응답은
+노드 상세, 허용된 연결 노드, source reference, 원본 이동 대상만 포함한다.
+
+### Errors and Limits
+
+- `400 INVALID_GRAPH_FILTER`: query 검증 실패
+- `403 SPACE_ACCESS_DENIED`: Space 접근 불가
+- `404 GRAPH_NODE_NOT_FOUND`: 허용 범위에 없는 노드
+- `503 KNOWLEDGE_GRAPH_UNAVAILABLE`: graph read model 또는 AI gateway unavailable
+
+서버는 `maxNodes`와 edge 수를 제한하고 `filters.truncated=true`를 반환할 수 있다.
+대규모 그래프에서는 cluster summary를 먼저 반환하고 상세 노드는 별도 조회한다.

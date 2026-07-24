@@ -15,11 +15,11 @@ public abstract class WorkspaceStore {
 
     abstract Optional<User> findUserById(String userId);
 
-    abstract Space createSpace(String name, String description, String createdBy, Instant now);
+    abstract Space createSpace(String name, String description, String imageUrl, String createdBy, Instant now);
 
     abstract Optional<Space> findSpaceById(String spaceId);
 
-    abstract Space updateSpace(String spaceId, String name, String description, Instant updatedAt);
+    abstract Space updateSpace(String spaceId, String name, String description, String imageUrl, Instant updatedAt);
 
     abstract void softDeleteSpace(String spaceId, Instant deletedAt);
 
@@ -53,6 +53,15 @@ public abstract class WorkspaceStore {
 
     abstract Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email);
 
+    abstract List<SpaceInvitation> findPendingSpaceInvitations(String email);
+    abstract List<SpaceInvitation> findSpaceInvitations(String spaceId);
+
+    abstract MeetingInvitation saveMeetingInvitation(MeetingInvitation invitation);
+
+    abstract Optional<MeetingInvitation> findMeetingInvitationById(String meetingId, String invitationId);
+
+    abstract Optional<MeetingInvitation> findPendingMeetingInvitation(String meetingId, String email);
+
     abstract Meeting createMeeting(
             String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt
     );
@@ -77,6 +86,8 @@ public abstract class WorkspaceStore {
     abstract long countMeetingsBySpaceId(String spaceId);
 
     abstract List<Meeting> findMeetingsBySpaceId(String spaceId);
+
+    abstract List<Meeting> findAccessibleMeetings(String userId);
 
     abstract List<Meeting> findProjectAiMeetings(String spaceId, String userId);
 

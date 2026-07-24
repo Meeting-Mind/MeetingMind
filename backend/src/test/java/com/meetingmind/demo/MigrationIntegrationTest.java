@@ -72,7 +72,7 @@ class MigrationIntegrationTest {
                 .load()
                 .migrate();
 
-        assertThat(workspaceResult.migrationsExecuted).isEqualTo(9);
+        assertThat(workspaceResult.migrationsExecuted).isEqualTo(10);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -86,7 +86,7 @@ class MigrationIntegrationTest {
             }
 
             assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"
+                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"
             );
 
             try (var statement = connection.createStatement()) {
@@ -106,6 +106,14 @@ class MigrationIntegrationTest {
                         """)) {
                     assertThat(rows.next()).isTrue();
                     assertThat(rows.getObject("auth_user_id")).isNull();
+                }
+                try (var rows = statement.executeQuery("""
+                        select pg_get_constraintdef(oid)
+                        from pg_constraint
+                        where conname = 'task_cards_status_check'
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getString(1)).contains("IN_REVIEW");
                 }
                 try (var rows = statement.executeQuery("""
                         select column_name

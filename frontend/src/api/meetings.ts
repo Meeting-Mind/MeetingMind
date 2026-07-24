@@ -29,6 +29,10 @@ export async function fetchMeetings(_session: AuthSession, spaceId: string): Pro
   });
 }
 
+export async function fetchAccessibleMeetings(_session: AuthSession): Promise<MeetingListResponse> {
+  return requestJson<MeetingListResponse>("/api/v1/meetings", { headers: undefined });
+}
+
 export async function createMeeting(
   _session: AuthSession,
   spaceId: string,

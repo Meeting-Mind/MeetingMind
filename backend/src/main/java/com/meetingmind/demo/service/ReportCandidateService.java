@@ -43,7 +43,7 @@ public class ReportCandidateService {
 
     public ReportCandidateGenerationResponse generate(String authorizationHeader, String meetingId) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
-        meetingAccessPolicy.requireEditAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
+        meetingAccessPolicy.requireReadAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
         WorkspaceDomainService.MeetingAiContext context = workspaceDomainService.meetingAiContext(meetingId);
         return generateCandidate(user, context, context.meeting().title() + " 회의록", null, null);
     }

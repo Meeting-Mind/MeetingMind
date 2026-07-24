@@ -424,6 +424,7 @@ erDiagram
 
 ### Space and Permission
 
+- `SPACE.imageUrl`은 nullable이며 대표 이미지의 공개 delivery URL만 저장한다. 이미지 binary는 DB에 저장하지 않는다.
 - `SPACE.deletedAt`이 null인 행만 활성 Space로 취급한다.
 - `SPACE_MEMBER(spaceId, userId)`는 active member 기준 unique다. `removedAt`이 null이면 active다.
 - `SPACE_MEMBER.role`은 `OWNER`, `ADMIN`, `MEMBER` 중 하나다.
@@ -478,6 +479,7 @@ erDiagram
 - `TASK_CARD.sourceCandidateId`는 nullable이지만, 값이 있으면 unique다. 후보 하나는 최대 하나의 TaskCard로만 확정된다.
 - `TASK_CARD.deletedAt`이 null인 행만 일반 칸반 조회에 포함한다. 삭제된 카드도 `sourceCandidateId` unique 제약은 유지한다.
 - `TASK_CARD.priority`는 `LOW`, `MEDIUM`, `HIGH` 중 하나이며 기본값은 `MEDIUM`이다.
+- `TASK_CARD.status`는 `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` 중 하나다.
 - `TASK_CARD.labels`는 PostgreSQL `text[]`로 저장하며, application layer에서 카드당 최대 10개, 각 1~40자, 대소문자 무시 중복 불가를 검증한다.
 - `TASK_CARD(spaceId, status)`와 `TASK_CARD(assigneeId, status)` index를 둔다.
 
@@ -502,6 +504,7 @@ erDiagram
 - `EMBEDDING_CHUNK.embedding`은 target forward migration에서 `vector(1536)`으로 고정하고 cosine exact search를 사용한다.
 - `EMBEDDING_CHUNK.scope`는 query mode가 아니라 source 소유 범위다. meeting 산출물과 `meetingAttachment`는 `meeting`, ProjectKnowledge는 `project`로 저장한다.
 - Project AI는 권한 필터를 통과한 meeting-owned chunk와 ProjectKnowledge chunk를 함께 검색하며 동일 source를 project scope로 중복 임베딩하지 않는다.
+- KnowledgeGraph는 별도 테이블이 아닌 `EMBEDDING_CHUNK`의 active source snapshot에서 만드는 read model이다. SpaceMember와 MeetingParticipant 권한 필터를 통과한 source만 cluster/node/edge로 반환한다.
 
 ### Audit
 
@@ -510,6 +513,31 @@ erDiagram
 - audit 대상 action 값은 `contracts/common.md`의 Audit Event Baseline과 맞춘다.
 
 ## Draft Gaps
+
+## Knowledge Graph Projection (Non-persistent)
+
+Knowledge Graph는 Phase 1에서 별도 테이블을 만들지 않는 read model이다.
+
+```text
+SPACE
+  |-- SPACE_MEMBER --(permission filter)-->
+  |-- MEETING --(MeetingParticipant filter)-->
+  |     |-- MEETING_REPORT
+  |     |-- DECISION / ACTION_ITEM / TASK_CARD
+  |     `-- MEETING_TRANSCRIPT / TRANSCRIPT_SEGMENT
+  |-- PROJECT_KNOWLEDGE
+  `-- DOMAIN_TERM
+
+permission-filtered sources + active EMBEDDING_CHUNK
+  --> GraphNode / GraphEdge / GraphCluster response
+```
+
+- Graph projection은 원본 entity의 FK를 대체하지 않는다.
+- 권한 필터는 projection 전에 적용하며, 필터에서 제외된 source는 node/edge/count에
+  포함하지 않는다.
+- Topic과 cluster는 현재 파생 결과이고, GraphNode/Edge/Cluster 저장 테이블은 없다.
+- Participant node는 별도 개인정보 정책 결정 전까지 ERD projection에서 제외한다.
+- 그래프 위치와 화면 상태는 domain ERD가 아닌 사용자별 UI preference로 관리한다.
 
 - `MeetingSchedule`은 현재 `Meeting.scheduledAt` 중심으로 표현했다. 별도 일정 엔티티가 필요하면 `MEETING_SCHEDULE`로 분리한다.
 - `RetentionPolicy`는 현재 `Meeting.retentionPolicy` 필드 중심이다. Space별 정책 관리가 필요하면 별도 테이블로 분리한다.

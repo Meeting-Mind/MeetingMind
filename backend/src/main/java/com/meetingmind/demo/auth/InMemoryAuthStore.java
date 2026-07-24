@@ -73,6 +73,14 @@ public class InMemoryAuthStore implements AuthStore {
     }
 
     @Override
+    public synchronized AuthUser updateProfile(AuthUser user, String displayName, String pictureUrl) {
+        AuthUser updated = new AuthUser(
+                user.id(), user.email(), displayName, pictureUrl, user.status(), user.createdAt(), user.lastLoginAt());
+        usersById.put(updated.id(), updated);
+        return updated;
+    }
+
+    @Override
     public synchronized AuthIdentity saveIdentity(
             String userId,
             String provider,

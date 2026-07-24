@@ -72,10 +72,10 @@ class WorkspaceCrudServiceTest {
         TaskCard updated = context.workspace.updateTaskCard("member", space.space().id(), created.id(),
                 new WorkspaceDomainService.TaskCardPatch(
                         null, false, "API 명세를 갱신한다.", true, null, false,
-                        null, false, "IN_PROGRESS", true, "HIGH", true, List.of("backend", "api"), true
+                        null, false, "IN_REVIEW", true, "HIGH", true, List.of("backend", "api"), true
                 ));
 
-        assertThat(updated.status()).isEqualTo(TaskCardStatus.IN_PROGRESS);
+        assertThat(updated.status()).isEqualTo(TaskCardStatus.IN_REVIEW);
         assertThat(updated.priority()).isEqualTo(TaskCardPriority.HIGH);
         assertThat(updated.labels()).containsExactly("backend", "api");
         assertThat(context.workspace.listTaskCards("member", space.space().id(), null, null, "명세"))
@@ -137,7 +137,7 @@ class WorkspaceCrudServiceTest {
         assertThat(draft.version()).isEqualTo(candidate.version() + 1);
         assertThat(context.store.findMeetingReports(meeting.meeting().id())).hasSize(2);
         assertThat(context.workspace.listMeetingReports("owner", meeting.meeting().id(), null))
-                .extracting(MeetingReport::id).containsExactly(draft.id());
+                .extracting(MeetingReport::id).containsExactly(draft.id(), candidate.id());
     }
 
     @Test

@@ -302,7 +302,8 @@ Space 정보를 수정한다.
 ```json
 {
   "name": "MeetingMind Core",
-  "description": "프로젝트 설명"
+  "description": "프로젝트 설명",
+  "imageUrl": "https://cdn.example.com/spaces/space-001/cover.webp"
 }
 ```
 
@@ -310,6 +311,7 @@ Space 정보를 수정한다.
 
 - `name`: optional, 제공 시 blank 금지
 - `description`: optional
+- `imageUrl`: optional nullable HTTPS URL. 이미지를 제거할 때는 `null`을 보낸다.
 
 ### Response
 
@@ -318,6 +320,7 @@ Space 정보를 수정한다.
   "id": "space-001",
   "name": "MeetingMind Core",
   "description": "프로젝트 설명",
+  "imageUrl": "https://cdn.example.com/spaces/space-001/cover.webp",
   "updatedAt": "2026-07-09T10:10:00+09:00"
 }
 ```
@@ -340,6 +343,35 @@ Space 정보를 수정한다.
 ### Notes
 
 - name 중복 허용 여부는 Backend owner가 결정한다.
+
+## POST /api/v1/spaces/{spaceId}/image
+
+Space 대표 이미지를 업로드하고 공개 URL을 반환한다. 실제 Space 수정은 위 `PATCH` 요청의
+`imageUrl`로 수행한다.
+
+### Auth and Permissions
+
+- 인증 필요
+- `OWNER` 또는 `ADMIN`
+
+### Request
+
+- `multipart/form-data`의 `file`
+- JPEG, PNG, WebP만 허용하며 최대 5MB
+
+### Response
+
+```json
+{
+  "imageUrl": "https://cdn.example.com/spaces/space-001/cover.webp"
+}
+```
+
+### Errors
+
+- `400`: 파일 형식 또는 크기 오류
+- `403 SPACE_ACCESS_DENIED`: 수정 권한 없음
+- `503`: 이미지 저장소 미설정 또는 일시 실패
 
 ## DELETE /api/v1/spaces/{spaceId}
 

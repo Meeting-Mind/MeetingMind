@@ -1027,3 +1027,48 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - 실제 권한 구현 전 Q-002는 먼저 결정하는 편이 안전하다.
 - 요구사항 기준선 파일은 PR #8의 `agent/requirements-docs-baseline` 브랜치에 포함되어 있다.
 - [x] T411 [backend/live-room] Space 기본 회의방 재사용을 위한 instant meeting backend를 추가했다. `POST /api/v1/spaces/{spaceId}/instant-meetings`, `meetings.room_code`, LiveKit `roomCode ?? meetingId` fallback, `SpaceControllerTest`/`MeetingLiveKitTokenServiceTest` 검증이 `implement.md` M138에 기록되어 있다.
+- [x] T412 [frontend/report] target Meeting Report에서 mock 자동 저장, local AI apply/revert, Task Candidate 혼합 표면을 제거하고 실제 report candidate/detail/edit/save/confirm/version API 흐름만 남긴다. 태스크 후보는 canonical `/spaces/:spaceId/meetings/:meetingId/tasks` 화면으로 연결한다. 검증은 `implement.md` M139에 기록한다.
+- [x] T413 [knowledge-graph] RAG source 기반 Knowledge cluster read model과 `GET /api/v1/spaces/{spaceId}/knowledge/graph`를 구현했다. Core가 SpaceMember/allowedMeetingIds를 먼저 계산하고, BFF는 Core route만 허용하며, AI가 active embedding source centroid를 cluster한다. Frontend는 raw chunk 대신 source-level node/edge만 표시한다. 검증은 `implement.md` M140에 기록한다.
+- [x] T414 [frontend/calendar-kanban] 활성 legacy Calendar query를 ISO-8601 instant로 수정하고, TODO/IN_PROGRESS/DONE Kanban column의 native drag-and-drop을 기존 task status PATCH에 연결했다. 이후 T415에서 `IN_REVIEW` 상태를 추가해 네 번째 drop target으로 확장했다. 검증은 `implement.md` M141/M142에 기록한다.
+- [x] T415 [backend/frontend/kanban] TaskCard에 `IN_REVIEW` 상태를 추가하고 V20 check constraint, API 계약, 활성 Kanban drop target을 함께 갱신한다. Project Overview의 열린 태스크는 같은 status PATCH로 완료 처리한다. 검증은 `implement.md` M142에 기록한다.
+- [x] T416 [frontend/report] target Meeting Report의 실제 report lifecycle을 기준으로 transcript 준비 상태·report 상태·근거 source·공식 확정 확인 단계를 한 화면에서 명확히 표시한다. 기존 report API와 Meeting route를 유지하며 검증은 `implement.md` M145에 기록한다.
+- [x] T417 [frontend/report-design] target Meeting Report를 Make mock과 분리된 실제 API 화면으로 유지하면서, 업무형 편집 문서와 검토 패널의 시각 밀도·상태 계층·반응형 경계를 정리한다. API와 route는 유지하고 검증은 `implement.md` M146에 기록한다.
+- [x] T418 [frontend/styles] `app.css`에 흩어진 Meeting Report 전용 selector를 `styles/report.css`로 분리하고 entry import를 추가한다. 앱 전체 scale 및 Meeting AI와 함께 쓰는 반응형 selector만 `app.css`에 유지하며 검증은 `implement.md` M147에 기록한다.
+- [x] T419 [frontend/report] Meeting Report의 transcript readiness, Empty State, generated document preview, report editing agent prompt를 실제 report/transcript API 상태에 맞춰 정리한다. 생성·저장·확정 API와 route는 유지하며 검증은 `implement.md` M148에 기록한다.
+- [x] T420 [frontend/report] Meeting Report header의 transcript unavailable badge와 우측 AI/review panel의 overflow, disabled, empty state를 정리한다. report API와 task candidate route는 유지하며 검증은 `implement.md` M149에 기록한다.
+- [x] T421 [frontend/common] `ConfirmDialog` 공통 stylesheet import 누락을 복구하고 body portal로 렌더링해 Report frame의 transform/overflow 밖에서 modal을 표시한다. 검증은 `implement.md` M150에 기록한다.
+- [x] T422 [frontend/report] 실제 Meeting Report를 한국어 문서 검토 흐름으로 정리한다. header의 상태/주요 action, 읽기 전용 markdown 문서, AI 제안의 적용 전 비교, 실제 근거 요약, mobile 보고서/AI 탭을 제공한다. API, route, 인증, 권한은 유지하며 계약상 제공되지 않는 transcript deep link와 task candidate 상세는 fake data로 보완하지 않는다. 검증과 제한 사항은 `implement.md` M151에 기록한다.
+
+## M040 Knowledge Graph Contract Expansion
+
+### Milestone Goal
+
+권한 필터가 적용된 Project Knowledge 그래프의 확장 노드, 관계, cluster, filter, detail 조회 계약을 Backend 구현 전에 확정한다.
+
+- [x] T423 [contracts] [owner: Codex] [agent: Codex] [depends: T413] 기존 graph 응답을 보존하는 additive API 확장 계약을 작성한다. 예상 파일: `contracts/knowledge-api.md`.
+- [x] T424 [data] [owner: Codex] [agent: Codex] [depends: T423] 그래프를 별도 영속 엔티티가 아닌 권한 필터된 read model로 정의하고 Topic/Participant 정책을 `data-model.md`, `erd.md`에 반영한다.
+- [x] T425 [decision] [owner: Codex] [agent: Codex] [depends: T423] Participant 개인정보 범위와 Topic 영속화 여부를 clarify 결정으로 기록한다.
+- [x] T426 [verification] [owner: Codex] [agent: Codex] [depends: T424,T425] 관련 문서 정합성과 `git diff --check`를 검증하고 결과를 `implement.md`에 기록한다.
+- [x] T427 [backend/knowledge-graph] [owner: Codex] [agent: Codex] [depends: T423,T424] 기존 graph endpoint에 `meetingIds`/`nodeTypes` 서버 필터와 권한 교집합 처리를 연결한다. 완료: 권한 없는 회의는 gateway 요청과 최종 node/edge 응답 모두에서 제외되고 지원하지 않는 node type은 `INVALID_GRAPH_FILTER`로 거부된다.
+- [x] T428 [ai/knowledge-graph] [owner: Codex] [agent: Codex] [depends: T423,T427] 기존 AI graph 응답에 flat nodes와 node/edge/cluster metadata를 additive하게 추가한다. 완료: source-level node를 유지하면서 nodeType, connectionCount, clusterIds, edgeType, weight, truncated 상태를 반환하고 Participant를 노출하지 않는다.
+- [x] T429 [frontend/knowledge-graph] [owner: Codex] [agent: Codex] [depends: T428] 확장 graph response의 flat nodes와 서버 필터 query를 기존 Knowledge 화면에 연결한다. 완료: flat nodes 우선 사용, 구 응답 fallback, meeting/node type query 전달, 기존 화면 레이아웃 유지.
+
+## M041 Semantic Color Token Consolidation
+
+### Milestone Goal
+
+기존 파랑 중심 디자인을 유지하면서 공통 accent, 링크, 상태, 선택, 포커스 토큰을 명시해 화면 간 색상 정합성을 높인다.
+
+- [x] T430 [frontend/styles] [owner: Codex] [agent: Codex] 공통 accent/link/status/selection 토큰을 `tokens.css`에 추가하고 공통 버튼·breadcrumb·badge와 반복 사용되는 `app.css` 색상값을 semantic token으로 연결한다. 레이아웃, route, API, 권한, 기능은 변경하지 않는다.
+- [x] V116 [frontend/styles] [owner: Codex] `git diff --check`와 `cd frontend && npm run build`로 토큰 및 공통 스타일 회귀를 검증한다. 기존 Vite chunk-size warning만 남는다.
+
+## M042 Workspace and Profile Images
+
+### Milestone Goal
+
+사용자가 S3에 업로드한 대표 이미지를 Workspace와 사용자 프로필에 안전하게 연결하고,
+업무 데이터베이스에는 공개 URL만 보관한다.
+
+- [x] T431 [backend/assets] [owner: Codex] S3 기반 JPEG/PNG/WebP(5MB) 업로드 endpoint와 Space 대표 이미지 URL 모델을 추가한다. Space 이미지는 OWNER/ADMIN만 업로드할 수 있고, 프로필은 본인만 수정한다.
+- [x] T432 [frontend/assets] [owner: Codex] 실제 런타임 `App.tsx`의 Project Settings와 Account Settings에 이미지 업로드, 미리보기, 제거, 저장 흐름을 연결한다.
+- [x] V117 [verification] [owner: Codex] Backend/Frontend compile 및 build, BFF proxy route 검증 결과를 `implement.md`에 기록한다.

@@ -20,9 +20,9 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
 
     @Override User saveUser(User user) { return delegate.saveUser(user); }
     @Override Optional<User> findUserById(String userId) { return delegate.findUserById(userId); }
-    @Override Space createSpace(String name, String description, String createdBy, Instant now) { return delegate.createSpace(name, description, createdBy, now); }
+    @Override Space createSpace(String name, String description, String imageUrl, String createdBy, Instant now) { return delegate.createSpace(name, description, imageUrl, createdBy, now); }
     @Override Optional<Space> findSpaceById(String spaceId) { return delegate.findSpaceById(spaceId); }
-    @Override Space updateSpace(String spaceId, String name, String description, Instant updatedAt) { return delegate.updateSpace(spaceId, name, description, updatedAt); }
+    @Override Space updateSpace(String spaceId, String name, String description, String imageUrl, Instant updatedAt) { return delegate.updateSpace(spaceId, name, description, imageUrl, updatedAt); }
     @Override void softDeleteSpace(String spaceId, Instant deletedAt) { delegate.softDeleteSpace(spaceId, deletedAt); }
     @Override SpaceMember addSpaceMember(String spaceId, String userId, SpaceRole role, Instant joinedAt) { return delegate.addSpaceMember(spaceId, userId, role, joinedAt); }
     @Override Optional<SpaceMember> findSpaceMember(String spaceId, String userId) { return delegate.findSpaceMember(spaceId, userId); }
@@ -37,11 +37,17 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
     @Override SpaceInvitation saveSpaceInvitation(SpaceInvitation invitation) { return delegate.saveSpaceInvitation(invitation); }
     @Override Optional<SpaceInvitation> findSpaceInvitationById(String spaceId, String invitationId) { return delegate.findSpaceInvitationById(spaceId, invitationId); }
     @Override Optional<SpaceInvitation> findPendingSpaceInvitation(String spaceId, String email) { return delegate.findPendingSpaceInvitation(spaceId, email); }
+    @Override List<SpaceInvitation> findPendingSpaceInvitations(String email) { return delegate.findPendingSpaceInvitations(email); }
+    @Override List<SpaceInvitation> findSpaceInvitations(String spaceId) { return delegate.findSpaceInvitations(spaceId); }
+    @Override MeetingInvitation saveMeetingInvitation(MeetingInvitation invitation) { return delegate.saveMeetingInvitation(invitation); }
+    @Override Optional<MeetingInvitation> findMeetingInvitationById(String meetingId, String invitationId) { return delegate.findMeetingInvitationById(meetingId, invitationId); }
+    @Override Optional<MeetingInvitation> findPendingMeetingInvitation(String meetingId, String email) { return delegate.findPendingMeetingInvitation(meetingId, email); }
     @Override Meeting createMeeting(String spaceId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt) { return delegate.createMeeting(spaceId, title, description, scheduledAt, scheduledEndAt); }
     @Override Optional<Meeting> findMeetingById(String meetingId) { return delegate.findMeetingById(meetingId); }
     @Override Optional<Meeting> findMeetingByJoinCode(String joinCode) { return delegate.findMeetingByJoinCode(joinCode); }
     @Override long countMeetingsBySpaceId(String spaceId) { return delegate.countMeetingsBySpaceId(spaceId); }
     @Override List<Meeting> findMeetingsBySpaceId(String spaceId) { return delegate.findMeetingsBySpaceId(spaceId); }
+    @Override List<Meeting> findAccessibleMeetings(String userId) { return delegate.findAccessibleMeetings(userId); }
     @Override List<Meeting> findProjectAiMeetings(String spaceId, String userId) { return delegate.findProjectAiMeetings(spaceId, userId); }
     @Override void lockMeeting(String meetingId) { delegate.lockMeeting(meetingId); }
     @Override Meeting updateMeeting(String meetingId, String title, String description, OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt, OffsetDateTime startedAt, OffsetDateTime endedAt, MeetingStatus status) { return delegate.updateMeeting(meetingId, title, description, scheduledAt, scheduledEndAt, startedAt, endedAt, status); }

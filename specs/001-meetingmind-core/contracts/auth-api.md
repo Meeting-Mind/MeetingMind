@@ -325,6 +325,46 @@ None.
 
 - 권한 목록은 이 endpoint에서 직접 반환하지 않는다. Space/Meeting별 API에서 계산한다.
 
+## PATCH /api/v1/auth/profile
+
+현재 로그인 사용자의 표시명과 프로필 이미지 URL을 수정한다.
+
+### Auth and Permissions
+
+- 인증 필요
+- 현재 사용자만 수정 가능
+
+### Request
+
+```json
+{
+  "displayName": "이미주",
+  "pictureUrl": "https://cdn.example.com/profiles/user-001/avatar.webp"
+}
+```
+
+`pictureUrl`은 nullable HTTPS URL이며, `null`로 보내면 이미지를 제거한다.
+
+### Response
+
+`GET /api/v1/auth/me`와 같은 User 응답을 반환한다.
+
+### Errors
+
+- `400 INVALID_REQUEST`: 표시명 또는 URL 검증 실패
+- `401 UNAUTHORIZED`: 인증 실패
+
+## POST /api/v1/assets/profile-image
+
+현재 사용자의 프로필 이미지를 업로드하고 공개 URL을 반환한다.
+
+- 인증 필요
+- `multipart/form-data`의 `file`
+- JPEG, PNG, WebP만 허용하며 최대 5MB
+- 응답: `{ "imageUrl": "https://cdn.example.com/profiles/user-001/avatar.webp" }`
+- `400`: 파일 형식 또는 크기 오류
+- `503`: 이미지 저장소 미설정 또는 일시 실패
+
 ## POST /api/v1/auth/logout
 
 현재 refresh session을 폐기한다.

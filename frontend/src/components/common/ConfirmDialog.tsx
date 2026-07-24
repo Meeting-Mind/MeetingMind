@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export function ConfirmDialog({
   open,
@@ -50,8 +51,16 @@ export function ConfirmDialog({
     return null;
   }
 
-  return (
-    <div className="mm-confirm-dialog-backdrop" role="presentation">
+  const dialog = (
+    <div
+      className="mm-confirm-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (!busy && event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+      role="presentation"
+    >
       <section
         aria-describedby="mm-confirm-dialog-description"
         aria-labelledby="mm-confirm-dialog-title"
@@ -60,7 +69,6 @@ export function ConfirmDialog({
         data-tone={tone}
         role="dialog"
       >
-        <p className="mm-confirm-dialog-label">Confirm action</p>
         <h2 id="mm-confirm-dialog-title">{title}</h2>
         <p id="mm-confirm-dialog-description">{description}</p>
         {children ? <div className="mm-confirm-dialog-detail">{children}</div> : null}
@@ -86,4 +94,6 @@ export function ConfirmDialog({
       </section>
     </div>
   );
+
+  return createPortal(dialog, document.body);
 }

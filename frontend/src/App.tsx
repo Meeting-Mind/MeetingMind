@@ -16,6 +16,7 @@ import {
   Clock,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Users,
   Calendar,
   BookOpen,
@@ -31,8 +32,11 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
-  GripVertical
+  GripVertical,
+  Pencil,
+  Languages
 } from "lucide-react";
+import { AnimatedThemeToggler } from "./components/common/AnimatedThemeToggler";
 import {
   ConnectionState,
   Room,
@@ -49,26 +53,37 @@ import {
   logoutAllDevices,
   logoutCurrentSession,
   signupWithPassword,
+  updateProfile,
+  uploadProfileImage,
   type AuthSession
 } from "./auth/session";
 import { subscribeToSessionInvalid } from "./auth/sessionInvalidation";
 import { AllDeviceLogoutModal } from "./components/AllDeviceLogoutModal";
 import { GoogleCredentialButton } from "./components/GoogleCredentialButton";
+import { MeetingReportPage } from "./pages/MeetingReportPage";
 import { chatMeetingAi, chatProjectAi, fetchProjectAiHistory } from "./api/ai";
-import { createMeetingJoinRequest, fetchMeetingParticipants } from "./api/meetingAccess";
+import { addMeetingParticipant, createMeetingInvitation, createMeetingJoinRequest, fetchMeetingParticipants, resolveMeetingInvitation } from "./api/meetingAccess";
 import {
   acceptSpaceInvitation,
   createSpace,
   createSpaceInvitation,
   deleteSpace,
+  leaveSpace,
   declineSpaceInvitation,
+  fetchPendingSpaceInvitations,
+  acceptPendingSpaceInvitation,
+  declinePendingSpaceInvitation,
+  fetchSpaceInvitations,
+  resendSpaceInvitation,
+  cancelSpaceInvitation,
   fetchSpaceDetail,
   fetchSpaceMembers,
   fetchSpaces,
   removeSpaceMember,
   transferSpaceOwner,
   updateSpace,
-  updateSpaceMemberRole
+  updateSpaceMemberRole,
+  uploadSpaceImage
 } from "./api/spaces";
 import {
   confirmTaskCandidate,
@@ -80,7 +95,7 @@ import {
   fetchTasks,
   updateTask
 } from "./api/tasks";
-import { createProjectKnowledge, deleteProjectKnowledge, fetchProjectKnowledge, fetchProjectKnowledgeDetail, updateProjectKnowledge } from "./api/knowledge";
+import { createProjectKnowledge, deleteProjectKnowledge, fetchKnowledgeGraph, fetchProjectKnowledge, fetchProjectKnowledgeDetail, restoreProjectKnowledge, updateProjectKnowledge } from "./api/knowledge";
 import { fetchCalendarEvents } from "./api/calendar";
 import {
   fetchMeetingDialogue,
@@ -88,22 +103,25 @@ import {
   stopActiveMeetingTranscription,
   stopMeetingTranscription
 } from "./api/transcripts";
-import { confirmMeetingReport, downloadMeetingReport, fetchMeetingReportDetail, fetchMeetingReports } from "./api/reports";
 import { archiveDomainTerm, createDomainTerm, fetchDomainTerms, updateDomainTerm } from "./api/terms";
+import { highlightTranscriptTerms } from "./components/common/TranscriptTerm";
 import { ApiRequestError } from "./api/client";
-import { createInstantMeeting, createMeeting, fetchMeetingDetail, fetchMeetings, updateMeeting } from "./api/meetings";
+import { createInstantMeeting, createMeeting, deleteMeeting, fetchAccessibleMeetings, fetchMeetingDetail, fetchMeetings, updateMeeting } from "./api/meetings";
 import { fetchMeetingLiveKitToken } from "./api/live";
 import type {
   CalendarEvent as ProjectCalendarEvent,
   DomainTerm,
   ProjectKnowledgeDetailResponse,
-  ReportDetailResponse,
   ProjectKnowledgeType,
   SpaceDetail,
+  SpaceSummary,
   SpaceMembersResponse,
   ProjectKnowledgeItem,
+  KnowledgeGraphResponse,
+  KnowledgeGraphNode,
   MeetingDetailResponse,
   MeetingParticipantSummary,
+  SpaceMemberSummary,
   MeetingSummary,
   TaskCard,
   TaskCardPriority,
@@ -124,6 +142,59 @@ const GlossaryTerm = ({ children, definition }: { children: React.ReactNode, def
       </span>
     </span>
   );
+};
+
+function renderMarkdownInline(value: string, keyPrefix: string) {
+  return value.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={`${keyPrefix}-bold-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    return <React.Fragment key={`${keyPrefix}-text-${index}`}>{part}</React.Fragment>;
+  });
+}
+
+const MeetingDescription = ({ value }: { value: string | null }) => {
+  const text = value?.trim();
+  if (!text) {
+    return <p className="text-sm leading-relaxed text-muted-foreground">No meeting description has been added yet.</p>;
+  }
+
+  const lines = text.split(/\r?\n/);
+  const content: React.ReactNode[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (/^\s*-\s+/.test(line)) {
+      const items: React.ReactNode[] = [];
+      while (index < lines.length && /^\s*-\s+/.test(lines[index])) {
+        items.push(<li key={`bullet-${index}`}>{renderMarkdownInline(lines[index].replace(/^\s*-\s+/, ""), `bullet-${index}`)}</li>);
+        index += 1;
+      }
+      content.push(<ul className="my-2 list-disc space-y-1 pl-5" key={`list-${index}`}>{items}</ul>);
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: React.ReactNode[] = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(<li key={`ordered-${index}`}>{renderMarkdownInline(lines[index].replace(/^\s*\d+\.\s+/, ""), `ordered-${index}`)}</li>);
+        index += 1;
+      }
+      content.push(<ol className="my-2 list-decimal space-y-1 pl-5" key={`ordered-list-${index}`}>{items}</ol>);
+      continue;
+    }
+    if (/^\s*#{1,3}\s+/.test(line)) {
+      content.push(<h4 className="my-2 font-semibold text-foreground" key={`heading-${index}`}>{renderMarkdownInline(line.replace(/^\s*#{1,3}\s+/, ""), `heading-${index}`)}</h4>);
+      index += 1;
+      continue;
+    }
+    if (line.trim()) {
+      content.push(<p className="my-1" key={`paragraph-${index}`}>{renderMarkdownInline(line, `paragraph-${index}`)}</p>);
+    } else {
+      content.push(<div className="h-2" key={`space-${index}`} />);
+    }
+    index += 1;
+  }
+  return <div className="text-sm leading-relaxed text-muted-foreground">{content}</div>;
 };
 
 const LIVE_PREJOIN_STORAGE_KEY = "meetingmind-prejoin";
@@ -231,6 +302,7 @@ function formatTranscriptTime(startMs: number) {
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
+
 function buildRoomParticipantCards(
   room: Room,
   roster: MeetingParticipantSummary[],
@@ -317,7 +389,7 @@ function VideoTrackSurface({
   return <video autoPlay className={className} muted playsInline ref={videoRef} style={mirror ? { transform: "scaleX(-1)" } : undefined} />;
 }
 
-function AudioTrackSurface({ publication }: { publication?: TrackPublication }) {
+function AudioTrackSurface({ publication, volume = 1 }: { publication?: TrackPublication; volume?: number }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -328,11 +400,12 @@ function AudioTrackSurface({ publication }: { publication?: TrackPublication }) 
     }
 
     track.attach(element);
+    element.volume = volume;
     void element.play().catch(() => {});
     return () => {
       track.detach(element);
     };
-  }, [publication]);
+  }, [publication, volume]);
 
   return <audio autoPlay hidden ref={audioRef} />;
 }
@@ -400,6 +473,63 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+type ThemeMode = "light" | "dark";
+type AppLocale = "en" | "ko";
+type AppPreferences = {
+  theme: ThemeMode;
+  setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
+  locale: AppLocale;
+  setLocale: React.Dispatch<React.SetStateAction<AppLocale>>;
+};
+
+const AppPreferencesContext = createContext<AppPreferences | null>(null);
+const THEME_STORAGE_KEY = "meetingmind-theme";
+const LOCALE_STORAGE_KEY = "meetingmind-locale";
+
+function storedTheme(): ThemeMode {
+  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+}
+
+function storedLocale(): AppLocale {
+  return window.localStorage.getItem(LOCALE_STORAGE_KEY) === "ko" ? "ko" : "en";
+}
+
+function useAppPreferences() {
+  const context = useContext(AppPreferencesContext);
+  if (!context) {
+    throw new Error("AppPreferencesContext is not available.");
+  }
+  return context;
+}
+
+function DisplayPreferences({ compact = false }: { compact?: boolean }) {
+  const { locale, setLocale, setTheme, theme } = useAppPreferences();
+  const korean = locale === "ko";
+  const nextThemeLabel = theme === "dark"
+    ? (korean ? "라이트 모드로 전환" : "Switch to light mode")
+    : (korean ? "다크 모드로 전환" : "Switch to dark mode");
+
+  return (
+    <div className={`flex items-center ${compact ? "gap-1" : "gap-2"}`}>
+      <AnimatedThemeToggler
+        dark={theme === "dark"}
+        label={nextThemeLabel}
+        onToggle={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+      />
+      <button
+        aria-label={korean ? "Switch language to English" : "언어를 한국어로 전환"}
+        className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+        onClick={() => setLocale((current) => current === "ko" ? "en" : "ko")}
+        title={korean ? "Switch language to English" : "한국어로 전환"}
+        type="button"
+      >
+        <Languages className="h-3.5 w-3.5" />
+        {korean ? "KO" : "EN"}
+      </button>
+    </div>
+  );
+}
+
 function useAuthState() {
   const context = useContext(AuthContext);
   if (!context) {
@@ -439,7 +569,8 @@ function sessionInitials(session: AuthSession | null) {
 }
 
 type ShellOutletContext = {
-  toggleAI: () => void;
+  toggleAI: (scope?: "project" | "meeting", meetingId?: string) => void;
+  setMeetingAiContext: (meetingId: string | null) => void;
   spaceDetail: SpaceDetail | null;
   spaceLoading: boolean;
   spaceError: Error | null;
@@ -451,18 +582,31 @@ type MeetingOutletContext = {
   meetingLoading: boolean;
   meetingError: Error | null;
   reloadMeeting: () => Promise<void>;
+  canManageParticipants: boolean;
 };
 
 // --- Layouts ---
 
 const AppShell = () => {
   const { session, setSession } = useAuthState();
+  const { locale } = useAppPreferences();
   const authSession = session as AuthSession;
   const { spaceId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const [isAIOpen, setIsAIOpen] = useState(false);
+  const [aiScope, setAiScope] = useState<"project" | "meeting">("project");
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceMenuLoading, setWorkspaceMenuLoading] = useState(false);
+  const [workspaceMenuError, setWorkspaceMenuError] = useState("");
+  const [availableSpaces, setAvailableSpaces] = useState<SpaceSummary[]>([]);
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
+  const [createWorkspaceName, setCreateWorkspaceName] = useState("");
+  const [createWorkspaceDescription, setCreateWorkspaceDescription] = useState("");
+  const [createWorkspacePending, setCreateWorkspacePending] = useState(false);
+  const [createWorkspaceError, setCreateWorkspaceError] = useState("");
   const [aiWidth, setAiWidth] = useState(400);
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState("");
@@ -522,6 +666,74 @@ const AppShell = () => {
   }, [loadSpace]);
 
   useEffect(() => {
+    setWorkspaceMenuOpen(false);
+  }, [spaceId]);
+
+  const toggleWorkspaceMenu = async () => {
+    if (workspaceMenuOpen) {
+      setWorkspaceMenuOpen(false);
+      return;
+    }
+
+    setWorkspaceMenuOpen(true);
+    setWorkspaceMenuError("");
+    setWorkspaceMenuLoading(true);
+    try {
+      const response = await fetchSpaces(authSession);
+      setAvailableSpaces(response.spaces);
+    } catch (cause) {
+      setWorkspaceMenuError(cause instanceof Error ? cause.message : "워크스페이스 목록을 불러오지 못했습니다.");
+    } finally {
+      setWorkspaceMenuLoading(false);
+    }
+  };
+
+  const createWorkspaceFromMenu = async () => {
+    const name = createWorkspaceName.trim();
+    if (!name || createWorkspacePending) {
+      return;
+    }
+
+    setCreateWorkspacePending(true);
+    setCreateWorkspaceError("");
+    try {
+      const created = await createSpace(authSession, {
+        name,
+        description: createWorkspaceDescription.trim() || null
+      });
+      setCreateWorkspaceOpen(false);
+      setWorkspaceMenuOpen(false);
+      setCreateWorkspaceName("");
+      setCreateWorkspaceDescription("");
+      navigate(`/spaces/${encodeURIComponent(created.id)}`);
+    } catch (cause) {
+      setCreateWorkspaceError(cause instanceof Error ? cause.message : "워크스페이스를 생성하지 못했습니다.");
+    } finally {
+      setCreateWorkspacePending(false);
+    }
+  };
+
+  const setMeetingAiContext = React.useCallback((meetingId: string | null) => {
+    setSelectedMeetingId(meetingId);
+    if (meetingId === null) {
+      setAiScope("project");
+    }
+  }, []);
+
+  const openAi = (scope: "project" | "meeting" = "project", meetingId?: string) => {
+    if (scope === "meeting" && (!meetingId || meetingId !== selectedMeetingId)) {
+      setAiScope("project");
+      setIsAIOpen(true);
+      return;
+    }
+    setAiScope(scope);
+    if (meetingId) {
+      setSelectedMeetingId(meetingId);
+    }
+    setIsAIOpen(true);
+  };
+
+  useEffect(() => {
     if (!isAIOpen || !spaceDetail || !session) {
       return;
     }
@@ -532,9 +744,17 @@ const AppShell = () => {
     setProjectAiMessages([
       {
         role: "assistant",
-        text: `${spaceDetail.name}의 공식 지식과 접근 가능한 회의만 검색합니다.`
+        text: aiScope === "meeting"
+          ? "현재 선택한 회의 범위에서만 질문할 수 있습니다. 근거가 없는 내용은 답하지 않습니다."
+          : `${spaceDetail.name}의 공식 지식과 접근 가능한 회의만 검색합니다.`
       }
     ]);
+
+    if (aiScope === "meeting") {
+      return () => {
+        active = false;
+      };
+    }
 
     void fetchProjectAiHistory(authSession, spaceDetail.id)
       .then((history) => {
@@ -551,7 +771,7 @@ const AppShell = () => {
     return () => {
       active = false;
     };
-  }, [authSession, isAIOpen, session, spaceDetail]);
+  }, [aiScope, authSession, isAIOpen, session, spaceDetail]);
 
   const getBreadcrumbs = () => {
     const paths = location.pathname.split('/').filter(Boolean);
@@ -560,10 +780,11 @@ const AppShell = () => {
     return paths.map((path, index) => {
       const url = `/${paths.slice(0, index + 1).join('/')}`;
       let label = path;
-      if (path === 'spaces') label = 'Workspaces';
+      if (path === 'spaces') label = locale === "ko" ? "워크스페이스" : "Workspaces";
       if (path === spaceId) {
         label = spaceDetail?.name ?? (spaceLoading ? "Loading project..." : path);
       }
+      if (path.startsWith("meeting-")) label = locale === "ko" ? "회의" : "Meeting";
       return { label, url };
     });
   };
@@ -587,19 +808,24 @@ const AppShell = () => {
   };
 
   const projectName = spaceDetail?.name ?? (spaceLoading ? "Loading project..." : "Unknown project");
+  const canAccessAdministration = spaceDetail?.role === "OWNER" || spaceDetail?.role === "ADMIN";
   const projectInitial = projectName.charAt(0).toUpperCase() || "P";
+  const korean = locale === "ko";
   const projectAiAvailable = spaceDetail?.aiEntrypoints.includes("project-ai") ?? true;
+  const activeAiAvailable = aiScope === "meeting" ? Boolean(selectedMeetingId) : projectAiAvailable;
+  const canOpenAi = projectAiAvailable || Boolean(selectedMeetingId);
   const outletContext: ShellOutletContext = {
-    toggleAI: () => setIsAIOpen(true),
+    toggleAI: openAi,
+    setMeetingAiContext,
     spaceDetail,
     spaceLoading,
     spaceError,
     reloadSpace: loadSpace
   };
 
-  async function handleProjectAiAsk(question: string) {
+  async function handleAiAsk(question: string) {
     const trimmed = question.trim();
-    if (!trimmed || !spaceDetail || projectAiLoading || !projectAiAvailable) {
+    if (!trimmed || !spaceDetail || projectAiLoading || !activeAiAvailable) {
       return;
     }
 
@@ -608,25 +834,27 @@ const AppShell = () => {
     setProjectAiLoading(true);
     setProjectAiMessages((current) => [...current, { role: "user", text: trimmed }]);
     try {
-      const response = await chatProjectAi(authSession, spaceDetail.id, { question: trimmed });
+      const response = aiScope === "meeting"
+        ? await chatMeetingAi(authSession, selectedMeetingId as string, { question: trimmed })
+        : await chatProjectAi(authSession, spaceDetail.id, { question: trimmed });
       setProjectAiModel(response.model);
       setProjectAiMessages((current) => [
         ...current,
         {
           role: "assistant",
-          text: response.unsupported ? unsupportedAiMessage(response.unsupportedReason, "project") : response.answer,
+          text: response.unsupported ? unsupportedAiMessage(response.unsupportedReason, aiScope) : response.answer,
           sources: response.sources,
           unsupported: response.unsupported
         }
       ]);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Project AI에 연결하지 못했습니다.";
+      const message = cause instanceof Error ? cause.message : `${aiScope === "meeting" ? "Meeting AI" : "Project AI"}에 연결하지 못했습니다.`;
       setProjectAiError(message);
       setProjectAiMessages((current) => [
         ...current,
         {
           role: "assistant",
-          text: "Project AI 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+          text: `${aiScope === "meeting" ? "Meeting AI" : "Project AI"} 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.`,
           unsupported: true
         }
       ]);
@@ -636,23 +864,75 @@ const AppShell = () => {
   }
 
   return (
-    <div className="flex h-screen bg-background font-sans text-foreground">
+    <div className="mm-active-app-shell flex h-screen bg-background font-sans text-foreground">
       {/* Sidebar */}
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-[68px]'} border-r border-border bg-card flex flex-col h-full shrink-0 transition-all duration-300 relative z-20`}>
         {/* Project Selector & Collapse Button */}
-        <div className="h-14 flex items-center border-b border-border shrink-0 overflow-hidden px-3">
+        <div className="h-14 flex items-center border-b border-border shrink-0 overflow-visible px-3">
           {isSidebarOpen ? (
             <>
-              <div className="flex items-center gap-3 min-w-0 hover:bg-muted/50 cursor-pointer p-1.5 rounded transition-colors flex-1">
+              <div className="relative min-w-0 flex-1">
+                <button
+                  aria-expanded={workspaceMenuOpen}
+                  aria-haspopup="menu"
+                  className="flex w-full items-center gap-3 rounded p-1.5 text-left transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  onClick={() => void toggleWorkspaceMenu()}
+                  title={korean ? "워크스페이스 전환" : "Switch workspace"}
+                  type="button"
+                >
                 <div className="w-6 h-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold shrink-0">{projectInitial}</div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold truncate leading-none">{projectName}</div>
                 </div>
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${workspaceMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {workspaceMenuOpen ? (
+                  <div className="absolute left-0 top-[calc(100%+0.5rem)] z-50 w-72 overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-xl" role="menu">
+                    <p className="px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {korean ? "워크스페이스 전환" : "Switch workspace"}
+                    </p>
+                    {workspaceMenuLoading ? <p className="px-2.5 py-3 text-sm text-muted-foreground">{korean ? "불러오는 중..." : "Loading workspaces..."}</p> : null}
+                    {!workspaceMenuLoading && workspaceMenuError ? <p className="px-2.5 py-3 text-sm text-red-600">{workspaceMenuError}</p> : null}
+                    {!workspaceMenuLoading && !workspaceMenuError && availableSpaces.length === 0 ? <p className="px-2.5 py-3 text-sm text-muted-foreground">{korean ? "접근 가능한 워크스페이스가 없습니다." : "No workspaces available."}</p> : null}
+                    {!workspaceMenuLoading && !workspaceMenuError ? availableSpaces.map((space) => {
+                      const active = space.id === spaceId;
+                      return (
+                        <button
+                          aria-current={active ? "page" : undefined}
+                          className={`flex w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-left text-sm transition-colors ${active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}
+                          disabled={active}
+                          key={space.id}
+                          onClick={() => navigate(`/spaces/${encodeURIComponent(space.id)}`)}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-semibold ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{space.name.charAt(0).toUpperCase() || "P"}</span>
+                          <span className="min-w-0 flex-1 truncate font-medium">{space.name}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">{space.role}</span>
+                        </button>
+                      );
+                    }) : null}
+                    <div className="mx-1.5 mt-1.5 border-t border-border pt-1.5">
+                      <button
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+                        onClick={() => {
+                          setCreateWorkspaceError("");
+                          setCreateWorkspaceOpen(true);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Plus className="h-4 w-4" />
+                        {korean ? "새 워크스페이스" : "New workspace"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <button
                 onClick={() => setIsSidebarOpen(false)}
                 className="text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0 p-1.5 rounded-md ml-1"
-                title="Collapse Sidebar"
+                title={korean ? "사이드바 접기" : "Collapse Sidebar"}
               >
                 <PanelLeftClose className="w-4 h-4" />
               </button>
@@ -661,7 +941,7 @@ const AppShell = () => {
             <button
               onClick={() => setIsSidebarOpen(true)}
               className="text-muted-foreground hover:bg-muted hover:text-foreground transition-colors p-1.5 rounded-md mx-auto"
-              title="Expand Sidebar"
+              title={korean ? "사이드바 펼치기" : "Expand Sidebar"}
             >
               <PanelLeftOpen className="w-4 h-4" />
             </button>
@@ -672,60 +952,66 @@ const AppShell = () => {
         <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-6 custom-scrollbar overflow-x-hidden">
           <div className="px-3">
             <nav className="flex flex-col gap-0.5">
-              <NavLink to={`/spaces/${spaceId}`} end title="Overview" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive && !isAIOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
+              <NavLink to={`/spaces/${spaceId}`} end title={korean ? "개요" : "Overview"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive && !isAIOpen ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
                 <LayoutDashboard className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Overview</span>
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "개요" : "Overview"}</span>
               </NavLink>
               <button
-                disabled={!projectAiAvailable}
-                onClick={() => setIsAIOpen(!isAIOpen)}
-                title="Project AI"
-                className={`flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isAIOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'} ${!projectAiAvailable ? 'opacity-50 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground' : ''}`}
+                disabled={!canOpenAi}
+                onClick={() => openAi("project")}
+                title="AI"
+                className={`flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isAIOpen ? 'bg-[color:var(--app-ai-soft)] text-[color:var(--app-ai)]' : 'text-muted-foreground hover:bg-[color:var(--app-ai-soft)] hover:text-[color:var(--app-ai)]'} ${!isSidebarOpen && 'justify-center'} ${!canOpenAi ? 'opacity-50 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground' : ''}`}
               >
-                <Sparkles className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Project AI</span>
+                <Sparkles className="w-4 h-4 shrink-0 text-[color:var(--app-ai)]" />
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>AI</span>
               </button>
             </nav>
           </div>
 
           <div className="px-3">
-            {isSidebarOpen && <div className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap">Collaboration</div>}
+            {isSidebarOpen && <div className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap">{korean ? "협업" : "Collaboration"}</div>}
             {!isSidebarOpen && <div className="h-px w-full bg-border my-2"></div>}
             <nav className="flex flex-col gap-0.5">
-              <NavLink to={`/spaces/${spaceId}/meetings`} title="Meetings" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
+              <NavLink to={`/spaces/${spaceId}/meetings`} title={korean ? "회의" : "Meetings"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
                 <Video className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Meetings</span>
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "회의" : "Meetings"}</span>
               </NavLink>
-              <NavLink to={`/spaces/${spaceId}/tasks`} title="Tasks" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
-                <CheckSquare className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Tasks</span>
+              <NavLink to={`/spaces/${spaceId}/tasks`} title={korean ? "태스크" : "Tasks"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-[color:var(--app-action-soft)] text-[color:var(--app-action)]' : 'text-muted-foreground hover:bg-[color:var(--app-action-soft)] hover:text-[color:var(--app-action)]'} ${!isSidebarOpen && 'justify-center'}`}>
+                <CheckSquare className="w-4 h-4 shrink-0 text-[color:var(--app-action)]" />
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "태스크" : "Tasks"}</span>
               </NavLink>
-              <NavLink to={`/spaces/${spaceId}/knowledge`} title="Knowledge" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
-                <Library className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Knowledge</span>
+              <NavLink to={`/spaces/${spaceId}/knowledge`} title={korean ? "지식" : "Knowledge"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-[color:var(--app-knowledge-soft)] text-[color:var(--app-knowledge)]' : 'text-muted-foreground hover:bg-[color:var(--app-knowledge-soft)] hover:text-[color:var(--app-knowledge)]'} ${!isSidebarOpen && 'justify-center'}`}>
+                <Library className="w-4 h-4 shrink-0 text-[color:var(--app-knowledge)]" />
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "지식" : "Knowledge"}</span>
               </NavLink>
-              <NavLink to={`/spaces/${spaceId}/calendar`} title="Calendar" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
+              <NavLink to={`/spaces/${spaceId}/calendar`} title={korean ? "캘린더" : "Calendar"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
                 <Calendar className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Calendar</span>
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "캘린더" : "Calendar"}</span>
               </NavLink>
             </nav>
           </div>
 
+          {canAccessAdministration ? (
+            <div className="px-3">
+              {isSidebarOpen && <div className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap">{korean ? "관리" : "Administration"}</div>}
+              {!isSidebarOpen && <div className="h-px w-full bg-border my-2"></div>}
+              <nav className="flex flex-col gap-0.5">
+                <NavLink to={`/spaces/${spaceId}/members`} title={korean ? "멤버" : "Members"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "멤버" : "Members"}</span>
+                </NavLink>
+                <NavLink to={`/spaces/${spaceId}/terms`} title={korean ? "용어사전" : "Terms Dictionary"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-[color:var(--app-knowledge-soft)] text-[color:var(--app-knowledge)]' : 'text-muted-foreground hover:bg-[color:var(--app-knowledge-soft)] hover:text-[color:var(--app-knowledge)]'} ${!isSidebarOpen && 'justify-center'}`}>
+                  <BookOpen className="w-4 h-4 shrink-0 text-[color:var(--app-knowledge)]" />
+                  <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "용어사전" : "Terms Dictionary"}</span>
+                </NavLink>
+              </nav>
+            </div>
+          ) : null}
           <div className="px-3">
-            {isSidebarOpen && <div className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap">Administration</div>}
-            {!isSidebarOpen && <div className="h-px w-full bg-border my-2"></div>}
             <nav className="flex flex-col gap-0.5">
-              <NavLink to={`/spaces/${spaceId}/members`} title="Members" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
-                <Users className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Members</span>
-              </NavLink>
-              <NavLink to={`/spaces/${spaceId}/terms`} title="Terms Dictionary" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
-                <BookOpen className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Terms Dictionary</span>
-              </NavLink>
-              <NavLink to={`/spaces/${spaceId}/settings`} title="Settings" className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
+              <NavLink to={`/spaces/${spaceId}/settings`} title={korean ? "설정" : "Settings"} className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'} ${!isSidebarOpen && 'justify-center'}`}>
                 <Settings className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>Settings</span>
+                <span className={`transition-opacity duration-300 whitespace-nowrap ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>{korean ? "설정" : "Settings"}</span>
               </NavLink>
             </nav>
           </div>
@@ -765,10 +1051,39 @@ const AppShell = () => {
         </div>
       </aside>
 
+      {createWorkspaceOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" role="presentation">
+          <section aria-labelledby="create-workspace-title" aria-modal="true" className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl" role="dialog">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground" id="create-workspace-title">{korean ? "새 워크스페이스" : "New workspace"}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{korean ? "새 프로젝트 협업 공간을 만듭니다." : "Create a new project collaboration space."}</p>
+              </div>
+              <button aria-label={korean ? "닫기" : "Close"} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setCreateWorkspaceOpen(false)} type="button"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-5 space-y-4">
+              <label className="block text-sm font-medium text-foreground">
+                {korean ? "워크스페이스 이름" : "Workspace name"}
+                <input autoFocus className="mt-1.5 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50" onChange={(event) => setCreateWorkspaceName(event.target.value)} placeholder={korean ? "예: Q3 제품 출시" : "e.g. Q3 product launch"} value={createWorkspaceName} />
+              </label>
+              <label className="block text-sm font-medium text-foreground">
+                {korean ? "설명" : "Description"} <span className="font-normal text-muted-foreground">({korean ? "선택" : "optional"})</span>
+                <textarea className="mt-1.5 min-h-24 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50" onChange={(event) => setCreateWorkspaceDescription(event.target.value)} placeholder={korean ? "이 프로젝트의 목적을 입력하세요." : "What is this project about?"} value={createWorkspaceDescription} />
+              </label>
+              {createWorkspaceError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{createWorkspaceError}</p> : null}
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted" disabled={createWorkspacePending} onClick={() => setCreateWorkspaceOpen(false)} type="button">{korean ? "취소" : "Cancel"}</button>
+              <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60" disabled={!createWorkspaceName.trim() || createWorkspacePending} onClick={() => void createWorkspaceFromMenu()} type="button">{createWorkspacePending ? (korean ? "생성 중..." : "Creating...") : (korean ? "워크스페이스 생성" : "Create workspace")}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
-        <header className="h-14 px-6 flex items-center justify-between border-b border-border bg-background shrink-0">
+        <header className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-border bg-background shrink-0">
           <div className="flex items-center gap-2 text-sm min-w-0">
             {getBreadcrumbs().map((crumb, i, arr) => (
               <div key={crumb.url} className="flex items-center gap-2 shrink-0">
@@ -781,15 +1096,16 @@ const AppShell = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="relative">
+            <div className="relative hidden sm:block">
               <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder={korean ? "검색..." : "Search..."}
                 className="pl-8 pr-3 py-1.5 w-64 rounded-md bg-muted/50 border border-transparent text-sm focus:bg-background focus:border-border focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
               />
             </div>
-            <button className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground transition-colors relative">
+            <DisplayPreferences compact />
+            <button aria-label={korean ? "알림" : "Notifications"} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground transition-colors relative">
               <Bell className="w-4 h-4" />
               <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-blue-500"></span>
             </button>
@@ -805,7 +1121,7 @@ const AppShell = () => {
           {/* Project AI Slide-out Drawer */}
           {isAIOpen && (
             <div
-              style={{ width: aiWidth }}
+              style={{ width: `min(100vw, ${aiWidth}px)` }}
               className="border-l border-border bg-card shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)] flex flex-col shrink-0 relative"
             >
               {/* Drag Handle */}
@@ -818,12 +1134,13 @@ const AppShell = () => {
                 </div>
               </div>
 
-              <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+              <div className="p-4 border-b border-border bg-muted/30">
+                <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded bg-primary/10 text-primary flex items-center justify-center">
+                  <div className="w-6 h-6 rounded bg-[color:var(--app-ai-soft)] text-[color:var(--app-ai)] flex items-center justify-center">
                     <Sparkles className="w-3.5 h-3.5" />
                   </div>
-                  <h2 className="font-semibold text-sm">Project AI</h2>
+                  <h2 className="font-semibold text-sm">{aiScope === "meeting" ? "Meeting AI" : "Project AI"}</h2>
                 </div>
                 <button
                   onClick={() => setIsAIOpen(false)}
@@ -831,11 +1148,16 @@ const AppShell = () => {
                 >
                   <X className="w-4 h-4" />
                 </button>
+                </div>
+                <div className="mt-3 inline-flex rounded-md bg-muted p-1" role="tablist" aria-label="AI search scope">
+                  <button aria-selected={aiScope === "project"} className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${aiScope === "project" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`} disabled={!projectAiAvailable} onClick={() => openAi("project")} role="tab" type="button">Project AI</button>
+                  <button aria-selected={aiScope === "meeting"} className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${aiScope === "meeting" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`} disabled={!selectedMeetingId} onClick={() => selectedMeetingId && openAi("meeting", selectedMeetingId)} role="tab" title={selectedMeetingId ? "Search this meeting only" : "Open AI from a meeting you can access to use Meeting AI"} type="button">Meeting AI</button>
+                </div>
               </div>
 
               <div className="p-4 border-b border-border bg-card text-xs text-muted-foreground flex items-center gap-2">
                 <ShieldAlert className="w-3.5 h-3.5" />
-                Searching only official knowledge and authorized meetings.
+                {aiScope === "meeting" ? "Searching the selected meeting only." : "Searching only official knowledge and authorized meetings."}
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -864,24 +1186,24 @@ const AppShell = () => {
 
               <div className="p-4 border-t border-border bg-card">
                 <div className="flex gap-2 mb-3 overflow-x-auto custom-scrollbar pb-1">
-                  <button className="whitespace-nowrap px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:bg-muted transition-colors" onClick={() => void handleProjectAiAsk("최근 확정된 결정사항을 요약해줘")} type="button">최근 결정 요약</button>
-                  <button className="whitespace-nowrap px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:bg-muted transition-colors" onClick={() => void handleProjectAiAsk("현재 열려 있는 태스크를 요약해줘")} type="button">열린 태스크</button>
+                  <button className="whitespace-nowrap px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:bg-muted transition-colors" onClick={() => void handleAiAsk(aiScope === "meeting" ? "이 회의의 핵심 결정사항을 요약해줘" : "최근 확정된 결정사항을 요약해줘")} type="button">{aiScope === "meeting" ? "회의 결정 요약" : "최근 결정 요약"}</button>
+                  <button className="whitespace-nowrap px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:bg-muted transition-colors" onClick={() => void handleAiAsk(aiScope === "meeting" ? "이 회의의 실행 항목을 알려줘" : "현재 열려 있는 태스크를 요약해줘")} type="button">{aiScope === "meeting" ? "회의 실행 항목" : "열린 태스크"}</button>
                 </div>
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="Ask Project AI..."
+                    placeholder={aiScope === "meeting" ? "Ask Meeting AI..." : "Ask Project AI..."}
                     value={projectAiInput}
                     onChange={(event) => setProjectAiInput(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        void handleProjectAiAsk(projectAiInput);
+                        void handleAiAsk(projectAiInput);
                       }
                     }}
                     className="w-full bg-muted border-none rounded-xl pl-4 pr-10 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
                   />
-                  <button className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-md bg-foreground hover:bg-foreground/90 text-background flex items-center justify-center transition-colors disabled:opacity-60" disabled={!projectAiInput.trim() || projectAiLoading || !projectAiAvailable} onClick={() => void handleProjectAiAsk(projectAiInput)} type="button">
+                  <button className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-md bg-foreground hover:bg-foreground/90 text-background flex items-center justify-center transition-colors disabled:opacity-60" disabled={!projectAiInput.trim() || projectAiLoading || !activeAiAvailable} onClick={() => void handleAiAsk(projectAiInput)} type="button">
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -900,24 +1222,27 @@ const AppShell = () => {
 // 1. Landing Page (/)
 const LandingPage = () => {
   const navigate = useNavigate();
+  const { locale } = useAppPreferences();
+  const korean = locale === "ko";
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center text-center p-8">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center text-center p-8 relative">
+      <div className="absolute right-6 top-6"><DisplayPreferences /></div>
       <div className="max-w-3xl space-y-6">
         <div className="w-16 h-16 bg-foreground text-background rounded-xl flex items-center justify-center mx-auto mb-8">
           <span className="text-2xl font-bold">M</span>
         </div>
         <h1 className="text-5xl font-bold tracking-tight text-foreground">
-          Meetings shouldn't be the end.<br/>They should be the beginning.
+          {korean ? <>회의가 끝난 뒤에도,<br />일이 이어지도록.</> : <>Meetings shouldn't be the end.<br />They should be the beginning.</>}
         </h1>
         <p className="text-xl text-muted-foreground">
-          MeetingMind seamlessly connects your meetings to transcripts, tasks, knowledge bases, and AI. Experience the continuous collaboration cycle.
+          {korean ? "MeetingMind는 회의를 전사, 태스크, 프로젝트 지식, AI로 연결합니다." : "MeetingMind seamlessly connects your meetings to transcripts, tasks, knowledge bases, and AI. Experience the continuous collaboration cycle."}
         </p>
         <div className="pt-8">
           <button
             onClick={() => navigate('/spaces')}
             className="bg-foreground text-background px-8 py-3 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors inline-flex items-center gap-2"
           >
-            Go to Workspaces <ArrowRight className="w-4 h-4" />
+            {korean ? "워크스페이스로 이동" : "Go to Workspaces"} <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -927,8 +1252,11 @@ const LandingPage = () => {
 
 // 2. Workspace Home (/spaces)
 const WorkspaceHome = () => {
-  const { session } = useAuthState();
+  const { session, setSession } = useAuthState();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const guestWorkspace = location.pathname === "/guest";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [spaces, setSpaces] = useState<Array<{
@@ -944,6 +1272,15 @@ const WorkspaceHome = () => {
   const [createDescription, setCreateDescription] = useState("");
   const [createPending, setCreatePending] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [pendingInvitations, setPendingInvitations] = useState<Awaited<ReturnType<typeof fetchPendingSpaceInvitations>>["invitations"]>([]);
+  const [invitationsOpen, setInvitationsOpen] = useState(false);
+  const [invitationPendingId, setInvitationPendingId] = useState("");
+  const [invitationError, setInvitationError] = useState("");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileLogoutPending, setProfileLogoutPending] = useState(false);
+  const [guestMeetings, setGuestMeetings] = useState<MeetingSummary[]>([]);
+  const selectedGuestMeetingId = searchParams.get("meetingId") ?? "";
+  const selectedGuestMeeting = guestMeetings.find((meeting) => meeting.id === selectedGuestMeetingId) ?? guestMeetings[0] ?? null;
 
   const loadSpaces = React.useCallback(async () => {
     if (!session) {
@@ -971,6 +1308,8 @@ const WorkspaceHome = () => {
         })
       );
       setSpaces(hydrated);
+      const accessible = await fetchAccessibleMeetings(session).catch(() => ({ meetings: [] as MeetingSummary[] }));
+      setGuestMeetings(accessible.meetings);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "워크스페이스를 불러오지 못했습니다.");
       setSpaces([]);
@@ -982,6 +1321,52 @@ const WorkspaceHome = () => {
   useEffect(() => {
     void loadSpaces();
   }, [loadSpaces]);
+
+  const loadPendingInvitations = React.useCallback(async () => {
+    if (!session) return;
+    try {
+      const response = await fetchPendingSpaceInvitations(session);
+      setPendingInvitations(response.invitations);
+    } catch (cause) {
+      setInvitationError(cause instanceof Error ? cause.message : "초대 알림을 불러오지 못했습니다.");
+    }
+  }, [session]);
+
+  useEffect(() => {
+    void loadPendingInvitations();
+  }, [loadPendingInvitations]);
+
+  async function resolvePendingInvitation(invitation: (typeof pendingInvitations)[number], accept: boolean) {
+    if (!session || invitationPendingId) return;
+    setInvitationPendingId(invitation.invitationId);
+    setInvitationError("");
+    try {
+      if (accept) {
+        await acceptPendingSpaceInvitation(session, invitation.spaceId, invitation.invitationId);
+        await loadSpaces();
+      } else {
+        await declinePendingSpaceInvitation(session, invitation.spaceId, invitation.invitationId);
+      }
+      setPendingInvitations((previous) => previous.filter((item) => item.invitationId !== invitation.invitationId));
+    } catch (cause) {
+      setInvitationError(cause instanceof Error ? cause.message : "초대를 처리하지 못했습니다.");
+    } finally {
+      setInvitationPendingId("");
+    }
+  }
+
+  async function handleWorkspaceLogout() {
+    if (profileLogoutPending) return;
+    setProfileLogoutPending(true);
+    try {
+      await logoutCurrentSession();
+      setSession(null);
+      navigate("/", { replace: true });
+    } finally {
+      setProfileLogoutPending(false);
+      setProfileOpen(false);
+    }
+  }
 
   async function handleCreateSpace(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1028,11 +1413,45 @@ const WorkspaceHome = () => {
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Your Spaces</h1>
-            <p className="text-sm text-muted-foreground">Select a project space to continue your work.</p>
+            <h1 className="text-2xl font-bold text-foreground">{guestWorkspace ? "Guest workspace" : "Your Spaces"}</h1>
+            <p className="text-sm text-muted-foreground">{guestWorkspace ? "Access only the meetings shared with you." : "Select a project space to continue your work."}</p>
+          </div>
+          <div className="flex items-center gap-3">
+          <div className="relative hidden sm:block">
+            <button aria-expanded={profileOpen} className="flex h-[38px] items-center gap-2 rounded-lg border border-foreground bg-card px-3 text-left hover:bg-muted transition-colors" onClick={() => setProfileOpen((value) => !value)} type="button">
+              {session?.user.pictureUrl ? <img alt="" className="h-7 w-7 rounded-full object-cover" src={session.user.pictureUrl} /> : <div className="h-7 w-7 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold">{session?.user.displayName?.charAt(0) ?? "U"}</div>}
+              <div className="min-w-0 -space-y-px"><p className="max-w-32 truncate text-xs font-semibold leading-4 text-foreground">{session?.user.displayName}</p><p className="max-w-40 truncate text-[11px] leading-4 text-muted-foreground">{session?.user.email}</p></div>
+            </button>
+            {profileOpen ? <div className="absolute right-0 top-11 z-30 w-44 rounded-lg border border-border bg-card p-1.5 shadow-xl"><button className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-50" disabled={profileLogoutPending} onClick={() => void handleWorkspaceLogout()} type="button"><LogOut className="h-4 w-4" /> {profileLogoutPending ? "Logging out..." : "Log out"}</button></div> : null}
+          </div>
+          <div className="relative">
+            <button
+              aria-label="Space invitations"
+              className="relative h-[38px] w-9 rounded-md border border-foreground bg-card text-foreground hover:bg-muted transition-colors inline-flex items-center justify-center"
+              onClick={() => { setInvitationsOpen((value) => !value); setInvitationError(""); }}
+              type="button"
+            >
+              <Bell className="w-4 h-4" />
+              {pendingInvitations.length > 0 ? <span className="absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] leading-4 font-semibold">{pendingInvitations.length}</span> : null}
+            </button>
+            {invitationsOpen ? (
+              <div className="absolute right-0 top-11 z-30 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3"><div><h2 className="text-sm font-semibold text-foreground">Space invitations</h2><p className="mt-0.5 text-xs text-muted-foreground">Invitations waiting for your response</p></div><button aria-label="Close invitations" className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setInvitationsOpen(false)} type="button">Close</button></div>
+                <div className="max-h-80 overflow-y-auto px-4">
+                {invitationError ? <p className="py-3 text-xs text-red-600">{invitationError}</p> : null}
+                {pendingInvitations.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No pending invitations.</p> : pendingInvitations.map((invitation) => (
+                  <div className="border-b border-border py-4 last:border-b-0" key={invitation.invitationId}>
+                    <p className="text-sm font-medium">{invitation.spaceName}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Invited as {invitation.role.toLowerCase()}</p>
+                    <div className="mt-3 flex justify-end gap-2"><button className="rounded-md border border-border px-2.5 py-1.5 text-xs" disabled={Boolean(invitationPendingId)} onClick={() => void resolvePendingInvitation(invitation, false)} type="button">Decline</button><button className="rounded-md bg-foreground px-2.5 py-1.5 text-xs text-background" disabled={Boolean(invitationPendingId)} onClick={() => void resolvePendingInvitation(invitation, true)} type="button">Accept</button></div>
+                  </div>
+                ))}
+                </div>
+              </div>
+            ) : null}
           </div>
           <button
-            className="bg-foreground text-background px-4 py-2 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors inline-flex items-center gap-2"
+            className="h-[38px] bg-foreground text-background px-4 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors inline-flex items-center gap-2"
             data-testid="create-space-trigger"
             onClick={() => {
               setCreateError("");
@@ -1042,6 +1461,16 @@ const WorkspaceHome = () => {
           >
             <Plus className="w-4 h-4" /> New Space
           </button>
+          {guestMeetings.length > 0 && !guestWorkspace ? (
+            <button
+              className="h-[38px] rounded-md border border-foreground bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              onClick={() => navigate(`/guest?meetingId=${encodeURIComponent(guestMeetings[0].id)}`)}
+              type="button"
+            >
+              Guest meetings <span className="ml-1 text-muted-foreground">{guestMeetings.length}</span>
+            </button>
+          ) : null}
+          </div>
         </div>
 
         {loading ? <LoadingState label="Loading spaces..." /> : null}
@@ -1057,6 +1486,52 @@ const WorkspaceHome = () => {
         ) : null}
 
         {!loading && !error && spaces.length === 0 ? (
+          guestWorkspace && guestMeetings.length > 0 ? (
+            <section className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+              <div className="rounded-lg border border-border bg-card p-5">
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">Guest workspace</p>
+                    <h2 className="mt-1 text-xl font-semibold text-foreground">{selectedGuestMeeting?.title ?? "Meeting access"}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">Project space ID · {selectedGuestMeeting?.spaceId}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">Guest</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button className="flex min-h-24 flex-col items-start justify-between rounded-md border border-foreground p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5" onClick={() => selectedGuestMeeting && navigate(`/spaces/${selectedGuestMeeting.spaceId}/meetings/${selectedGuestMeeting.id}/${selectedGuestMeeting.status === "IN_PROGRESS" ? "live" : "live/prejoin"}`)} type="button">
+                    <Video className="h-5 w-5 text-primary" />
+                    <span><span className="block text-sm font-semibold text-foreground">Join meeting</span><span className="mt-1 block text-xs text-muted-foreground">Check camera and microphone before joining.</span></span>
+                  </button>
+                  <button className="flex min-h-24 flex-col items-start justify-between rounded-md border border-foreground p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5" onClick={() => selectedGuestMeeting && navigate(`/guest/meetings/${selectedGuestMeeting.id}/ai`)} type="button">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    <span><span className="block text-sm font-semibold text-foreground">Meeting AI</span><span className="mt-1 block text-xs text-muted-foreground">Ask questions about this meeting only.</span></span>
+                  </button>
+                  <button className="flex min-h-24 flex-col items-start justify-between rounded-md border border-foreground p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5" onClick={() => selectedGuestMeeting && navigate(`/spaces/${selectedGuestMeeting.spaceId}/meetings/${selectedGuestMeeting.id}/transcript`)} type="button">
+                    <FileText className="h-5 w-5 text-primary" />
+                    <span><span className="block text-sm font-semibold text-foreground">Transcript</span><span className="mt-1 block text-xs text-muted-foreground">View the transcript for this meeting.</span></span>
+                  </button>
+                  <button className="flex min-h-24 flex-col items-start justify-between rounded-md border border-foreground p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5" onClick={() => selectedGuestMeeting && navigate(`/spaces/${selectedGuestMeeting.spaceId}/meetings/${selectedGuestMeeting.id}/report`)} type="button">
+                    <BookOpen className="h-5 w-5 text-primary" />
+                    <span><span className="block text-sm font-semibold text-foreground">Meeting report</span><span className="mt-1 block text-xs text-muted-foreground">Open the report when access is available.</span></span>
+                  </button>
+                </div>
+              </div>
+              <aside className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-center justify-between">
+                  <div><h3 className="text-sm font-semibold text-foreground">Invited meetings</h3><p className="mt-1 text-xs text-muted-foreground">Only meetings shared with you are shown.</p></div>
+                  <span className="text-xs text-muted-foreground">{guestMeetings.length}</span>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {guestMeetings.map((meeting) => (
+                    <button className={`flex w-full items-center justify-between rounded-md border px-3 py-2.5 text-left transition-colors ${selectedGuestMeeting?.id === meeting.id ? "border-primary/50 bg-primary/5" : "border-foreground hover:bg-muted/50"}`} key={meeting.id} onClick={() => setSearchParams({ guest: "1", meetingId: meeting.id })} type="button">
+                      <span className="min-w-0"><span className="block truncate text-sm font-medium text-foreground">{meeting.title}</span><span className="mt-1 block text-xs text-muted-foreground">{new Date(meeting.scheduledAt).toLocaleString()}</span></span>
+                      <span className="ml-3 shrink-0 text-[11px] font-medium text-muted-foreground">{meeting.status}</span>
+                    </button>
+                  ))}
+                </div>
+              </aside>
+            </section>
+          ) : (
           <EmptyState
             action={(
               <button
@@ -1071,6 +1546,7 @@ const WorkspaceHome = () => {
             icon={<Building className="w-5 h-5" />}
             title="No spaces yet"
           />
+          )
         ) : null}
 
         {!loading && !error && spaces.length > 0 ? (
@@ -1181,6 +1657,7 @@ const WorkspaceHome = () => {
 // 3. Project Home (/spaces/:spaceId)
 const ProjectHome = () => {
   const navigate = useNavigate();
+  const { locale } = useAppPreferences();
   const { spaceId = "" } = useParams();
   const { session } = useAuthState();
   const { spaceDetail, spaceLoading, spaceError, reloadSpace } = useOutletContext<ShellOutletContext>();
@@ -1188,6 +1665,10 @@ const ProjectHome = () => {
   const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
   const [instantMeetingPending, setInstantMeetingPending] = useState(false);
   const [instantMeetingError, setInstantMeetingError] = useState<string | null>(null);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [taskCompletionError, setTaskCompletionError] = useState<string | null>(null);
+  const [taskPage, setTaskPage] = useState(0);
+  const korean = locale === "ko";
 
   useEffect(() => {
     let active = true;
@@ -1264,8 +1745,18 @@ const ProjectHome = () => {
   const nextMeeting = spaceDetail.upcomingMeetings
     .slice()
     .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())[0] ?? null;
-  const openTasks = spaceDetail.actionItems.filter((task) => task.status !== "DONE");
-  const completedTasks = spaceDetail.actionItems.filter((task) => task.status === "DONE").length;
+  const myTasks = spaceDetail.actionItems
+    .filter((task) => task.assigneeId === session?.user.id)
+    .sort((left, right) => {
+      const doneDifference = Number(left.status === "DONE") - Number(right.status === "DONE");
+      if (doneDifference !== 0) return doneDifference;
+      if (!left.dueDate && !right.dueDate) return 0;
+      if (!left.dueDate) return 1;
+      if (!right.dueDate) return -1;
+      return new Date(left.dueDate).getTime() - new Date(right.dueDate).getTime();
+    });
+  const completedTasks = myTasks.filter((task) => task.status === "DONE").length;
+  const visibleTasks = myTasks.slice(taskPage * 5, taskPage * 5 + 5);
   const knowledgeIndexedCount = knowledgeItems.filter((item) => item.embeddingStatus === "COMPLETED").length;
   const knowledgeIndexedPercent = knowledgeItems.length > 0 ? Math.round((knowledgeIndexedCount / knowledgeItems.length) * 100) : 0;
   const meetingProgressPercent = Math.min(100, spaceDetail.upcomingMeetings.length * 20);
@@ -1338,10 +1829,26 @@ const ProjectHome = () => {
     }
   }
 
+  async function handleCompleteTask(taskId: string) {
+    if (!session || !spaceId || completingTaskId) {
+      return;
+    }
+    setCompletingTaskId(taskId);
+    setTaskCompletionError(null);
+    try {
+      await updateTask(session, spaceId, taskId, { status: "DONE" });
+      await reloadSpace();
+    } catch (cause) {
+      setTaskCompletionError(cause instanceof Error ? cause.message : "Couldn't complete this task.");
+    } finally {
+      setCompletingTaskId(null);
+    }
+  }
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold truncate">Project Overview</h1>
+        <h1 className="text-2xl font-bold truncate">{korean ? "프로젝트 개요" : "Project Overview"}</h1>
         <div className="flex items-center gap-2 shrink-0">
           <span className="px-2 py-1 rounded bg-muted text-xs font-medium text-muted-foreground">Space Role: {roleLabel(spaceDetail.role)}</span>
         </div>
@@ -1355,17 +1862,17 @@ const ProjectHome = () => {
           <div className="bg-card border border-border rounded-lg p-5 space-y-3">
             <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0 flex-1">
-              <div className="w-12 h-12 bg-blue-500/10 text-blue-600 rounded flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent)] rounded flex items-center justify-center shrink-0">
                 <Video className="w-6 h-6" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider shrink-0">Up Next</span>
+                  <span className="text-xs font-semibold text-[color:var(--app-accent)] uppercase tracking-wider shrink-0">{korean ? "다음 회의" : "Up Next"}</span>
                   <span className="text-xs text-muted-foreground truncate">
-                    {nextMeeting ? dateTimeLabel(nextMeeting.scheduledAt) : "No upcoming meeting"}
+                    {nextMeeting ? dateTimeLabel(nextMeeting.scheduledAt) : (korean ? "예정된 회의 없음" : "No upcoming meeting")}
                   </span>
                 </div>
-                <h3 className="font-semibold text-foreground truncate block w-full">{nextMeeting?.title ?? "Schedule your next meeting"}</h3>
+                <h3 className="font-semibold text-foreground truncate block w-full">{nextMeeting?.title ?? (korean ? "다음 회의 일정을 잡아보세요" : "Schedule your next meeting")}</h3>
               </div>
             </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1379,7 +1886,7 @@ const ProjectHome = () => {
                     type="button"
                   >
                     <Play className="w-4 h-4" />
-                    {instantMeetingPending ? "Starting..." : "Start meeting"}
+                    {instantMeetingPending ? (korean ? "시작 중..." : "Starting...") : (korean ? "회의 시작" : "Start meeting")}
                   </button>
                 ) : null}
                 <button
@@ -1387,7 +1894,7 @@ const ProjectHome = () => {
                   className="border border-border bg-background text-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-muted transition-colors shrink-0"
                   type="button"
                 >
-                  {nextMeeting ? "Open" : "View meetings"}
+                  {nextMeeting ? (korean ? "열기" : "Open") : (korean ? "회의 보기" : "View meetings")}
                 </button>
               </div>
             </div>
@@ -1399,15 +1906,26 @@ const ProjectHome = () => {
           {/* Open Tasks */}
           <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h3 className="font-semibold">My Open Tasks</h3>
-              <button className="text-sm text-muted-foreground hover:text-foreground shrink-0" onClick={() => navigate("tasks")} type="button">View all</button>
+              <h3 className="font-semibold">{korean ? "내 태스크" : "My Tasks"}</h3>
+              <button className="text-sm text-muted-foreground hover:text-foreground shrink-0" onClick={() => navigate("tasks")} type="button">{korean ? "전체 보기" : "View all"}</button>
             </div>
             <div className="divide-y divide-border">
-              {openTasks.length > 0 ? openTasks.slice(0, 5).map((task) => (
+              {myTasks.length > 0 ? visibleTasks.map((task) => (
                 <div key={task.id} className="px-5 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors cursor-pointer min-w-0 gap-4" onClick={() => navigate("tasks")}>
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="w-4 h-4 rounded border border-muted-foreground/40 shrink-0"></div>
-                    <span className="text-sm font-medium truncate block w-full">{task.title}</span>
+                    <button
+                      aria-label={task.status === "DONE" ? `Completed ${task.title}` : `Complete ${task.title}`}
+                      className={`flex h-4 w-4 items-center justify-center rounded border p-0 leading-none shrink-0 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-wait ${task.status === "DONE" ? "border-emerald-500 bg-emerald-500" : "border-muted-foreground/40 hover:border-foreground"}`}
+                      disabled={task.status === "DONE" || completingTaskId === task.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleCompleteTask(task.id);
+                      }}
+                      type="button"
+                    >
+                      {task.status === "DONE" ? <span className="-translate-y-px text-[10px] leading-none text-white">✓</span> : <span className="sr-only">Complete</span>}
+                    </button>
+                    <span className={`text-sm font-medium truncate block w-full ${task.status === "DONE" ? "text-muted-foreground line-through" : ""}`}>{task.title}</span>
                   </div>
                   <div className="flex items-center gap-3 text-xs shrink-0">
                     <span className="text-muted-foreground">{task.dueDate ? dateLabel(task.dueDate) : "No due date"}</span>
@@ -1415,22 +1933,30 @@ const ProjectHome = () => {
                 </div>
               )) : (
                 <EmptyState
-                  desc="Confirmed action items will appear here."
+                  desc={korean ? "내게 할당된 태스크가 여기에 표시됩니다." : "You will see tasks assigned to you here."}
                   icon={<CheckSquare className="w-5 h-5" />}
-                  title="No open tasks"
+                  title={korean ? "할당된 태스크가 없습니다" : "No assigned tasks"}
                 />
               )}
             </div>
+            {myTasks.length > 5 ? (
+              <div className="flex items-center justify-between border-t border-border px-5 py-3 text-sm">
+                <button className="text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={taskPage === 0} onClick={() => setTaskPage((page) => Math.max(0, page - 1))} type="button">{korean ? "이전" : "Previous"}</button>
+                <span className="text-xs text-muted-foreground">{taskPage + 1} / {Math.ceil(Math.min(myTasks.length, 10) / 5)}</span>
+                <button className="text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={taskPage >= Math.ceil(Math.min(myTasks.length, 10) / 5) - 1} onClick={() => setTaskPage((page) => page + 1)} type="button">{korean ? "다음" : "Next"}</button>
+              </div>
+            ) : null}
+            {taskCompletionError ? <p className="px-5 py-3 text-xs text-red-600 border-t border-border" role="alert">{taskCompletionError}</p> : null}
           </div>
 
           {/* Recent Transcripts/Reports */}
           <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h3 className="font-semibold">Recent Confirmed Reports</h3>
+              <h3 className="font-semibold">{korean ? "최근 확정 회의록" : "Recent Confirmed Reports"}</h3>
             </div>
             <div className="divide-y divide-border">
               {spaceDetail.recentReports.length > 0 ? spaceDetail.recentReports.slice(0, 5).map((report) => (
-                <div key={report.id} className="px-5 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors cursor-pointer min-w-0 gap-4" onClick={() => navigate(`meetings/${report.meetingId}/report`)}>
+                <div key={report.id} className="px-5 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors min-w-0 gap-4">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
                     <span className="text-sm font-medium truncate block w-full">{report.title}</span>
@@ -1444,9 +1970,9 @@ const ProjectHome = () => {
                 </div>
               )) : (
                 <EmptyState
-                  desc="Confirmed reports will appear here after a meeting report is finalized."
+                  desc={korean ? "회의록이 확정되면 여기에 표시됩니다." : "Confirmed reports will appear here after a meeting report is finalized."}
                   icon={<FileText className="w-5 h-5" />}
-                  title="No reports yet"
+                  title={korean ? "아직 확정된 회의록이 없습니다" : "No reports yet"}
                 />
               )}
             </div>
@@ -1457,29 +1983,29 @@ const ProjectHome = () => {
         <div className="lg:col-span-4 space-y-6 min-w-0">
           {/* Project Stats */}
           <div className="bg-card border border-border rounded-lg p-5">
-            <h3 className="font-semibold mb-4 text-sm">Project Activity</h3>
+            <h3 className="font-semibold mb-4 text-sm">{korean ? "프로젝트 현황" : "Project Activity"}</h3>
             <div className="space-y-4">
               <div>
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-muted-foreground">Task Completion</span>
-                  <span className="font-medium">{completedTasks} / {spaceDetail.actionItems.length}</span>
+                  <span className="text-muted-foreground">{korean ? "태스크 완료" : "Task Completion"}</span>
+                  <span className="font-medium">{completedTasks} / {myTasks.length}</span>
                 </div>
                 <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-foreground rounded-full" style={{ width: `${spaceDetail.actionItems.length > 0 ? Math.round((completedTasks / spaceDetail.actionItems.length) * 100) : 0}%` }}></div>
+                  <div className="h-full bg-foreground rounded-full" style={{ width: `${myTasks.length > 0 ? Math.round((completedTasks / myTasks.length) * 100) : 0}%` }}></div>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-muted-foreground">Knowledge Indexed</span>
+                  <span className="text-muted-foreground">{korean ? "지식 색인" : "Knowledge Indexed"}</span>
                   <span className="font-medium">{knowledgeIndexedPercent}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${knowledgeIndexedPercent}%` }}></div>
+                  <div className="h-full bg-[color:var(--app-knowledge)] rounded-full" style={{ width: `${knowledgeIndexedPercent}%` }}></div>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-muted-foreground">Upcoming Meetings</span>
+                  <span className="text-muted-foreground">{korean ? "예정된 회의" : "Upcoming Meetings"}</span>
                   <span className="font-medium">{spaceDetail.upcomingMeetings.length}</span>
                 </div>
                 <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
@@ -1492,7 +2018,7 @@ const ProjectHome = () => {
           {/* Members */}
           <div className="bg-card border border-border rounded-lg p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-sm">Members</h3>
+              <h3 className="font-semibold text-sm">{korean ? "멤버" : "Members"}</h3>
               <span className="text-xs text-muted-foreground">{members.length} people</span>
             </div>
             <div className="space-y-2.5">
@@ -1525,6 +2051,8 @@ const ProjectHome = () => {
 // 4. Meeting List (/spaces/:spaceId/meetings)
 const MeetingList = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
+  const { spaceDetail } = useOutletContext<ShellOutletContext>();
   const { spaceId = "" } = useParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -1542,6 +2070,20 @@ const MeetingList = () => {
   const [createError, setCreateError] = useState("");
   const [instantPending, setInstantPending] = useState(false);
   const [instantError, setInstantError] = useState("");
+  const [meetingPage, setMeetingPage] = useState(0);
+  const [openMeetingMenu, setOpenMeetingMenu] = useState<string | null>(null);
+  const [deletePendingMeetingId, setDeletePendingMeetingId] = useState<string | null>(null);
+  const [editingMeeting, setEditingMeeting] = useState<MeetingSummary | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editStartAt, setEditStartAt] = useState("");
+  const [editEndAt, setEditEndAt] = useState("");
+  const [editPending, setEditPending] = useState(false);
+  const korean = locale === "ko";
+
+  useEffect(() => {
+    setMeetingPage(0);
+  }, [searchQuery, statusFilter]);
 
   const loadMeetings = React.useCallback(async () => {
     if (!session || !spaceId) {
@@ -1671,6 +2213,60 @@ const MeetingList = () => {
     }
   }
 
+  function canManageMeeting(meeting: MeetingSummary) {
+    return spaceDetail?.role === "OWNER" || spaceDetail?.role === "ADMIN" || meeting.myRole === "HOST";
+  }
+
+  async function handleDeleteMeeting(meeting: MeetingSummary) {
+    if (!session || !canManageMeeting(meeting) || deletePendingMeetingId) return;
+    if (!window.confirm(`'${meeting.title}' 회의를 삭제하시겠습니까?`)) return;
+    setDeletePendingMeetingId(meeting.id);
+    try {
+      await deleteMeeting(session, meeting.id);
+      setOpenMeetingMenu(null);
+      await loadMeetings();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error("회의를 삭제하지 못했습니다."));
+    } finally {
+      setDeletePendingMeetingId(null);
+    }
+  }
+
+  function openEditMeeting(meeting: MeetingSummary) {
+    setEditingMeeting(meeting);
+    setEditTitle(meeting.title);
+    setEditDescription(meeting.description ?? "");
+    setEditStartAt(meeting.scheduledAt.slice(0, 16));
+    setEditEndAt(meeting.scheduledEndAt.slice(0, 16));
+    setOpenMeetingMenu(null);
+  }
+
+  async function handleEditMeeting(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !editingMeeting || editPending || !editTitle.trim() || !editStartAt || !editEndAt) return;
+    const startAt = new Date(editStartAt);
+    const endAt = new Date(editEndAt);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+      setError(new Error("유효한 제목과 시작·종료 시간을 입력해 주세요."));
+      return;
+    }
+    setEditPending(true);
+    try {
+      await updateMeeting(session, editingMeeting.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim() || undefined,
+        scheduledAt: startAt.toISOString(),
+        scheduledEndAt: endAt.toISOString()
+      });
+      setEditingMeeting(null);
+      await loadMeetings();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error("회의를 수정하지 못했습니다."));
+    } finally {
+      setEditPending(false);
+    }
+  }
+
   function meetingStatusLabel(status: string) {
     if (status === "SCHEDULED") {
       return "Upcoming";
@@ -1718,7 +2314,15 @@ const MeetingList = () => {
     })}`;
   }
 
-  const filteredMeetings = meetings.filter((meeting) => {
+  const meetingStatusOrder: Record<string, number> = { IN_PROGRESS: 0, SCHEDULED: 1, ENDED: 2, CANCELED: 3 };
+  const orderedMeetings = [...meetings].sort((left, right) => {
+    const statusDifference = (meetingStatusOrder[left.status] ?? 99) - (meetingStatusOrder[right.status] ?? 99);
+    if (statusDifference !== 0) return statusDifference;
+    const leftTime = new Date(left.status === "SCHEDULED" || left.status === "IN_PROGRESS" ? left.scheduledAt : left.scheduledEndAt).getTime();
+    const rightTime = new Date(right.status === "SCHEDULED" || right.status === "IN_PROGRESS" ? right.scheduledAt : right.scheduledEndAt).getTime();
+    return left.status === "SCHEDULED" || left.status === "IN_PROGRESS" ? leftTime - rightTime : rightTime - leftTime;
+  });
+  const filteredMeetings = orderedMeetings.filter((meeting) => {
     const matchesStatus = statusFilter === "ALL" || meeting.status === statusFilter;
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const matchesQuery = !normalizedQuery
@@ -1728,13 +2332,15 @@ const MeetingList = () => {
     return matchesStatus && matchesQuery;
   });
   const hasMeetings = meetings.length > 0;
+  const meetingPageCount = Math.ceil(filteredMeetings.length / 7);
+  const visibleMeetings = filteredMeetings.slice(meetingPage * 7, meetingPage * 7 + 7);
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Meetings</h1>
-          <p className="text-sm text-muted-foreground">Manage upcoming, live, and past meetings.</p>
+          <h1 className="text-2xl font-bold">{korean ? "회의" : "Meetings"}</h1>
+          <p className="text-sm text-muted-foreground">{korean ? "예정, 진행 중, 종료된 회의를 관리합니다." : "Manage upcoming, live, and past meetings."}</p>
         </div>
         {hasMeetings ? (
           <div className="flex items-center gap-3">
@@ -1746,21 +2352,21 @@ const MeetingList = () => {
               disabled={instantPending}
               type="button"
             >
-              <Play className="w-4 h-4" /> {instantPending ? "Starting..." : "Start Meeting"}
+              <Play className="w-4 h-4" /> {instantPending ? (korean ? "시작 중..." : "Starting...") : (korean ? "회의 시작" : "Start Meeting")}
             </button>
             <button
               className={`px-4 py-2 rounded-md bg-card border text-sm font-medium flex items-center gap-2 transition-colors ${filtersOpen ? "border-foreground text-foreground" : "border-border hover:bg-muted"}`}
               onClick={() => setFiltersOpen((current) => !current)}
               type="button"
             >
-              <Filter className="w-4 h-4" /> {filtersOpen ? "Hide Filters" : "Filter"}
+              <Filter className="w-4 h-4" /> {filtersOpen ? (korean ? "필터 숨기기" : "Hide Filters") : (korean ? "필터" : "Filter")}
             </button>
             <button
               className="px-4 py-2 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 flex items-center gap-2 transition-colors"
               onClick={openCreateModal}
               type="button"
             >
-              <Plus className="w-4 h-4" /> Schedule Meeting
+              <Plus className="w-4 h-4" /> {korean ? "회의 일정 만들기" : "Schedule Meeting"}
             </button>
           </div>
         ) : null}
@@ -1769,27 +2375,27 @@ const MeetingList = () => {
       {hasMeetings && filtersOpen ? (
         <div className="bg-card border border-border rounded-lg p-4 flex flex-col gap-4 md:flex-row md:items-end">
           <div className="flex-1 min-w-0">
-            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Search</label>
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{korean ? "검색" : "Search"}</label>
             <input
               className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by title, host, or status"
+              placeholder={korean ? "제목, 호스트 또는 상태로 검색" : "Search by title, host, or status"}
               type="search"
               value={searchQuery}
             />
           </div>
           <div className="w-full md:w-56">
-            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Status</label>
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{korean ? "상태" : "Status"}</label>
             <select
               className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
               onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
               value={statusFilter}
             >
-              <option value="ALL">All statuses</option>
-              <option value="SCHEDULED">Upcoming</option>
-              <option value="IN_PROGRESS">In Progress</option>
-              <option value="ENDED">Confirmed</option>
-              <option value="CANCELED">Canceled</option>
+              <option value="ALL">{korean ? "모든 상태" : "All statuses"}</option>
+              <option value="SCHEDULED">{korean ? "예정" : "Upcoming"}</option>
+              <option value="IN_PROGRESS">{korean ? "진행 중" : "In Progress"}</option>
+              <option value="ENDED">{korean ? "종료됨" : "Confirmed"}</option>
+              <option value="CANCELED">{korean ? "취소됨" : "Canceled"}</option>
             </select>
           </div>
           <button
@@ -1800,12 +2406,12 @@ const MeetingList = () => {
             }}
             type="button"
           >
-            Reset
+            {korean ? "초기화" : "Reset"}
           </button>
         </div>
       ) : null}
 
-      {loading ? <LoadingState label="Loading meetings..." /> : null}
+      {loading ? <LoadingState label={korean ? "회의를 불러오는 중..." : "Loading meetings..."} /> : null}
 
       {!loading && error instanceof ApiRequestError && error.status === 403 ? <PermissionDenied type="project" /> : null}
 
@@ -1892,7 +2498,7 @@ const MeetingList = () => {
       ) : null}
 
       {!loading && !error && filteredMeetings.length > 0 ? (
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="bg-card border border-border rounded-lg overflow-visible">
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-muted-foreground uppercase border-b border-border bg-muted/30">
               <tr>
@@ -1901,10 +2507,11 @@ const MeetingList = () => {
                 <th className="px-6 py-4 font-medium">Date & Time</th>
                 <th className="px-6 py-4 font-medium">Host</th>
                 <th className="px-6 py-4 font-medium">Participants</th>
+                <th className="px-6 py-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredMeetings.map((meeting) => (
+              {visibleMeetings.map((meeting) => (
                 <tr
                   key={meeting.id}
                   onClick={() => navigate(meeting.id)}
@@ -1919,10 +2526,32 @@ const MeetingList = () => {
                   <td className="px-6 py-4 text-muted-foreground">{meetingDateTimeLabel(meeting)}</td>
                   <td className="px-6 py-4 text-muted-foreground">{meeting.host}</td>
                   <td className="px-6 py-4 text-muted-foreground flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {meeting.participantCount}</td>
+                  <td className="px-6 py-4 text-right">
+                    {canManageMeeting(meeting) ? (
+                      <div className="relative inline-block" onClick={(event) => event.stopPropagation()}>
+                        <button aria-label={`${meeting.title} meeting actions`} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setOpenMeetingMenu((current) => current === meeting.id ? null : meeting.id)} type="button">
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+                        {openMeetingMenu === meeting.id ? (
+                          <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-md border border-border bg-card p-1 text-left shadow-lg">
+                            <button className="w-full rounded px-2 py-1.5 text-xs hover:bg-muted" onClick={() => openEditMeeting(meeting)} type="button">Edit</button>
+                            <button className="w-full rounded px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deletePendingMeetingId === meeting.id} onClick={() => void handleDeleteMeeting(meeting)} type="button">{deletePendingMeetingId === meeting.id ? "Deleting..." : "Delete"}</button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {meetingPageCount > 1 ? (
+            <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
+              <button className="text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={meetingPage === 0} onClick={() => setMeetingPage((page) => Math.max(0, page - 1))} type="button">Previous</button>
+              <span className="text-xs text-muted-foreground">{meetingPage + 1} / {meetingPageCount}</span>
+              <button className="text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={meetingPage >= meetingPageCount - 1} onClick={() => setMeetingPage((page) => page + 1)} type="button">Next</button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -2015,6 +2644,24 @@ const MeetingList = () => {
           </div>
         </div>
       ) : null}
+
+      {editingMeeting ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(event) => { if (event.target === event.currentTarget && !editPending) setEditingMeeting(null); }}>
+          <form className="w-full max-w-lg space-y-4 rounded-lg border border-border bg-card p-6 shadow-xl" onSubmit={(event) => void handleEditMeeting(event)}>
+            <div className="flex items-start justify-between gap-4">
+              <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Meeting management</p><h2 className="text-lg font-semibold">Edit meeting</h2></div>
+              <button aria-label="Close edit meeting" className="rounded-md p-1 text-muted-foreground hover:bg-muted" onClick={() => setEditingMeeting(null)} type="button"><X className="h-4 w-4" /></button>
+            </div>
+            <label className="block text-sm font-medium">Title<input className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" onChange={(event) => setEditTitle(event.target.value)} value={editTitle} /></label>
+            <label className="block text-sm font-medium">Description<textarea className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" onChange={(event) => setEditDescription(event.target.value)} rows={3} value={editDescription} /></label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-medium">Start<input className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" onChange={(event) => setEditStartAt(event.target.value)} type="datetime-local" value={editStartAt} /></label>
+              <label className="block text-sm font-medium">End<input className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" onChange={(event) => setEditEndAt(event.target.value)} type="datetime-local" value={editEndAt} /></label>
+            </div>
+            <div className="flex justify-end gap-2"><button className="rounded-md border border-border px-4 py-2 text-sm" disabled={editPending} onClick={() => setEditingMeeting(null)} type="button">Cancel</button><button className="rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background disabled:opacity-60" disabled={editPending} type="submit">{editPending ? "Saving..." : "Save changes"}</button></div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -2025,9 +2672,12 @@ const MeetingContextLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
+  const shellContext = useOutletContext<ShellOutletContext>();
   const [meetingDetail, setMeetingDetail] = useState<MeetingDetailResponse | null>(null);
   const [meetingLoading, setMeetingLoading] = useState(true);
   const [meetingError, setMeetingError] = useState<Error | null>(null);
+  const korean = locale === "ko";
 
   const loadMeeting = React.useCallback(async () => {
     if (!session || !meetingId) {
@@ -2054,18 +2704,32 @@ const MeetingContextLayout = () => {
     void loadMeeting();
   }, [loadMeeting]);
 
+  useEffect(() => {
+    if (!meetingId || meetingDetail?.id !== meetingId) {
+      shellContext.setMeetingAiContext(null);
+      return;
+    }
+
+    const hasMeetingAiPermission = meetingDetail.myRole !== null
+      || shellContext.spaceDetail?.role === "OWNER"
+      || shellContext.spaceDetail?.role === "ADMIN";
+    // Meeting AI requires a meeting participant role or a Space ACL override.
+    shellContext.setMeetingAiContext(hasMeetingAiPermission ? meetingId : null);
+    return () => shellContext.setMeetingAiContext(null);
+  }, [meetingDetail, meetingId, shellContext.setMeetingAiContext, shellContext.spaceDetail?.role]);
+
   function meetingStatusLabel(status: string) {
     if (status === "SCHEDULED") {
-      return "Upcoming";
+      return korean ? "예정" : "Upcoming";
     }
     if (status === "IN_PROGRESS") {
-      return "In Progress";
+      return korean ? "진행 중" : "In Progress";
     }
     if (status === "ENDED") {
-      return "Confirmed";
+      return korean ? "종료됨" : "Confirmed";
     }
     if (status === "CANCELED") {
-      return "Canceled";
+      return korean ? "취소됨" : "Canceled";
     }
     return status;
   }
@@ -2088,24 +2752,25 @@ const MeetingContextLayout = () => {
 
   function timeRangeLabel() {
     if (!meetingDetail) {
-      return "Loading schedule...";
+      return korean ? "일정을 불러오는 중..." : "Loading schedule...";
     }
     const scheduledAt = new Date(meetingDetail.scheduledAt);
     const scheduledEndAt = new Date(meetingDetail.scheduledEndAt);
     if (Number.isNaN(scheduledAt.getTime()) || Number.isNaN(scheduledEndAt.getTime())) {
-      return "Schedule unavailable";
+      return korean ? "일정 정보 없음" : "Schedule unavailable";
     }
-    return `${scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${scheduledAt.toLocaleTimeString("en-US", {
+    const dateLocale = korean ? "ko-KR" : "en-US";
+    return `${scheduledAt.toLocaleDateString(dateLocale, { month: "short", day: "numeric" })}, ${scheduledAt.toLocaleTimeString(dateLocale, {
       hour: "numeric",
       minute: "2-digit"
-    })} - ${scheduledEndAt.toLocaleTimeString("en-US", {
+    })} - ${scheduledEndAt.toLocaleTimeString(dateLocale, {
       hour: "numeric",
       minute: "2-digit"
     })}`;
   }
 
   if (meetingLoading) {
-    return <LoadingState label="Loading meeting..." />;
+    return <LoadingState label={korean ? "회의를 불러오는 중..." : "Loading meeting..."} />;
   }
 
   if (meetingError instanceof ApiRequestError && meetingError.status === 403) {
@@ -2121,12 +2786,12 @@ const MeetingContextLayout = () => {
             onClick={() => navigate(`/spaces/${spaceId}/meetings`)}
             type="button"
           >
-            Back to meetings
+            {korean ? "회의 목록으로" : "Back to meetings"}
           </button>
         )}
-        desc="The meeting may have been deleted or you may no longer have access."
+        desc={korean ? "회의가 삭제되었거나 더 이상 접근할 수 없습니다." : "The meeting may have been deleted or you may no longer have access."}
         icon={<Video className="w-5 h-5" />}
-        title="Meeting not found"
+        title={korean ? "회의를 찾을 수 없습니다" : "Meeting not found"}
       />
     );
   }
@@ -2138,13 +2803,13 @@ const MeetingContextLayout = () => {
         onRetry={() => {
           void loadMeeting();
         }}
-        title="Couldn't load meeting"
+        title={korean ? "회의를 불러올 수 없습니다" : "Couldn't load meeting"}
       />
     );
   }
 
   if (!meetingDetail) {
-    return <LoadingState label="Loading meeting..." />;
+    return <LoadingState label={korean ? "회의를 불러오는 중..." : "Loading meeting..."} />;
   }
 
   const joinTarget = meetingDetail.status === "IN_PROGRESS" ? "live" : "live/prejoin";
@@ -2152,14 +2817,17 @@ const MeetingContextLayout = () => {
     meetingDetail,
     meetingLoading,
     meetingError,
-    reloadMeeting: loadMeeting
+    reloadMeeting: loadMeeting,
+    canManageParticipants: shellContext.spaceDetail?.role === "OWNER"
+      || shellContext.spaceDetail?.role === "ADMIN"
+      || meetingDetail.myRole === "HOST"
   };
 
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Meeting Context Header */}
-      <div className="border-b border-border bg-card px-8 pt-6 pb-0 flex flex-col gap-6 shrink-0">
-        <div className="flex items-start justify-between">
+      <div className="border-b border-border bg-card px-4 sm:px-8 pt-6 pb-0 flex flex-col gap-5 sm:gap-6 shrink-0">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${meetingStatusStyle(meetingDetail.status)}`}>{meetingStatusLabel(meetingDetail.status)}</span>
@@ -2167,46 +2835,48 @@ const MeetingContextLayout = () => {
             </div>
             <h1 className="text-2xl font-bold text-foreground">{meetingDetail.title}</h1>
           </div>
-          <button
-            onClick={() => navigate(joinTarget)}
-            className="bg-primary text-primary-foreground px-6 py-2.5 rounded-md text-sm font-bold shadow-sm hover:bg-primary/90 flex items-center gap-2 transition-colors"
-          >
-            <Video className="w-4 h-4" /> {meetingDetail.status === "IN_PROGRESS" ? "Resume Meeting Room" : "Enter Meeting Room"}
-          </button>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <button
+              onClick={() => navigate(joinTarget)}
+              className="bg-primary text-primary-foreground px-6 py-2.5 rounded-md text-sm font-bold shadow-sm hover:bg-primary/90 flex items-center gap-2 transition-colors"
+            >
+              <Video className="w-4 h-4" /> {meetingDetail.status === "IN_PROGRESS" ? (korean ? "회의 다시 참여" : "Resume Meeting Room") : (korean ? "회의실 입장" : "Enter Meeting Room")}
+            </button>
+          </div>
         </div>
 
         {/* Context Navigation Tabs */}
-        <nav className="flex items-center gap-6 text-sm font-medium">
+        <nav className="flex items-center gap-6 overflow-x-auto text-sm font-medium">
           <NavLink
             to={`/spaces/${spaceId}/meetings/${meetingId}`}
             end
             className={({ isActive }) => `pb-3 border-b-2 transition-colors ${isActive ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
           >
-            Overview
+            {korean ? "개요" : "Overview"}
           </NavLink>
           <NavLink
             to={`/spaces/${spaceId}/meetings/${meetingId}/transcript`}
             className={({ isActive }) => `pb-3 border-b-2 transition-colors ${isActive ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
           >
-            Transcript
+            {korean ? "전사" : "Transcript"}
           </NavLink>
           <NavLink
             to={`/spaces/${spaceId}/meetings/${meetingId}/report`}
             className={({ isActive }) => `pb-3 border-b-2 transition-colors ${isActive ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
           >
-            AI Report
+            {korean ? "AI 회의록" : "AI Report"}
           </NavLink>
           <NavLink
             to={`/spaces/${spaceId}/meetings/${meetingId}/tasks`}
             className={({ isActive }) => `pb-3 border-b-2 transition-colors ${isActive ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
           >
-            Task Candidates
+            {korean ? "태스크 후보" : "Task Candidates"}
           </NavLink>
           <NavLink
-            to={`/spaces/${spaceId}/meetings/${meetingId}/ai`}
-            className={({ isActive }) => `pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${isActive ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
+            to={`/spaces/${spaceId}/meetings/${meetingId}/participants`}
+            className={({ isActive }) => `pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${isActive ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
           >
-            <Sparkles className="w-3.5 h-3.5" /> Meeting AI
+            <Users className="w-3.5 h-3.5" /> {korean ? "참가자" : "Participants"}
           </NavLink>
         </nav>
       </div>
@@ -2233,9 +2903,7 @@ const MeetingOverview = () => {
       <div className="space-y-6 xl:col-span-2">
         <div className="bg-card border border-border rounded-lg p-6">
           <h3 className="font-semibold mb-4 text-foreground">Agenda & Description</h3>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {meetingDetail.description?.trim() || "No meeting description has been added yet."}
-          </p>
+          <MeetingDescription value={meetingDetail.description} />
         </div>
       </div>
 
@@ -2275,6 +2943,130 @@ const MeetingOverview = () => {
       </div>
     </div>
   );
+};
+
+const MeetingParticipants = () => {
+  const { session } = useAuthState();
+  const authSession = session as AuthSession;
+  const { spaceId = "" } = useParams();
+  const { meetingDetail, canManageParticipants, reloadMeeting } = useOutletContext<MeetingOutletContext>();
+  const [spaceMembers, setSpaceMembers] = useState<SpaceMemberSummary[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberPending, setMemberPending] = useState(false);
+  const [invitePending, setInvitePending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!canManageParticipants || !spaceId) return;
+    void fetchSpaceMembers(authSession, spaceId).then((response) => setSpaceMembers(response.members)).catch(() => setSpaceMembers([]));
+  }, [authSession, canManageParticipants, spaceId]);
+
+  if (!meetingDetail) {
+    return <LoadingState label="Loading participants..." />;
+  }
+
+  const activeParticipants = meetingDetail.participants.filter((participant) => participant.accessStatus === "ACTIVE");
+  const availableMembers = spaceMembers.filter((member) => !activeParticipants.some((participant) => participant.userId === member.userId));
+  const matchingMembers = availableMembers.filter((member) => {
+    const query = memberSearch.trim().toLocaleLowerCase();
+    if (!query) return true;
+    return [member.displayName, member.email, member.userId]
+      .filter(Boolean)
+      .some((value) => value!.toLocaleLowerCase().includes(query));
+  });
+
+  async function handleAddMember(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMemberId || memberPending) return;
+    setMemberPending(true); setError("");
+    try {
+      await addMeetingParticipant(authSession, meetingDetail!.id, { userId: selectedMemberId, role: "VIEWER", participantType: "member" });
+      setNotice("Space member added to this meeting."); setSelectedMemberId(""); await reloadMeeting();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Couldn't add the space member."); }
+    finally { setMemberPending(false); }
+  }
+  async function handleCreateGuestInvite(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const targetMeetingId = meetingDetail?.id;
+    if (invitePending || !targetMeetingId) return;
+    setInvitePending(true);
+    setError("");
+    try {
+      const result = await createMeetingInvitation(authSession, targetMeetingId);
+      const url = `${window.location.origin}/meeting-invitations/${encodeURIComponent(targetMeetingId)}/${encodeURIComponent(result.invitationId)}#token=${encodeURIComponent(result.inviteToken)}`;
+      await navigator.clipboard.writeText(url);
+      setNotice("Guest invite link copied. Sign in to join this meeting directly.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Couldn't create the guest invitation.");
+    } finally {
+      setInvitePending(false);
+    }
+  }
+
+  return (
+    <div className="max-w-3xl space-y-5 p-4 sm:p-8">
+      <section className="rounded-lg border border-border bg-card p-6">
+        <div className="flex flex-col items-start justify-between gap-3 border-b border-border pb-4 sm:flex-row sm:gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Meeting access</p>
+            <h2 className="mt-1 text-lg font-semibold text-foreground">Participants</h2>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Space membership does not automatically grant access to this meeting. Only active participants can view its transcript, report, and Meeting AI.</p>
+          </div>
+          <span className="shrink-0 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground">{activeParticipants.length} active</span>
+        </div>
+        {notice ? <p className="mt-3 text-xs text-emerald-700" role="status">{notice}</p> : null}
+        {error ? <p className="mt-3 text-xs text-red-600" role="alert">{error}</p> : null}
+        <div className="mt-2 divide-y divide-border">
+          {activeParticipants.length ? activeParticipants.map((participant) => {
+            const name = participant.displayName?.trim() || participant.email?.trim() || participant.userId;
+            return (
+              <div className="flex items-center gap-3 py-4" key={participant.id}>
+                <div aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-foreground">{name.charAt(0).toUpperCase()}</div>
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-foreground">{name}</p><p className="truncate text-xs text-muted-foreground">{participant.role === "HOST" ? "Host" : participant.participantType === "member" ? "Member" : "Guest"}</p></div>
+              </div>
+            );
+          }) : <EmptyState desc="An owner, admin, or active host can grant access. Guests can join with a valid invite link after signing in." icon={<Users className="w-5 h-5" />} title="No active participants" />}
+        </div>
+      </section>
+      {canManageParticipants ? <section className="rounded-lg border border-border bg-card p-6">
+        <form className="mb-5 flex flex-wrap items-end gap-3 border-b border-border pb-5" onSubmit={handleAddMember}>
+          <div className="min-w-0 flex-1">
+            <label className="mb-1 block text-xs font-semibold text-muted-foreground" htmlFor="meeting-member-search">Add Space Member</label>
+            <input
+              aria-label="Search space members"
+              className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary/50"
+              disabled={memberPending}
+              id="meeting-member-search"
+              onChange={(event) => { setMemberSearch(event.target.value); setSelectedMemberId(""); }}
+              placeholder="Search by name or email"
+              value={selectedMemberId ? (availableMembers.find((member) => member.userId === selectedMemberId)?.displayName || availableMembers.find((member) => member.userId === selectedMemberId)?.email || "") : memberSearch}
+            />
+            {memberSearch.trim() && !selectedMemberId ? (
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border bg-card shadow-sm" role="listbox">
+                {matchingMembers.length ? matchingMembers.map((member) => {
+                  const label = member.displayName || member.email || member.userId;
+                  return <button className="block w-full px-3 py-2 text-left text-sm hover:bg-muted" key={member.id} onClick={() => { setSelectedMemberId(member.userId); setMemberSearch(""); }} type="button">{label}<span className="ml-2 text-xs text-muted-foreground">{member.email && member.displayName ? member.email : ""}</span></button>;
+                }) : <p className="px-3 py-2 text-xs text-muted-foreground">No matching members.</p>}
+              </div>
+            ) : null}
+            {selectedMemberId ? <p className="mt-1 text-xs text-muted-foreground">Selected: {availableMembers.find((member) => member.userId === selectedMemberId)?.displayName || availableMembers.find((member) => member.userId === selectedMemberId)?.email}</p> : null}
+          </div>
+          <button className="min-h-10 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50" disabled={!selectedMemberId || memberPending} type="submit">{memberPending ? "Adding..." : "Grant access"}</button>
+        </form>
+        <form className="flex items-center justify-between gap-3 border-b border-border pb-4" onSubmit={handleCreateGuestInvite}>
+          <p className="text-sm text-muted-foreground">Create a guest link. Recipients sign in and join this meeting directly.</p>
+          <button className="min-h-10 shrink-0 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50" disabled={invitePending} type="submit">{invitePending ? "Creating..." : "Copy guest invite"}</button>
+        </form>
+      </section> : null}
+    </div>
+  );
+};
+
+const MeetingReportRoute = () => {
+  const { session } = useAuthState();
+  return <MeetingReportPage session={session} />;
 };
 // 5.2 Transcript
 const MeetingTranscript = () => {
@@ -2415,7 +3207,7 @@ const MeetingTranscript = () => {
           )}
           desc="The meeting may have been deleted or you may no longer have access."
           icon={<FileText className="w-5 h-5" />}
-          title="Transcript unavailable"
+          title="Couldn't load transcript"
         />
       ) : null}
 
@@ -2483,287 +3275,6 @@ const MeetingTranscript = () => {
       {!loading && !error && meetingDetail?.status === "IN_PROGRESS" ? (
         <p className="text-xs text-muted-foreground mt-4">This transcript can continue updating while the meeting is live.</p>
       ) : null}
-    </div>
-  );
-};
-
-// 5.3 AI Report
-function parseReportSections(markdown: string | null) {
-  const decisions: string[] = [];
-  const actions: string[] = [];
-  if (!markdown) {
-    return { decisions, actions };
-  }
-
-  let section = "";
-  for (const rawLine of markdown.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-    if (line.startsWith("##")) {
-      section = line.replace(/^##+\s*/, "").toLowerCase();
-      continue;
-    }
-    if (!line.startsWith("-")) {
-      continue;
-    }
-    const value = line.replace(/^-\s*/, "").trim();
-    if (!value) {
-      continue;
-    }
-    if (section.includes("결정")) {
-      decisions.push(value);
-      continue;
-    }
-    if (section.includes("action")) {
-      actions.push(value);
-    }
-  }
-
-  return { decisions, actions };
-}
-
-function parseActionItemLine(line: string) {
-  const separators = [" — ", " – ", " - ", ": "];
-  for (const separator of separators) {
-    if (line.includes(separator)) {
-      const [left, ...rest] = line.split(separator);
-      const right = rest.join(separator).trim();
-      if (left.trim() && right) {
-        return {
-          who: left.trim(),
-          what: right,
-          due: "Not specified"
-        };
-      }
-    }
-  }
-  return {
-    who: "Not specified",
-    what: line,
-    due: "Not specified"
-  };
-}
-
-const MeetingAIReport = () => {
-  const { session } = useAuthState();
-  const navigate = useNavigate();
-  const { spaceId = "", meetingId = "" } = useParams();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  const [downloading, setDownloading] = useState<"markdown" | "pdf" | "docx" | null>(null);
-  const [report, setReport] = useState<ReportDetailResponse | null>(null);
-
-  const loadReport = React.useCallback(async () => {
-    if (!session || !meetingId) {
-      setReport(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const listResponse = await fetchMeetingReports(session, meetingId);
-      const currentReport =
-        listResponse.reports.find((item) => item.isCurrent)
-        ?? [...listResponse.reports].sort((left, right) => right.version - left.version)[0]
-        ?? null;
-
-      if (!currentReport) {
-        setReport(null);
-      } else {
-        const detail = await fetchMeetingReportDetail(session, meetingId, currentReport.id);
-        setReport(detail);
-      }
-    } catch (cause) {
-      setReport(null);
-      setError(cause instanceof Error ? cause : new Error("회의록을 불러오지 못했습니다."));
-    } finally {
-      setLoading(false);
-    }
-  }, [meetingId, session]);
-
-  useEffect(() => {
-    void loadReport();
-  }, [loadReport]);
-
-  const reportSections = parseReportSections(report?.markdown ?? null);
-  const decisionItems = reportSections.decisions.length > 0 ? reportSections.decisions : [];
-  const actionItems = reportSections.actions.map(parseActionItemLine);
-
-  async function handleConfirm() {
-    if (!session || !meetingId || !report || report.status === "CONFIRMED" || confirming) {
-      return;
-    }
-    setConfirming(true);
-    try {
-      await confirmMeetingReport(session, meetingId, report.id);
-      await loadReport();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause : new Error("회의록 확정에 실패했습니다."));
-    } finally {
-      setConfirming(false);
-    }
-  }
-
-  async function handleDownload(format: "markdown" | "pdf" | "docx") {
-    if (!session || !meetingId || !report || downloading) {
-      return;
-    }
-    setDownloading(format);
-    try {
-      const blob = await downloadMeetingReport(session, meetingId, report.id, format);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `meeting-report-${report.id}.${format === "markdown" ? "md" : format}`;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause : new Error("회의록 다운로드에 실패했습니다."));
-    } finally {
-      setDownloading(null);
-    }
-  }
-
-  if (loading) {
-    return <LoadingState label="Loading report..." />;
-  }
-
-  if (error instanceof ApiRequestError && error.status === 403) {
-    return <PermissionDenied type="report" />;
-  }
-
-  if (error instanceof ApiRequestError && error.status === 404) {
-    return (
-      <EmptyState
-        action={(
-          <button
-            className="bg-foreground text-background px-4 py-2 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors"
-            onClick={() => navigate(`/spaces/${spaceId}/meetings`)}
-            type="button"
-          >
-            Back to meetings
-          </button>
-        )}
-        desc="The report may not exist yet or you no longer have access."
-        icon={<FileText className="w-5 h-5" />}
-        title="Report unavailable"
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <ErrorState
-        desc={error.message}
-        onRetry={() => { void loadReport(); }}
-        title="Couldn't load report"
-      />
-    );
-  }
-
-  if (!report) {
-    return (
-      <EmptyState
-        desc="Generate or confirm a meeting report to see the official summary here."
-        icon={<FileText className="w-5 h-5" />}
-        title="No report yet"
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Status Bar */}
-      <div className={`flex items-center justify-between rounded-lg px-5 py-3 border ${report.status === "CONFIRMED" ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
-        <div className="flex items-center gap-2">
-          {report.status === "CONFIRMED"
-            ? <><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span><span className="text-sm font-medium text-emerald-800">Report Confirmed — added to project knowledge base</span></>
-            : <><span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span><span className="text-sm font-medium text-amber-800">Draft — review and confirm to add to knowledge base</span></>
-          }
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="px-3 py-1.5 rounded-md border border-border text-xs font-semibold hover:bg-background transition-colors disabled:opacity-60"
-            disabled={downloading !== null}
-            onClick={() => void handleDownload("markdown")}
-            type="button"
-          >
-            {downloading === "markdown" ? "Downloading..." : "MD"}
-          </button>
-          <button
-            className="px-3 py-1.5 rounded-md border border-border text-xs font-semibold hover:bg-background transition-colors disabled:opacity-60"
-            disabled={downloading !== null}
-            onClick={() => void handleDownload("pdf")}
-            type="button"
-          >
-            {downloading === "pdf" ? "Downloading..." : "PDF"}
-          </button>
-          {report.status !== "CONFIRMED" ? (
-            <button
-              onClick={() => void handleConfirm()}
-              className="bg-foreground text-background text-xs font-semibold px-4 py-1.5 rounded-md hover:bg-foreground/90 transition-colors disabled:opacity-60"
-              disabled={confirming}
-              type="button"
-            >
-              {confirming ? "Confirming..." : "Confirm Report"}
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div className="bg-card border border-border rounded-lg p-6 space-y-3">
-        <h3 className="font-semibold text-foreground">Meeting Summary</h3>
-        <p className="text-sm text-foreground/80 leading-relaxed">{report.summary}</p>
-      </div>
-
-      {/* Key Decisions */}
-      <div className="bg-card border border-border rounded-lg p-6">
-        <h3 className="font-semibold text-foreground mb-4">Key Decisions</h3>
-        {decisionItems.length > 0 ? (
-          <ul className="space-y-3">
-            {decisionItems.map((decision, index) => (
-              <li key={`${report.id}-decision-${index}`} className="flex gap-3 text-sm text-foreground/80">
-                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{index + 1}</span>
-                {decision}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">No decision list was explicitly captured in this report.</p>
-        )}
-      </div>
-
-      {/* Action Items */}
-      <div className="bg-card border border-border rounded-lg p-6">
-        <h3 className="font-semibold text-foreground mb-4">Action Items</h3>
-        {actionItems.length > 0 ? (
-          <div className="space-y-3">
-            {actionItems.map((action, index) => (
-              <div key={`${report.id}-action-${index}`} className="flex items-start gap-3 py-2 border-b border-border last:border-0">
-                <div className="w-4 h-4 rounded border border-muted-foreground/40 shrink-0 mt-0.5"></div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground">{action.what}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-muted-foreground">→ {action.who}</span>
-                    <span className="text-xs text-muted-foreground">· {action.due}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No action items were explicitly captured in this report.</p>
-        )}
-      </div>
     </div>
   );
 };
@@ -3033,10 +3544,18 @@ const MeetingTaskCandidates = () => {
 };
 
 // 5.5 Meeting AI Chat
-const MeetingAIChat = () => {
+const MeetingAIChat = ({
+  meetingIdOverride,
+  meetingDetailOverride
+}: {
+  meetingIdOverride?: string;
+  meetingDetailOverride?: MeetingDetailResponse | null;
+}) => {
   const { session } = useAuthState();
-  const { meetingId = "" } = useParams();
-  const { meetingDetail } = useOutletContext<MeetingOutletContext>();
+  const { meetingId: routeMeetingId = "" } = useParams();
+  const meetingContext = useOutletContext<MeetingOutletContext | undefined>();
+  const meetingId = meetingIdOverride ?? routeMeetingId;
+  const meetingDetail = meetingDetailOverride ?? meetingContext?.meetingDetail;
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Array<{
     role: "user" | "assistant";
@@ -3159,6 +3678,7 @@ const MeetingAIChat = () => {
 // 6. Project Tasks — Kanban Board
 const ProjectTasks = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
   const { spaceId = "" } = useParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -3174,9 +3694,15 @@ const ProjectTasks = () => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeSearch, setAssigneeSearch] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [priority, setPriority] = useState<TaskCardPriority>("MEDIUM");
   const [status, setStatus] = useState<TaskCardStatus>("TODO");
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dropTargetStatus, setDropTargetStatus] = useState<TaskCardStatus | null>(null);
+  const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState("");
+  const korean = locale === "ko";
 
   const loadTasks = React.useCallback(async () => {
     if (!session || !spaceId) {
@@ -3213,6 +3739,7 @@ const ProjectTasks = () => {
     setTitle("");
     setDescription("");
     setAssigneeId("");
+    setAssigneeSearch("");
     setDueDate("");
     setPriority("MEDIUM");
     setStatus("TODO");
@@ -3230,6 +3757,7 @@ const ProjectTasks = () => {
     setTitle(task.title);
     setDescription(task.description ?? "");
     setAssigneeId(task.assigneeId ?? "");
+    setAssigneeSearch("");
     setDueDate(task.dueDate ?? "");
     setPriority(task.priority);
     setStatus(task.status);
@@ -3299,6 +3827,53 @@ const ProjectTasks = () => {
     }
   }
 
+  async function moveTaskToStatus(taskId: string, nextStatus: TaskCardStatus) {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!session || !spaceId || !task || task.status === nextStatus || movingTaskId) {
+      return;
+    }
+
+    setMoveError("");
+    setMovingTaskId(taskId);
+    try {
+      const updated = await updateTask(session, spaceId, taskId, { status: nextStatus });
+      setTasks((currentTasks) => currentTasks.map((item) => (
+        item.id === taskId ? { ...item, status: updated.status } : item
+      )));
+      try {
+        await loadTasks();
+      } catch {
+        // Keep the successful PATCH response visible while the list refresh catches up.
+      }
+    } catch (cause) {
+      setMoveError(cause instanceof Error ? cause.message : "Task status update failed.");
+    } finally {
+      setMovingTaskId(null);
+    }
+  }
+
+  function handleTaskDragStart(event: React.DragEvent<HTMLDivElement>, taskId: string) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", taskId);
+    setDraggedTaskId(taskId);
+    setMoveError("");
+  }
+
+  function handleTaskDragEnd() {
+    setDraggedTaskId(null);
+    setDropTargetStatus(null);
+  }
+
+  function handleTaskDrop(event: React.DragEvent<HTMLDivElement>, nextStatus: TaskCardStatus) {
+    event.preventDefault();
+    const taskId = event.dataTransfer.getData("text/plain") || draggedTaskId;
+    setDraggedTaskId(null);
+    setDropTargetStatus(null);
+    if (taskId) {
+      void moveTaskToStatus(taskId, nextStatus);
+    }
+  }
+
   function priorityLabel(taskPriority: TaskCardPriority) {
     if (taskPriority === "HIGH") {
       return "High";
@@ -3334,38 +3909,47 @@ const ProjectTasks = () => {
   const columns = [
     { id: "todo", label: "To Do", color: "text-slate-600", dot: "bg-slate-400", status: "TODO" as TaskCardStatus },
     { id: "inprogress", label: "In Progress", color: "text-blue-600", dot: "bg-blue-500", status: "IN_PROGRESS" as TaskCardStatus },
-    { id: "review", label: "In Review", color: "text-purple-600", dot: "bg-purple-500", status: null },
+    { id: "review", label: "In Review", color: "text-purple-600", dot: "bg-purple-500", status: "IN_REVIEW" as TaskCardStatus },
     { id: "done", label: "Done", color: "text-emerald-600", dot: "bg-emerald-500", status: "DONE" as TaskCardStatus }
   ];
 
   const tasksByColumn = columns.map((column) => ({
     ...column,
-    tasks: column.status ? normalizedTasks.filter((task) => task.status === column.status) : []
+    tasks: normalizedTasks.filter((task) => task.status === column.status)
   }));
+  const matchingAssignees = members.filter((member) => {
+    const query = assigneeSearch.trim().toLocaleLowerCase();
+    if (!query) return false;
+    return [member.displayName, member.email, member.userId]
+      .filter(Boolean)
+      .some((value) => value!.toLocaleLowerCase().includes(query));
+  });
 
   return (
     <div className="p-6 flex flex-col gap-4 h-full">
       <div className="flex items-center justify-between shrink-0">
-        <h1 className="text-xl font-bold">Tasks</h1>
+          <h1 className="text-xl font-bold">{korean ? "태스크" : "Tasks"}</h1>
         <div className="flex items-center gap-2">
           <button
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md hover:bg-muted transition-colors"
             onClick={() => setShowOpenOnly((current) => !current)}
             type="button"
           >
-            <Filter className="w-3.5 h-3.5" /> {showOpenOnly ? "Show all" : "Open only"}
+            <Filter className="w-3.5 h-3.5" /> {showOpenOnly ? (korean ? "전체 보기" : "Show all") : (korean ? "진행 중만" : "Open only")}
           </button>
           <button
             className="flex items-center gap-1.5 text-sm font-medium bg-foreground text-background px-3 py-1.5 rounded-md hover:bg-foreground/90 transition-colors"
             onClick={openCreateModal}
             type="button"
           >
-            <Plus className="w-3.5 h-3.5" /> New Task
+            <Plus className="w-3.5 h-3.5" /> {korean ? "태스크 추가" : "New Task"}
           </button>
         </div>
       </div>
 
-      {loading ? <LoadingState label="Loading tasks..." /> : null}
+      {moveError ? <p className="text-sm text-red-600" role="alert">{moveError}</p> : null}
+
+      {loading ? <LoadingState label={korean ? "태스크를 불러오는 중..." : "Loading tasks..."} /> : null}
 
       {!loading && error instanceof ApiRequestError && error.status === 403 ? <PermissionDenied type="project" /> : null}
 
@@ -3416,7 +4000,26 @@ const ProjectTasks = () => {
       {!loading && !error && tasks.length > 0 ? (
         <div className="flex gap-4 overflow-x-auto pb-2 flex-1">
           {tasksByColumn.map((col) => (
-            <div key={col.id} className="flex flex-col gap-3 min-w-[280px] w-[280px]">
+            <div
+              key={col.id}
+              className={`flex flex-col gap-3 min-w-[280px] w-[280px] ${dropTargetStatus === col.status ? "rounded-lg bg-primary/5" : ""}`}
+              onDragLeave={() => {
+                if (dropTargetStatus === col.status) {
+                  setDropTargetStatus(null);
+                }
+              }}
+              onDragOver={(event) => {
+                if (!draggedTaskId || movingTaskId) {
+                  return;
+                }
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDropTargetStatus(col.status);
+              }}
+              onDrop={(event) => {
+                handleTaskDrop(event, col.status);
+              }}
+            >
               <div className="flex items-center gap-2 px-1">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${col.dot}`}></span>
                 <span className={`text-sm font-semibold ${col.color}`}>{col.label}</span>
@@ -3430,7 +4033,11 @@ const ProjectTasks = () => {
                   return (
                     <div
                       key={task.id}
-                      className="bg-card border border-border rounded-lg p-3.5 cursor-pointer hover:border-border/80 hover:shadow-sm transition-all group"
+                      aria-grabbed={draggedTaskId === task.id}
+                      className={`bg-card border border-border rounded-lg p-3.5 cursor-pointer hover:border-border/80 hover:shadow-sm transition-all group ${draggedTaskId === task.id ? "opacity-50" : ""}`}
+                      draggable={!movingTaskId}
+                      onDragEnd={handleTaskDragEnd}
+                      onDragStart={(event) => handleTaskDragStart(event, task.id)}
                       onClick={() => openEditModal(task)}
                     >
                       <p className="text-sm font-medium text-foreground leading-snug mb-3">{task.title}</p>
@@ -3447,7 +4054,7 @@ const ProjectTasks = () => {
                   );
                 }) : (
                   <div className="bg-card border border-dashed border-border rounded-lg p-4 text-xs text-muted-foreground min-h-[92px] flex items-center justify-center text-center">
-                    {col.id === "review" ? "No review state in the current backend workflow." : "No tasks in this column."}
+                    No tasks in this column.
                   </div>
                 )}
                 <button
@@ -3512,18 +4119,24 @@ const ProjectTasks = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Assignee</label>
-                  <select
+                  <input
+                    aria-label="Search assignee"
                     className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
-                    onChange={(event) => setAssigneeId(event.target.value)}
-                    value={assigneeId}
-                  >
-                    <option value="">Unassigned</option>
-                    {members.map((member) => (
-                      <option key={member.id} value={member.userId}>
-                        {member.displayName?.trim() || member.email || member.userId}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(event) => { setAssigneeSearch(event.target.value); setAssigneeId(""); }}
+                    placeholder={assigneeId ? (memberLookup.get(assigneeId)?.name ?? "Search member") : "Search by name or email"}
+                    value={assigneeSearch}
+                  />
+                  {assigneeId ? (
+                    <button className="mt-1 text-xs text-muted-foreground hover:text-foreground" onClick={() => { setAssigneeId(""); setAssigneeSearch(""); }} type="button">Clear assignee</button>
+                  ) : null}
+                  {assigneeSearch.trim() ? (
+                    <div className="mt-1 max-h-32 overflow-y-auto rounded-md border border-border bg-card shadow-sm" role="listbox">
+                      {matchingAssignees.length ? matchingAssignees.map((member) => {
+                        const label = member.displayName?.trim() || member.email || member.userId;
+                        return <button className="block w-full px-3 py-2 text-left text-sm hover:bg-muted" key={member.id} onClick={() => { setAssigneeId(member.userId); setAssigneeSearch(""); }} type="button">{label}<span className="ml-2 text-xs text-muted-foreground">{member.email && member.displayName ? member.email : ""}</span></button>;
+                      }) : <p className="px-3 py-2 text-xs text-muted-foreground">No matching members.</p>}
+                    </div>
+                  ) : null}
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Due date</label>
@@ -3558,6 +4171,7 @@ const ProjectTasks = () => {
                   >
                     <option value="TODO">To Do</option>
                     <option value="IN_PROGRESS">In Progress</option>
+                    <option value="IN_REVIEW">In Review</option>
                     <option value="DONE">Done</option>
                   </select>
                 </div>
@@ -3603,7 +4217,7 @@ const ProjectTasks = () => {
 };
 
 // 7. Knowledge Base — Graph View
-type KnowledgeNodeType = "hub" | ProjectKnowledgeItem["type"];
+type KnowledgeNodeType = "hub" | ProjectKnowledgeItem["type"] | "glossary" | "action" | "summary" | "transcript";
 type KNode = {
   id: string;
   label: string;
@@ -3613,18 +4227,24 @@ type KNode = {
   desc: string;
   connections: string[];
   sourceMeetingId: string | null;
+  sourceKind: "hub" | "meeting" | KnowledgeGraphNode["sourceType"] | "glossary";
   embeddingStatus?: ProjectKnowledgeItem["embeddingStatus"];
   updatedAt?: string;
+  knowledgeId?: string;
 };
-type KEdge = { from: string; to: string };
+type KEdge = { from: string; to: string; similarity?: number };
 type KFolder = { id: string; label: string; nodeIds: string[] };
 
 const NODE_STYLE: Record<KnowledgeNodeType, { fill: string; stroke: string; label: string; dot: string }> = {
-  hub: { fill: "#09090B", stroke: "#09090B", label: "Hub", dot: "bg-foreground" },
-  report: { fill: "#2563EB", stroke: "#2563EB", label: "Report", dot: "bg-blue-600" },
-  decision: { fill: "#7C3AED", stroke: "#7C3AED", label: "Decision", dot: "bg-violet-600" },
-  manual: { fill: "#059669", stroke: "#059669", label: "Manual", dot: "bg-emerald-600" },
-  external: { fill: "#D97706", stroke: "#D97706", label: "External", dot: "bg-amber-600" }
+  hub: { fill: "var(--app-text-strong)", stroke: "var(--app-text-strong)", label: "Hub", dot: "bg-[var(--app-text-strong)]" },
+  report: { fill: "var(--app-accent)", stroke: "var(--app-accent)", label: "Report", dot: "bg-[var(--app-accent)]" },
+  decision: { fill: "var(--app-ai)", stroke: "var(--app-ai)", label: "Decision", dot: "bg-[var(--app-ai)]" },
+  manual: { fill: "var(--app-success)", stroke: "var(--app-success)", label: "Manual", dot: "bg-[var(--app-success)]" },
+  external: { fill: "var(--app-orange)", stroke: "var(--app-orange)", label: "External", dot: "bg-[var(--app-orange)]" },
+  glossary: { fill: "var(--app-knowledge)", stroke: "var(--app-knowledge)", label: "Glossary", dot: "bg-[var(--app-knowledge)]" },
+  action: { fill: "var(--app-action)", stroke: "var(--app-action)", label: "Action", dot: "bg-[var(--app-action)]" },
+  summary: { fill: "var(--app-knowledge)", stroke: "var(--app-knowledge)", label: "Summary", dot: "bg-[var(--app-knowledge)]" },
+  transcript: { fill: "var(--app-subtle)", stroke: "var(--app-subtle)", label: "Transcript", dot: "bg-[var(--app-subtle)]" }
 };
 
 const KNOWLEDGE_TYPE_LABELS: Record<ProjectKnowledgeItem["type"], string> = {
@@ -3632,6 +4252,18 @@ const KNOWLEDGE_TYPE_LABELS: Record<ProjectKnowledgeItem["type"], string> = {
   decision: "Decision",
   manual: "Manual",
   external: "External"
+};
+
+const KNOWLEDGE_NODE_LABELS: Record<KnowledgeNodeType, string> = {
+  hub: "Hub",
+  report: "Report",
+  decision: "Decision",
+  manual: "Manual",
+  external: "External",
+  glossary: "Glossary",
+  action: "Action",
+  summary: "Summary",
+  transcript: "Transcript"
 };
 
 const KNOWLEDGE_STATUS_LABELS: Record<ProjectKnowledgeItem["embeddingStatus"], string> = {
@@ -3653,10 +4285,14 @@ const FolderIcon = ({ open }: { open: boolean }) => (
 const FileIcon = ({ type }: { type: KnowledgeNodeType }) => {
   const colors: Record<KnowledgeNodeType, string> = {
     hub: "text-foreground",
-    report: "text-blue-500",
-    decision: "text-violet-500",
-    manual: "text-emerald-500",
-    external: "text-amber-500"
+    report: "text-[color:var(--app-accent)]",
+    decision: "text-[color:var(--app-ai)]",
+    manual: "text-[color:var(--app-success)]",
+    external: "text-[color:var(--app-orange)]",
+    glossary: "text-[color:var(--app-knowledge)]",
+    action: "text-[color:var(--app-action)]",
+    summary: "text-[color:var(--app-knowledge)]",
+    transcript: "text-[color:var(--app-muted)]"
   };
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`shrink-0 ${colors[type]}`}>
@@ -3666,8 +4302,183 @@ const FileIcon = ({ type }: { type: KnowledgeNodeType }) => {
   );
 };
 
-function buildKnowledgeNodes(items: ProjectKnowledgeItem[], projectName: string): KNode[] {
+function wrapKnowledgeGraphLabel(label: string, maxLength = 18): string[] {
+  if (label.length <= maxLength) return [label];
+  const first = label.slice(0, maxLength - 1);
+  const remainder = label.slice(maxLength - 1);
+  return [`${first}...`, remainder.slice(0, maxLength - 1) + (remainder.length > maxLength - 1 ? "..." : "")];
+}
+
+const KNOWLEDGE_GRAPH_BOUNDS = { minX: 48, maxX: 952, minY: 48, maxY: 652 };
+const KNOWLEDGE_GRAPH_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+function stableKnowledgeGraphOffset(id: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < id.length; index += 1) {
+    hash ^= id.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
+function clampKnowledgeGraphPosition(x: number, y: number) {
+  return {
+    x: Math.min(KNOWLEDGE_GRAPH_BOUNDS.maxX, Math.max(KNOWLEDGE_GRAPH_BOUNDS.minX, x)),
+    y: Math.min(KNOWLEDGE_GRAPH_BOUNDS.maxY, Math.max(KNOWLEDGE_GRAPH_BOUNDS.minY, y))
+  };
+}
+
+function layoutKnowledgeGraphNodes(nodes: KNode[], grouped?: Map<string, KNode[]>): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  const hub = nodes.find((node) => node.type === "hub");
+  if (hub) positions.set(hub.id, { x: 500, y: 350 });
+
+  const groups = grouped ? Array.from(grouped.values()).filter((members) => members.length > 0) : [nodes.filter((node) => node.type !== "hub")];
+  const orderedGroups = groups
+    .map((members) => [...members].sort((left, right) => left.id.localeCompare(right.id)))
+    .sort((left, right) => left[0].id.localeCompare(right[0].id));
+  const groupCount = orderedGroups.length;
+
+  orderedGroups.forEach((members, groupIndex) => {
+    const groupAngle = groupIndex * (Math.PI * 2 / Math.max(groupCount, 1)) - Math.PI / 2;
+    const groupRadius = grouped ? Math.min(285, 190 + Math.sqrt(groupCount) * 28) : 0;
+    const center = grouped
+      ? { x: 500 + Math.cos(groupAngle) * groupRadius, y: 350 + Math.sin(groupAngle) * groupRadius * 0.72 }
+      : { x: 500, y: 350 };
+    const ringCapacity = Math.max(1, Math.ceil(Math.sqrt(members.length)));
+    members.forEach((node, index) => {
+      const ring = Math.floor(index / ringCapacity);
+      const indexInRing = index % ringCapacity;
+      const ringCount = Math.min(ringCapacity, members.length - ring * ringCapacity);
+      const angle = indexInRing * (Math.PI * 2 / Math.max(ringCount, 1)) + stableKnowledgeGraphOffset(node.id) * 0.35;
+      const radius = grouped ? 78 + ring * 88 : 125 + Math.sqrt(index + 1) * 70;
+      const position = clampKnowledgeGraphPosition(
+        center.x + Math.cos(grouped ? angle : index * KNOWLEDGE_GRAPH_GOLDEN_ANGLE) * radius,
+        center.y + Math.sin(grouped ? angle : index * KNOWLEDGE_GRAPH_GOLDEN_ANGLE) * radius * 0.72
+      );
+      positions.set(node.id, position);
+    });
+  });
+
+  return positions;
+}
+
+function measureKnowledgeGraphLayout(nodes: KNode[], edges: KEdge[]) {
+  const radiusFor = (node: KNode) => node.type === "hub" ? 32 : 23;
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  let overlapCount = 0;
+  let outOfBoundsCount = 0;
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    const estimatedLabelWidth = Math.min(180, Math.max(44, node.label.length * 6.2));
+    if (node.x - estimatedLabelWidth / 2 < KNOWLEDGE_GRAPH_BOUNDS.minX || node.x + estimatedLabelWidth / 2 > KNOWLEDGE_GRAPH_BOUNDS.maxX
+      || node.y - radiusFor(node) < KNOWLEDGE_GRAPH_BOUNDS.minY || node.y + radiusFor(node) > KNOWLEDGE_GRAPH_BOUNDS.maxY) {
+      outOfBoundsCount += 1;
+    }
+    for (let otherIndex = index + 1; otherIndex < nodes.length; otherIndex += 1) {
+      const other = nodes[otherIndex];
+      const distance = Math.hypot(node.x - other.x, node.y - other.y);
+      if (distance < radiusFor(node) + radiusFor(other) + 28) overlapCount += 1;
+    }
+  }
+  const lengths = edges.map((edge) => {
+    const from = nodeById.get(edge.from);
+    const to = nodeById.get(edge.to);
+    return from && to ? Math.hypot(from.x - to.x, from.y - to.y) : 0;
+  }).filter((length) => length > 0);
+  return {
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    averageEdgeLength: lengths.length ? lengths.reduce((sum, length) => sum + length, 0) / lengths.length : 0,
+    maxEdgeLength: lengths.length ? Math.max(...lengths) : 0,
+    overlapCount,
+    outOfBoundsCount
+  };
+}
+
+function buildKnowledgeNodes(
+  items: ProjectKnowledgeItem[],
+  graph: KnowledgeGraphResponse | null,
+  projectName: string,
+  terms: DomainTerm[]
+): KNode[] {
   const hubId = "hub";
+  if (graph) {
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    const graphNodes = graph.nodes?.length ? graph.nodes : graph.clusters.flatMap((cluster) => cluster.nodes);
+    const connectedIds = new Map<string, string[]>();
+    graph.edges.forEach((edge) => {
+      connectedIds.set(edge.from, [...(connectedIds.get(edge.from) ?? []), edge.to]);
+      connectedIds.set(edge.to, [...(connectedIds.get(edge.to) ?? []), edge.from]);
+    });
+    const itemNodes = graphNodes.map((node, index) => {
+      const ring = Math.floor(index / 8);
+      const indexInRing = index % 8;
+      const nodesInRing = Math.min(8, graphNodes.length - ring * 8);
+      const angle = (Math.PI * 2 * indexInRing) / Math.max(nodesInRing, 1) - Math.PI / 2;
+      const radius = 180 + ring * 110;
+      const knowledgeId = node.sourceType === "projectKnowledge" ? node.id.replace(/^knowledge:/, "") : undefined;
+      const knowledge = knowledgeId ? itemById.get(knowledgeId) : undefined;
+      const nodeType: KnowledgeNodeType = node.nodeType === "DECISION" ? "decision"
+        : node.nodeType === "ACTION" ? "action"
+          : node.nodeType === "PROJECT_KNOWLEDGE" ? (knowledge?.type ?? "manual")
+            : node.nodeType === "MEETING" ? "summary"
+              : knowledge?.type
+        ?? (node.sourceType === "actionItem" ? "action"
+          : node.sourceType === "decision" ? "decision"
+            : node.sourceType === "glossary" ? "glossary"
+              : node.sourceType === "meetingSummary" ? "summary"
+                : node.sourceType === "transcript" ? "transcript"
+                  : "report");
+      return {
+        id: node.id,
+        label: node.title,
+        type: nodeType,
+        x: 500 + Math.cos(angle) * radius,
+        y: 300 + Math.sin(angle) * radius,
+        desc: knowledge?.contentPreview ?? `${NODE_STYLE[nodeType].label} source indexed for this project.`,
+        connections: connectedIds.get(node.id) ?? [],
+        sourceMeetingId: node.sourceMeetingId,
+        sourceKind: node.sourceType,
+        embeddingStatus: node.embeddingStatus,
+        updatedAt: knowledge?.updatedAt,
+        knowledgeId
+      } satisfies KNode;
+    });
+    const termNodes = terms.map((term, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(terms.length, 1) - Math.PI / 2;
+      const connections = graphNodes
+        .filter((node) => node.title.toLowerCase().includes(term.term.toLowerCase()))
+        .map((node) => node.id);
+      return {
+        id: `term:${term.id}`,
+        label: term.term,
+        type: "glossary" as const,
+        x: 500 + Math.cos(angle) * 330,
+        y: 300 + Math.sin(angle) * 220,
+        desc: term.definition,
+        connections: connections.length ? connections : [hubId],
+        sourceMeetingId: null,
+        sourceKind: "glossary" as const,
+        updatedAt: term.updatedAt
+      } satisfies KNode;
+    });
+    return [
+      {
+        id: hubId,
+        label: projectName,
+        type: "hub",
+        x: 500,
+        y: 300,
+        desc: `Semantic clusters for ${projectName}.`,
+        connections: [],
+        sourceMeetingId: null,
+        sourceKind: "hub"
+      },
+      ...itemNodes,
+      ...termNodes
+    ];
+  }
   const itemNodes = items.map((item, index) => {
     const ring = Math.floor(index / 8);
     const indexInRing = index % 8;
@@ -3683,11 +4494,31 @@ function buildKnowledgeNodes(items: ProjectKnowledgeItem[], projectName: string)
       desc: item.contentPreview,
       connections: [hubId],
       sourceMeetingId: item.sourceMeetingId,
+      sourceKind: "projectKnowledge",
       embeddingStatus: item.embeddingStatus,
-      updatedAt: item.updatedAt
+      updatedAt: item.updatedAt,
+      knowledgeId: item.id
     } satisfies KNode;
   });
 
+  const termNodes = terms.map((term, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(terms.length, 1) - Math.PI / 2;
+    const connections = itemNodes
+      .filter((node) => `${node.label} ${node.desc}`.toLowerCase().includes(term.term.toLowerCase()))
+      .map((node) => node.id);
+    return {
+      id: `term:${term.id}`,
+      label: term.term,
+      type: "glossary" as const,
+      x: 500 + Math.cos(angle) * 330,
+      y: 300 + Math.sin(angle) * 220,
+      desc: term.definition,
+      connections: connections.length ? connections : [hubId],
+      sourceMeetingId: null,
+      sourceKind: "glossary" as const,
+      updatedAt: term.updatedAt
+    } satisfies KNode;
+  });
   return [
     {
       id: hubId,
@@ -3697,37 +4528,57 @@ function buildKnowledgeNodes(items: ProjectKnowledgeItem[], projectName: string)
       y: 300,
       desc: `Central project hub for ${projectName}.`,
       connections: itemNodes.map((node) => node.id),
-      sourceMeetingId: null
+      sourceMeetingId: null,
+      sourceKind: "hub"
     },
-    ...itemNodes
+    ...itemNodes,
+    ...termNodes
   ];
 }
 
-function buildKnowledgeEdges(nodes: KNode[]): KEdge[] {
+function buildKnowledgeEdges(nodes: KNode[], graph?: KnowledgeGraphResponse | null): KEdge[] {
   return Array.from(
     new Set(nodes.flatMap((node) => node.connections.map((connection) => [node.id, connection].sort().join("--"))))
   ).map((key) => {
     const [from, to] = key.split("--");
-    return { from, to };
+    const graphEdge = graph?.edges.find((edge) => [edge.from, edge.to].sort().join("--") === key);
+    return { from, to, similarity: graphEdge?.similarity };
   });
 }
 
-function buildKnowledgeFolders(nodes: KNode[], projectName: string): KFolder[] {
+function buildKnowledgeFolders(nodes: KNode[], graph: KnowledgeGraphResponse | null, projectName: string): KFolder[] {
+  if (graph) {
+    return [
+      { id: "f-hub", label: projectName, nodeIds: ["hub"] },
+      ...graph.clusters.map((cluster) => ({
+        id: cluster.id,
+        label: cluster.label,
+        nodeIds: cluster.nodes.map((node) => node.id)
+      }))
+    ].filter((folder) => folder.nodeIds.length > 0);
+  }
   const itemNodes = nodes.filter((node) => node.type !== "hub");
   return [
     { id: "f-hub", label: projectName, nodeIds: ["hub"] },
     { id: "f-reports", label: "Reports", nodeIds: itemNodes.filter((node) => node.type === "report").map((node) => node.id) },
     { id: "f-decisions", label: "Decisions", nodeIds: itemNodes.filter((node) => node.type === "decision").map((node) => node.id) },
     { id: "f-manual", label: "Manual Notes", nodeIds: itemNodes.filter((node) => node.type === "manual").map((node) => node.id) },
-    { id: "f-external", label: "External Sources", nodeIds: itemNodes.filter((node) => node.type === "external").map((node) => node.id) }
+    { id: "f-external", label: "External Sources", nodeIds: itemNodes.filter((node) => node.type === "external").map((node) => node.id) },
+    { id: "f-glossary", label: "Glossary", nodeIds: nodes.filter((node) => node.type === "glossary").map((node) => node.id) }
   ].filter((folder) => folder.nodeIds.length > 0);
 }
 
 const ProjectKnowledge = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
   const navigate = useNavigate();
   const { spaceId = "" } = useParams();
   const { spaceDetail } = useOutletContext<ShellOutletContext>();
+  const korean = locale === "ko";
+  const graphNodeLabel = (type: KnowledgeNodeType) => {
+    if (!korean) return NODE_STYLE[type].label;
+    return ({ hub: "허브", report: "보고서", decision: "결정", manual: "수동 지식", external: "외부 자료", glossary: "용어", action: "액션", summary: "요약", transcript: "전사" } as const)[type];
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<ProjectKnowledgeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -3735,6 +4586,9 @@ const ProjectKnowledge = () => {
   const [hovered, setHovered] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
+  const [terms, setTerms] = useState<DomainTerm[]>([]);
+  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphResponse | null>(null);
+  const [graphError, setGraphError] = useState<Error | null>(null);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -3743,6 +4597,7 @@ const ProjectKnowledge = () => {
   const [mutationError, setMutationError] = useState("");
   const [notice, setNotice] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [undoKnowledge, setUndoKnowledge] = useState<ProjectKnowledgeDetailResponse | null>(null);
   const [draft, setDraft] = useState<{
     type: ProjectKnowledgeType;
     title: string;
@@ -3756,19 +4611,156 @@ const ProjectKnowledge = () => {
   });
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const svgRef = useRef<SVGSVGElement>(null);
+  const knowledgeLayoutRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
+  const [leftPanelWidth, setLeftPanelWidth] = useState(240);
+  const [rightPanelWidth, setRightPanelWidth] = useState(256);
+  const [resizingPane, setResizingPane] = useState<"left" | "right" | null>(null);
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [editingKnowledge, setEditingKnowledge] = useState(false);
+  const [clusterMode, setClusterMode] = useState<"type" | "meeting" | "similarity" | "folder" | null>(null);
+  const [folderAssignments, setFolderAssignments] = useState<Record<string, string>>({});
+  const [folderLabels, setFolderLabels] = useState<Record<string, string>>({});
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [draggedListNodeId, setDraggedListNodeId] = useState<string | null>(null);
+  const [dropFolderId, setDropFolderId] = useState<string | null>(null);
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
+  const [visibleTypes, setVisibleTypes] = useState<Record<KnowledgeNodeType, boolean>>({
+    hub: true,
+    report: true,
+    decision: true,
+    manual: true,
+    external: true,
+    glossary: true,
+    action: true,
+    summary: true,
+    transcript: true
+  });
   const projectName = spaceDetail?.name ?? "Project Knowledge";
   const currentRole = spaceDetail?.role ?? "MEMBER";
   const canManageKnowledge = currentRole === "OWNER" || currentRole === "ADMIN";
-  const nodes = React.useMemo(() => buildKnowledgeNodes(knowledgeItems, projectName), [knowledgeItems, projectName]);
-  const edges = React.useMemo(() => buildKnowledgeEdges(nodes), [nodes]);
-  const folders = React.useMemo(() => buildKnowledgeFolders(nodes, projectName), [nodes, projectName]);
+  const nodes = React.useMemo(() => buildKnowledgeNodes(knowledgeItems, knowledgeGraph, projectName, terms), [knowledgeGraph, knowledgeItems, projectName, terms]);
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
+  const displayNodes = React.useMemo(() => {
+    let positionedNodes = nodes;
+    const groups: KnowledgeNodeType[] = ["report", "decision", "manual", "external", "glossary"];
+    if (clusterMode) {
+      const grouped = new Map<string, KNode[]>();
+      const nonHubNodes = nodes.filter((node) => node.type !== "hub");
+      if (clusterMode === "type") {
+        groups.forEach((type) => grouped.set(type, nodes.filter((node) => node.type === type)));
+      } else if (clusterMode === "meeting") {
+        nonHubNodes.filter((node) => Boolean(node.sourceMeetingId)).forEach((node) => {
+          const key = node.sourceMeetingId ? `meeting:${node.sourceMeetingId}` : "project";
+          grouped.set(key, [...(grouped.get(key) ?? []), node]);
+        });
+      } else if (clusterMode === "similarity") {
+        const graphClusters = knowledgeGraph?.clusters ?? [];
+        graphClusters.forEach((cluster) => {
+          if (cluster.nodes.length < 2) return;
+          const members = cluster.nodes
+            .map((graphNode) => nodes.find((node) => node.id === graphNode.id))
+            .filter((node): node is KNode => Boolean(node && node.type !== "hub"));
+          if (members.length > 0) grouped.set(`similarity:${cluster.id}`, members);
+        });
+      } else if (clusterMode === "folder") {
+        const sourceFolders = buildKnowledgeFolders(nodes, knowledgeGraph, projectName);
+        nonHubNodes.forEach((node) => {
+          const assignedFolderId = folderAssignments[node.id];
+          const folder = sourceFolders.find((item) =>
+            item.id === assignedFolderId || (!assignedFolderId && item.nodeIds.includes(node.id))
+          );
+          if (!assignedFolderId && !folder) return;
+          const key = `folder:${assignedFolderId ?? folder?.id ?? "unfiled"}`;
+          grouped.set(key, [...(grouped.get(key) ?? []), node]);
+        });
+      }
+      const positions = layoutKnowledgeGraphNodes(nodes, grouped);
+      const groupedNodeIds = new Set(Array.from(grouped.values()).flat().map((node) => node.id));
+      positionedNodes = nodes
+        .filter((node) => node.type === "hub" || groupedNodeIds.has(node.id))
+        .map((node) => ({ ...node, ...(positions.get(node.id) ?? { x: node.x, y: node.y }) }));
+    }
+    if (!clusterMode) {
+      const positions = layoutKnowledgeGraphNodes(nodes);
+      positionedNodes = nodes.map((node) => ({ ...node, ...(positions.get(node.id) ?? { x: node.x, y: node.y }) }));
+    }
+    return positionedNodes;
+  }, [clusterMode, folderAssignments, knowledgeGraph, nodes, projectName]);
+  const edges = React.useMemo(() => buildKnowledgeEdges(nodes, knowledgeGraph), [knowledgeGraph, nodes]);
+  const folders = React.useMemo(() => buildKnowledgeFolders(nodes, knowledgeGraph, projectName), [knowledgeGraph, nodes, projectName]);
+  const displayedFolders = React.useMemo(() => {
+    const knownNodeIds = new Set(nodes.map((node) => node.id));
+    const assigned = new Set<string>();
+    return folders.filter((folder) => folder.id !== "f-hub").map((folder) => {
+      const baseNodeIds = nodes
+        .filter((node) => {
+          const assignedFolderId = folderAssignments[node.id];
+          if (assignedFolderId) return assignedFolderId === folder.id;
+          return folder.nodeIds.includes(node.id);
+        })
+        .map((node) => node.id)
+        .filter((nodeId) => {
+          if (!knownNodeIds.has(nodeId)) return false;
+          assigned.add(nodeId);
+          return true;
+        });
+      return { ...folder, label: folderLabels[folder.id] ?? folder.label, nodeIds: baseNodeIds };
+    });
+  }, [folderAssignments, folderLabels, folders, nodes]);
+  const visibleNodes = React.useMemo(
+    () => displayNodes.filter((node) => visibleTypes[node.type]),
+    [displayNodes, visibleTypes]
+  );
+  const visibleNodeIds = React.useMemo(
+    () => new Set(visibleNodes.map((node) => node.id)),
+    [visibleNodes]
+  );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.debug("[knowledge-graph-layout]", measureKnowledgeGraphLayout(visibleNodes, edges));
+  }, [edges, visibleNodes]);
   const saving = pendingAction !== null;
   const isCreating = pendingAction === "create";
   const isUpdating = pendingAction === "update";
   const isArchiving = pendingAction === "archive";
+
+  useEffect(() => {
+    if (!resizingPane) {
+      return;
+    }
+
+    const resizePane = (event: PointerEvent) => {
+      const layoutBounds = knowledgeLayoutRef.current?.getBoundingClientRect();
+      if (!layoutBounds) {
+        return;
+      }
+
+      if (resizingPane === "left") {
+        setLeftPanelWidth(Math.min(420, Math.max(200, event.clientX - layoutBounds.left)));
+      } else {
+        setRightPanelWidth(Math.min(420, Math.max(240, layoutBounds.right - event.clientX)));
+      }
+    };
+
+    const stopResize = () => setResizingPane(null);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", resizePane);
+    window.addEventListener("pointerup", stopResize);
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", resizePane);
+      window.removeEventListener("pointerup", stopResize);
+    };
+  }, [resizingPane]);
 
   const loadKnowledge = React.useCallback(async () => {
     if (!session || !spaceId) {
@@ -3782,7 +4774,10 @@ const ProjectKnowledge = () => {
     try {
       const response = await fetchProjectKnowledge(session, spaceId);
       setKnowledgeItems(response.items);
-      setSelectedId((current) => current && response.items.some((item) => item.id === current) ? current : null);
+      setSelectedId((current) => {
+        const knowledgeId = current?.replace(/^knowledge:/, "");
+        return current && response.items.some((item) => item.id === knowledgeId) ? current : null;
+      });
     } catch (cause) {
       setKnowledgeItems([]);
       setError(cause instanceof Error ? cause : new Error("지식 목록을 불러오지 못했습니다."));
@@ -3791,16 +4786,45 @@ const ProjectKnowledge = () => {
     }
   }, [session, spaceId]);
 
+  const loadKnowledgeGraph = React.useCallback(async () => {
+    if (!session || !spaceId) {
+      setKnowledgeGraph(null);
+      setGraphError(null);
+      return;
+    }
+    setGraphError(null);
+    try {
+      setKnowledgeGraph(await fetchKnowledgeGraph(session, spaceId));
+    } catch (cause) {
+      setKnowledgeGraph(null);
+      setGraphError(cause instanceof Error ? cause : new Error("Knowledge graph unavailable."));
+    }
+  }, [session, spaceId]);
+
   useEffect(() => {
     void loadKnowledge();
   }, [loadKnowledge]);
+
+  useEffect(() => {
+    void loadKnowledgeGraph();
+  }, [loadKnowledgeGraph]);
+
+  useEffect(() => {
+    if (!session || !spaceId) {
+      setTerms([]);
+      return;
+    }
+    void fetchDomainTerms(session, spaceId, { status: "ACTIVE" })
+      .then((response) => setTerms(response.terms))
+      .catch(() => setTerms([]));
+  }, [session, spaceId]);
 
   useEffect(() => {
     setOpenFolders(new Set(folders.map((folder) => folder.id)));
   }, [folders]);
 
   useEffect(() => {
-    if (!session || !spaceId || !selected || selected.type === "hub") {
+    if (!session || !spaceId || !selected?.knowledgeId) {
       setSelectedDetail(null);
       setDetailError(null);
       setDetailLoading(false);
@@ -3811,7 +4835,7 @@ const ProjectKnowledge = () => {
     setDetailLoading(true);
     setDetailError(null);
 
-    void fetchProjectKnowledgeDetail(session, spaceId, selected.id)
+    void fetchProjectKnowledgeDetail(session, spaceId, selected.knowledgeId)
       .then((detail) => {
         if (!cancelled) {
           setSelectedDetail(detail);
@@ -3841,14 +4865,14 @@ const ProjectKnowledge = () => {
   }, [selected, session, spaceId]);
 
   async function reloadSelectedDetail() {
-    if (!session || !spaceId || !selected || selected.type === "hub") {
+    if (!session || !spaceId || !selected?.knowledgeId) {
       return;
     }
 
     setDetailLoading(true);
     setDetailError(null);
     try {
-      const detail = await fetchProjectKnowledgeDetail(session, spaceId, selected.id);
+      const detail = await fetchProjectKnowledgeDetail(session, spaceId, selected.knowledgeId);
       setSelectedDetail(detail);
       setDraft({
         type: detail.type,
@@ -3866,8 +4890,10 @@ const ProjectKnowledge = () => {
 
   function openCreatePanel() {
     setCreateMode(true);
+    setRightPanelOpen(true);
     setSelectedId(null);
     setSelectedDetail(null);
+    setEditingKnowledge(false);
     setDetailError(null);
     setArchiveConfirmOpen(false);
     setMutationError("");
@@ -3898,8 +4924,8 @@ const ProjectKnowledge = () => {
         content: draft.content.trim(),
         sourceMeetingId: draft.sourceMeetingId.trim() || null
       });
-      await loadKnowledge();
-      setSelectedId(response.id);
+      await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
+      setSelectedId(`knowledge:${response.id}`);
       setCreateMode(false);
       setNotice("지식을 등록했습니다.");
     } catch (cause) {
@@ -3925,7 +4951,7 @@ const ProjectKnowledge = () => {
         title: draft.title.trim(),
         content: draft.content.trim()
       });
-      await Promise.all([loadKnowledge(), fetchProjectKnowledgeDetail(session, spaceId, selectedDetail.id).then((detail) => {
+      await Promise.all([loadKnowledge(), loadKnowledgeGraph(), fetchProjectKnowledgeDetail(session, spaceId, selectedDetail.id).then((detail) => {
         setSelectedDetail(detail);
         setDraft({
           type: detail.type,
@@ -3949,13 +4975,19 @@ const ProjectKnowledge = () => {
     setPendingAction("archive");
     setMutationError("");
     setNotice("");
+    const archived = selectedDetail;
     try {
       await deleteProjectKnowledge(session, spaceId, selectedDetail.id);
       setSelectedId(null);
       setSelectedDetail(null);
       setArchiveConfirmOpen(false);
-      await loadKnowledge();
+      setUndoKnowledge(archived);
       setNotice("지식을 보관했습니다.");
+      try {
+        await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
+      } catch {
+        setNotice("지식을 보관했습니다. 목록 새로고침은 다시 시도해 주세요.");
+      }
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : "지식을 보관하지 못했습니다.");
     } finally {
@@ -3963,8 +4995,37 @@ const ProjectKnowledge = () => {
     }
   }
 
+  async function handleRestoreKnowledge() {
+    if (!session || !spaceId || !undoKnowledge || !canManageKnowledge || saving) return;
+    setPendingAction("archive");
+    setMutationError("");
+    try {
+      await restoreProjectKnowledge(session, spaceId, undoKnowledge.id);
+      setUndoKnowledge(null);
+      setNotice("지식을 복구했습니다.");
+      await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : "지식을 복구하지 못했습니다.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function cancelKnowledgeEdit() {
+    if (selectedDetail) {
+      setDraft({
+        type: selectedDetail.type,
+        title: selectedDetail.title,
+        content: selectedDetail.content,
+        sourceMeetingId: selectedDetail.sourceMeetingId ?? ""
+      });
+    }
+    setMutationError("");
+    setEditingKnowledge(false);
+  }
+
   const highlightIds = hovered
-    ? new Set([hovered, ...(nodes.find((node) => node.id === hovered)?.connections ?? [])])
+    ? new Set([hovered, ...(displayNodes.find((node) => node.id === hovered)?.connections ?? [])])
     : selected
     ? new Set([selected.id, ...selected.connections])
     : null;
@@ -3980,9 +5041,60 @@ const ProjectKnowledge = () => {
       return next;
     });
 
+  function toggleNodeType(type: KnowledgeNodeType) {
+    setVisibleTypes((current) => ({ ...current, [type]: !current[type] }));
+  }
+
+  function moveListNode(nodeId: string, folderId: string) {
+    setFolderAssignments((current) => ({ ...current, [nodeId]: folderId }));
+    setDraggedListNodeId(null);
+    setDropFolderId(null);
+  }
+
+  function renameFolder(folderId: string, fallbackLabel: string) {
+    const nextLabel = window.prompt("Folder name", folderLabels[folderId] ?? fallbackLabel)?.trim();
+    if (nextLabel) {
+      setFolderLabels((current) => ({ ...current, [folderId]: nextLabel }));
+    }
+    setRenamingFolderId(null);
+  }
+
+  async function deleteFolder(folder: KFolder) {
+    setFolderMenuId(null);
+    if (folder.id === "f-hub" || !canManageKnowledge) return;
+    const items = folder.nodeIds
+      .map((nodeId) => nodes.find((node) => node.id === nodeId))
+      .filter((node): node is KNode => Boolean(node?.knowledgeId));
+    const message = items.length > 0
+      ? `Delete folder "${folder.label}" and ${items.length} knowledge item(s)? This cannot be undone.`
+      : `Delete folder "${folder.label}"?`;
+    if (!window.confirm(message)) return;
+    if (items.length > 0 && session && spaceId) {
+      setPendingAction("archive");
+      try {
+        await Promise.all(items.map((node) => deleteProjectKnowledge(session, spaceId, node.knowledgeId!)));
+        await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
+      } catch (cause) {
+        setMutationError(cause instanceof Error ? cause.message : "폴더를 삭제하지 못했습니다.");
+      } finally {
+        setPendingAction(null);
+      }
+    }
+    setFolderAssignments((current) => {
+      const next = { ...current };
+      folder.nodeIds.forEach((nodeId) => delete next[nodeId]);
+      return next;
+    });
+    setFolderLabels((current) => {
+      const next = { ...current };
+      delete next[folder.id];
+      return next;
+    });
+  }
+
   const matchesSearch = (node: KNode) =>
     search === ""
-    || [node.label, node.desc, node.type === "hub" ? "hub" : KNOWLEDGE_TYPE_LABELS[node.type]].join(" ").toLowerCase().includes(search.toLowerCase());
+    || [node.label, node.desc, node.sourceKind === "meeting" ? "meeting" : KNOWLEDGE_NODE_LABELS[node.type]].join(" ").toLowerCase().includes(search.toLowerCase());
 
   const onSvgMouseDown = (e: React.MouseEvent) => {
     if ((e.target as SVGElement).tagName === "svg" || (e.target as SVGElement).tagName === "rect") {
@@ -3998,6 +5110,14 @@ const ProjectKnowledge = () => {
     setTransform((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
   };
   const onSvgMouseUp = () => { isPanning.current = false; };
+  const onSvgClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    const target = event.target as SVGElement;
+    if (target.tagName === "svg" || target.tagName === "rect") {
+      setSelectedId(null);
+      setRightPanelOpen(false);
+      setCreateMode(false);
+    }
+  };
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
@@ -4012,11 +5132,11 @@ const ProjectKnowledge = () => {
     if (Number.isNaN(date.getTime())) {
       return value;
     }
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return date.toLocaleDateString(korean ? "ko-KR" : "en-US", { month: "short", day: "numeric", year: "numeric" });
   }
 
   if (loading) {
-    return <LoadingState label="Loading knowledge..." />;
+    return <LoadingState label={korean ? "지식을 불러오는 중..." : "Loading knowledge..."} />;
   }
 
   if (error instanceof ApiRequestError && error.status === 403) {
@@ -4032,50 +5152,32 @@ const ProjectKnowledge = () => {
             onClick={() => navigate("/spaces")}
             type="button"
           >
-            Back to workspaces
+            {korean ? "워크스페이스로" : "Back to workspaces"}
           </button>
         )}
-        desc="The project was not found or you no longer have access."
+        desc={korean ? "프로젝트를 찾을 수 없거나 더 이상 접근할 수 없습니다." : "The project was not found or you no longer have access."}
         icon={<Library className="w-5 h-5" />}
-        title="Knowledge unavailable"
+        title={korean ? "지식을 사용할 수 없습니다" : "Knowledge unavailable"}
       />
     );
   }
 
   if (error) {
-    return <ErrorState desc={error.message} onRetry={() => { void loadKnowledge(); }} title="Couldn't load knowledge" />;
-  }
-
-  if (knowledgeItems.length === 0 && !createMode) {
-    return (
-      <EmptyState
-        action={canManageKnowledge ? (
-          <button
-            className="bg-foreground text-background px-4 py-2 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors"
-            onClick={openCreatePanel}
-            type="button"
-          >
-            Add knowledge
-          </button>
-        ) : undefined}
-        desc={canManageKnowledge
-          ? "Official project knowledge will appear here after reports or manual knowledge are registered."
-          : "Official project knowledge will appear here after reports or manual knowledge are registered. Your current role can view only."}
-        icon={<Library className="w-5 h-5" />}
-        title="No project knowledge yet"
-      />
-    );
+    return <ErrorState desc={error.message} onRetry={() => { void loadKnowledge(); }} title={korean ? "지식을 불러올 수 없습니다" : "Couldn't load knowledge"} />;
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <div className="w-60 shrink-0 border-r border-border bg-card flex flex-col h-full">
+    <div ref={knowledgeLayoutRef} className="flex h-full min-w-0 overflow-hidden">
+      {leftPanelOpen ? <div
+        className="shrink-0 border-r border-border bg-card flex flex-col h-full"
+        style={{ width: leftPanelWidth }}
+      >
         <div className="px-3 py-2.5 border-b border-border flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search nodes..."
+              placeholder={korean ? "노드 검색..." : "Search nodes..."}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -4084,7 +5186,7 @@ const ProjectKnowledge = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar py-1.5 px-1">
-          {folders.map((folder) => {
+          {displayedFolders.map((folder) => {
             const isOpen = openFolders.has(folder.id);
             const visibleNodes = folder.nodeIds
               .map((id) => nodes.find((node) => node.id === id))
@@ -4092,16 +5194,48 @@ const ProjectKnowledge = () => {
               .filter(matchesSearch);
             if (search !== "" && visibleNodes.length === 0) return null;
             return (
-              <div key={folder.id} className="mb-0.5">
-                <div className="flex items-center gap-1 px-1 py-0.5 rounded-md transition-colors hover:bg-muted/30">
-                  <button onClick={() => toggleFolder(folder.id)} className="flex items-center gap-1.5 flex-1 min-w-0 py-1">
+              <div
+                key={folder.id}
+                className={`mb-0.5 rounded-md transition-colors ${dropFolderId === folder.id ? "bg-primary/10 ring-1 ring-primary/50" : ""}`}
+                onDragEnter={() => { if (draggedListNodeId) setDropFolderId(folder.id); }}
+                onDragOver={(event) => { event.preventDefault(); if (draggedListNodeId) setDropFolderId(folder.id); }}
+                onDrop={() => { if (draggedListNodeId) moveListNode(draggedListNodeId, folder.id); }}
+              >
+                <div className="relative flex items-center gap-1 px-1 py-0.5 rounded-md transition-colors hover:bg-muted/30">
+                  <button onClick={() => toggleFolder(folder.id)} className="flex items-center gap-1.5 flex-1 min-w-0 py-1" type="button">
                     <svg width="10" height="10" viewBox="0 0 10 10" className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}>
                       <path d="M3 2L7 5L3 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
                     </svg>
                     <FolderIcon open={isOpen} />
-                    <span className="text-xs font-medium text-foreground truncate">{folder.label}</span>
+                    {renamingFolderId === folder.id ? (
+                      <input
+                        autoFocus
+                        className="min-w-0 flex-1 rounded border border-primary/40 bg-background px-1 text-xs font-medium text-foreground focus:outline-none"
+                        defaultValue={folder.label}
+                        onBlur={() => setRenamingFolderId(null)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") renameFolder(folder.id, folder.label);
+                          if (event.key === "Escape") setRenamingFolderId(null);
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    ) : <span className="text-xs font-medium text-foreground truncate">{folder.label}</span>}
                     <span className="text-[9px] text-muted-foreground ml-auto shrink-0 pr-1">{folder.nodeIds.length}</span>
                   </button>
+                  <button
+                    aria-label={korean ? `${folder.label} 폴더 메뉴` : `Rename ${folder.label}`}
+                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={() => setFolderMenuId((current) => current === folder.id ? null : folder.id)}
+                    type="button"
+                  >
+                    <MoreVertical className="h-3 w-3" />
+                  </button>
+                  {folderMenuId === folder.id ? (
+                    <div className="absolute z-30 mt-8 ml-32 w-32 rounded-md border border-border bg-card p-1 shadow-lg">
+                      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted" onClick={() => { setFolderMenuId(null); setRenamingFolderId(folder.id); }} type="button">{korean ? "이름 바꾸기" : "Rename"}</button>
+                      {folder.id !== "f-hub" ? <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-red-600 hover:bg-red-50" disabled={!canManageKnowledge || saving} onClick={() => void deleteFolder(folder)} type="button">{korean ? "삭제" : "Delete"}</button> : null}
+                    </div>
+                  ) : null}
                 </div>
 
                 {isOpen ? (
@@ -4109,7 +5243,10 @@ const ProjectKnowledge = () => {
                     {visibleNodes.map((node) => (
                       <button
                         key={node.id}
-                        onClick={() => setSelectedId(selected?.id === node.id ? null : node.id)}
+                        draggable
+                        onDragStart={() => setDraggedListNodeId(node.id)}
+                        onDragEnd={() => setDraggedListNodeId(null)}
+                        onClick={() => { setSelectedId(selected?.id === node.id ? null : node.id); setEditingKnowledge(false); setRightPanelOpen(true); }}
                         onMouseEnter={() => setHovered(node.id)}
                         onMouseLeave={() => setHovered(null)}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer transition-colors hover:bg-muted/50 ${selected?.id === node.id ? "bg-muted" : ""}`}
@@ -4132,45 +5269,97 @@ const ProjectKnowledge = () => {
             onClick={openCreatePanel}
             type="button"
           >
-            <Plus className="w-3.5 h-3.5" /> Add Knowledge
+            <Plus className="w-3.5 h-3.5" /> {korean ? "지식 추가" : "Add Knowledge"}
           </button>
           {!canManageKnowledge ? <p className="mt-2 text-[11px] text-muted-foreground">OWNER 또는 ADMIN만 지식을 등록할 수 있습니다.</p> : null}
-          {notice ? <p className="mt-2 text-[11px] text-emerald-700">{notice}</p> : null}
+          {notice ? (
+            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-emerald-700" role="status">
+              <span>{notice}</span>
+              {undoKnowledge && canManageKnowledge ? (
+                <button
+                  className="shrink-0 rounded border border-emerald-200 px-2 py-1 font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+                  disabled={saving}
+                  onClick={() => void handleRestoreKnowledge()}
+                  type="button"
+                >
+                  {korean ? "되돌리기" : "Undo"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-      </div>
+      </div> : null}
 
-      <div className="flex-1 relative overflow-hidden bg-[#FAFAFA]" style={{ backgroundImage: "radial-gradient(circle, #E4E4E7 1px, transparent 1px)", backgroundSize: "24px 24px" }}>
-        <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-card border border-border rounded-lg px-2 py-1.5 shadow-sm">
+      <button
+        aria-label={korean ? "지식 목록 너비 조절" : "Resize knowledge list"}
+        className="group relative z-20 -ml-px w-2 shrink-0 cursor-col-resize border-0 bg-transparent p-0 focus:outline-none focus-visible:bg-primary/30"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          setResizingPane("left");
+        }}
+        type="button"
+      >
+        <span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
+      </button>
+
+      <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--app-surface-soft)]" style={{ backgroundImage: "radial-gradient(circle, var(--app-line) 1px, transparent 1px)", backgroundSize: "24px 24px" }}>
+        <button
+          aria-label={leftPanelOpen ? (korean ? "지식 목록 숨기기" : "Hide knowledge list") : (korean ? "지식 목록 보기" : "Show knowledge list")}
+          className="absolute left-3 top-3 z-20 rounded-md border border-border bg-card px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+          onClick={() => setLeftPanelOpen((current) => !current)}
+          type="button"
+        >
+          {leftPanelOpen ? (korean ? "목록 숨기기" : "Hide list") : (korean ? "목록 보기" : "Show list")}
+        </button>
+        <div className="absolute left-3 top-14 z-10 flex items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5 shadow-sm">
           <button onClick={() => setTransform((current) => ({ ...current, scale: Math.min(3, current.scale * 1.2) }))} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground text-sm font-bold transition-colors">+</button>
           <span className="text-xs text-muted-foreground w-10 text-center font-mono">{Math.round(transform.scale * 100)}%</span>
           <button onClick={() => setTransform((current) => ({ ...current, scale: Math.max(0.3, current.scale * 0.8) }))} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground text-sm font-bold transition-colors">−</button>
           <div className="w-px h-4 bg-border mx-0.5"></div>
-          <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors">Reset</button>
+          <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors">{korean ? "초기화" : "Reset"}</button>
+          <div className="mx-0.5 h-4 w-px bg-border"></div>
+          <select
+            aria-label={korean ? "노드 묶기 기준" : "Cluster nodes by"}
+            className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground focus:outline-none"
+            onChange={(event) => setClusterMode((event.target.value || null) as "type" | "meeting" | "similarity" | "folder" | null)}
+            value={clusterMode ?? ""}
+          >
+            <option value="">{korean ? "자유 배치" : "Free layout"}</option>
+            <option value="type">{korean ? "유형별" : "By type"}</option>
+            <option value="meeting">{korean ? "회의별" : "By meeting"}</option>
+            <option value="similarity">{korean ? "유사도별" : "By similarity"}</option>
+            <option value="folder">{korean ? "폴더별" : "By folder"}</option>
+          </select>
         </div>
 
         <div className="absolute top-3 right-3 z-10 bg-card border border-border rounded-lg px-3 py-2 shadow-sm space-y-1.5">
           {(Object.entries(NODE_STYLE) as [KnowledgeNodeType, typeof NODE_STYLE[KnowledgeNodeType]][]).map(([type, style]) => (
-            <div key={type} className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${style.dot}`}></span>
-              <span className="text-[10px] text-muted-foreground capitalize">{style.label}</span>
-            </div>
+            <label key={type} className="flex cursor-pointer items-center gap-2 text-[10px] text-muted-foreground">
+              <input checked={visibleTypes[type]} className="h-3 w-3 accent-primary" onChange={() => toggleNodeType(type)} type="checkbox" />
+              <span className={`h-2 w-2 rounded-full ${style.dot}`}></span>
+              <span>{graphNodeLabel(type)}</span>
+            </label>
           ))}
+          {graphError ? <p className="max-w-40 border-t border-border pt-1.5 text-[10px] leading-relaxed text-amber-700">{korean ? "의미 기반 그래프를 불러올 수 없습니다. 공식 지식은 계속 확인할 수 있습니다." : "Semantic graph is unavailable. Official knowledge is still available."}</p> : null}
         </div>
 
         <svg
           ref={svgRef}
           className="w-full h-full cursor-grab active:cursor-grabbing select-none"
+          preserveAspectRatio="xMidYMid meet"
+          viewBox="0 0 1000 700"
           onMouseDown={onSvgMouseDown}
           onMouseMove={onSvgMouseMove}
           onMouseUp={onSvgMouseUp}
           onMouseLeave={onSvgMouseUp}
+          onClick={onSvgClick}
           onWheel={onWheel}
         >
           <rect width="100%" height="100%" fill="transparent" />
           <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
-            {edges.map((edge) => {
-              const fromNode = nodes.find((node) => node.id === edge.from);
-              const toNode = nodes.find((node) => node.id === edge.to);
+            {edges.filter((edge) => visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to)).map((edge) => {
+              const fromNode = displayNodes.find((node) => node.id === edge.from);
+              const toNode = displayNodes.find((node) => node.id === edge.to);
               if (!fromNode || !toNode) return null;
               const isHighlighted = highlightIds ? highlightIds.has(edge.from) && highlightIds.has(edge.to) : false;
               const dimmed = highlightIds && !isHighlighted;
@@ -4181,7 +5370,7 @@ const ProjectKnowledge = () => {
                   y1={fromNode.y}
                   x2={toNode.x}
                   y2={toNode.y}
-                  stroke={isHighlighted ? "#09090B" : "#D4D4D8"}
+                  stroke={isHighlighted ? "var(--app-text-strong)" : "var(--app-line-strong)"}
                   strokeWidth={isHighlighted ? 1.5 : 1}
                   strokeOpacity={dimmed ? 0.15 : 1}
                   strokeDasharray={isHighlighted ? undefined : "4 3"}
@@ -4190,41 +5379,55 @@ const ProjectKnowledge = () => {
               );
             })}
 
-            {nodes.map((node) => {
+            {visibleNodes.map((node) => {
               const style = NODE_STYLE[node.type];
               const isHub = node.type === "hub";
               const radius = isHub ? 22 : 14;
-              const isSelected = selected?.id === node.id;
-              const isHovered = hovered === node.id;
-              const dimmed = highlightIds && !highlightIds.has(node.id);
+                const isSelected = selected?.id === node.id;
+                const isHovered = hovered === node.id;
+                const dimmed = highlightIds && !highlightIds.has(node.id);
               return (
                 <g
                   key={node.id}
                   transform={`translate(${node.x}, ${node.y})`}
-                  onClick={() => setSelectedId(selected?.id === node.id ? null : node.id)}
+                  style={{
+                    transform: clusterMode ? `translate(${node.x}px, ${node.y}px)` : undefined,
+                    transformOrigin: `${node.x}px ${node.y}px`,
+                    transformBox: "view-box",
+                    opacity: dimmed ? 0.2 : 1,
+                    filter: isSelected || isHovered ? "drop-shadow(0 5px 6px rgba(15, 23, 42, 0.22))" : "drop-shadow(0 2px 2px rgba(15, 23, 42, 0.12))",
+                    transition: clusterMode ? "transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease, filter 180ms ease" : "opacity 180ms ease, filter 180ms ease"
+                  }}
+                  onClick={() => { setSelectedId(selected?.id === node.id ? null : node.id); setRightPanelOpen(true); }}
                   onMouseEnter={() => setHovered(node.id)}
                   onMouseLeave={() => setHovered(null)}
-                  className="cursor-pointer"
-                  style={{ opacity: dimmed ? 0.2 : 1, transition: "opacity 0.15s" }}
+                  className="knowledge-graph-node cursor-pointer"
                 >
+                  <circle r={radius + 10} fill="transparent" />
                   {isSelected || isHovered ? <circle r={radius + 6} fill={style.fill} opacity={0.15} /> : null}
                   <circle
-                    r={radius}
+                    r={radius + (isHovered ? 2 : 0)}
                     fill={style.fill}
-                    stroke="white"
+                    stroke="var(--app-surface)"
                     strokeWidth={isSelected ? 3 : 2}
                     style={{ transition: "r 0.15s" }}
                   />
-                  {isHub ? <text textAnchor="middle" dominantBaseline="central" fill="white" fontSize={10} fontWeight="700">MM</text> : null}
+                  {isHub ? <text textAnchor="middle" dominantBaseline="central" fill="var(--app-surface)" fontSize={10} fontWeight="700">MM</text> : null}
                   <text
                     y={radius + 10}
                     textAnchor="middle"
-                    fill="#09090B"
+                    fill="var(--app-text-strong)"
                     fontSize={10}
                     fontWeight={isSelected ? "700" : "500"}
+                    stroke="var(--app-surface)"
+                    strokeWidth={4}
+                    strokeLinejoin="round"
+                    paintOrder="stroke"
                     style={{ pointerEvents: "none" }}
                   >
-                    {node.label}
+                    {wrapKnowledgeGraphLabel(node.label).map((line, index) => (
+                      <tspan key={`${node.id}-label-${index}`} x="0" dy={index === 0 ? 0 : 12}>{line}</tspan>
+                    ))}
                   </text>
                 </g>
               );
@@ -4233,8 +5436,25 @@ const ProjectKnowledge = () => {
         </svg>
       </div>
 
+      {rightPanelOpen && (createMode || selected) ? (
+        <button
+          aria-label="Resize knowledge detail panel"
+          className="group relative z-20 -mr-px w-2 shrink-0 cursor-col-resize border-0 bg-transparent p-0 focus:outline-none focus-visible:bg-primary/30"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            setResizingPane("right");
+          }}
+          type="button"
+        >
+          <span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
+        </button>
+      ) : null}
+
       {createMode ? (
-        <div className="w-64 shrink-0 border-l border-border bg-card flex flex-col h-full">
+        <div
+          className="knowledge-detail-panel shrink-0 border-l border-border bg-card flex flex-col h-full"
+          style={{ width: rightPanelWidth }}
+        >
           <div className="p-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Plus className="w-3.5 h-3.5 text-muted-foreground" />
@@ -4310,26 +5530,43 @@ const ProjectKnowledge = () => {
           </div>
         </div>
       ) : selected ? (
-        <div className="w-64 shrink-0 border-l border-border bg-card flex flex-col h-full">
+        <div
+          className="knowledge-detail-panel shrink-0 border-l border-border bg-card flex flex-col h-full"
+          style={{ width: rightPanelWidth }}
+        >
           <div className="p-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${NODE_STYLE[selected.type].dot}`}></span>
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground capitalize">
-                {selected.type === "hub" ? "hub" : KNOWLEDGE_TYPE_LABELS[selected.type]}
+                {selected.sourceKind === "hub" ? "hub" : selected.sourceKind === "meeting" ? "meeting" : KNOWLEDGE_NODE_LABELS[selected.type]}
               </span>
             </div>
-            <button onClick={() => setSelectedId(null)} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors" type="button">
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {selected.knowledgeId && canManageKnowledge && !editingKnowledge ? (
+                <button
+                  className="rounded-md px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!selectedDetail || detailLoading}
+                  onClick={() => { setEditingKnowledge(true); setMutationError(""); setNotice(""); }}
+                  type="button"
+                >
+                  Edit
+                </button>
+              ) : null}
+              <button onClick={() => { setSelectedId(null); setEditingKnowledge(false); }} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors" type="button">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <div>
               <h3 className="font-semibold text-foreground text-sm leading-snug">{selected.label}</h3>
             </div>
-            {selected.type === "hub" ? (
+            {selected.sourceKind === "hub" ? (
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Official project knowledge connected to this space. Only accessible knowledge is shown here.
+                Semantic clusters use official project knowledge and meetings you can access. Raw transcript chunks are not shown.
               </p>
+            ) : selected.sourceKind === "meeting" ? (
+              <p className="text-xs text-muted-foreground leading-relaxed">This meeting is connected by semantic similarity. Open the meeting to review its transcript and report.</p>
             ) : detailLoading ? (
               <p className="text-xs text-muted-foreground leading-relaxed">Loading detail...</p>
             ) : detailError ? (
@@ -4347,11 +5584,11 @@ const ProjectKnowledge = () => {
               <p className="text-xs text-muted-foreground leading-relaxed">{selectedDetail?.content ?? selected.desc}</p>
             )}
 
-            {selected.type !== "hub" ? (
+            {selected.sourceKind !== "hub" ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${NODE_STYLE[selected.type].dot} text-white`}>
-                    {KNOWLEDGE_TYPE_LABELS[selected.type]}
+                    {selected.sourceKind === "meeting" ? "Meeting" : KNOWLEDGE_NODE_LABELS[selected.type]}
                   </span>
                   {selected.embeddingStatus ? <span className="text-[10px] text-muted-foreground">{KNOWLEDGE_STATUS_LABELS[selected.embeddingStatus]}</span> : null}
                 </div>
@@ -4360,26 +5597,30 @@ const ProjectKnowledge = () => {
               </div>
             ) : null}
 
-            {selected.type !== "hub" && selectedDetail && !detailLoading ? (
+            {Boolean(selected.knowledgeId) && selectedDetail && !detailLoading ? (
               <div className="space-y-3">
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Title</label>
-                  <input
-                    className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
-                    disabled={!canManageKnowledge || saving}
-                    onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                    value={draft.title}
-                  />
+                  {editingKnowledge ? (
+                    <input
+                      className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
+                      disabled={!canManageKnowledge || saving}
+                      onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+                      value={draft.title}
+                    />
+                  ) : <p className="text-sm font-medium text-foreground">{selectedDetail.title}</p>}
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Content</label>
-                  <textarea
-                    className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none disabled:opacity-60"
-                    disabled={!canManageKnowledge || saving}
-                    onChange={(event) => setDraft((current) => ({ ...current, content: event.target.value }))}
-                    rows={8}
-                    value={draft.content}
-                  />
+                  {editingKnowledge ? (
+                    <textarea
+                      className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none disabled:opacity-60"
+                      disabled={!canManageKnowledge || saving}
+                      onChange={(event) => setDraft((current) => ({ ...current, content: event.target.value }))}
+                      rows={8}
+                      value={draft.content}
+                    />
+                  ) : <p className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">{selectedDetail.content}</p>}
                 </div>
                 {!canManageKnowledge ? <p className="text-[11px] text-muted-foreground">현재 계정은 지식을 조회만 할 수 있습니다.</p> : null}
                 {mutationError ? <p className="text-xs text-red-600">{mutationError}</p> : null}
@@ -4391,7 +5632,7 @@ const ProjectKnowledge = () => {
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Connected to</p>
               <div className="space-y-1">
                 {selected.connections.map((connectionId) => {
-                  const connectedNode = nodes.find((node) => node.id === connectionId);
+                  const connectedNode = displayNodes.find((node) => node.id === connectionId);
                   if (!connectedNode) return null;
                   return (
                     <button
@@ -4410,19 +5651,40 @@ const ProjectKnowledge = () => {
           </div>
           <div className="p-4 border-t border-border">
             <div className="space-y-2">
-              {selected.type !== "hub" ? (
+              {selected.knowledgeId ? (
                 <>
-                  <button
-                    className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
-                    disabled={!canManageKnowledge || saving || !selectedDetail}
-                    onClick={() => void handleUpdateKnowledge()}
-                    type="button"
-                  >
-                    {isUpdating ? "Saving..." : "Save Changes"}
-                  </button>
+                  {canManageKnowledge ? (editingKnowledge ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="w-full py-2 rounded-md border border-border text-foreground text-xs font-semibold hover:bg-muted transition-colors disabled:opacity-60"
+                        disabled={saving}
+                        onClick={cancelKnowledgeEdit}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
+                        disabled={saving || !selectedDetail}
+                        onClick={() => void handleUpdateKnowledge()}
+                        type="button"
+                      >
+                        {isUpdating ? "Saving..." : "Save Changes"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
+                      disabled={!selectedDetail}
+                      onClick={() => { setEditingKnowledge(true); setMutationError(""); setNotice(""); }}
+                      type="button"
+                    >
+                      Edit Knowledge
+                    </button>
+                  )) : null}
                   <button
                     className="w-full py-2 rounded-md border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 transition-colors disabled:opacity-60"
-                    disabled={!canManageKnowledge || saving || !selectedDetail}
+                    disabled={!canManageKnowledge || saving || !selectedDetail || editingKnowledge}
                     onClick={() => setArchiveConfirmOpen(true)}
                     type="button"
                   >
@@ -4499,6 +5761,8 @@ const ProjectKnowledge = () => {
 // 8. Members & Roles
 const ProjectMembers = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
+  const authSession = session as AuthSession;
   const { spaceId = "" } = useParams();
   const { spaceDetail } = useOutletContext<ShellOutletContext>();
   const navigate = useNavigate();
@@ -4511,12 +5775,15 @@ const ProjectMembers = () => {
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
+  const [invitations, setInvitations] = useState<Awaited<ReturnType<typeof fetchSpaceInvitations>>["invitations"]>([]);
+  const [invitationActionId, setInvitationActionId] = useState("");
   const [confirmState, setConfirmState] = useState<null | {
     type: "role" | "remove" | "transfer";
     member: SpaceMembersResponse["members"][number];
     nextRole?: "ADMIN" | "MEMBER";
     previousOwnerRole?: "ADMIN" | "MEMBER";
   }>(null);
+  const korean = locale === "ko";
 
   const loadMembers = React.useCallback(async () => {
     if (!session || !spaceId) {
@@ -4545,6 +5812,13 @@ const ProjectMembers = () => {
   const currentRole = spaceDetail?.role ?? "MEMBER";
   const canManageMembers = currentRole === "OWNER" || currentRole === "ADMIN";
   const canTransferOwner = currentRole === "OWNER";
+
+  const loadInvitations = React.useCallback(async () => {
+    if (!session || !spaceId || !canManageMembers) return;
+    try { setInvitations((await fetchSpaceInvitations(session, spaceId)).invitations); } catch { setInvitations([]); }
+  }, [session, spaceId, canManageMembers]);
+
+  useEffect(() => { void loadInvitations(); }, [loadInvitations]);
 
   const roleColor: Record<"OWNER" | "ADMIN" | "MEMBER", string> = {
     OWNER: "bg-foreground text-background",
@@ -4585,6 +5859,7 @@ const ProjectMembers = () => {
       setInviteNotice(`Invite created (${response.status}).`);
       setInviteEmail("");
       setInviteRole("MEMBER");
+      await loadInvitations();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "Invite failed.");
     } finally {
@@ -4627,14 +5902,14 @@ const ProjectMembers = () => {
     <div className="p-8 max-w-3xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Members & Roles</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{members.length} members in this space</p>
+          <h1 className="text-xl font-bold">{korean ? "멤버 및 역할" : "Members & Roles"}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{korean ? `이 스페이스의 멤버 ${members.length}명` : `${members.length} members in this space`}</p>
         </div>
       </div>
 
       {/* Invite */}
       <div className="bg-card border border-border rounded-lg p-5 space-y-3">
-        <h3 className="font-semibold text-sm">Invite Member</h3>
+        <h3 className="font-semibold text-sm">{korean ? "멤버 초대" : "Invite Member"}</h3>
         <div className="flex gap-2">
           <input
             type="email"
@@ -4658,14 +5933,18 @@ const ProjectMembers = () => {
             disabled={!canManageMembers || invitePending}
             className="px-4 py-2 bg-foreground text-background rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors"
           >
-            {invitePending ? "Sending..." : "Send Invite"}
+            {invitePending ? (korean ? "보내는 중..." : "Sending...") : (korean ? "초대 보내기" : "Send Invite")}
           </button>
         </div>
-        {!canManageMembers ? <p className="text-xs text-muted-foreground">Only project owner or admin can invite members.</p> : null}
-        {inviteNotice ? <p className="text-xs text-emerald-700">{inviteNotice}</p> : null}
+        {!canManageMembers ? <p className="text-xs text-muted-foreground">{korean ? "프로젝트 OWNER 또는 ADMIN만 멤버를 초대할 수 있습니다." : "Only project owner or admin can invite members."}</p> : null}
+      {inviteNotice ? <p className="text-xs text-emerald-700">{inviteNotice}</p> : null}
       </div>
+      {canManageMembers ? <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-5 py-4 border-b border-border"><h3 className="font-semibold text-sm">{korean ? "대기 중인 초대" : "Pending invitations"}</h3><p className="mt-1 text-xs text-muted-foreground">{korean ? "아직 참여하지 않은 사람에게 보낸 초대를 관리합니다." : "Manage invitations sent to people who have not joined yet."}</p></div>
+        {invitations.length === 0 ? <p className="px-5 py-6 text-sm text-muted-foreground">No pending invitations.</p> : <div className="divide-y divide-border">{invitations.filter((item) => item.status === "PENDING").map((invitation) => <div className="flex items-center justify-between gap-4 px-5 py-3" key={invitation.invitationId}><div className="min-w-0"><p className="truncate text-sm font-medium">{invitation.email}</p><p className="mt-1 text-xs text-muted-foreground">{invitation.role} · expires {joinedLabel(invitation.expiresAt)}</p></div><div className="flex shrink-0 gap-2"><button className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50" disabled={Boolean(invitationActionId)} onClick={async () => { setInvitationActionId(invitation.invitationId); try { await resendSpaceInvitation(authSession, spaceId, invitation.invitationId); await loadInvitations(); setInviteNotice("Invitation resent."); } catch (cause) { setActionError(cause instanceof Error ? cause.message : "Resend failed."); } finally { setInvitationActionId(""); } }} type="button">Resend</button><button className="rounded-md px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={Boolean(invitationActionId)} onClick={async () => { if (!window.confirm("Cancel this invitation?")) return; setInvitationActionId(invitation.invitationId); try { await cancelSpaceInvitation(authSession, spaceId, invitation.invitationId); await loadInvitations(); } catch (cause) { setActionError(cause instanceof Error ? cause.message : "Cancel failed."); } finally { setInvitationActionId(""); } }} type="button">Cancel</button></div></div>)}</div>}
+      </div> : null}
       {actionError ? <p className="text-xs text-red-600" role="alert">{actionError}</p> : null}
-      {loading ? <LoadingState label="Loading members..." /> : null}
+      {loading ? <LoadingState label={korean ? "멤버를 불러오는 중..." : "Loading members..."} /> : null}
       {!loading && error instanceof ApiRequestError && error.status === 403 ? <PermissionDenied type="project" /> : null}
       {!loading && error instanceof ApiRequestError && error.status === 404 ? (
         <EmptyState
@@ -4697,7 +5976,7 @@ const ProjectMembers = () => {
           <span className="col-span-5">Member</span>
           <span className="col-span-3">Role</span>
           <span className="col-span-2">Joined</span>
-          <span className="col-span-2 text-right">Status</span>
+          <span className="col-span-2 text-left">Status</span>
         </div>
         <div className="divide-y divide-border">
           {members.length > 0 ? members.map(m => {
@@ -4711,34 +5990,24 @@ const ProjectMembers = () => {
                   <div className="text-xs text-muted-foreground truncate">{m.email}</div>
                 </div>
               </div>
-              <div className="col-span-3">
-                {m.role === "OWNER" ? (
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${roleColor[m.role]}`}>Owner</span>
-                ) : (
-                  <select
-                    value={m.role}
-                    disabled={!canManageMembers || actionPending}
-                    onChange={e => setConfirmState({ type: "role", member: m, nextRole: e.target.value as "ADMIN" | "MEMBER" })}
-                    className="text-xs border border-border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary/50"
-                  >
-                    <option value="ADMIN">Admin</option>
-                    <option value="MEMBER">Member</option>
-                  </select>
-                )}
-              </div>
-              <div className="col-span-2 text-xs text-muted-foreground">{joinedLabel(m.joinedAt)}</div>
-              <div className="col-span-2 flex items-center justify-end gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                <span className="text-xs text-muted-foreground">Active</span>
+              <div className="col-span-3 flex items-center gap-2">
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded ${roleColor[m.role]}`}>
+                  {m.role === "OWNER" ? "Owner" : m.role === "ADMIN" ? "Admin" : "Member"}
+                </span>
                 {canTransferOwner && m.role !== "OWNER" ? (
                   <button
-                    className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 text-xs text-primary hover:underline"
+                    className="text-xs text-primary hover:underline"
                     onClick={() => setConfirmState({ type: "transfer", member: m, previousOwnerRole: "ADMIN" })}
                     type="button"
                   >
                     Transfer
                   </button>
                 ) : null}
+              </div>
+              <div className="col-span-2 text-xs text-muted-foreground">{joinedLabel(m.joinedAt)}</div>
+              <div className="col-span-2 flex items-center justify-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span className="text-xs text-muted-foreground">Active</span>
                 {canManageMembers && m.role !== "OWNER" && (
                   <button onClick={() => setConfirmState({ type: "remove", member: m })} className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 text-muted-foreground hover:text-red-500">
                     <X className="w-3.5 h-3.5" />
@@ -4842,11 +6111,14 @@ const ProjectMembers = () => {
 // 9. Terms Dictionary
 const TermsDictionary = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
   const navigate = useNavigate();
   const { spaceId = "" } = useParams();
   const { spaceDetail } = useOutletContext<ShellOutletContext>();
   const [search, setSearch] = useState("");
   const [terms, setTerms] = useState<DomainTerm[]>([]);
+  const [archivedTerms, setArchivedTerms] = useState<DomainTerm[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -4856,6 +6128,7 @@ const TermsDictionary = () => {
   const [notice, setNotice] = useState("");
   const [newTerm, setNewTerm] = useState({ term: "", definition: "" });
   const [draftTerm, setDraftTerm] = useState({ term: "", definition: "" });
+  const korean = locale === "ko";
 
   const currentRole = spaceDetail?.role ?? "MEMBER";
   const canManageTerms = currentRole === "OWNER" || currentRole === "ADMIN";
@@ -4870,9 +6143,13 @@ const TermsDictionary = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetchDomainTerms(session, spaceId, { status: "ACTIVE" });
-      setTerms(response.terms);
-      setSelectedId((current) => current && response.terms.some((term) => term.id === current) ? current : response.terms[0]?.id ?? null);
+      const [activeResponse, archivedResponse] = await Promise.all([
+        fetchDomainTerms(session, spaceId, { status: "ACTIVE" }),
+        fetchDomainTerms(session, spaceId, { status: "ARCHIVED" })
+      ]);
+      setTerms(activeResponse.terms);
+      setArchivedTerms(archivedResponse.terms);
+      setSelectedId((current) => current && [...activeResponse.terms, ...archivedResponse.terms].some((term) => term.id === current) ? current : activeResponse.terms[0]?.id ?? null);
     } catch (cause) {
       setTerms([]);
       setError(cause instanceof Error ? cause : new Error("용어 사전을 불러오지 못했습니다."));
@@ -4886,14 +6163,16 @@ const TermsDictionary = () => {
   }, [loadTerms]);
 
   const selected = terms.find((term) => term.id === selectedId) ?? null;
+  const selectedArchived = archivedTerms.find((term) => term.id === selectedId) ?? null;
+  const selectedTerm = selected ?? selectedArchived;
 
   useEffect(() => {
-    if (!selected) {
+    if (!selectedTerm) {
       setDraftTerm({ term: "", definition: "" });
       return;
     }
-    setDraftTerm({ term: selected.term, definition: selected.definition });
-  }, [selected]);
+    setDraftTerm({ term: selectedTerm.term, definition: selectedTerm.definition });
+  }, [selectedTerm]);
 
   const statusTone: Record<DomainTerm["status"], string> = {
     ACTIVE: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -4987,6 +6266,24 @@ const TermsDictionary = () => {
     }
   }
 
+  async function handleRestoreTerm() {
+    if (!session || !spaceId || !selectedArchived || !canManageTerms || saving) return;
+    setSaving(true);
+    setMutationError("");
+    setNotice("");
+    try {
+      await updateDomainTerm(session, spaceId, selectedArchived.id, { status: "ACTIVE" });
+      await loadTerms();
+      setShowArchived(false);
+      setSelectedId(selectedArchived.id);
+      setNotice("용어를 복구했습니다.");
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : "용어를 복구하지 못했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return <LoadingState label="Loading terms..." />;
   }
@@ -5027,7 +6324,7 @@ const TermsDictionary = () => {
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search terms..."
+              placeholder={korean ? "용어 검색..." : "Search terms..."}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -5048,6 +6345,18 @@ const TermsDictionary = () => {
               <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{t.definition}</p>
             </button>
           ))}
+          <div className="border-t border-border">
+              <button className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-semibold text-muted-foreground hover:bg-muted/30" onClick={() => setShowArchived((value) => !value)} type="button">
+                <span>{korean ? "보관된 용어" : "Archived terms"}</span>
+                <span>{archivedTerms.length}</span>
+              </button>
+              {showArchived ? archivedTerms.map((term) => (
+                <button key={term.id} onClick={() => setSelectedId(term.id)} className={`w-full px-4 py-3 text-left hover:bg-muted/30 ${selectedId === term.id ? "bg-muted" : ""}`} type="button">
+                  <div className="flex items-center justify-between gap-2"><span className="text-sm font-semibold text-foreground">{term.term}</span><span className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${statusTone[term.status]}`}>{term.status}</span></div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{term.definition}</p>
+                </button>
+              )) : null}
+          </div>
         </div>
         <div className="p-3 border-t border-border">
           <button
@@ -5055,7 +6364,7 @@ const TermsDictionary = () => {
             disabled={!canManageTerms}
             className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors"
           >
-            <Plus className="w-3.5 h-3.5" /> Add Term
+            <Plus className="w-3.5 h-3.5" /> {korean ? "용어 추가" : "Add Term"}
           </button>
           {!canManageTerms ? <p className="mt-2 text-[11px] text-muted-foreground">OWNER 또는 ADMIN만 용어를 수정할 수 있습니다.</p> : null}
         </div>
@@ -5065,7 +6374,7 @@ const TermsDictionary = () => {
       <div className="flex-1 overflow-y-auto">
         {showAdd ? (
           <div className="p-8 max-w-xl space-y-4">
-            <h2 className="font-bold text-lg">Add New Term</h2>
+            <h2 className="font-bold text-lg">{korean ? "새 용어 추가" : "Add New Term"}</h2>
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Term / Abbreviation</label>
@@ -5082,15 +6391,15 @@ const TermsDictionary = () => {
               <button onClick={() => void handleCreateTerm()} disabled={!canManageTerms || saving} className="px-4 py-2 rounded-md bg-foreground text-background text-sm font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60">{saving ? "Saving..." : "Save Term"}</button>
             </div>
           </div>
-        ) : selected ? (
+        ) : selectedTerm ? (
           <div className="p-8 max-w-xl space-y-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${statusTone[selected.status]}`}>{selected.status}</span>
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${statusTone[selectedTerm.status]}`}>{selectedTerm.status}</span>
                 </div>
-                <h2 className="text-2xl font-bold text-foreground">{selected.term}</h2>
-                <p className="text-sm text-muted-foreground mt-0.5">Updated {formatUpdatedAt(selected.updatedAt)}</p>
+                <h2 className="text-2xl font-bold text-foreground">{selectedTerm.term}</h2>
+                <p className="text-sm text-muted-foreground mt-0.5">Updated {formatUpdatedAt(selectedTerm.updatedAt)}</p>
               </div>
             </div>
             <div className="bg-card border border-border rounded-lg p-5 space-y-4">
@@ -5118,22 +6427,31 @@ const TermsDictionary = () => {
               {notice ? <p className="text-xs text-emerald-700">{notice}</p> : null}
             </div>
             <div className="flex gap-2">
-              <button
+              {selectedArchived ? (
+                <button
+                  className="px-4 py-2 rounded-md bg-foreground text-background text-sm font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
+                  disabled={!canManageTerms || saving}
+                  onClick={() => void handleRestoreTerm()}
+                  type="button"
+                >
+                  {saving ? "Restoring..." : "Restore"}
+                </button>
+              ) : <button
                 className="px-4 py-2 rounded-md bg-foreground text-background text-sm font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
                 disabled={!canManageTerms || saving}
                 onClick={() => void handleUpdateTerm()}
                 type="button"
               >
                 {saving ? "Saving..." : "Save Changes"}
-              </button>
-              <button
+              </button>}
+              {!selectedArchived ? <button
                 className="px-4 py-2 rounded-md border border-red-200 text-red-700 text-sm font-semibold hover:bg-red-50 transition-colors disabled:opacity-60"
                 disabled={!canManageTerms || saving}
                 onClick={() => void handleArchiveTerm()}
                 type="button"
               >
                 Archive
-              </button>
+              </button> : null}
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Usage</p>
@@ -5157,14 +6475,17 @@ const TermsDictionary = () => {
 // 10. Calendar
 const ProjectCalendar = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
   const navigate = useNavigate();
   const { spaceId = "" } = useParams();
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState({ year: today.getFullYear(), month: today.getMonth() + 1 });
   const [selectedDay, setSelectedDay] = useState<number | null>(today.getDate());
+  const [dayMeetingPage, setDayMeetingPage] = useState(0);
   const [events, setEvents] = useState<ProjectCalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const korean = locale === "ko";
 
   const monthStart = React.useMemo(
     () => new Date(currentMonth.year, currentMonth.month - 1, 1),
@@ -5174,11 +6495,6 @@ const ProjectCalendar = () => {
     () => new Date(currentMonth.year, currentMonth.month, 0),
     [currentMonth.month, currentMonth.year]
   );
-  const monthKey = React.useMemo(
-    () => `${currentMonth.year}-${String(currentMonth.month).padStart(2, "0")}`,
-    [currentMonth.month, currentMonth.year]
-  );
-
   useEffect(() => {
     setSelectedDay((current) => {
       if (current === null) {
@@ -5200,8 +6516,8 @@ const ProjectCalendar = () => {
     setError(null);
     try {
       const response = await fetchCalendarEvents(session, {
-        from: `${monthKey}-01`,
-        to: `${monthKey}-${String(monthEnd.getDate()).padStart(2, "0")}`,
+        from: monthStart.toISOString(),
+        to: new Date(currentMonth.year, currentMonth.month, 1).toISOString(),
         spaceId
       });
       setEvents(response.events);
@@ -5221,7 +6537,7 @@ const ProjectCalendar = () => {
     } finally {
       setLoading(false);
     }
-  }, [monthEnd, monthKey, session, spaceId]);
+  }, [currentMonth.month, currentMonth.year, monthEnd, monthStart, session, spaceId]);
 
   useEffect(() => {
     void loadEvents();
@@ -5265,6 +6581,8 @@ const ProjectCalendar = () => {
     currentMonth.month === today.getMonth() + 1;
   const monthLabel = monthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const dayMeetings = selectedDay ? meetingsByDay[selectedDay] ?? [] : [];
+  const visibleDayMeetings = dayMeetings.slice(dayMeetingPage * 3, dayMeetingPage * 3 + 3);
+  const dayMeetingPageCount = Math.ceil(dayMeetings.length / 3);
 
   function shiftMonth(offset: number) {
     setCurrentMonth((current) => {
@@ -5309,7 +6627,7 @@ const ProjectCalendar = () => {
               }}
               type="button"
             >
-              Today
+              {korean ? "오늘" : "Today"}
             </button>
             <button
               className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground transition-colors text-sm font-bold"
@@ -5364,19 +6682,30 @@ const ProjectCalendar = () => {
             return (
               <div
                 key={day}
-                onClick={() => setSelectedDay(day)}
+                onClick={() => {
+                  setSelectedDay(day);
+                  setDayMeetingPage(0);
+                }}
                 className={`bg-background p-2 cursor-pointer hover:bg-muted/30 transition-colors min-h-[72px] ${isSelected ? "ring-1 ring-inset ring-primary" : ""}`}
               >
                 <span className={`text-xs font-semibold inline-flex w-6 h-6 items-center justify-center rounded-full ${isToday ? "bg-foreground text-background" : "text-foreground"}`}>
                   {day}
                 </span>
                 <div className="mt-1 space-y-0.5">
-                  {dayMeetings.map((m, i) => (
+                  {dayMeetings.slice(0, 3).map((m, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusStyle[m.status]}`}></span>
                       <span className="text-[10px] text-foreground truncate">{m.title}</span>
                     </div>
                   ))}
+                  {dayMeetings.length > 3 ? (
+                    <div className="relative group/calendar-more">
+                      <span className="text-[10px] font-semibold text-primary">...</span>
+                      <div className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden min-w-44 rounded-md border border-border bg-card p-2 shadow-lg group-hover/calendar-more:block">
+                        {dayMeetings.slice(3).map((meeting) => <p className="truncate text-[10px] text-foreground" key={meeting.id}>{formatTime(meeting.startsAt)} {meeting.title}</p>)}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
@@ -5392,7 +6721,7 @@ const ProjectCalendar = () => {
           </p>
           {selectedDay && dayMeetings.length > 0 ? (
             <div className="space-y-3">
-              {dayMeetings.map((m) => (
+              {visibleDayMeetings.map((m) => (
                 <button
                   key={m.id}
                   className="w-full space-y-1 text-left rounded-md hover:bg-muted/30 transition-colors p-1"
@@ -5412,6 +6741,13 @@ const ProjectCalendar = () => {
                   </div>
                 </button>
               ))}
+              {dayMeetingPageCount > 1 ? (
+                <div className="flex items-center justify-between border-t border-border pt-3 text-xs">
+                  <button className="text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={dayMeetingPage === 0} onClick={() => setDayMeetingPage((page) => Math.max(0, page - 1))} type="button">Previous</button>
+                  <span className="text-muted-foreground">{dayMeetingPage + 1} / {dayMeetingPageCount}</span>
+                  <button className="text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={dayMeetingPage >= dayMeetingPageCount - 1} onClick={() => setDayMeetingPage((page) => page + 1)} type="button">Next</button>
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">No meetings scheduled</p>
@@ -5686,6 +7022,18 @@ const LiveMeeting = () => {
   const [participants, setParticipants] = useState<LiveParticipantCard[]>([]);
   const [activeSpeakerSid, setActiveSpeakerSid] = useState<string | null>(null);
   const [transcriptRows, setTranscriptRows] = useState<LiveTranscriptRow[]>([]);
+  const [dictionaryTerms, setDictionaryTerms] = useState<DomainTerm[]>([]);
+  const [livePanel, setLivePanel] = useState<"transcript" | "chat">("transcript");
+  const [selectedDictionaryTerm, setSelectedDictionaryTerm] = useState<DomainTerm | null>(null);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: string; text: string; time: string; local?: boolean }>>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedAudioInput, setSelectedAudioInput] = useState("");
+  const [selectedVideoInput, setSelectedVideoInput] = useState("");
+  const [remoteVolumes, setRemoteVolumes] = useState<Record<string, number>>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [micVolume, setMicVolume] = useState(1);
   const [transcriptStatus, setTranscriptStatus] = useState<"PENDING" | "PROCESSING" | "COMPLETED" | "FAILED">("PENDING");
   const [transcriptError, setTranscriptError] = useState("");
   const [roomRetrySeed, setRoomRetrySeed] = useState(0);
@@ -5694,10 +7042,26 @@ const LiveMeeting = () => {
   const roomRef = useRef<Room | null>(null);
   const sttSessionIdRef = useRef<string | null>(null);
   const sttStartedRef = useRef(false);
+  const stopSttOnUnmountRef = useRef(true);
   const meetingDetailRef = useRef<MeetingDetailResponse | null>(null);
   const liveStartedAtRef = useRef(Date.now());
   const initialDevicePreferencesRef = useRef({ micOn, camOn });
   const currentUserName = authSession.user.displayName?.trim() || "MeetingMind User";
+
+  useEffect(() => {
+    if (!spaceId || !session) return;
+    void fetchDomainTerms(authSession, spaceId, { status: "ACTIVE" })
+      .then((response) => setDictionaryTerms(response.terms))
+      .catch(() => setDictionaryTerms([]));
+  }, [authSession, session, spaceId]);
+
+  useEffect(() => {
+    if (!roomReady || !navigator.mediaDevices?.enumerateDevices) return;
+    void navigator.mediaDevices.enumerateDevices().then((devices) => {
+      setAudioInputDevices(devices.filter((device) => device.kind === "audioinput"));
+      setVideoInputDevices(devices.filter((device) => device.kind === "videoinput"));
+    }).catch(() => {});
+  }, [roomReady]);
 
   useEffect(() => {
     let active = true;
@@ -5778,6 +7142,7 @@ const LiveMeeting = () => {
     };
 
     const initializeRoom = async () => {
+      stopSttOnUnmountRef.current = true;
       setRoomReady(false);
       setRoomError(null);
       setTranscriptError("");
@@ -5805,6 +7170,21 @@ const LiveMeeting = () => {
           .on(RoomEvent.TrackMuted, () => syncSnapshot(room))
           .on(RoomEvent.TrackUnmuted, () => syncSnapshot(room))
           .on(RoomEvent.ActiveSpeakersChanged, () => syncSnapshot(room))
+          .on(RoomEvent.DataReceived, (payload, participant) => {
+            try {
+              const data = JSON.parse(new TextDecoder().decode(payload)) as { type?: string; text?: string };
+              const text = data.text?.trim();
+              if (data.type !== "meeting-chat" || !text) return;
+              setChatMessages((previous) => [...previous, {
+                id: `${participant?.identity ?? "remote"}-${Date.now()}`,
+                sender: participant?.name || participant?.identity || "Participant",
+                text,
+                time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              }]);
+            } catch {
+              // Ignore data messages that are not MeetingMind chat payloads.
+            }
+          })
           .on(RoomEvent.LocalTrackPublished, async (publication) => {
             syncSnapshot(room);
             if (sttStartedRef.current || publication.source !== Track.Source.Microphone || !publication.trackSid) {
@@ -5874,6 +7254,13 @@ const LiveMeeting = () => {
         } catch (cause) {
           console.warn("[LiveMeeting] microphone setup failed", cause);
         }
+        const existingSttSessionId = sessionStorage.getItem(sttSessionStorageKey(meetingId));
+        if (existingSttSessionId) {
+          sttSessionIdRef.current = existingSttSessionId;
+          sttStartedRef.current = true;
+          setSttState("active");
+          setTranscriptError("");
+        }
         syncSnapshot(room);
         if (mounted) {
           setRoomReady(true);
@@ -5906,7 +7293,7 @@ const LiveMeeting = () => {
           void room.disconnect();
         }
       };
-      if (sessionId) {
+      if (sessionId && stopSttOnUnmountRef.current) {
         void stopMeetingTranscription(authSession, meetingId, sessionId)
           .then(() => sessionStorage.removeItem(sttSessionStorageKey(meetingId)))
           .catch(() => {})
@@ -6026,43 +7413,88 @@ const LiveMeeting = () => {
     }
   }
 
+  async function handleAudioInputChange(deviceId: string) {
+    const room = roomRef.current;
+    if (!room || !deviceId) return;
+    try {
+      await room.localParticipant.setMicrophoneEnabled(true, { deviceId });
+      setSelectedAudioInput(deviceId);
+      setMicOn(true);
+    } catch (cause) {
+      setRoomError(cause instanceof Error ? new Error(`마이크 장치를 변경하지 못했습니다. ${cause.message}`) : new Error("마이크 장치를 변경하지 못했습니다."));
+    }
+  }
+
+  async function handleVideoInputChange(deviceId: string) {
+    const room = roomRef.current;
+    if (!room || !deviceId) return;
+    try {
+      await room.localParticipant.setCameraEnabled(true, { deviceId });
+      setSelectedVideoInput(deviceId);
+      setCamOn(true);
+    } catch (cause) {
+      setRoomError(cause instanceof Error ? new Error(`카메라를 변경하지 못했습니다. ${cause.message}`) : new Error("카메라를 변경하지 못했습니다."));
+    }
+  }
+
   async function handleLeave() {
     if (ending) {
       return;
     }
     setEnding(true);
-    const sessionId = sttSessionIdRef.current ?? sessionStorage.getItem(sttSessionStorageKey(meetingId));
-    if (sttState === "active" || sessionId) {
-      try {
-        const response = sessionId
-          ? await stopMeetingTranscription(authSession, meetingId, sessionId)
-          : await stopActiveMeetingTranscription(authSession, meetingId);
-        sttSessionIdRef.current = null;
-        sttStartedRef.current = false;
-        sessionStorage.removeItem(sttSessionStorageKey(meetingId));
-        setTranscriptStatus(response.transcriptStatus);
-      } catch (cause) {
-        setEnding(false);
-        setRoomError(
-          cause instanceof Error
-            ? new Error(`전사를 안전하게 종료하지 못했습니다. ${cause.message}`)
-            : new Error("전사를 안전하게 종료하지 못했습니다.")
-        );
-        return;
-      }
-    }
+    stopSttOnUnmountRef.current = false;
     const room = roomRef.current;
     if (room) {
       await room.disconnect();
       roomRef.current = null;
     }
-    if (meetingDetail?.myRole === "HOST") {
-      if (meetingDetail.status === "SCHEDULED") {
-        await updateMeeting(authSession, meetingId, { status: "IN_PROGRESS" }).catch(() => {});
-      }
-      await updateMeeting(authSession, meetingId, { status: "ENDED" }).catch(() => {});
-    }
     navigate(`/spaces/${spaceId}/meetings/${meetingId}`);
+  }
+
+  async function handleEndMeeting() {
+    if (ending) return;
+    setEnding(true);
+    const sessionId = sttSessionIdRef.current ?? sessionStorage.getItem(sttSessionStorageKey(meetingId));
+    try {
+      if (sessionId || sttState === "active") {
+        const response = sessionId
+          ? await stopMeetingTranscription(authSession, meetingId, sessionId)
+          : await stopActiveMeetingTranscription(authSession, meetingId);
+        setTranscriptStatus(response.transcriptStatus);
+        sessionStorage.removeItem(sttSessionStorageKey(meetingId));
+      }
+      stopSttOnUnmountRef.current = false;
+      await roomRef.current?.disconnect();
+      roomRef.current = null;
+      await updateMeeting(authSession, meetingId, { status: "ENDED" });
+      navigate(`/spaces/${spaceId}/meetings/${meetingId}`);
+    } catch (cause) {
+      setRoomError(cause instanceof Error ? cause : new Error("회의를 종료하지 못했습니다."));
+      setEnding(false);
+    }
+  }
+
+  async function handleSendLiveChat(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = chatDraft.trim();
+    const room = roomRef.current;
+    if (!text || !room || room.state !== ConnectionState.Connected) return;
+    try {
+      await room.localParticipant.publishData(
+        new TextEncoder().encode(JSON.stringify({ type: "meeting-chat", text })),
+        { reliable: true }
+      );
+      setChatMessages((previous) => [...previous, {
+        id: `local-${Date.now()}`,
+        sender: currentUserName,
+        text,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        local: true
+      }]);
+      setChatDraft("");
+    } catch {
+      setRoomError(new Error("채팅을 전송하지 못했습니다. 잠시 후 다시 시도해주세요."));
+    }
   }
 
   if (meetingLoading) {
@@ -6179,7 +7611,7 @@ const LiveMeeting = () => {
       <div className="flex flex-1 min-h-0">
         {/* Video Grid */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex-1 grid grid-cols-2 gap-2 p-3">
+          <div className="live-video-grid flex-1 grid grid-cols-2 gap-2 p-3">
             {participants.map((participant) => (
               <div key={participant.key} className={`relative bg-zinc-900 rounded-xl overflow-hidden flex items-center justify-center border ${participant.sid === stageParticipant?.sid ? "border-emerald-500/60" : "border-white/5"}`}>
                 {participant.cameraPublication?.videoTrack && participant.isCameraEnabled ? (
@@ -6220,30 +7652,72 @@ const LiveMeeting = () => {
             <button
               onClick={() => void handleLeave()}
               disabled={ending}
-              className="px-5 h-11 rounded-full bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white text-sm font-bold transition-colors ml-4"
+              className="px-5 h-11 rounded-full bg-zinc-700 hover:bg-zinc-600 disabled:opacity-60 text-white text-sm font-bold transition-colors ml-4"
             >
-              {ending ? "Ending..." : "End"}
+              {ending ? "Leaving..." : "Leave"}
             </button>
+            {meetingDetail?.myRole === "HOST" ? (
+              <button onClick={() => void handleEndMeeting()} disabled={ending} className="px-5 h-11 rounded-full bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white text-sm font-bold transition-colors">End meeting</button>
+            ) : null}
+            <div className="relative">
+              <button aria-expanded={settingsOpen} aria-label="회의 장치 설정" className="w-11 h-11 rounded-full bg-zinc-700 hover:bg-zinc-600 text-white flex items-center justify-center" onClick={() => setSettingsOpen((open) => !open)} type="button">
+                <Settings className="w-5 h-5" />
+              </button>
+              {settingsOpen ? (
+                <div className="absolute bottom-14 right-0 z-20 w-72 rounded-xl border border-white/10 bg-zinc-800 p-3 text-left shadow-2xl">
+                  <div className="mb-3 flex items-center justify-between">
+                    <strong className="text-sm text-white">Device settings</strong>
+                    <button aria-label="설정 닫기" className="text-zinc-400 hover:text-white" onClick={() => setSettingsOpen(false)} type="button"><X className="h-4 w-4" /></button>
+                  </div>
+                  <label className="mb-3 block text-[11px] text-zinc-400">Microphone
+                    <select aria-label="마이크 선택" className="mt-1 w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-2 text-xs text-zinc-200" onChange={(event) => void handleAudioInputChange(event.target.value)} value={selectedAudioInput}>
+                      <option value="">Default microphone</option>
+                      {audioInputDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
+                    </select>
+                  </label>
+                  <label className="mb-3 block text-[11px] text-zinc-400">Camera
+                    <select aria-label="카메라 선택" className="mt-1 w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-2 text-xs text-zinc-200" onChange={(event) => void handleVideoInputChange(event.target.value)} value={selectedVideoInput}>
+                      <option value="">Default camera</option>
+                      {videoInputDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-zinc-400">Microphone level
+                    <input aria-label="마이크 음량" className="mt-2 w-full accent-emerald-400" max="1" min="0" onChange={(event) => setMicVolume(Number(event.target.value))} step="0.05" type="range" value={micVolume} />
+                    <span className="mt-1 block text-right text-[10px] text-zinc-500">{Math.round(micVolume * 100)}%</span>
+                  </label>
+                  <p className="mt-2 text-[10px] leading-relaxed text-zinc-500">입력 레벨은 현재 장치 미리보기 설정입니다. 실제 송출 gain은 오디오 처리 모듈 연결 후 적용됩니다.</p>
+                </div>
+              ) : null}
+            </div>
           </div>
           {roomError ? <div className="px-4 py-2 text-xs text-red-300 bg-red-500/10 border-t border-red-500/20">{roomError.message}</div> : null}
         </div>
 
-        {/* Right Panel — Live Transcript */}
-        <div className="w-72 shrink-0 bg-zinc-900 border-l border-white/5 flex flex-col">
-          <div className="border-b border-white/5 px-4 py-3 text-xs font-semibold text-white shrink-0">
-            Live Transcript
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+        {/* Live communication panels: transcript and chat stay visible side by side. */}
+        <div className="live-communication-panels shrink-0">
+          <section className="live-communication-pane">
+            <div className="border-b border-white/5 px-3 py-3 shrink-0 text-xs font-semibold text-white">
+              Live Transcript
+            </div>
+          {selectedDictionaryTerm ? (
+            <div className="live-term-definition" role="status">
+              <div className="flex items-center justify-between gap-2">
+                <strong>{selectedDictionaryTerm.term}</strong>
+                <button aria-label="용어 설명 닫기" onClick={() => setSelectedDictionaryTerm(null)} type="button">닫기</button>
+              </div>
+              <p>{selectedDictionaryTerm.definition}</p>
+            </div>
+          ) : null}
+          <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
             {transcriptRows.map((row) => (
               <div key={row.key} className="flex gap-2.5">
-                <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-[9px] font-bold text-white shrink-0 mt-0.5">{row.initials}</div>
+                <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center text-[8px] font-bold text-white shrink-0 mt-0.5">{row.initials}</div>
                 <div>
                   <div className="flex items-baseline gap-2 mb-0.5">
-                    <span className="text-[11px] font-semibold text-zinc-300">{row.speaker}</span>
-                    <span className="text-[10px] text-zinc-600 font-mono">{row.time}</span>
+                    <span className="text-[10px] font-semibold text-zinc-300">{row.speaker}</span>
+                    <span className="text-[9px] text-zinc-600 font-mono">{row.time}</span>
                   </div>
-                  <p className="text-xs text-zinc-400 leading-relaxed">{row.text}</p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">{highlightTranscriptTerms(row.text, dictionaryTerms, (term) => setSelectedDictionaryTerm(dictionaryTerms.find((candidate) => candidate.term === term.term) ?? null))}</p>
                 </div>
               </div>
             ))}
@@ -6270,12 +7744,44 @@ const LiveMeeting = () => {
               </div>
             ) : null}
           </div>
+          </section>
+          <section className="live-communication-pane">
+            <div className="border-b border-white/5 px-3 py-3 shrink-0 text-xs font-semibold text-white">
+              Chat
+            </div>
+            <div className="border-b border-white/5 px-2 py-2">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Participants</div>
+              <div className="space-y-1.5">
+                {participants.filter((participant) => participant.isConnected && !participant.isLocal).map((participant) => (
+                  <label className="flex items-center gap-2 text-[10px] text-zinc-300" key={`volume-${participant.key}`}>
+                    <span className="min-w-0 flex-1 truncate">{participant.name}</span>
+                    <input aria-label={`${participant.name} volume`} className="w-20 accent-emerald-400" max="1" min="0" onChange={(event) => setRemoteVolumes((current) => ({ ...current, [participant.key]: Number(event.target.value) }))} step="0.05" type="range" value={remoteVolumes[participant.key] ?? 1} />
+                  </label>
+                ))}
+                {!participants.some((participant) => participant.isConnected && !participant.isLocal) ? <p className="text-[10px] text-zinc-600">No other participants</p> : null}
+              </div>
+            </div>
+            <div className="live-chat-panel">
+              <div className="live-chat-list" aria-live="polite">
+                {chatMessages.length === 0 ? <p className="text-xs text-zinc-500 text-center py-6">참가자와 실시간으로 메시지를 주고받을 수 있습니다.</p> : chatMessages.map((message) => (
+                  <article className={`live-chat-message ${message.local ? "is-local" : ""}`} key={message.id}>
+                    <div><strong>{message.sender}</strong><time>{message.time}</time></div>
+                    <p>{message.text}</p>
+                  </article>
+                ))}
+              </div>
+              <form className="live-chat-form" onSubmit={handleSendLiveChat}>
+                <input aria-label="회의 채팅 입력" onChange={(event) => setChatDraft(event.target.value)} placeholder="메시지를 입력하세요" type="text" value={chatDraft} />
+                <button disabled={!chatDraft.trim() || !roomReady} type="submit">전송</button>
+              </form>
+            </div>
+          </section>
         </div>
       </div>
       {participants
         .filter((participant) => participant.isConnected && !participant.isLocal)
         .map((participant) => (
-          <AudioTrackSurface key={`audio-${participant.key}`} publication={participant.audioPublication} />
+          <AudioTrackSurface key={`audio-${participant.key}`} publication={participant.audioPublication} volume={remoteVolumes[participant.key] ?? 1} />
         ))}
     </div>
   );
@@ -6284,53 +7790,30 @@ const LiveMeeting = () => {
 // 13. Project Settings
 const ProjectSettings = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
   const authSession = session as AuthSession;
   const navigate = useNavigate();
   const { spaceId = "" } = useParams<{ spaceId: string }>();
   const { spaceDetail, spaceLoading, spaceError, reloadSpace } = useOutletContext<ShellOutletContext>();
   const [projectName, setProjectName] = useState("");
   const [description, setDescription] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
   const [savePending, setSavePending] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [mutationError, setMutationError] = useState("");
   const [deletePending, setDeletePending] = useState(false);
   const [showDanger, setShowDanger] = useState(false);
+  const [leavePending, setLeavePending] = useState(false);
+  const korean = locale === "ko";
 
   useEffect(() => {
     setProjectName(spaceDetail?.name ?? "");
     setDescription(spaceDetail?.description ?? "");
-  }, [spaceDetail?.description, spaceDetail?.name]);
-
-  const Toggle = ({ value }: { value: boolean }) => (
-    <button
-      disabled
-      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${value ? "bg-foreground" : "bg-muted-foreground/30"} opacity-60 cursor-not-allowed`}
-      type="button"
-    >
-      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${value ? "translate-x-4" : ""}`} />
-    </button>
-  );
+    setImageUrl(spaceDetail?.imageUrl ?? "");
+  }, [spaceDetail?.description, spaceDetail?.imageUrl, spaceDetail?.name]);
 
   const canManage = spaceDetail?.role === "OWNER" || spaceDetail?.role === "ADMIN";
   const canDelete = spaceDetail?.role === "OWNER";
-  const projectAiEnabled = spaceDetail?.aiEntrypoints.includes("project-ai") ?? false;
-  const settingsRows = [
-    {
-      label: "Project AI",
-      desc: "현재 프로젝트에서 Project AI 진입 가능 여부를 표시합니다.",
-      value: projectAiEnabled
-    },
-    {
-      label: "Auto-confirm Reports",
-      desc: "자동 확정 설정 API가 아직 없습니다. 서버 계약이 준비되면 연결합니다.",
-      value: false
-    },
-    {
-      label: "Live STT in Meetings",
-      desc: "Live STT 설정 저장 API가 아직 없습니다. 회의 단위 제어만 지원합니다.",
-      value: false
-    }
-  ];
 
   async function handleSave() {
     if (!spaceDetail || !canManage || !projectName.trim() || savePending) {
@@ -6343,7 +7826,8 @@ const ProjectSettings = () => {
     try {
       await updateSpace(authSession, spaceDetail.id, {
         name: projectName.trim(),
-        description: description.trim() || null
+        description: description.trim() || null,
+        imageUrl: imageUrl.trim() || null
       });
       await reloadSpace();
       setSaveMessage("프로젝트 정보를 저장했습니다.");
@@ -6359,6 +7843,20 @@ const ProjectSettings = () => {
       } else {
         setMutationError(cause instanceof Error ? cause.message : "프로젝트 정보를 저장하지 못했습니다.");
       }
+    } finally {
+      setSavePending(false);
+    }
+  }
+
+  async function handleImageUpload(file: File) {
+    if (!spaceDetail || !canManage || savePending || deletePending) return;
+    setSavePending(true);
+    setMutationError("");
+    try {
+      setImageUrl(await uploadSpaceImage(authSession, spaceDetail.id, file));
+      setSaveMessage("이미지를 업로드했습니다. 변경사항 저장을 눌러 적용하세요.");
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : "프로젝트 이미지를 업로드하지 못했습니다.");
     } finally {
       setSavePending(false);
     }
@@ -6391,6 +7889,24 @@ const ProjectSettings = () => {
     }
   }
 
+  async function handleLeave() {
+    if (!spaceDetail || leavePending) return;
+    if (spaceDetail.role === "OWNER") {
+      setMutationError("OWNER는 소유권을 이양한 뒤에만 이 스페이스에서 나갈 수 있습니다.");
+      return;
+    }
+    if (!window.confirm("이 프로젝트 스페이스에서 나가시겠습니까?")) return;
+    setLeavePending(true);
+    setMutationError("");
+    try {
+      await leaveSpace(authSession, spaceDetail.id);
+      navigate("/spaces", { replace: true });
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : "프로젝트에서 나가지 못했습니다.");
+      setLeavePending(false);
+    }
+  }
+
   if (spaceLoading) {
     return <LoadingState label="Loading project settings..." />;
   }
@@ -6406,17 +7922,40 @@ const ProjectSettings = () => {
   }
 
   return (
-    <div className="p-8 max-w-2xl mx-auto space-y-8">
-      <h1 className="text-xl font-bold">Project Settings</h1>
+    <div className="w-full max-w-5xl mx-auto p-8 space-y-8">
+      <h1 className="text-xl font-bold">{korean ? "프로젝트 설정" : "Project Settings"}</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <button className="px-4 py-2 rounded-md border border-border bg-background text-sm font-semibold hover:bg-muted transition-colors" onClick={() => navigate(`/spaces/${encodeURIComponent(spaceDetail.id)}/meetings`)} type="button">
+          {korean ? "회의 관리" : "Meeting management"}
+        </button>
+        <button className="px-4 py-2 rounded-md border border-red-300 bg-white text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-60" disabled={leavePending} onClick={() => void handleLeave()} type="button">
+          {leavePending ? (korean ? "나가는 중..." : "Leaving...") : (korean ? "스페이스 나가기" : "Leave this space")}
+        </button>
+      </div>
 
       {/* General */}
       <section className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
-          <h2 className="font-semibold text-sm">General</h2>
+          <h2 className="font-semibold text-sm">{korean ? "일반" : "General"}</h2>
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Project Name</label>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">{korean ? "대표 이미지" : "Workspace Image"}</label>
+            <div className="flex flex-wrap items-center gap-3">
+              {imageUrl ? <img alt="Workspace preview" className="h-12 w-12 rounded-md border border-border object-cover" src={imageUrl} /> : <div className="h-12 w-12 rounded-md border border-dashed border-border bg-muted" />}
+              <label className="cursor-pointer rounded-md border border-border bg-background px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-60">
+                {korean ? "이미지 업로드" : "Upload image"}
+                <input accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={!canManage || savePending || deletePending} onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleImageUpload(file);
+                  event.target.value = "";
+                }} type="file" />
+              </label>
+              {imageUrl ? <button className="text-sm text-muted-foreground hover:text-foreground" disabled={!canManage || savePending || deletePending} onClick={() => setImageUrl("")} type="button">{korean ? "제거" : "Remove"}</button> : null}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">{korean ? "프로젝트 이름" : "Project Name"}</label>
             <input
               className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
               disabled={!canManage || savePending || deletePending}
@@ -6425,7 +7964,7 @@ const ProjectSettings = () => {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Description</label>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">{korean ? "설명" : "Description"}</label>
             <textarea
               className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none disabled:opacity-60"
               disabled={!canManage || savePending || deletePending}
@@ -6455,26 +7994,8 @@ const ProjectSettings = () => {
             onClick={() => void handleSave()}
             type="button"
           >
-            {savePending ? "Saving..." : "Save Changes"}
+            {savePending ? (korean ? "저장 중..." : "Saving...") : (korean ? "변경사항 저장" : "Save Changes")}
           </button>
-        </div>
-      </section>
-
-      {/* AI & Automation */}
-      <section className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="font-semibold text-sm">AI & Automation</h2>
-        </div>
-        <div className="divide-y divide-border">
-          {settingsRows.map((item) => (
-            <div key={item.label} className="px-5 py-4 flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
-              </div>
-              <Toggle value={item.value} />
-            </div>
-          ))}
         </div>
       </section>
 
@@ -6514,9 +8035,7 @@ const ProjectSettings = () => {
                 {deletePending ? "Deleting..." : "Delete"}
               </button>
             </div>
-            {!canDelete ? (
-              <p className="text-xs text-red-700">프로젝트 삭제는 OWNER만 할 수 있습니다.</p>
-            ) : null}
+            {!canDelete ? <p className="text-xs text-red-700">프로젝트 삭제는 OWNER만 할 수 있습니다.</p> : null}
           </div>
         )}
       </section>
@@ -6533,6 +8052,16 @@ const AccountSettings = () => {
   const [logoutPending, setLogoutPending] = useState(false);
   const [allDeviceLogoutOpen, setAllDeviceLogoutOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"profile" | "notifications" | "security">("profile");
+  const [displayName, setDisplayName] = useState(authSession.user.displayName);
+  const [pictureUrl, setPictureUrl] = useState(authSession.user.pictureUrl ?? "");
+  const [profilePending, setProfilePending] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileError, setProfileError] = useState("");
+
+  useEffect(() => {
+    setDisplayName(authSession.user.displayName);
+    setPictureUrl(authSession.user.pictureUrl ?? "");
+  }, [authSession.user.displayName, authSession.user.pictureUrl]);
 
   const tabs = [
     { id: "profile" as const, label: "Profile" },
@@ -6575,6 +8104,36 @@ const AccountSettings = () => {
     navigate("/login", { replace: true });
   }
 
+  async function handleProfileSave() {
+    if (!displayName.trim() || profilePending) return;
+    setProfilePending(true);
+    setProfileMessage("");
+    setProfileError("");
+    try {
+      const user = await updateProfile({ displayName: displayName.trim(), pictureUrl: pictureUrl.trim() || null });
+      setSession({ ...authSession, user });
+      setProfileMessage("Profile saved.");
+    } catch (cause) {
+      setProfileError(cause instanceof Error ? cause.message : "Unable to save profile.");
+    } finally {
+      setProfilePending(false);
+    }
+  }
+
+  async function handleProfileImageUpload(file: File) {
+    if (profilePending) return;
+    setProfilePending(true);
+    setProfileError("");
+    try {
+      setPictureUrl(await uploadProfileImage(file));
+      setProfileMessage("Image uploaded. Save profile to apply it.");
+    } catch (cause) {
+      setProfileError(cause instanceof Error ? cause.message : "Unable to upload profile image.");
+    } finally {
+      setProfilePending(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-3xl mx-auto px-8 py-10">
@@ -6585,7 +8144,7 @@ const AccountSettings = () => {
         </button>
 
         <div className="flex items-center gap-4 mb-8">
-          <div className="w-14 h-14 rounded-full bg-foreground text-background flex items-center justify-center text-xl font-bold">{sessionInitials(session)}</div>
+          {pictureUrl ? <img alt="Profile" className="w-14 h-14 rounded-full border border-border object-cover" src={pictureUrl} /> : <div className="w-14 h-14 rounded-full bg-foreground text-background flex items-center justify-center text-xl font-bold">{sessionInitials(session)}</div>}
           <div>
             <h1 className="text-xl font-bold">{authSession.user.displayName}</h1>
             <p className="text-sm text-muted-foreground">{authSession.user.email}</p>
@@ -6610,11 +8169,18 @@ const AccountSettings = () => {
             <div className="bg-card border border-border rounded-lg p-5 space-y-4">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Full Name</label>
-                <input
-                  className="w-full px-3 py-2 rounded-md border border-border bg-muted text-sm text-muted-foreground cursor-not-allowed"
-                  readOnly
-                  value={authSession.user.displayName}
-                />
+                <input className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" disabled={profilePending} onChange={(event) => setDisplayName(event.target.value)} value={displayName} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Profile Image</label>
+                <div className="flex items-center gap-3">
+                  {pictureUrl ? <img alt="Profile preview" className="h-10 w-10 rounded-full border border-border object-cover" src={pictureUrl} /> : <div className="h-10 w-10 rounded-full bg-muted" />}
+                  <label className="cursor-pointer rounded-md border border-border bg-background px-3 py-2 text-sm font-semibold hover:bg-muted">
+                    Upload image
+                    <input accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={profilePending} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProfileImageUpload(file); event.target.value = ""; }} type="file" />
+                  </label>
+                  {pictureUrl ? <button className="text-sm text-muted-foreground hover:text-foreground" disabled={profilePending} onClick={() => setPictureUrl("")} type="button">Remove</button> : null}
+                </div>
               </div>
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Email</label>
@@ -6628,9 +8194,9 @@ const AccountSettings = () => {
                   value={authSession.user.status}
                 />
               </div>
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                프로필 수정과 이미지 저장 API는 아직 연결되지 않았습니다.
-              </p>
+              {profileError ? <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{profileError}</p> : null}
+              {profileMessage ? <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">{profileMessage}</p> : null}
+              <button className="px-4 py-2 bg-foreground text-background rounded-md text-sm font-semibold hover:bg-foreground/90 disabled:opacity-60" disabled={profilePending || !displayName.trim()} onClick={() => void handleProfileSave()} type="button">{profilePending ? "Saving..." : "Save Profile"}</button>
             </div>
           </div>
         )}
@@ -6917,6 +8483,17 @@ const MeetingAccessCompatRoute = () => {
   return <Navigate replace to={`/meeting-access${nextParams.toString() ? `?${nextParams.toString()}` : ""}`} />;
 };
 
+const GlobalMeetings = () => {
+  const { session } = useAuthState();
+  const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!session) return;
+    void fetchAccessibleMeetings(session).then((response) => setMeetings(response.meetings)).catch((cause) => setError(cause instanceof Error ? cause.message : "Couldn't load meetings."));
+  }, [session]);
+  return <div className="min-h-screen bg-background p-4 sm:p-8"><main className="mx-auto max-w-4xl"><header className="mb-8"><Link className="text-sm font-semibold text-muted-foreground hover:text-foreground" to="/">MeetingMind</Link><h1 className="mt-3 text-3xl font-bold">Meetings</h1><p className="mt-1 text-sm text-muted-foreground">Meetings you can access, including guest invitations.</p></header>{error ? <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}<div className="space-y-3">{meetings.map((meeting) => <Link className="block rounded-lg border border-border bg-card p-5 transition-colors hover:bg-muted/40" key={meeting.id} to={`/spaces/${encodeURIComponent(meeting.spaceId)}/meetings/${encodeURIComponent(meeting.id)}/${meeting.status === "IN_PROGRESS" ? "live" : "live/prejoin"}`}><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold">{meeting.title}</h2><p className="mt-1 text-sm text-muted-foreground">{new Date(meeting.scheduledAt).toLocaleString()}</p></div><span className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground">{meeting.status}</span></div></Link>)}{!error && meetings.length === 0 ? <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No accessible meetings yet.</div> : null}</div></main></div>;
+};
+
 // 16. Invitation Response
 const InvitationResponse = () => {
   const { session } = useAuthState();
@@ -7028,8 +8605,8 @@ const InvitationResponse = () => {
         ) : null}
 
         {isComplete ? (
-          <Link to="/spaces" className="block w-full py-2.5 rounded-lg bg-foreground text-background text-center text-sm font-semibold hover:bg-foreground/90 transition-colors">
-            Go to Workspaces
+          <Link to={`/spaces/${encodeURIComponent(spaceId)}`} className="block w-full py-2.5 rounded-lg bg-foreground text-background text-center text-sm font-semibold hover:bg-foreground/90 transition-colors">
+            Open workspace
           </Link>
         ) : (
           <div className="flex gap-3">
@@ -7056,6 +8633,33 @@ const InvitationResponse = () => {
       </div>
     </div>
   );
+};
+
+const MeetingInvitationResponse = () => {
+  const { session } = useAuthState();
+  const { meetingId = "", invitationId = "" } = useParams<{ meetingId: string; invitationId: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const token = new URLSearchParams(location.hash.replace(/^#/, "")).get("token")?.trim() ?? "";
+  const [state, setState] = useState<"ready" | "submitting" | "accepted" | "declined" | "error">("ready");
+  const [message, setMessage] = useState("");
+
+  async function resolve(accept: boolean) {
+    if (!session || !token || state === "submitting") return;
+    setState("submitting");
+    try {
+      const result = await resolveMeetingInvitation(session, meetingId, invitationId, token, accept);
+      setState(accept ? "accepted" : "declined");
+      setMessage(accept ? "Meeting access granted." : "Invitation declined.");
+      if (accept && result.participantId) setTimeout(() => navigate("/meetings", { replace: true }), 700);
+    } catch (cause) {
+      setState("error");
+      setMessage(cause instanceof Error ? cause.message : "Couldn't resolve the invitation.");
+    }
+  }
+
+  if (!session) return <Navigate replace state={{ requestedPath: `${location.pathname}${location.search}${location.hash}` }} to="/login" />;
+  return <div className="min-h-screen bg-background flex items-center justify-center p-6"><section className="w-full max-w-md rounded-xl border border-border bg-card p-6 space-y-4"><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Meeting invitation</p><h1 className="text-xl font-semibold">Join this meeting</h1><p className="text-sm leading-relaxed text-muted-foreground">This invitation grants access to this meeting only. It does not add you to the Space.</p>{message ? <p className={state === "error" ? "text-sm text-red-600" : "text-sm text-emerald-700"}>{message}</p> : null}{!token ? <p className="text-sm text-red-600">This invitation link is missing its token.</p> : <div className="flex justify-end gap-2"><button className="rounded-md border border-border px-4 py-2 text-sm font-semibold hover:bg-muted" disabled={state === "submitting"} onClick={() => void resolve(false)} type="button">Decline</button><button className="rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90" disabled={state === "submitting"} onClick={() => void resolve(true)} type="button">{state === "submitting" ? "Processing..." : "Accept invitation"}</button></div>}</section></div>;
 };
 
 // ─────────────────────────────────────────────
@@ -7368,6 +8972,7 @@ const ModalDemo = () => {
 // ─────────────────────────────────────────────
 const LoginPage = () => {
   const { loading: authLoading, session, setSession } = useAuthState();
+  const { locale } = useAppPreferences();
   const location = useLocation();
   const navigate = useNavigate();
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -7377,6 +8982,7 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+  const korean = locale === "ko";
 
   useEffect(() => {
     if (authLoading || !session) {
@@ -7447,7 +9053,10 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background flex" data-testid="sign-in-page">
+    <div className="min-h-screen bg-background flex relative" data-testid="sign-in-page">
+      <div className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6">
+        <DisplayPreferences />
+      </div>
       {/* Left — Brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-foreground flex-col justify-between p-12">
         <div className="flex items-center gap-2.5">
@@ -7458,13 +9067,15 @@ const LoginPage = () => {
         </div>
         <div className="space-y-6">
           <blockquote className="text-white/80 text-xl leading-relaxed font-light">
-            "Every decision we make in meetings deserves to be remembered, acted on, and built upon."
+            {korean
+              ? "회의에서 내린 모든 결정은 기억되고, 실행되며, 다음 업무로 이어져야 합니다."
+              : "Every decision we make in meetings deserves to be remembered, acted on, and built upon."}
           </blockquote>
           <div className="flex flex-col gap-4">
             {[
-              { icon: <Mic className="w-4 h-4" />, text: "Real-time transcription with speaker attribution" },
-              { icon: <Sparkles className="w-4 h-4" />, text: "AI-generated reports, decisions, and task extraction" },
-              { icon: <Library className="w-4 h-4" />, text: "Project knowledge base built automatically from meetings" },
+              { icon: <Mic className="w-4 h-4" />, text: korean ? "화자 정보를 포함한 실시간 전사" : "Real-time transcription with speaker attribution" },
+              { icon: <Sparkles className="w-4 h-4" />, text: korean ? "AI 회의록, 결정사항, 태스크 후보 생성" : "AI-generated reports, decisions, and task extraction" },
+              { icon: <Library className="w-4 h-4" />, text: korean ? "회의에서 자동으로 쌓이는 프로젝트 지식" : "Project knowledge base built automatically from meetings" },
             ].map(f => (
               <div key={f.text} className="flex items-center gap-3 text-white/60 text-sm">
                 <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center shrink-0">{f.icon}</div>
@@ -7484,8 +9095,8 @@ const LoginPage = () => {
               <div className="w-7 h-7 rounded-lg bg-foreground flex items-center justify-center"><Sparkles className="w-3.5 h-3.5 text-background" /></div>
               <span className="font-bold">MeetingMind</span>
             </div>
-            <h1 className="text-2xl font-bold text-foreground">Welcome back</h1>
-            <p className="text-sm text-muted-foreground mt-1">{mode === "signup" ? "Create your workspace account" : "Sign in to your workspace"}</p>
+            <h1 className="text-2xl font-bold text-foreground">{mode === "signup" ? (korean ? "환영합니다" : "Welcome!") : (korean ? "다시 오셨군요" : "Welcome back")}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{mode === "signup" ? (korean ? "워크스페이스 계정을 만들어 시작하세요" : "Create your workspace account") : (korean ? "워크스페이스에 로그인하세요" : "Sign in to your workspace")}</p>
           </div>
 
           <div className="grid grid-cols-2 rounded-lg border border-border p-1 bg-muted/40">
@@ -7494,21 +9105,21 @@ const LoginPage = () => {
               onClick={() => setMode("login")}
               className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${mode === "login" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}
             >
-              Sign in
+              {korean ? "로그인" : "Sign in"}
             </button>
             <button
               type="button"
               onClick={() => setMode("signup")}
               className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${mode === "signup" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}
             >
-              Sign up
+              {korean ? "회원가입" : "Sign up"}
             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "signup" ? (
               <div>
-                <div id="signup-display-name-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Display Name</div>
+                <div id="signup-display-name-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{korean ? "이름" : "Display Name"}</div>
                 <input
                   id="signup-display-name"
                   aria-labelledby="signup-display-name-label"
@@ -7524,7 +9135,7 @@ const LoginPage = () => {
               </div>
             ) : null}
             <div>
-              <div id="auth-email-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Work Email</div>
+              <div id="auth-email-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{korean ? "이메일" : "Work Email"}</div>
               <input
                 data-testid="sign-in-email"
                 id="auth-email"
@@ -7542,8 +9153,8 @@ const LoginPage = () => {
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <div id="auth-password-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Password</div>
-                <button type="button" className="text-xs text-primary hover:underline">Forgot password?</button>
+                <div id="auth-password-label" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{korean ? "비밀번호" : "Password"}</div>
+                <button type="button" className="text-xs text-primary hover:underline">{korean ? "비밀번호를 잊으셨나요?" : "Forgot password?"}</button>
               </div>
               <input
                 data-testid="sign-in-password"
@@ -7566,13 +9177,13 @@ const LoginPage = () => {
               disabled={loading}
               className="w-full py-2.5 rounded-lg bg-foreground text-background text-sm font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              {loading ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" /> Processing...</> : mode === "signup" ? "Create account" : "Sign in"}
+              {loading ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" /> {korean ? "처리 중..." : "Processing..."}</> : mode === "signup" ? (korean ? "계정 만들기" : "Create account") : (korean ? "로그인" : "Sign in")}
             </button>
           </form>
 
           <div className="relative">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border" /></div>
-            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">or continue with</span></div>
+            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">{korean ? "또는" : "or continue with"}</span></div>
           </div>
 
           {clientId ? (
@@ -7590,14 +9201,14 @@ const LoginPage = () => {
 
           <p className="text-center text-xs text-muted-foreground">
             {mode === "signup"
-              ? "Already have an account? "
-              : "Need an account? "}
+              ? (korean ? "이미 계정이 있나요? " : "Already have an account? ")
+              : (korean ? "계정이 없나요? " : "Need an account? ")}
             <button
               onClick={() => setMode(mode === "signup" ? "login" : "signup")}
               className="text-foreground font-semibold hover:underline"
               type="button"
             >
-              {mode === "signup" ? "Go to sign in" : "Create one"}
+              {mode === "signup" ? (korean ? "로그인" : "Go to sign in") : (korean ? "회원가입" : "Create one")}
             </button>
           </p>
         </div>
@@ -7613,8 +9224,16 @@ type AIMessage = { role: "user" | "assistant"; text: string; sources?: { label: 
 
 const ProjectAIPage = () => {
   const { session } = useAuthState();
+  const { locale } = useAppPreferences();
   const { spaceId = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const { spaceDetail, spaceLoading, spaceError } = useOutletContext<ShellOutletContext>();
+  const aiScope = searchParams.get("scope") === "meeting" ? "meeting" : "project";
+  const selectedMeetingId = searchParams.get("meetingId") ?? "";
+  const projectAiHref = `/spaces/${encodeURIComponent(spaceId)}/ai`;
+  const meetingAiHref = selectedMeetingId
+    ? `${projectAiHref}?scope=meeting&meetingId=${encodeURIComponent(selectedMeetingId)}`
+    : null;
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<AIMessage[]>([
     {
@@ -7627,6 +9246,7 @@ const ProjectAIPage = () => {
   const [error, setError] = useState("");
   const [model, setModel] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const korean = locale === "ko";
 
   const suggestions = [
     "최근 확정된 결정사항을 정리해줘",
@@ -7716,16 +9336,16 @@ const ProjectAIPage = () => {
 
   const sourceStyle: Record<string, string> = {
     report: "bg-blue-50 text-blue-700 border-blue-200",
-    doc: "bg-violet-50 text-violet-700 border-violet-200",
+    doc: "bg-cyan-50 text-cyan-700 border-cyan-200",
     term: "bg-amber-50 text-amber-700 border-amber-200",
   };
 
   if (spaceLoading) {
-    return <LoadingState label="Loading Project AI..." />;
+    return <LoadingState label={korean ? "프로젝트 AI를 불러오는 중..." : "Loading Project AI..."} />;
   }
 
   if (spaceError) {
-    return <ErrorState title="Couldn't load Project AI" desc={spaceError.message} />;
+    return <ErrorState title={korean ? "프로젝트 AI를 불러올 수 없습니다" : "Couldn't load Project AI"} desc={spaceError.message} />;
   }
 
   return (
@@ -7733,27 +9353,37 @@ const ProjectAIPage = () => {
       {/* Header */}
       <div className="px-6 py-4 border-b border-border bg-card shrink-0 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-primary" />
+          <div className="w-8 h-8 rounded-lg bg-[color:var(--app-ai-soft)] flex items-center justify-center">
+            <Sparkles className="w-4 h-4 text-[color:var(--app-ai)]" />
           </div>
           <div>
-            <h2 className="font-semibold text-sm">Project AI</h2>
-            <p className="text-[10px] text-muted-foreground">Searches confirmed reports & official knowledge only</p>
+            <h2 className="font-semibold text-sm">{aiScope === "meeting" ? "Meeting AI" : "Project AI"}</h2>
+            <p className="text-[10px] text-muted-foreground">{aiScope === "meeting" ? (korean ? "선택한 회의만 검색합니다" : "Searches the selected meeting only") : (korean ? "확정 회의록과 공식 지식만 검색합니다" : "Searches confirmed reports & official knowledge only")}</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground border border-border rounded-full px-2.5 py-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-          {spaceDetail?.name ? `${spaceDetail.name} only` : "Authorized sources only"}
+          {spaceDetail?.name ? (korean ? `${spaceDetail.name} 범위만` : `${spaceDetail.name} only`) : (korean ? "권한 있는 자료만" : "Authorized sources only")}
         </div>
+        <nav aria-label="AI scope" className="flex items-center gap-1 rounded-md bg-muted p-1">
+          <Link className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${aiScope === "project" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`} to={projectAiHref}>Project AI</Link>
+          {meetingAiHref ? <Link className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${aiScope === "meeting" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`} to={meetingAiHref}>Meeting AI</Link> : <span className="px-3 py-1.5 text-xs text-muted-foreground">{korean ? "Meeting AI용 회의를 선택하세요" : "Select a meeting for Meeting AI"}</span>}
+        </nav>
       </div>
 
+      {aiScope === "meeting" ? (
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+          {selectedMeetingId ? <MeetingAIChat meetingIdOverride={selectedMeetingId} /> : <EmptyState desc={korean ? "회의 화면에서 Meeting AI를 열면 해당 회의 범위만 검색합니다." : "Open Meeting AI from a meeting to keep the search scope limited to that meeting."} icon={<Sparkles className="w-5 h-5" />} title={korean ? "회의를 선택하세요" : "Select a meeting"} />}
+        </div>
+      ) : (
+      <>
       {/* Messages */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-6">
         {messages.map((m, i) => (
           <div key={i} className={`flex gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
             {m.role === "assistant" && (
-              <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
+              <div className="w-7 h-7 rounded-full bg-[color:var(--app-ai-soft)] flex items-center justify-center shrink-0 mt-0.5">
+                <Sparkles className="w-3.5 h-3.5 text-[color:var(--app-ai)]" />
               </div>
             )}
             <div className={`max-w-[75%] space-y-2 ${m.role === "user" ? "items-end flex flex-col" : ""}`}>
@@ -7812,145 +9442,39 @@ const ProjectAIPage = () => {
         <p className="text-[10px] text-muted-foreground mt-2 text-center">AI answers are based only on official project knowledge and authorized meetings.</p>
         {model ? <p className="text-[10px] text-muted-foreground mt-1 text-center">Model: {model}</p> : null}
       </div>
+      </>
+      )}
     </div>
   );
 };
 
-// ─────────────────────────────────────────────
-// 19. Meeting Report — enhanced with workflow states
-// ─────────────────────────────────────────────
-type ReportStatus = "draft" | "editing" | "confirmed";
+const GuestMeetingAiPage = () => {
+  const { meetingId = "" } = useParams<{ meetingId: string }>();
+  const navigate = useNavigate();
+  const [meeting, setMeeting] = useState<MeetingDetailResponse | null>(null);
+  const { session } = useAuthState();
 
-const MeetingReport = () => {
-  const [status, setStatus] = useState<ReportStatus>("draft");
-  const [editMode, setEditMode] = useState(false);
-  const [summaryText, setSummaryText] = useState(
-    "The team aligned on the JWT auth flow for the Q3 launch. Key decisions included handling silent re-authentication for expired refresh tokens and defining a 24-hour idle timeout. Sarah Jenkins will update the design system with a timeout screen and a new outlined button variant, both treated as P1 priority."
-  );
-
-  const statusConfig: Record<ReportStatus, { label: string; color: string; bg: string; border: string; desc: string }> = {
-    draft:     { label: "Draft",      color: "text-amber-700",   bg: "bg-amber-50",   border: "border-amber-200", desc: "AI-generated — not yet reviewed" },
-    editing:   { label: "Editing",    color: "text-blue-700",    bg: "bg-blue-50",    border: "border-blue-200",  desc: "Under review and editing" },
-    confirmed: { label: "Confirmed",  color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", desc: "Added to project knowledge base" },
-  };
-
-  const sc = statusConfig[status];
-
-  const decisions = [
-    { id: 1, text: "Silent re-authentication flow when refresh token expires; user sees interruption only after 24h idle.", accepted: true },
-    { id: 2, text: "Outlined button variant to be added to design system as P1 before auth screen implementation.", accepted: true },
-    { id: 3, text: "Timeout/error screen design to follow existing error state patterns.", accepted: false },
-  ];
-
-  const [extractedTasks, setExtractedTasks] = useState([
-    { id: 1, title: "Design timeout screen matching existing error state patterns", assignee: "Sarah Jenkins", added: false },
-    { id: 2, title: "Add outlined button variant to design system (P1)", assignee: "Sarah Jenkins", added: false },
-    { id: 3, title: "Review final design spec for backend JWT implementation", assignee: "David Chen", added: false },
-  ]);
-
-  const addedCount = extractedTasks.filter(t => t.added).length;
+  useEffect(() => {
+    if (!session || !meetingId) return;
+    void fetchMeetingDetail(session, meetingId).then(setMeeting).catch(() => setMeeting(null));
+  }, [meetingId, session]);
 
   return (
-    <div className="space-y-5">
-      {/* Status bar */}
-      <div className={`flex items-center justify-between rounded-lg px-5 py-3 border ${sc.bg} ${sc.border}`}>
-        <div className="flex items-center gap-3">
-          <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${sc.bg} ${sc.border} ${sc.color}`}>{sc.label}</span>
-          <span className={`text-sm ${sc.color}`}>{sc.desc}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {status === "draft" && (
-            <><button onClick={() => { setStatus("editing"); setEditMode(true); }} className="px-3 py-1.5 rounded-md border border-blue-300 text-blue-700 bg-white text-xs font-semibold hover:bg-blue-50 transition-colors">Start Review</button>
-            <button onClick={() => setStatus("confirmed")} className="px-3 py-1.5 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors">Quick Confirm</button></>
-          )}
-          {status === "editing" && (
-            <><button onClick={() => setEditMode(p => !p)} className="px-3 py-1.5 rounded-md border border-border text-xs font-semibold hover:bg-muted transition-colors">{editMode ? "Preview" : "Edit"}</button>
-            <button onClick={() => { setStatus("confirmed"); setEditMode(false); }} className="px-3 py-1.5 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors">Confirm Report</button></>
-          )}
-          {status === "confirmed" && (
-            <button onClick={() => setStatus("editing")} className="px-3 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:bg-muted transition-colors">Reopen for editing</button>
-          )}
-        </div>
-      </div>
-
-      {/* Status stepper */}
-      <div className="flex items-center gap-2">
-        {(["draft","editing","confirmed"] as ReportStatus[]).map((s, i) => {
-          const past = ["draft","editing","confirmed"].indexOf(status) >= i;
-          return (
-            <React.Fragment key={s}>
-              <div className={`flex items-center gap-1.5 ${past ? "" : "opacity-40"}`}>
-                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${past ? "bg-foreground text-background" : "bg-muted text-muted-foreground"}`}>{i+1}</div>
-                <span className="text-xs font-medium capitalize text-foreground">{s}</span>
-              </div>
-              {i < 2 && <div className={`flex-1 h-px ${past && status !== (["draft","editing","confirmed"][i] as ReportStatus) ? "bg-foreground" : "bg-border"}`} />}
-            </React.Fragment>
-          );
-        })}
-      </div>
-
-      {/* Summary */}
-      <div className="bg-card border border-border rounded-lg p-6 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-foreground">Meeting Summary</h3>
-          {status === "editing" && (
-            <button onClick={() => setEditMode(p => !p)} className="text-xs text-primary hover:underline">{editMode ? "Preview" : "Edit"}</button>
-          )}
-        </div>
-        {editMode && status === "editing" ? (
-          <textarea value={summaryText} onChange={e => setSummaryText(e.target.value)} rows={6} className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none leading-relaxed" />
-        ) : (
-          <p className="text-sm text-foreground/80 leading-relaxed">{summaryText}</p>
-        )}
-      </div>
-
-      {/* Key Decisions */}
-      <div className="bg-card border border-border rounded-lg p-6">
-        <h3 className="font-semibold text-foreground mb-4">Key Decisions</h3>
-        <div className="space-y-3">
-          {decisions.map((d, i) => (
-            <div key={d.id} className={`flex gap-3 p-3 rounded-lg border ${d.accepted ? "border-emerald-200 bg-emerald-50" : "border-border bg-muted/30"}`}>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 ${d.accepted ? "bg-emerald-500 text-white" : "bg-muted-foreground/20 text-muted-foreground"}`}>{i + 1}</div>
-              <p className="text-sm text-foreground/80 flex-1 leading-relaxed">{d.text}</p>
-              {!d.accepted && status !== "confirmed" && (
-                <span className="text-[10px] font-medium text-muted-foreground border border-border bg-background rounded px-1.5 py-0.5 shrink-0 self-start">Pending</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Task Extraction */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h3 className="font-semibold">Extracted Tasks</h3>
-          <button
-            disabled={addedCount === 0}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${addedCount > 0 ? "bg-foreground text-background hover:bg-foreground/90" : "bg-muted text-muted-foreground cursor-not-allowed"}`}
-          >
-            Add {addedCount > 0 ? addedCount : ""} to Board
-          </button>
-        </div>
-        <div className="divide-y divide-border">
-          {extractedTasks.map(task => (
-            <div
-              key={task.id}
-              onClick={() => setExtractedTasks(prev => prev.map(t => t.id === task.id ? { ...t, added: !t.added } : t))}
-              className={`flex items-center gap-3 px-5 py-3.5 cursor-pointer transition-colors ${task.added ? "bg-primary/5" : "hover:bg-muted/30"}`}
-            >
-              <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${task.added ? "bg-primary border-primary" : "border-muted-foreground/40"}`}>
-                {task.added && <span className="text-white text-[9px] font-bold">✓</span>}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground truncate">{task.title}</p>
-                <p className="text-xs text-muted-foreground">→ {task.assignee}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+    <div className="min-h-screen bg-muted/10 p-6 lg:p-10">
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-card">
+        <header className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-primary">Guest workspace</p><h1 className="mt-1 truncate text-lg font-semibold text-foreground">{meeting?.title ?? "Meeting AI"}</h1></div>
+          <button className="rounded-md border border-foreground px-3 py-2 text-sm font-medium text-foreground hover:bg-muted" onClick={() => navigate(`/spaces?guest=1&meetingId=${encodeURIComponent(meetingId)}`)} type="button">Back to meeting</button>
+        </header>
+        <main className="min-h-0 flex-1 p-5 lg:p-8"><MeetingAIChat meetingIdOverride={meetingId} meetingDetailOverride={meeting} /></main>
       </div>
     </div>
   );
+};
+
+const LegacyMeetingAiRedirect = () => {
+  const { spaceId = "", meetingId = "" } = useParams();
+  return <Navigate replace to={`/spaces/${encodeURIComponent(spaceId)}/ai?scope=meeting&meetingId=${encodeURIComponent(meetingId)}`} />;
 };
 
 // ─────────────────────────────────────────────
@@ -8004,6 +9528,7 @@ const PlaceholderPage = ({ title }: { title: string }) => (
 );
 
 // --- Router Setup ---
+// This is the active frontend route source. main.tsx renders App directly.
 
 const router = createBrowserRouter([
   { path: "/", Component: LandingPage },
@@ -8011,6 +9536,7 @@ const router = createBrowserRouter([
   { path: "/meeting-access", Component: MeetingAccess },
   { path: "/meetings/:meetingId", Component: MeetingAccessCompatRoute },
   { path: "/spaces", element: <RequireAuth><WorkspaceHome /></RequireAuth> },
+  { path: "/guest", element: <RequireAuth><WorkspaceHome /></RequireAuth> },
   {
     path: "/spaces/:spaceId",
     element: <RequireAuth><AppShell /></RequireAuth>,
@@ -8023,9 +9549,10 @@ const router = createBrowserRouter([
         children: [
           { index: true, Component: MeetingOverview },
           { path: "transcript", Component: MeetingTranscript },
-          { path: "report", Component: MeetingReport },
+          { path: "report", Component: MeetingReportRoute },
           { path: "tasks", Component: MeetingTaskCandidates },
-          { path: "ai", Component: MeetingAIChat },
+          { path: "participants", Component: MeetingParticipants },
+          { path: "ai", Component: LegacyMeetingAiRedirect },
         ]
       },
       { path: "tasks", Component: ProjectTasks },
@@ -8041,7 +9568,10 @@ const router = createBrowserRouter([
   },
   { path: "/spaces/:spaceId/meetings/:meetingId/live/prejoin", element: <RequireAuth><PrejoinRoom /></RequireAuth> },
   { path: "/spaces/:spaceId/meetings/:meetingId/live", element: <RequireAuth><LiveMeeting /></RequireAuth> },
+  { path: "/guest/meetings/:meetingId/ai", element: <RequireAuth><GuestMeetingAiPage /></RequireAuth> },
   { path: "/space-invitations/:spaceId/:invitationId", element: <RequireAuth><InvitationResponse /></RequireAuth> },
+  { path: "/meeting-invitations/:meetingId/:invitationId", element: <RequireAuth><MeetingInvitationResponse /></RequireAuth> },
+  { path: "/meetings", element: <RequireAuth><GlobalMeetings /></RequireAuth> },
   { path: "/settings", element: <RequireAuth><AccountSettings /></RequireAuth> },
   { path: "/denied", Component: () => <PermissionDenied type="project" /> },
 ]);
@@ -8049,6 +9579,18 @@ const router = createBrowserRouter([
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [theme, setTheme] = useState<ThemeMode>(storedTheme);
+  const [locale, setLocale] = useState<AppLocale>(storedLocale);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  }, [locale]);
 
   useEffect(() => {
     let active = true;
@@ -8088,9 +9630,11 @@ export function App() {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ session, loading, setSession }}>
-      <RouterProvider router={router} />
-    </AuthContext.Provider>
+    <AppPreferencesContext.Provider value={{ theme, setTheme, locale, setLocale }}>
+      <AuthContext.Provider value={{ session, loading, setSession }}>
+        <RouterProvider router={router} />
+      </AuthContext.Provider>
+    </AppPreferencesContext.Provider>
   );
 }
 
