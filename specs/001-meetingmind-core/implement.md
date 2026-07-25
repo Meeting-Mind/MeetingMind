@@ -2284,6 +2284,18 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T455 STT Service Startup Failure
+
+- 변경 파일: `stt/src/main/java/com/meetingmind/stt/service/TranscriptionCoordinator.java`, `stt/src/test/java/com/meetingmind/stt/SpringBeanConstructorInjectionTest.java`(신규), `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 발단: 로컬 전체 스택을 띄우다가 **독립 STT 서비스가 아예 기동하지 못하는 것**을 발견했다. `NoSuchMethodException: TranscriptionCoordinator.<init>()`.
+- 원인: `TranscriptionCoordinator`에 생성자가 둘이다(주입용 3-arg public, `Clock`을 고정하는 테스트용 4-arg package-private). Spring은 생성자가 여러 개면 어느 쪽으로 주입할지 결정할 수 없어 기본 생성자를 찾고, 없으면 기동에 실패한다. 3-arg 쪽에 `@Autowired`를 명시해 해결했다.
+- **테스트가 못 잡은 이유**: STT 테스트 13건이 전부 단위 테스트이고 **Spring context를 띄우는 테스트가 하나도 없었다**. CI `Realtime STT Service` job은 통과한다 — 조립 단계를 보지 않기 때문이다. `application-mtls.yml`(`T450.1`)과 정확히 같은 계열의 공백이다.
+- 재발 방지 설계: `@SpringBootTest`로 컨텍스트를 띄우는 대신 **reflection으로 모든 bean의 생성자 주입 가능성을 검사**한다. STT는 JPA를 쓰므로 컨텍스트 기동에 실제 데이터베이스가 필요한데 CI STT job에는 Postgres service가 없고, 붙이면 CI 실행 시간이 늘어난다. reflection 검사는 DB 없이 밀리초 단위로 끝나면서 **134개 bean 전체**를 덮는다. 한계는 조립 가능 여부만 본다는 것이며 설정 바인딩까지 보장하지는 않는다.
+- **먼저 실패시켜 확인했다**: 수정을 되돌린 상태에서 새 테스트를 돌려 `TranscriptionCoordinator (생성자 2개)`를 정확히 지목하며 실패하는 것을 확인한 뒤 수정을 복원했다. 통과만 보고 넘어가면 결함을 잡지 못하는 테스트를 추가할 수 있다.
+- 전수 조사: backend/bff/auth/stt의 Spring bean 134개를 훑어 "생성자 2개 이상 + `@Autowired` 없음"을 4건 더 찾았으나(`EgressTokenService`, `AuthEnvironment`, `PasswordHasher`, `LiveKitTokenService`) 전부 **기본 생성자를 갖고 있어 안전**했다. 실제 결함은 `TranscriptionCoordinator` 하나뿐이다.
+- 로컬 기동 조건: STT는 Core와 분리된 자체 DB를 쓴다(`V1__init_stt_schema.sql` 주석). `local` 프로파일은 DataSource를 요구하므로 별도 database(`meetingmind_stt`)를 만들고 `db` 프로파일로 띄운다. 기동 확인 후 Flyway 마이그레이션 1건 적용을 함께 확인했다.
+- 검증: `cd stt && ./gradlew test` -> 42건 / 실패 0 / skip 0. 실제 기동으로 `/actuator/health` `UP` 확인.
+
 ## T439.4 STT / LiveKit / Report Confirm Custom Metrics
 
 - 변경 파일: `backend/src/main/java/com/meetingmind/demo/observability/BackendOperationMetrics.java`(신규), `ConfiguredTranscriptionGateway.java`, `MeetingLiveKitTokenService.java`, `MeetingReportLifecycleService.java`, `backend/src/test/java/com/meetingmind/demo/BackendMetricNamesTest.java`(신규), 기존 단위 테스트 2건, `infra/grafana/dashboards/meetingmind-stt-live.json`(신규), `contracts/observability.md`.
