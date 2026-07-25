@@ -2284,6 +2284,19 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T450 Audit — `#56` 유입분 검증 커버리지 실측
+
+- 배경: `#56`으로 들어온 `cert-loader`(Go), `ai/envoy`, 각 서비스 `application-mtls.yml`, `infra/aws` Terraform이 한 번도 검증되지 않았다고 보고 있었다. 실측해 보니 **절반은 이미 덮여 있었고, 덮이지 않은 곳은 따로 있었다**.
+- CI 실적: dev(`15bb730`) CI run `30168886298`의 12개 job이 전부 success이며 skip이 없다. run 단위 success는 근거가 아니므로 job 단위로 확인했다.
+- 덮여 있음:
+  - `cert-loader`: `Certificate Loader` job이 `go mod verify && go test ./... && go vet ./...`를 실제로 실행한다. Go 툴체인이 로컬에 없어도 CI가 검증한다.
+  - `ai/envoy`: `Container Images` job이 이미지를 빌드할 뿐 아니라 openssl로 self-signed 인증서를 만들어 `envoy.yaml`을 실제로 로드시킨다. 설정 파일이 파싱만 되는 수준이 아니라 기동까지 확인된다.
+- 덮여 있지 않음(실제 공백):
+  - `application-mtls.yml` 4종(`auth`, `backend`, `bff`, `stt`): CI workflow에 `mtls` 문자열이 없고, 어떤 테스트도 이 프로파일을 활성화하지 않는다. 즉 property binding과 Spring context 기동이 한 번도 실행된 적이 없다. `management:` 중복키 회귀와 같은 계열의 결함이 그대로 남을 수 있는 자리다.
+  - `infra/aws` Terraform: CI에 terraform job 자체가 없다. `fmt`/`validate`조차 돌지 않는다.
+- 자체 검증한 것: SnakeYAML `DuplicateKeyException` 계열 결함을 전수 검사했다. PyYAML 기본 로더는 중복키를 조용히 덮어쓰므로(마지막 값 승) 중복키를 예외로 올리는 로더를 따로 구성했다. build/산출물 디렉터리를 제외한 YAML 26개가 전부 통과했고, 대상 목록에 `application-mtls.yml` 4종과 `ai/envoy/envoy.yaml`이 실제로 포함됐음을 파일 목록 대조로 확인했다(탐색이 비어서 통과하는 경우를 배제).
+- 한계: YAML이 파싱된다는 것과 Spring이 그 값을 바인딩해 context를 띄운다는 것은 다르다. mtls 프로파일의 실제 기동 검증과 Terraform 검증은 후속 작업으로 남긴다.
+
 ## T449 SMK-003 Remainder — Report Body Generation by Real Provider
 
 - 변경 파일: `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
