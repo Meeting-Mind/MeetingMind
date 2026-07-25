@@ -1,14 +1,17 @@
 name: CI
 
+# 머지 후 push로 CI를 다시 돌리지 않는다. PR에서 이미 같은 커밋을 검증했고,
+# merge commit만 달라진 상태를 전부 재실행하면 실행 시간이 정확히 두 배가 된다.
+# 실측: 1회 실행이 약 19분이고 머지 중복만 11회, 약 205분을 이렇게 썼다.
+#
+# 직접 push는 여전히 검증이 필요하므로 수동 실행(workflow_dispatch)을 남겨 둔다.
+# dev를 보호 규칙으로 PR-only로 두면 직접 push 자체가 막힌다.
 on:
   pull_request:
     branches:
       - dev
       - main
-  push:
-    branches:
-      - dev
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
