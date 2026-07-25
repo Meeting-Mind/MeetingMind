@@ -2284,6 +2284,16 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T449 SMK-003 Remainder — Report Body Generation by Real Provider
+
+- 변경 파일: `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 대상 경로: `POST /api/internal/meeting-ai/generate-report`. Project AI와 달리 이 endpoint는 **자체 검색을 하지 않는다**. `build_backend_report_sources`가 Backend가 전달한 `sources`만 사용하므로, Backend가 권한 검증과 단일 meeting 선필터를 끝낸 뒤에만 근거가 들어온다.
+- 양성 1건: dev DB의 `meeting-1b4438c0…`에서 실제 transcript segment 37건을 source로 전달했다. `unsupported=false`, summary와 markdown(976자), decision 3건, actionItem 3건이 생성됐고 model은 `gpt-4.1-mini-2025-04-14`다. 인용된 source 6건이 **전부 전달 범위 안**이며 범위 밖 인용은 0건이다.
+- 음성 2건(`validate_backend_report_sources` 가드): 다른 회의의 source를 섞으면 HTTP 403 `AI_CONTEXT_FORBIDDEN`("Report source meetingId must match request meetingId."). 허용되지 않은 source type(`report`)을 섞어도 HTTP 403 `AI_CONTEXT_FORBIDDEN`("Report source type is not allowed."). 즉 단일 meeting 경계와 source type allowlist가 실제로 강제된다.
+- 응답 필드 주의: 응답 모델 `GenerateReportResponse`의 필드는 `supported`가 아니라 `unsupported`다. provider JSON 쪽은 `supported` boolean을 요구하고(`supported`가 false면 `unsupported_report(reason="MODEL_UNSUPPORTED")`로 전환) 응답에서는 반전된 이름으로 노출된다. 검증 스크립트에서 `supported`를 읽으면 항상 `None`이 나오므로 공허하게 통과할 수 있다.
+- 이로써 SMK-003의 두 축이 모두 닫혔다. 본문 생성(`T449`) -> 확정 시 색인 작업 생성(`T445`) -> worker가 소비해 `report` chunk 적재(`T447`).
+- 범위 한계: AI 서버 내부 endpoint 직접 호출이다. Backend가 생성 결과를 `CANDIDATE`로 저장하는 단계는 `T445`가 다루는 별개 경로다. opt-in 수동 smoke이며 실 provider 과금이 발생한다.
+
 ## T448 SMK-004 Project AI Answers from Confirmed Report with Citation
 
 - 변경 파일: `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
