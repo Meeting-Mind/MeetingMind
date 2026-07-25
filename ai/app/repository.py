@@ -91,7 +91,13 @@ class EmbeddingJobRepository(Protocol):
     ) -> bool:
         ...
 
-    def record_failure(self, job: EmbeddingJob, failure_code: str, retry_delay_seconds: int | None) -> None:
+    def record_failure(
+        self,
+        job: EmbeddingJob,
+        failure_code: str,
+        retry_delay_seconds: int | None,
+        failure_detail: str | None = None,
+    ) -> None:
         ...
 
     def queue_metrics(self) -> EmbeddingQueueMetrics:
@@ -259,23 +265,33 @@ class PostgresEmbeddingRepository:
                 )
             return True
 
-    def record_failure(self, job: EmbeddingJob, failure_code: str, retry_delay_seconds: int | None) -> None:
+    def record_failure(
+        self,
+        job: EmbeddingJob,
+        failure_code: str,
+        retry_delay_seconds: int | None,
+        failure_detail: str | None = None,
+    ) -> None:
         with self._connect(self._dsn) as connection:
             if retry_delay_seconds is None:
                 connection.execute(
                     """
                     update embedding_jobs
-                    set status = 'FAILED', failure_code = %s, completed_at = now(), lease_expires_at = null
+                    set status = 'FAILED', failure_code = %s, failure_detail = %s,
+                        completed_at = now(), lease_expires_at = null
                     where id = %s and status = 'PROCESSING'
                     """,
-                    (failure_code, job.id),
+                    (failure_code, failure_detail, job.id),
                 )
                 knowledge_status = "FAILED"
             else:
+                # 재시도로 되돌릴 때는 failure_code를 지운다. failure_detail도 함께 지워야
+                # check 제약(detail이 있으면 code도 있어야 함)을 만족한다.
                 connection.execute(
                     """
                     update embedding_jobs
                     set status = 'PENDING', started_at = null, completed_at = null, failure_code = null,
+                        failure_detail = null,
                         next_attempt_at = now() + (%s * interval '1 second'), lease_expires_at = null
                     where id = %s and status = 'PROCESSING'
                     """,

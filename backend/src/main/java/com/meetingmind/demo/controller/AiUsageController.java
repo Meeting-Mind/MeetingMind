@@ -6,6 +6,7 @@ import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.RecordAiUsageEventRequest;
 import com.meetingmind.demo.dto.RecordAiUsageEventResponse;
 import com.meetingmind.demo.dto.SpaceAiUsageResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,10 +22,36 @@ public class AiUsageController {
 
     private final AuthService authService;
     private final WorkspaceDomainService workspaceDomainService;
+    private final int tokenQuota;
 
-    public AiUsageController(AuthService authService, WorkspaceDomainService workspaceDomainService) {
+    public AiUsageController(
+            AuthService authService,
+            WorkspaceDomainService workspaceDomainService,
+            @Value("${meetingmind.ai.token-quota:0}") int tokenQuota
+    ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
+        this.tokenQuota = tokenQuota;
+    }
+
+    /**
+     * quota는 표시 전용이다. 초과해도 AI 호출을 차단하지 않는다. 프로토타입에서 실수로 팀
+     * 전체가 막히는 위험을 지지 않기 위한 결정이며, 차단이 필요해지면 별도 과제로 다룬다.
+     *
+     * <p>quota가 설정되지 않았으면 {@code limit}과 {@code usagePercent}를 모두 null로 둔다.
+     * 0을 내려보내면 클라이언트가 "한도 0"으로 오해할 수 있다.
+     */
+    private Integer quotaLimit() {
+        return tokenQuota > 0 ? tokenQuota : null;
+    }
+
+    private Double usagePercent(int totalInputTokens, int totalOutputTokens) {
+        Integer limit = quotaLimit();
+        if (limit == null) {
+            return null;
+        }
+        long usedTokens = (long) totalInputTokens + (long) totalOutputTokens;
+        return Math.round(usedTokens * 10_000.0 / limit) / 100.0;
     }
 
     @GetMapping("/spaces/{spaceId}/ai/usage")
@@ -37,11 +64,11 @@ public class AiUsageController {
         WorkspaceDomainService.SpaceAiUsage usage = workspaceDomainService.spaceAiUsage(user.id(), spaceId, window);
         return new SpaceAiUsageResponse(
                 usage.window(),
-                null,
+                quotaLimit(),
                 usage.totalRequests(),
                 usage.totalInputTokens(),
                 usage.totalOutputTokens(),
-                null,
+                usagePercent(usage.totalInputTokens(), usage.totalOutputTokens()),
                 usage.features().stream()
                         .map(feature -> new SpaceAiUsageResponse.FeatureUsage(
                                 feature.feature(),

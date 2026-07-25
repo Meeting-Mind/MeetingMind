@@ -2284,6 +2284,145 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T439.2 Grafana Provisioning and Dashboards
+
+- 변경 파일: `infra/grafana/**`(신규 5개), `specs/001-meetingmind-core/contracts/observability.md`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 범위 결정: **provisioning + dashboard JSON까지**만 만든다. STT/LiveKit custom metric 추가는 backend/stt 코드 변경이 따라오므로 별도로 둔다.
+- 없는 지표로 패널을 만들지 않았다: `contracts/observability.md`가 STT/LiveKit 패널을 "최소 필요"로 적어 두었지만 해당 metric이 아직 구현되어 있지 않다. 없는 지표를 쿼리하면 Grafana는 오류를 내지 않고 **빈 패널**을 보여주므로, 만들어 두면 "대시보드가 있다"는 착각만 남는다. 그래서 제외하고 gap으로 남겼다.
+- AI 지표 검증: dashboard JSON에서 쿼리를 파싱해 지표 이름을 뽑고, 실행 중인 AI 서버의 `GET /metrics` 실제 출력과 대조했다. 8종 전부 존재하며 histogram은 `_bucket` 접미사까지 확인했다. 쿼리가 0개인 경우를 실패로 처리해 공허한 통과를 막았다.
+- BFF 지표: Micrometer 등록 코드에서 이름과 tag, meter 종류(Counter/Timer/Gauge)를 확인하고 Prometheus 변환 규칙을 적용했다(dot -> underscore, Counter `_total`, Timer `_seconds_count`/`_seconds_sum`). 실행 중인 BFF의 `/actuator/prometheus`는 인증이 걸려 있어(401) 직접 대조하지 못했다.
+- **부수 발견**: 지표 이름을 테스트로 고정하려 했으나, `@SpringBootTest` 환경의 BFF `/actuator/prometheus`가 **Prometheus 노출 형식이 아닌 텍스트**를 반환한다(dot 이름 + `value=`). 기존 `exposesPrometheusMetrics`는 "비어 있지 않음"만 단정해 이를 잡지 못하고 있었다. 원인 규명은 이 작업 범위를 넘으므로 추가하려던 테스트는 되돌리고 gap으로 기록했다. **지표 이름이 어긋나면 dashboard는 오류 없이 빈 패널이 되므로 조용히 실패한다** — 고정 테스트가 필요한 이유다.
+- 대시보드 구성: AI는 endpoint별 요청/실패율/지연 p50·p95, provider 소요 시간과 토큰 사용량, 요청당 근거 수, 검색 지연/결과 수, 색인 대기열. BFF는 guard 거부/circuit 상태, 브라우저 요청 결과와 지연, 토큰 재발급/세션 무효.
+- 색인 대기열 패널에는 `T447`에서 실제로 5시간 47분 방치됐던 사실을 설명으로 남겼다. 이 패널이 있었으면 그때 바로 드러났다.
+
+## T439.1 Space AI Usage and Quota
+
+- 변경 파일: `backend/src/main/resources/application.yml`, `backend/src/main/java/com/meetingmind/demo/controller/AiUsageController.java`, `backend/src/test/java/com/meetingmind/demo/controller/AiUsageControllerTest.java`, `frontend/src/App.tsx`, `frontend/e2e/space-ai-usage.spec.ts`(신규), `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 착수 전 실측: API는 이미 있었다(`GET /api/v1/spaces/{spaceId}/ai/usage`, window/총계/기능별 집계). `limit`과 `usagePercent`만 `null` 하드코딩이었다. frontend에는 타입과 `fetchSpaceAiUsage`가 있었지만 **호출하는 화면이 없었다**. "Knowledge Indexed" 제거는 이미 끝나 있었다. 즉 남은 일은 quota 계산과 화면 연결이었다.
+- 결정: quota 상한은 **환경변수 전역 기본값**(`MEETINGMIND_AI_TOKEN_QUOTA`)에서 온다. Space별 컬럼을 두면 마이그레이션과 설정 UI가 따라오는데 프로토타입 단계에 비해 과하다. 값이 0 이하이거나 미설정이면 `limit`/`usagePercent`를 **둘 다 null로** 둔다. 0을 내려보내면 클라이언트가 "한도 0"으로 오해한다.
+- 결정: quota는 **표시 전용이며 초과해도 AI 호출을 차단하지 않는다**. 프로토타입에서 설정 실수로 팀 전체가 막히는 위험을 지지 않는다. `quotaOverrunIsReportedButNeverBlocks` 테스트가 이 결정을 고정한다 — 초과 이후에도 기록과 조회가 계속 성공함을 단정한다.
+- UI: Space 개요에 사용량 카드를 추가했다. 총 토큰, 요청 수, 기능별 내역을 보여주고 quota가 설정된 경우에만 진행률 막대와 퍼센트를 렌더한다. 100%를 넘으면 색을 바꾸되 "AI 사용은 계속됩니다"를 함께 표시해 차단이 아님을 분명히 한다. 조회가 실패하면 카드만 숨기고 개요 전체는 정상 동작한다.
+- **YAML 중복키를 스스로 만들었다가 잡았다**: `meetingmind.ai:` 블록이 이미 있는데 파일 앞쪽에 같은 키를 새로 열어 SnakeYAML `DuplicateKeyException`으로 backend가 기동하지 못했다. `V119.4`가 고쳤던 회귀와 정확히 같은 유형이며, `compileJava`는 통과했다. `T450`에서 만든 중복키 스캐너로 확인 후 기존 블록에 합쳤다. **YAML을 건드리면 컴파일이 아니라 기동으로 확인해야 한다**는 것이 다시 확인됐다.
+- 검증: `AiUsageControllerTest` 3건 실행 / 0 skip / 0 실패. `npm run build` 통과, 단위 테스트 22건 통과, lint 0 errors / 4 warnings(기존과 동일, 신규 경고 없음). Playwright `space-ai-usage` 1건 통과.
+- e2e를 따로 둔 이유: 카드가 조건부 렌더(`aiUsage ? ... : null`)라 조회가 실패하면 **조용히 사라진다**. 빌드도 단위 테스트도 그것을 잡지 못한다. 실제로 첫 실행에서 카드가 뜨지 않았고, 원인이 stale backend였음을 이 테스트가 드러냈다.
+
+## T451.1 AH-009 — Token-Based Context Budget
+
+- 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/{test-matrix,tasks,implement}.md`.
+- 배경: `T451`이 고친 것은 "상한을 넘길 때 무엇을 먼저 버리는가"였고 상한 자체는 여전히 **건수**였다. `PERF-TOKEN-01`은 프로토타입 목표("기능별 기본 상한을 두고 초과 시 낮은 점수 근거부터 제거")와 MVP 목표("요청 전 토큰 예상치를 계산하고 상한 초과 요청을 자동 축소")를 나눠 두는데, 전자는 `T451`로 충족됐고 후자가 이 작업이다.
+- 토큰 측정 방식 결정: **문자 기반 추정**을 쓴다. `tiktoken`을 넣으면 정확하지만 `ai/requirements.txt` 의존성과 컨테이너 이미지가 커지고 모델별 인코딩 관리가 따라온다. 상한 판정에는 보수적 추정으로 충분하다. `estimate_tokens`는 한글/CJK를 문자당 1토큰, 그 외를 4문자당 1토큰으로 본다. CJK를 **과대평가**하는 방향이라 상한을 넘겨 잘리는 쪽으로 안전하게 틀린다.
+- 기능별 예산 분리(`PERF-TOKEN-01`이 명시한 요건): `AI_CONTEXT_TOKEN_BUDGET`이 전역 기본값(6000)이고 `AI_CONTEXT_TOKEN_BUDGET_<FEATURE>`로 덮어쓴다. 적용 대상은 `explain_term`, `meeting_chat`, `project_chat`, `report`, `tasks` 다섯이다. 값이 정수가 아니거나 0 이하면 전역 기본값으로 되돌린다.
+- **최소 1건은 남긴다**: 예산이 아무리 작아도 source를 전부 버리지 않는다. 전부 버리면 근거가 사라져 `NO_EVIDENCE`가 되는데, 그것은 **검색 실패** 신호이지 예산 초과 신호가 아니다. 둘을 섞으면 운영 중에 원인을 오판한다.
+- 적용 순서: score 정렬 -> 건수 상한(있으면) -> 토큰 예산. 예산은 직렬화된 JSON 기준으로 재므로 실제 전달량과 어긋나지 않는다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests` -> 211건 / 실패 0 / skip 7. 신규 4건이 실제로 실행됨을 `-v`로 확인했다. 예산 축소 테스트는 **예산 없이 5건 전부 들어간다**는 양성 대조를 함께 단정해, 축소가 예산 때문임을 고정했다.
+- 한계: 추정이므로 provider가 세는 실제 토큰과 다르다. 정확한 회계가 필요해지면 `tiktoken` 도입을 다시 판단한다. 출력 길이 제한(`PERF-TOKEN-05`)은 이 작업 범위 밖이다.
+
+## T454 SMK-002 Media Axis — Two-Participant Publish/Subscribe
+
+- 변경 파일: `frontend/e2e/live-media.spec.ts`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 덮는 범위: `T444`는 LiveKit **서버 도달성**만 덮는다(room create/list/delete, token 스코프). 브라우저 client가 없어 매체 경로는 검증되지 않았고, 그래서 `SMK-002` 매체 축이 수동으로 남아 있었다. 이 스펙이 그 축을 브라우저 2개로 자동화한다.
+- 구성: 호스트가 Space와 회의를 만들고 두 번째 사용자를 회의 참가자로 넣는다. 두 사용자가 각각 별도 browser context로 prejoin(`Join Now`)을 거쳐 live room에 들어간다. Chromium fake device(`--use-fake-device-for-media-stream`, `--use-fake-ui-for-media-stream`)를 쓰지 않으면 `getUserMedia`가 권한 프롬프트에서 멈춘다. `test.use({ launchOptions })`는 describe 안에 두면 worker를 새로 강제해 Playwright가 거부하므로 파일 top-level에 둔다.
+- 단정: 원격 참가자 목록은 `isConnected && !isLocal`로 걸러진 것만 렌더하므로, 상대의 볼륨 컨트롤(`{name} volume`)이 보인다는 것은 **실제로 접속해 구독됐다**는 뜻이다. 양쪽에서 서로를 본다.
+- 음성 기준선: 첫 참가자가 혼자 있을 때 `No other participants`가 보이는 것을 **먼저** 단정한다. 이것이 없으면 뒤의 양성 단정이 원래부터 떠 있던 것을 본 것인지 구분할 수 없다. "없음 -> 있음" 전이가 성립해야 공유 room이 실제로 동작한 것이다.
+- 선행 단정: UI를 건드리기 전에 `POST /api/v1/meetings/{id}/livekit-token`이 성공하는지 확인한다. 자격증명이 죽어 있으면 UI 단정은 의미가 없고, 실패 원인도 화면 타임아웃이 아니라 토큰 응답으로 드러나야 한다.
+- 발견: `participantType=member`는 `SPACE_ACCESS_DENIED`("member participant는 SpaceMember여야 합니다")로 거부된다. 회의 초대만 받은 사용자는 `guest`여야 한다. 경계가 의도대로 동작함을 확인한 셈이다.
+- **opt-in인 이유**: `LiveKitTokenService`는 CWD의 `.env`를 읽고 Playwright backend webServer의 cwd가 `backend/`이므로 로컬에서는 `backend/.env`의 자격증명이 쓰인다. CI에는 그 파일이 없어 토큰 발급이 `LIVEKIT_NOT_CONFIGURED`가 된다. 게이트 없이 두면 CI가 항상 실패하고, 조건부 skip으로 두면 "통과처럼 보이는 skip"이 된다. 그래서 `RUN_LIVEKIT_MEDIA_E2E=true` 명시적 opt-in으로 뒀다. **게이트 없이 돌린 결과의 skip은 통과 근거가 아니다.**
+- 검증: 신선한 `test` 프로파일 스택(`PLAYWRIGHT_BACKEND_PORT=8090` 등)에서 `RUN_LIVEKIT_MEDIA_E2E=true` -> 1건 실행/통과. 게이트 없이 전체 실행 시 8 passed / 1 skipped로 skip 경로도 정상이다. 이 스펙도 `T453`과 같은 `ensureUser` 문제로 처음에는 stale backend에서만 통과했었고 같은 방식으로 고쳤다.
+- **fake media로 덮지 못하는 것**: 실제 마이크/카메라 권한 프롬프트, prejoin 장치 선택 UX, 실제 오디오 품질. 이 세 가지는 여전히 사람이 확인해야 하며 `SMK-002`의 진짜 수동 잔여다.
+
+## T453 SMK-005 Browser Axis — Automated Instead of Manual
+
+- 변경 파일: `frontend/e2e/guest-acl-ui.spec.ts`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 판단 변경: `SMK-005` 브라우저 축을 "수동 필수"로 두고 있었으나 실제로는 자동화 자산이 이미 있었다. `playwright.config.ts`가 backend(`test` 프로파일) + BFF(legacy auth) + frontend dev server를 함께 띄우고, CI에 `Playwright` job이 `npm run test:e2e`(필터 없음)로 `e2e/` 전체를 실행한다. 새 스펙은 별도 배선 없이 CI에 포함된다.
+- 스펙 구성: 호스트가 Space와 회의 2개를 만들고 guest를 **한쪽 회의에만** 참가자로 넣는다(`role=VIEWER`, `participantType=guest`, Space 멤버로는 넣지 않음). 그 상태에서 guest가 UI로 Space 범위에 도달할 수 있는지 본다.
+  - Space 목록에 호스트 Space가 렌더되지 않는다.
+  - `/spaces/{id}`, `/meetings`, `/members`, `/knowledge`, 초대되지 않은 회의 상세를 **URL 직접 입력**해도 Space 이름과 회의 제목이 렌더되지 않는다.
+  - 같은 Space 범위 API가 guest 토큰에 대해 4xx로 거부된다. 화면에 안 보이는 것만으로는 클라이언트 필터로 가려둔 상태와 구분되지 않기 때문이다.
+- **음성 단정 유효성 고정**: 이 스펙의 부정 단정은 전부 `toHaveCount(0)`이라, 라우트 오타나 로그인 실패로 페이지가 아무것도 렌더하지 않아도 통과한다. 그래서 `space owner does see the space screens the guest is denied`를 함께 두어 **같은 URL에서 소유자에게는 보인다**는 것을 고정했다. 이 테스트가 깨지면 나머지 음성 단정은 무의미해진다. 추가로 guest 토큰으로 초대된 회의를 실제로 읽을 수 있음을 셋업 유효성 근거로 먼저 단정한다.
+- 계층 구분(중요): `playwright.config.ts`는 backend를 `SPRING_PROFILES_ACTIVE=test`로 띄우므로 **in-memory adapter**가 쓰인다. 이 스펙은 SQL 계층 결함을 잡지 못한다. SQL 축은 `T446`이 실 PostgreSQL로 담당한다. 두 축을 섞으면 "guest 테스트가 있으니 안전하다"는 잘못된 결론에 이르므로 스펙 상단 주석에 명시했다.
+- 검증: `cd frontend && PLAYWRIGHT_BACKEND_PORT=8090 PLAYWRIGHT_BFF_PORT=8091 PLAYWRIGHT_FRONTEND_PORT=5199 BFF_REDIS_PORT=6380 npx playwright test` -> 8건 통과 / 1 skip(opt-in). local Redis는 6379가 아니라 6380이라 override가 필요하지만 CI service는 6379이므로 CI에서는 불필요하다.
+- **정정(중요)**: 최초 실행은 이미 떠 있던 backend(포트 8080, 7시간 전 기동)에 붙어 통과했다. `reuseExistingServer: !CI`가 local에서 true라 Playwright가 기존 프로세스를 재사용했고, 그 프로세스는 `local` 프로파일(실 DB)이라 **CI가 쓰는 `test` 프로파일과 달랐다**. 별도 포트로 신선한 스택을 띄우자 4건이 실패했다. 즉 첫 통과는 CI 환경의 근거가 아니었다.
+- 실패 원인과 수정: `signup`은 auth store에만 사용자를 만든다. workspace store에는 컨트롤러의 `currentUser()`가 호출하는 `ensureUser`로 등록된다. guest가 인증 API를 한 번도 호출하지 않은 상태에서 참가자로 추가하면 `addMeetingParticipant`의 `requireUser(userId)`가 `UNAUTHORIZED`로 거부한다. fixture에서 guest가 `GET /api/v1/spaces`를 먼저 호출하도록 고쳤다. 실제 사용자도 초대 전에 로그인하므로 현실과 어긋나지 않는다.
+- 남은 수동 범위: 없음. `SMK-005`의 브라우저 축은 이 스펙으로 닫힌다.
+
+## V119 Status — 자동 검증 범위 마감, 수동 2건 잔여
+
+- `SMK-001~005` 중 **자동 검증이 가능한 범위는 전부 닫혔다**. `T445`(색인 작업 생성), `T446`(guest ACL), `T447`(worker 소비), `T448`(Project AI citation), `T449`(회의록 본문 생성)가 각각의 축을 덮는다.
+- 남은 것은 브라우저 실조작이 필요한 2건이며 에이전트가 대신 수행할 수 없다.
+  - `SMK-002` 매체 publish/subscribe를 포함한 실제 회의 입장
+  - `SMK-005` UI가 서버 경계를 우회하는 경로(클라이언트에만 있는 필터 등)
+- 이 둘은 서버 측 근거가 이미 확보돼 있으므로(`T440`/`T444`, `T446`) 남은 위험은 **클라이언트 계층에 국한**된다.
+- 검증 과정에서 나온 기능 결함과 후속 과제는 별도로 남는다: `T451`(수정 완료), `T451.1` token budget, `T450.1` mtls 프로파일 기동, `T450.2` Terraform CI. 이 중 `V119` 마감을 막는 것은 없다.
+- 판단: `V119`는 위 수동 2건이 채워지는 시점에 닫는다. 그 전까지 열어 둔다.
+
+## T452 Embedding Job Failure Cause Retention
+
+- 변경 파일: `backend/src/main/resources/db/migration/V25__add_embedding_job_failure_detail.sql`(신규), `ai/app/{embedding_worker,repository,observability}.py`, `ai/tests/test_embedding_worker.py`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 문제: `normalize_failure_code`가 미분류 예외를 전부 `INTERNAL_ERROR`로 접고 `embedding_jobs`에 원인을 남길 컬럼이 없었다. `T447`에서 dev DB의 `INTERNAL_ERROR` 3건을 진단할 때 실패 행만으로는 아무것도 알 수 없어 **재실행으로만** 환경성 실패임을 좁힐 수 있었다.
+- 구현: `V25`가 `failure_detail varchar(200)`과 `failure_detail is null or failure_code is not null` check 제약을 추가한다. worker는 `failure_detail_for(error)`로 예외의 정규화된 타입 이름(`app.embedding_provider.EmbeddingProviderError`, `ZeroDivisionError` 등)을 기록한다.
+- **예외 메시지를 저장하지 않는 이유**: provider 응답 본문이나 DSN(비밀번호 포함)이 예외 메시지에 실려 올 수 있어 `NFR-LOG-01` 원문 비노출 원칙과 충돌한다. 타입 이름만으로도 psycopg 오류와 provider 오류를 즉시 구분할 수 있어 진단 목적은 달성된다. 컬럼 comment에도 같은 제약을 남겼다.
+- 재시도 경로 처리: 재시도로 되돌릴 때 `failure_code`를 지우므로 `failure_detail`도 함께 지운다. 그러지 않으면 새 check 제약을 위반한다.
+- **로그 allowlist 함정**: `log_event`는 `_SAFE_FIELDS` allowlist 밖의 key를 조용히 버린다. `failureDetail`을 로그 호출에 추가했지만 allowlist에 없어 payload에서 사라졌고, DB 값만 단정한 첫 테스트는 이를 통과했다. allowlist에 추가하고 테스트가 로그 payload도 함께 단정하도록 고쳤다. 조용히 버려지는 필드는 단정 없이는 드러나지 않는다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests` -> 207건 / 실패 0 / skip 7. `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest` -> 1건 실행 / 0 skip / 0 실패로 `V25`가 pristine DB에 적용되고 classpath 유도 기대 목록에 반영됨을 확인했다. `BUILD SUCCESSFUL`은 근거가 아니므로 결과 XML의 `tests`/`skipped`를 직접 읽었다.
+
+## T451 AH-009 — Shrink Order Defect in Report/Task Context
+
+- 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/{test-matrix,tasks,implement}.md`.
+- 발단: `AH-009`를 "자동 검증만 추가하면 되는 공백"으로 보고 접근했으나, 검증을 짜려고 보니 **정책 자체가 리포트 경로에서 성립하지 않았다**.
+- 결함: `format_untrusted_sources(sources, limit=12)`가 `sources[:limit]`로 **위치 기반 절단**을 했다. 검색 경로는 `InMemoryRagRetriever.search`가 `(-score, chunkId)`로 정렬한 뒤 자르므로 문제가 없지만, 리포트 생성과 task 추출은 Backend가 전달한 순서를 그대로 받는다. Backend는 transcript를 발화 순서로 보내므로 score와 위치가 무관하고, 결과적으로 **높은 score 근거가 먼저 잘려 나갔다**.
+- 실증: 15건 중 뒤쪽 3건만 score 0.9, 나머지 12건을 0.2로 두고 호출하니 high-score 3건이 전부 provider 문맥에서 빠지고 low-score 12건이 전부 남았다. 수정 후에는 high-score 3건이 전부 유지되고 low-score 3건이 밀려난다.
+- 기존 테스트가 못 잡은 이유: `test_report_generation_limits_provider_context_to_first_twelve_sources`가 15건의 `relevanceScore`를 **전부 0.9로 동일**하게 두었다. 그래서 "앞 12건이 남는다"는 위치 단정만 하고 있었고 순서 정책은 아무것도 검증하지 않았다. score가 균일하면 위치 절단과 score 절단이 같은 결과를 내므로 결함이 보이지 않는다.
+- 수정: 절단이 일어나는 지점(`limit`이 주어진 경우)에만 `-(relevanceScore or 0.0)`로 정렬한 뒤 자른다. `sorted`는 stable이므로 score가 같거나 전부 `None`이면 기존 순서가 그대로 유지되어 회귀가 없다. 정렬만 하고 source를 추가하지 않으므로 scope는 넓어지지 않는다. `limit`이 없는 호출부(meeting chat, project chat)는 절단 자체가 없어 영향을 받지 않는다.
+- 적용 범위: `limit=12` 호출부는 리포트 생성과 task 추출 두 곳이며 둘 다 같은 결함이었다. 공통 함수에서 고쳐 양쪽이 함께 해결된다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests` -> 205건 실행 / 실패 0 / skip 7. 신규 `test_report_generation_drops_low_score_sources_first_when_over_limit`가 실제로 실행됨을 `-v`로 확인했다. `./.venv/bin/python -m compileall app` 통과.
+- **남은 공백**: `AH-009`의 이름은 token budget이지만 현재 상한은 여전히 **건수**(retrieval `limit`, 문맥 12건)다. token 단위 회계는 구현되어 있지 않다. 긴 transcript segment가 12건만으로 상한을 넘길 수 있으므로 token 기반 budget은 별도 과제로 남긴다. 이번 변경이 고친 것은 "상한을 넘길 때 무엇을 먼저 버리는가"이지 "상한을 token으로 재는가"가 아니다.
+
+## T450 Audit — `#56` 유입분 검증 커버리지 실측
+
+- 배경: `#56`으로 들어온 `cert-loader`(Go), `ai/envoy`, 각 서비스 `application-mtls.yml`, `infra/aws` Terraform이 한 번도 검증되지 않았다고 보고 있었다. 실측해 보니 **절반은 이미 덮여 있었고, 덮이지 않은 곳은 따로 있었다**.
+- CI 실적: dev(`15bb730`) CI run `30168886298`의 12개 job이 전부 success이며 skip이 없다. run 단위 success는 근거가 아니므로 job 단위로 확인했다.
+- 덮여 있음:
+  - `cert-loader`: `Certificate Loader` job이 `go mod verify && go test ./... && go vet ./...`를 실제로 실행한다. Go 툴체인이 로컬에 없어도 CI가 검증한다.
+  - `ai/envoy`: `Container Images` job이 이미지를 빌드할 뿐 아니라 openssl로 self-signed 인증서를 만들어 `envoy.yaml`을 실제로 로드시킨다. 설정 파일이 파싱만 되는 수준이 아니라 기동까지 확인된다.
+- 덮여 있지 않음(실제 공백):
+  - `application-mtls.yml` 4종(`auth`, `backend`, `bff`, `stt`): CI workflow에 `mtls` 문자열이 없고, 어떤 테스트도 이 프로파일을 활성화하지 않는다. 즉 property binding과 Spring context 기동이 한 번도 실행된 적이 없다. `management:` 중복키 회귀와 같은 계열의 결함이 그대로 남을 수 있는 자리다.
+  - `infra/aws` Terraform: CI에 terraform job 자체가 없다. `fmt`/`validate`조차 돌지 않는다.
+  - 위 두 항목은 배포 인프라 영역이라 해당 담당자가 맡는다(`T450.1`, `T450.2`). 이 감사의 결과물은 **공백의 위치를 특정한 것**까지다.
+- 자체 검증한 것: SnakeYAML `DuplicateKeyException` 계열 결함을 전수 검사했다. PyYAML 기본 로더는 중복키를 조용히 덮어쓰므로(마지막 값 승) 중복키를 예외로 올리는 로더를 따로 구성했다. build/산출물 디렉터리를 제외한 YAML 26개가 전부 통과했고, 대상 목록에 `application-mtls.yml` 4종과 `ai/envoy/envoy.yaml`이 실제로 포함됐음을 파일 목록 대조로 확인했다(탐색이 비어서 통과하는 경우를 배제).
+- 한계: YAML이 파싱된다는 것과 Spring이 그 값을 바인딩해 context를 띄운다는 것은 다르다. mtls 프로파일의 실제 기동 검증과 Terraform 검증은 후속 작업으로 남긴다.
+
+## T449 SMK-003 Remainder — Report Body Generation by Real Provider
+
+- 변경 파일: `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 대상 경로: `POST /api/internal/meeting-ai/generate-report`. Project AI와 달리 이 endpoint는 **자체 검색을 하지 않는다**. `build_backend_report_sources`가 Backend가 전달한 `sources`만 사용하므로, Backend가 권한 검증과 단일 meeting 선필터를 끝낸 뒤에만 근거가 들어온다.
+- 양성 1건: dev DB의 `meeting-1b4438c0…`에서 실제 transcript segment 37건을 source로 전달했다. `unsupported=false`, summary와 markdown(976자), decision 3건, actionItem 3건이 생성됐고 model은 `gpt-4.1-mini-2025-04-14`다. 인용된 source 6건이 **전부 전달 범위 안**이며 범위 밖 인용은 0건이다.
+- 음성 2건(`validate_backend_report_sources` 가드): 다른 회의의 source를 섞으면 HTTP 403 `AI_CONTEXT_FORBIDDEN`("Report source meetingId must match request meetingId."). 허용되지 않은 source type(`report`)을 섞어도 HTTP 403 `AI_CONTEXT_FORBIDDEN`("Report source type is not allowed."). 즉 단일 meeting 경계와 source type allowlist가 실제로 강제된다.
+- 응답 필드 주의: 응답 모델 `GenerateReportResponse`의 필드는 `supported`가 아니라 `unsupported`다. provider JSON 쪽은 `supported` boolean을 요구하고(`supported`가 false면 `unsupported_report(reason="MODEL_UNSUPPORTED")`로 전환) 응답에서는 반전된 이름으로 노출된다. 검증 스크립트에서 `supported`를 읽으면 항상 `None`이 나오므로 공허하게 통과할 수 있다.
+- 이로써 SMK-003의 두 축이 모두 닫혔다. 본문 생성(`T449`) -> 확정 시 색인 작업 생성(`T445`) -> worker가 소비해 `report` chunk 적재(`T447`).
+- 범위 한계: AI 서버 내부 endpoint 직접 호출이다. Backend가 생성 결과를 `CANDIDATE`로 저장하는 단계는 `T445`가 다루는 별개 경로다. opt-in 수동 smoke이며 실 provider 과금이 발생한다.
+
+## T448 SMK-004 Project AI Answers from Confirmed Report with Citation
+
+- 변경 파일: `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 대상 경로: `POST /api/internal/project-ai/chat`. `sources`가 비어 있으면 `build_backend_project_chat_sources`가 `search_postgres_sources`로 pgvector 검색을 수행하고, source type에 `report`가 포함된다. `T447`로 색인된 `report` chunk가 이 단계의 선행 조건이다.
+- 양성 2건: Space A(`space-9a7d73d7…`)에서 "베타 시작 시점" 질문에 `supported`로 답하며 인용 source에 확정 회의록 `report-738390bc…`가 포함된다. Space B(`space-fac05824…`)에서도 자기 Space의 `report-741bdeb4…`와 decision 3건이 인용된다. 서로 다른 Space에서 각각 성립하므로 특정 데이터에 우연히 맞은 결과가 아니다.
+- 음성 3건: 근거 없는 질문 -> `unsupported=true`, `LOW_RELEVANCE`. `allowedMeetingIds=[]` -> `NO_EVIDENCE`(회의 소유 source가 회의 scope 없이는 노출되지 않는다). 교차 Space(`projectId=B` + `allowedMeetingIds=A의 회의`) -> `unsupported=true`. 세 건의 reason이 서로 달라 일괄 거부가 아니다.
+- 응답 단정만으로 부족한 이유와 보완: unsupported 응답은 `sources`를 비우고 반환한다. 따라서 교차 Space 요청이 거부된 것이 **검색이 아무것도 반환하지 않아서인지**, 아니면 **검색은 누출했는데 모델이 답하지 못한 것인지** 응답만으로는 구분할 수 없다. `PostgresRagRetriever`를 직접 호출해 모델을 배제하고 확인했다. 올바른 scope에서는 8건(그중 대상 report 포함)이 반환되고, 교차 Space 요청에서는 Space B 자신의 `projectKnowledge` 4건만 반환되어 A의 source는 0건이었다. 양성 대조가 8건으로 비어있지 않으므로 공허한 통과가 아니다.
+- 범위 한계: AI 서버 내부 endpoint를 직접 호출했다. Backend의 권한 검증과 `allowedMeetingIds` 선필터를 거치는 public 경로(`POST /api/v1/spaces/{spaceId}/ai/chat`)의 end-to-end 검증은 별도다. 자동 회귀 테스트가 아니라 opt-in 수동 smoke이며 실 provider 과금이 발생한다.
+
+## T447 SMK-003 Provider Tier — Embedding Worker Consumes REPORT_CONFIRMED
+
+- 변경 파일: `scripts/run-embedding-worker.sh`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 조사 결과 1 — 미구현이 아니라 실행 공백이다: `ai/app/embedding_worker.py`의 `EmbeddingWorker.run_once()`/`main()` poll 루프, `claim_job`/`complete_job`/`record_failure`/`retry_delay_for`가 모두 구현되어 있다. 문제는 local에서 이 프로세스를 띄우는 경로가 없다는 것이다. `scripts/run-ai.sh`는 `uvicorn app.main:app`만 실행하고, `compose.local.yml:146`의 `meetingmind-ai-worker`는 `profiles: ["ai"]` 뒤에 있어 `docker compose up -d`로는 뜨지 않는다. 결과적으로 `embedding_jobs`가 소비되지 않고 PENDING으로 누적된다. 실측으로 가장 오래된 PENDING이 `oldestPendingAgeSeconds=20624`(약 5.7시간)였다.
+- 조사 결과 2 — 기존 실패 3건은 코드 결함이 아니었다: dev DB에 `INTERNAL_ERROR`로 4회 재시도 소진된 작업이 3건(그중 `REPORT_CONFIRMED` 2건) 있었다. 과금 전에 무료로 원인을 좁히기 위해 provider 호출 이전 단계인 `load_snapshot`만 3건 모두 재실행했고 전부 정상이었다(각 3/7/9 chunk). 이후 `REPORT_CONFIRMED` 2건을 재큐잉해 실행하니 둘 다 1회 시도로 성공했다. 즉 2026-07-24 00:31~01:20 구간의 환경성 실패이며, 해당 기간 `ai/app/embedding_{provider,worker}.py`와 `repository.py`에는 커밋도 없다.
+- 관측성 공백(후속 필요): `normalize_failure_code`가 미분류 예외를 전부 `INTERNAL_ERROR`로 접고 `embedding_jobs`에는 메시지를 남기는 컬럼이 없다. 실패 작업만 보고는 원인을 알 수 없어, 위 진단도 재실행으로만 좁힐 수 있었다.
+- 검증(실 provider, OpenAI 과금 발생): `text-embedding-3-small` / dimension 1536.
+  - `REPORT_CONFIRMED` `embedding-job-f4cd7b44...`(meeting-0e6afc58) -> COMPLETED, chunkCount 7, activated=true.
+  - `REPORT_CONFIRMED` `embedding-job-90559ff3...`(meeting-1b8ae733) -> COMPLETED, chunkCount 9, activated=true. 이 건은 신규 `scripts/run-embedding-worker.sh`로 소비시켜 스크립트 자체의 양성 대조로 삼았다(빈 큐 폴링만으로는 스크립트가 동작한다는 증거가 되지 않는다).
+  - 최종 상태: `embedding_jobs`에 `REPORT_CONFIRMED` 3건 전부 COMPLETED, PENDING 0. `embedding_chunks`의 active `report` chunk 3건이 모두 1536차원 vector를 가진다. 이전 generation의 transcript chunk 4건은 `is_active=false`로 교체되어 generation swap도 함께 확인됐다.
+- 남은 실패 2건은 별개다: `INVALID_SOURCE` 1건(전사 세그먼트가 없는 회의 — 정상 동작), `INTERNAL_ERROR` 1건(`TRANSCRIPT_COMPLETED`, 재큐잉하지 않음).
+- 범위 한계: dev DB(5434)에 대해 실행했으므로 `scripts/run-db-tests.sh`가 쓰는 격리 테스트 DB와 무관하다. 실패 작업 재큐잉은 dev 데이터를 변경한다. 자동화된 회귀 테스트는 아니며, 이 단계는 실 provider 과금 때문에 opt-in으로 남는다.
+
 ## T446 SMK-005 Guest ACL Negative on Real Database
 
 - 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/GuestSpaceAclNegativeIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.

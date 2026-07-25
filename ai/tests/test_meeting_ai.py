@@ -36,7 +36,10 @@ from app.main import (
     backend_project_chat,
     call_text_generation,
     call_openai_text,
+    context_token_budget,
+    estimate_tokens,
     explain_term,
+    format_untrusted_sources,
     extract_tasks,
     format_untrusted_sources,
     generate_report_from_sources,
@@ -1406,6 +1409,94 @@ class RagSafetyTest(unittest.TestCase):
         self.assertIn("segment-011", user_content)
         self.assertNotIn("segment-012", user_content)
         self.assertNotIn("14번째 보고서 근거입니다.", user_content)
+
+    def test_report_generation_drops_low_score_sources_first_when_over_limit(self):
+        # AH-009: source가 상한을 넘으면 낮은 score부터 버려야 한다.
+        # 높은 score를 뒤쪽에 배치해 위치 기반 절단과 score 기반 절단을 구분한다.
+        # (Backend는 transcript를 발화 순서로 보내므로 실제로 발생하는 배치다.)
+        sources = [
+            AiSource(
+                sourceId=f"segment-{index:03d}",
+                type="transcript",
+                text=f"{index}번째 보고서 근거입니다.",
+                relevanceScore=0.9 if index >= 12 else 0.2,
+            )
+            for index in range(15)
+        ]
+
+        with patch(
+            "app.main.call_openai_text",
+            return_value=(
+                '{"supported":true,"summary":"요약","decisions":['
+                '{"title":"결정","sourceIds":["segment-012"]}],'
+                '"actionItems":[],"markdown":"## 요약"}',
+                "test-model",
+                None,
+            ),
+        ) as call_openai_text:
+            generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
+
+        user_content = call_openai_text.call_args.kwargs["user_content"]
+        for source_id in ("segment-012", "segment-013", "segment-014"):
+            self.assertIn(source_id, user_content)
+        # scope를 넓히지 않는다: 전달한 source 밖의 ID가 문맥에 들어가지 않는다.
+        self.assertNotIn("segment-015", user_content)
+        # 상한을 실제로 지킨다: 12건만 남으므로 low-score 3건은 빠진다.
+        dropped = [
+            source_id
+            for source_id in (f"segment-{index:03d}" for index in range(12))
+            if source_id not in user_content
+        ]
+        self.assertEqual(len(dropped), 3)
+
+    def test_token_budget_drops_low_score_sources_beyond_the_budget(self):
+        # PERF-TOKEN-01 MVP 목표: 건수뿐 아니라 토큰으로도 상한을 잰다.
+        # 건수 상한만으로는 긴 segment가 예산을 넘길 수 있다.
+        sources = [
+            AiSource(
+                sourceId=f"segment-{index:03d}",
+                type="transcript",
+                text="긴 회의 발화입니다. " * 40,
+                relevanceScore=1.0 - (index * 0.1),
+            )
+            for index in range(5)
+        ]
+
+        unbounded = json.loads(format_untrusted_sources(sources))
+        bounded = json.loads(format_untrusted_sources(sources, token_budget=400))
+
+        # 양성 대조: 예산이 없으면 전부 들어간다. 이게 성립해야 축소가 예산 때문임을 안다.
+        self.assertEqual(len(unbounded), 5)
+        self.assertLess(len(bounded), len(unbounded))
+        # 남은 것은 score가 높은 쪽부터다.
+        kept_ids = [item["sourceId"] for item in bounded]
+        self.assertEqual(kept_ids, [f"segment-{index:03d}" for index in range(len(kept_ids))])
+
+    def test_token_budget_keeps_at_least_one_source(self):
+        # 전부 버리면 근거가 사라져 NO_EVIDENCE로 바뀐다. 그건 검색 실패 신호이지
+        # 예산 초과 신호가 아니므로 둘을 섞으면 안 된다.
+        sources = [
+            AiSource(sourceId="segment-000", type="transcript", text="매우 긴 발화. " * 200, relevanceScore=0.9)
+        ]
+
+        bounded = json.loads(format_untrusted_sources(sources, token_budget=1))
+
+        self.assertEqual(len(bounded), 1)
+
+    def test_token_estimate_counts_korean_more_heavily_than_ascii(self):
+        # CJK를 과대평가하는 방향이라 상한을 넘겨 잘리는 쪽으로 안전하게 틀린다.
+        self.assertGreater(estimate_tokens("회의록 요약"), estimate_tokens("meeting"))
+        self.assertEqual(estimate_tokens(""), 0)
+
+    def test_context_token_budget_falls_back_on_invalid_or_nonpositive_values(self):
+        with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET": "5000"}, clear=False):
+            self.assertEqual(context_token_budget("report"), 5000)
+            with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET_REPORT": "1200"}, clear=False):
+                self.assertEqual(context_token_budget("report"), 1200)
+            with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET_REPORT": "not-a-number"}, clear=False):
+                self.assertEqual(context_token_budget("report"), 5000)
+            with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET_REPORT": "0"}, clear=False):
+                self.assertEqual(context_token_budget("report"), 5000)
 
     def test_backend_generate_report_marks_sources_as_untrusted_context(self):
         payload = BackendGenerateReportRequest(

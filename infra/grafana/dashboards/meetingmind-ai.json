@@ -1,0 +1,190 @@
+{
+  "uid": "meetingmind-ai",
+  "title": "MeetingMind AI",
+  "tags": ["meetingmind", "ai"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "endpoint",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+        "query": "label_values(meetingmind_ai_requests_total, endpoint)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "AI Overview",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Endpoint별 요청 수 (req/s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint, outcome) (rate(meetingmind_ai_requests_total{endpoint=~\"$endpoint\"}[5m]))",
+          "legendFormat": "{{endpoint}} · {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Endpoint별 실패율",
+      "description": "outcome=failed 비율. 분모가 0이면 값이 없다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint) (rate(meetingmind_ai_requests_total{outcome=\"failed\", endpoint=~\"$endpoint\"}[5m])) / clamp_min(sum by (endpoint) (rate(meetingmind_ai_requests_total{endpoint=~\"$endpoint\"}[5m])), 0.0000001)",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Endpoint별 응답 시간 p50 / p95 (ms)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (endpoint, le) (rate(meetingmind_ai_request_duration_ms_bucket{endpoint=~\"$endpoint\"}[5m])))",
+          "legendFormat": "p50 {{endpoint}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (endpoint, le) (rate(meetingmind_ai_request_duration_ms_bucket{endpoint=~\"$endpoint\"}[5m])))",
+          "legendFormat": "p95 {{endpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Provider 소요 시간 p95 (ms)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (provider, api_style, le) (rate(meetingmind_ai_provider_total_ms_bucket[5m])))",
+          "legendFormat": "{{provider}} · {{api_style}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Provider 토큰 사용량 (tokens/s)",
+      "description": "direction=input/output. 비용 추적의 1차 지표다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider, direction) (rate(meetingmind_ai_provider_tokens_total[5m]))",
+          "legendFormat": "{{provider}} · {{direction}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "요청당 근거(source) 수 p50 / p95",
+      "description": "근거 수가 0에 가까우면 검색이 비어 unsupported로 끝나고 있다는 신호다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (endpoint, le) (rate(meetingmind_ai_request_source_count_bucket{endpoint=~\"$endpoint\"}[5m])))",
+          "legendFormat": "p50 {{endpoint}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (endpoint, le) (rate(meetingmind_ai_request_source_count_bucket{endpoint=~\"$endpoint\"}[5m])))",
+          "legendFormat": "p95 {{endpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "RAG / Embedding",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "검색 소요 시간 p50 / p95 (ms)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (scope, le) (rate(meetingmind_ai_rag_retrieval_duration_ms_bucket[5m])))",
+          "legendFormat": "p50 {{scope}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (scope, le) (rate(meetingmind_ai_rag_retrieval_duration_ms_bucket[5m])))",
+          "legendFormat": "p95 {{scope}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "검색 결과 개수 p50",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (scope, le) (rate(meetingmind_ai_rag_retrieval_result_count_bucket[5m])))",
+          "legendFormat": "p50 {{scope}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "색인 대기열 (pending / processing / failed)",
+      "description": "worker가 떠 있지 않으면 pending이 계속 오른다. 실제로 이 상태가 5시간 47분 방치된 적이 있다(T447).",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "meetingmind_ai_embedding_queue",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    }
+  ]
+}

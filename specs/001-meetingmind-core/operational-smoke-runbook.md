@@ -16,6 +16,28 @@ OpenAI-compatible generation, embedding, and public callback checks are opt-in.
 | SMK-004 | Project AI confirmed report query | Local DB plus opt-in provider | SMK-003 data and Project AI provider | Project AI answers from confirmed report with citation |
 | SMK-005 | Guest/ACL negative | Local automated plus browser/manual | guest account variants | guest cannot access Space-wide data outside allowed meeting |
 
+### 현재 상태 (2026-07-26)
+
+| ID | 자동 검증 가능 범위 | 상태 | 근거 |
+| --- | --- | --- | --- |
+| SMK-001 | 전체 | PASS | AI unit + on-prem HTTP smoke |
+| SMK-002 | local tier / STT provider / LiveKit 도달성 | PASS | `V119.4`, `T440`, `T444` |
+| SMK-002 | 매체 publish/subscribe join | PASS | `T454` (Playwright 2 context, opt-in) |
+| SMK-002 | 장치 권한 프롬프트 / 실제 음성 품질 | **수동 잔여** | fake media로 덮이지 않는 범위 |
+| SMK-003 | 회의록 본문 생성 | PASS | `T449` |
+| SMK-003 | 확정 -> 색인 작업 생성 | PASS | `T445` |
+| SMK-003 | worker 소비 -> `report` chunk | PASS | `T447` |
+| SMK-004 | 전체 | PASS | `T448` |
+| SMK-005 | 서버 ACL 경계 | PASS | `T446` |
+| SMK-005 | UI 우회 경로 | PASS | `T453` (Playwright, CI 포함) |
+
+`SMK-005`는 두 축이 모두 닫혔다. 서버 경계는 `T446`이 실 PostgreSQL로, UI 우회 경로는
+`T453`이 Playwright로 덮는다. **두 축은 서로를 대신하지 못한다** — Playwright는 backend를
+`test` 프로파일(in-memory)로 띄우므로 SQL 결함을 잡지 못한다.
+
+`SMK-002` 매체 축도 `T454`로 자동화됐다. 남은 수동 범위는 fake media가 대신할 수 없는
+**장치 권한 프롬프트, prejoin 장치 선택 UX, 실제 음성 품질** 세 가지로 좁혀졌다.
+
 ## Local Deterministic Checks
 
 Run these before provider smoke. They should not require paid provider keys.
@@ -209,6 +231,34 @@ Pass criteria:
 - Provider model, duration, and source counts are recorded without prompt/answer/secret text.
 - Validator passes against the generated result JSON.
 
+### Embedding Worker Smoke (SMK-003 provider tier)
+
+Embedding worker는 FastAPI app(`app.main`)이 아니라 **독립 프로세스**다. `scripts/run-ai.sh`는
+worker를 띄우지 않고, `compose.local.yml`의 `meetingmind-ai-worker`는 `profiles: ["ai"]` 뒤에
+있어 기본 `docker compose up -d`로는 뜨지 않는다. 그래서 local에서 `embedding_jobs`가 소비되지
+않고 PENDING으로 쌓인다. `app/main.py`만 보면 worker가 없는 것처럼 보이니 주의한다.
+
+```bash
+./scripts/run-embedding-worker.sh
+```
+
+실제 embedding provider를 호출하므로 **OpenAI 과금이 발생한다**. 기본값은
+`AI_EMBEDDING_PROVIDER=openai`, `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`,
+dimension 1536이며 `OPENAI_API_KEY`는 루트 `.env`에서 읽는다.
+
+Pass criteria:
+
+- `REPORT_CONFIRMED` 작업이 `COMPLETED`가 되고 로그에 `embedding_job_completed`와 `activated=true`가 남는다.
+- `embedding_chunks`에 `source_type='report'`, `is_active=true`, `vector_dims(embedding)=1536`인 행이 생긴다.
+- 이전 generation chunk가 `is_active=false`로 교체된다.
+
+빈 큐를 폴링하는 것만으로는 통과 근거가 되지 않는다. 반드시 소비된 작업 ID와 chunk 수를
+함께 남긴다. 과금 없이 원인을 좁히려면 provider 호출 이전 단계인 `load_snapshot`만 따로
+실행해 볼 수 있다.
+
+`INTERNAL_ERROR`는 미분류 예외의 포괄 코드이고 `embedding_jobs`에 메시지 컬럼이 없어
+실패 행만으로는 원인을 알 수 없다. 재실행으로 좁히는 것 외의 방법이 현재 없다.
+
 ### End-to-end Product Smoke
 
 Use this only after backend, BFF legacy mode, frontend, PostgreSQL, Redis, LiveKit, and
@@ -244,8 +294,10 @@ STT provider are running.
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` @ becc81d+ | SMK-002 (provider tier, STT) | Opt-in provider | PASS | `SonioxSttTranscriptSmokeIntegrationTest` 1건 실행/0 skip. meeting `meeting-6e842ab8-ee8f-4b05-8534-68080350111a`, status `COMPLETED`, provider `soniox-realtime`, segments 2, `TRANSCRIPT_COMPLETED` embedding job 1 | 실제 Soniox realtime API 호출. 입력은 합성 한국어 음성(16 kHz mono s16le, 약 5초)이며 실제 회의 녹음을 쓰지 않았다. `providerId()` 단정으로 fallback 대체가 아님을 확인했다. 전사 결과가 입력 문구와 일치했다 |
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-002 (provider tier, LiveKit) | Opt-in provider | PASS (server-side) | `LiveKitRealServerSmokeIntegrationTest` 1건 실행/0 skip. room create/list/delete 왕복, token `iss`=API key, `video.room` 스코프 일치 | 실제 LiveKit Cloud 호출로 자격증명 유효성과 서버 도달성을 확인했다. room은 삭제로 정리하고 조회로 잔존 없음을 단정한다. 매체(media) publish/subscribe는 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다 |
 | TBD | TBD | TBD | SMK-002 (provider tier, Clova) | Opt-in provider | N/A | — | `clova-nest` 자격증명 부재. runtime 기본 provider가 아니므로 `SMK-002` 종료 조건에서 제외한다 |
+| 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-002 (media join) | Opt-in (LiveKit 자격증명) | PASS | `frontend/e2e/live-media.spec.ts` 1건 실행/통과 | 브라우저 2개 context가 같은 회의에 접속해 서로를 원격 참가자로 본다. 원격 목록은 `isConnected && !isLocal`만 렌더하므로 구독 성립의 근거다. `No other participants` -> 상대 등장 전이를 함께 단정해 "원래부터 떠 있던 것"과 구분했다. `RUN_LIVEKIT_MEDIA_E2E=true` opt-in이며 CI에는 `backend/.env`가 없어 실행되지 않는다. **게이트 없이 돌린 skip은 통과 근거가 아니다.** 장치 권한 프롬프트·prejoin 장치 선택·실제 음성 품질은 fake media로 덮이지 않아 수동으로 남는다 |
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-003 (local tier, 색인 연결) | Local DB automated | PASS | `ReportConfirmKnowledgeIndexIntegrationTest` 1건 실행/0 skip | 앱 경로 `confirmMeetingReport`가 `REPORT_CONFIRMED` 색인 작업 1건을 만든다. CANDIDATE에서는 생기지 않음도 확인. 확정 회의록은 별도 `project_knowledge` 문서가 아니라 meeting source로 색인된다 |
-| TBD | TBD | TBD | SMK-003 (provider tier) | Opt-in provider | TBD | report/chunk IDs | 회의록 본문 AI 생성과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재되는 단계가 남는다 |
-| TBD | TBD | TBD | SMK-004 | Opt-in provider | TBD | answer/source IDs | TBD |
+| 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-003 (provider tier, embedding worker) | Opt-in provider (OpenAI 과금) | PASS | job `embedding-job-f4cd7b44...`(7 chunk), `embedding-job-90559ff3...`(9 chunk) | worker는 구현되어 있었고 local 실행 경로가 없었다(`run-ai.sh`는 FastAPI만, compose worker는 `profiles: ["ai"]`). `scripts/run-embedding-worker.sh` 추가 후 `REPORT_CONFIRMED` 2건이 각각 1회 시도로 COMPLETED, active `report` chunk 3건 전부 1536차원 vector 보유. 기존 `INTERNAL_ERROR` 실패는 환경성이었고 재실행으로 해소됐다. 회의록 **본문 AI 생성**은 여전히 별도 단계다 |
+| 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-003 (본문 생성) | Opt-in provider (OpenAI 과금) | PASS | `meeting-1b4438c0…` transcript 37건 -> markdown 976자, decision 3 / actionItem 3 / model `gpt-4.1-mini-2025-04-14` | `/api/internal/meeting-ai/generate-report`는 자체 검색을 하지 않고 Backend가 전달한 source만 쓴다. `unsupported=false`이고 인용 6건이 전부 전달 범위 안(범위 밖 0건). 음성 2건은 HTTP 403 `AI_CONTEXT_FORBIDDEN`(다른 회의 source 혼입 / 허용되지 않은 source type). 응답 필드는 `supported`가 아니라 `unsupported`다 |
+| 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-004 | Opt-in provider (OpenAI 과금) | PASS | 인용 `report-738390bc…`, `report-741bdeb4…` / model `gpt-4.1-mini-2025-04-14` | Project AI가 확정 회의록을 인용해 답한다. 양성 2건(서로 다른 Space) + 음성 3건(`LOW_RELEVANCE`, `NO_EVIDENCE`, 교차 Space)으로 검증. unsupported 응답은 sources를 비우므로 응답만으로는 SQL 누출 여부를 알 수 없어, `PostgresRagRetriever`를 직접 호출해 모델과 무관하게 scope 강제를 확인했다(양성 8건 확보, 교차 누출 0건) |
 | 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-005 (server ACL) | Local DB automated | PASS | `GuestSpaceAclNegativeIntegrationTest` 1건 실행/0 skip | 실 DB에서 회의 전용 GUEST가 초대 밖 회의 상세, Space 회의/멤버/knowledge 목록, Space 상세 전부 거부됨을 확인. 회의 참가가 Space 멤버십으로 승격되지 않음도 확인. 양성 대조로 자기 회의 읽기는 성공하는 것을 먼저 단정한다 |
-| TBD | TBD | TBD | SMK-005 (browser) | Manual | TBD | account/meeting IDs | UI가 서버 경계를 우회하는 경로는 브라우저 수동 확인이 남는다 |
+| 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-005 (browser) | Local automated (Playwright) | PASS | `frontend/e2e/guest-acl-ui.spec.ts` 4건 / 전체 7건 통과 | 수동으로 두고 있었으나 Playwright 자산이 이미 있어 자동화했다. 회의 전용 GUEST가 Space 범위 화면에 URL 직접 입력으로도 도달하지 못하고 해당 API도 4xx로 거부된다. 음성 단정이 전부 `toHaveCount(0)`이라 공허하게 통과할 수 있어, **같은 URL에서 소유자에게는 보인다**는 양성 대조를 함께 고정했다. backend가 `test` 프로파일(in-memory)이므로 SQL 축은 `T446`이 별도로 담당한다 |

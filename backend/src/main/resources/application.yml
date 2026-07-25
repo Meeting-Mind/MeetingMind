@@ -39,6 +39,9 @@ meetingmind:
   ai:
     base-url: ${MEETINGMIND_AI_BASE_URL:http://localhost:8000}
     service-token: ${AI_INTERNAL_SERVICE_TOKEN:}
+    # Space 단위 AI token quota. 표시 전용이며 초과해도 AI 호출을 차단하지 않는다.
+    # 0 이하이거나 미설정이면 quota 없음으로 보고 limit/usagePercent를 노출하지 않는다.
+    token-quota: ${MEETINGMIND_AI_TOKEN_QUOTA:0}
     guard:
       max-concurrent: ${MEETINGMIND_AI_GUARD_MAX_CONCURRENT:16}
       failure-threshold: ${MEETINGMIND_AI_GUARD_FAILURE_THRESHOLD:3}
