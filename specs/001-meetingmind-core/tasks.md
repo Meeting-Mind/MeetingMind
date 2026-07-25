@@ -1092,7 +1092,7 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T438 [backend-ai-resilience] [owner: Backend/AI] [depends: T437] BFF 외 Backend/Core -> AI/provider 경계에도 circuit/bulkhead 또는 동등한 안전장치를 보강한다.
 - [x] T439 [observability] [owner: Backend/BFF/AI] [depends: T437] Prometheus metric endpoint와 Grafana dashboard 기준을 추가한다. STT latency, AI duration/token/source count, RAG retrieval, provider failure, downstream guard 상태를 포함한다.
 - [ ] T439.1 [observability/frontend-backend] [owner: Backend/AI/Frontend] [depends: T439] Space Overview의 `Knowledge Indexed`를 운영 지표에서 제거하고, Space 단위 AI Usage/quota API와 UI 기준을 정의한다. token total, request count, feature별 usage, usage percent를 포함한다.
-- [ ] V119 [verification] [owner: QA/Integration] [depends: T435,T436,T438,T439] 요구사항 ID별 통과/미통과/수동검증/환경필요 상태를 갱신하고, 실행 결과를 `implement.md`에 기록한다.
+- [ ] V119 [verification] [owner: QA/Integration] [depends: T435,T436,T438,T439] 요구사항 ID별 통과/미통과/수동검증/환경필요 상태를 갱신하고, 실행 결과를 `implement.md`에 기록한다. **자동 검증 가능한 범위는 전부 닫혔다**(`T445`~`T449`). 남은 마감 조건은 브라우저 실조작이 필요한 2건뿐이다 — `SMK-002` 매체 join, `SMK-005` UI 우회 경로. 상세는 implement.md `V119 Status` 참고.
 - [x] V119.1 [verification/docs] [owner: Codex] [depends: T435.3,T436.2,T437,T439] 요구사항 ID별 현재 상태표와 local deterministic smoke 실행 결과, env/manual blocker를 `test-matrix.md`, `operational-smoke-runbook.md`, `implement.md`에 동기화한다.
 - [x] V119.4 [verification/smoke] [owner: Claude] [depends: V119.3] dev 병합이 만든 `application.yml` `management:` 중복키 회귀를 제거하고, `SttTranscriptFlowIntegrationTest`의 `@Primary` SttProvider 충돌을 고쳐 `SMK-002` local tier 근거를 실제로 확보한다. `run-local-stack.sh`에 runbook이 요구한 포트 점유 preflight를 구현한다.
 

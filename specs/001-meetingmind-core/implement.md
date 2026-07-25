@@ -2284,6 +2284,16 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## V119 Status — 자동 검증 범위 마감, 수동 2건 잔여
+
+- `SMK-001~005` 중 **자동 검증이 가능한 범위는 전부 닫혔다**. `T445`(색인 작업 생성), `T446`(guest ACL), `T447`(worker 소비), `T448`(Project AI citation), `T449`(회의록 본문 생성)가 각각의 축을 덮는다.
+- 남은 것은 브라우저 실조작이 필요한 2건이며 에이전트가 대신 수행할 수 없다.
+  - `SMK-002` 매체 publish/subscribe를 포함한 실제 회의 입장
+  - `SMK-005` UI가 서버 경계를 우회하는 경로(클라이언트에만 있는 필터 등)
+- 이 둘은 서버 측 근거가 이미 확보돼 있으므로(`T440`/`T444`, `T446`) 남은 위험은 **클라이언트 계층에 국한**된다.
+- 검증 과정에서 나온 기능 결함과 후속 과제는 별도로 남는다: `T451`(수정 완료), `T451.1` token budget, `T450.1` mtls 프로파일 기동, `T450.2` Terraform CI. 이 중 `V119` 마감을 막는 것은 없다.
+- 판단: `V119`는 위 수동 2건이 채워지는 시점에 닫는다. 그 전까지 열어 둔다.
+
 ## T452 Embedding Job Failure Cause Retention
 
 - 변경 파일: `backend/src/main/resources/db/migration/V25__add_embedding_job_failure_detail.sql`(신규), `ai/app/{embedding_worker,repository,observability}.py`, `ai/tests/test_embedding_worker.py`, `specs/001-meetingmind-core/{tasks,implement}.md`.

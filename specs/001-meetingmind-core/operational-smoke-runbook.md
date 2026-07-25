@@ -16,6 +16,23 @@ OpenAI-compatible generation, embedding, and public callback checks are opt-in.
 | SMK-004 | Project AI confirmed report query | Local DB plus opt-in provider | SMK-003 data and Project AI provider | Project AI answers from confirmed report with citation |
 | SMK-005 | Guest/ACL negative | Local automated plus browser/manual | guest account variants | guest cannot access Space-wide data outside allowed meeting |
 
+### 현재 상태 (2026-07-26)
+
+| ID | 자동 검증 가능 범위 | 상태 | 근거 |
+| --- | --- | --- | --- |
+| SMK-001 | 전체 | PASS | AI unit + on-prem HTTP smoke |
+| SMK-002 | local tier / STT provider / LiveKit 도달성 | PASS | `V119.4`, `T440`, `T444` |
+| SMK-002 | 매체 publish/subscribe join | **수동 대기** | 브라우저 필요, 자동화 불가 |
+| SMK-003 | 회의록 본문 생성 | PASS | `T449` |
+| SMK-003 | 확정 -> 색인 작업 생성 | PASS | `T445` |
+| SMK-003 | worker 소비 -> `report` chunk | PASS | `T447` |
+| SMK-004 | 전체 | PASS | `T448` |
+| SMK-005 | 서버 ACL 경계 | PASS | `T446` |
+| SMK-005 | UI 우회 경로 | **수동 대기** | 브라우저 필요 |
+
+자동화 가능한 범위는 모두 닫혔다. `V119` 마감은 위 **수동 2건**만 남아 있으며, 이 둘은
+브라우저 실조작이 필요해 에이전트가 대신 수행할 수 없다.
+
 ## Local Deterministic Checks
 
 Run these before provider smoke. They should not require paid provider keys.
