@@ -2249,3 +2249,15 @@
   - 안전망 작동 실증: 같은 파일을 `V27`로 바꿔 25, 26에 구멍을 만든 뒤 재실행해 `migration versions must be contiguous starting at 1`으로 실패함을 확인했다. 즉 단정이 느슨해진 것이 아니다.
   - 임시 probe 파일은 삭제했고 마이그레이션 파일 수는 24로 원복했다. 전체 재실행 결과 Backend 206건/실패 0/skip 1을 유지한다.
 - 판단: 이제 마이그레이션 추가 시 이 테스트를 손댈 필요가 없고, 누락·중복·순서 오류·번호 건너뜀은 여전히 잡힌다.
+
+## T440 Soniox Realtime STT Provider Smoke
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/SonioxSttTranscriptSmokeIntegrationTest.java`, `scripts/run-db-tests.sh`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 배경: runbook이 지정한 유일한 provider 근거는 `ClovaSttTranscriptSmokeIntegrationTest`(`clova-nest`)였으나 실제 runtime 기본 provider는 `ConfiguredSttProvider`의 `soniox-realtime`이었다. 문서가 검증하려는 provider와 실제로 실행되는 provider가 달랐고 Clova 자격증명도 없었다. 결정에 따라 `soniox-realtime` 대상 opt-in smoke를 추가했다.
+- 구현: `RUN_SONIOX_STT_SMOKE=true` 게이트, `SONIOX_STT_SMOKE_PCM_PATH` 입력, 선택적 `SONIOX_STT_SMOKE_EXPECTED_TEXT` 단정. 통과 기준은 transcript `COMPLETED`, provider 기록 일치, segment 1건 이상, 전사 텍스트 non-blank, `TRANSCRIPT_COMPLETED` embedding job 정확히 1건이다.
+- 거짓 양성 차단: `ConfiguredSttProvider`는 primary 생성이 실패하면 `STT_FALLBACK_PROVIDER`(기본 `openai-realtime`)로 넘어간다. 그대로 두면 Soniox가 실패했는데 OpenAI가 전사해 통과할 수 있다. 테스트는 `STT_PROVIDER`와 `STT_FALLBACK_PROVIDER`를 모두 `soniox-realtime`으로 고정해 원래 예외가 다시 던져지게 하고, 주입된 `SttProvider.providerId()`가 `soniox-realtime`임을 먼저 단정한다.
+- 입력 데이터 판단: `backend/output/debug-audio/*-16k-1ch.wav`에 기존 16 kHz mono 녹음이 있었지만 실제 회의 음성이므로 외부 provider로 전송하지 않았다. macOS `say`와 `afconvert`로 합성 한국어 음성을 만들어 WAV 헤더를 제거한 raw PCM(약 5초)을 사용했다. 합성 입력은 기대 문구를 알 수 있어 검증도 강해지고 저장소에 오디오를 커밋하지 않는다.
+- 실행 증적: meeting `meeting-6e842ab8-ee8f-4b05-8534-68080350111a`, status `COMPLETED`, provider `soniox-realtime`, language `ko-KR`, segment 2건, `TRANSCRIPT_COMPLETED` embedding job 1건. 전사 결과는 `안녕하세요, 오늘 회의를 시작하겠습니다.` / `전사 스모크 테스트`로 합성 입력 문구와 일치했다.
+- 부수 회귀 차단 (`run-db-tests.sh`): 첫 실행에서 provider를 호출하지 않고 통과한 것처럼 보이는 문제가 있었다. Gradle은 환경변수를 `test` 태스크 입력으로 추적하지 않으므로, gate 환경변수만 바꿔 재실행하면 태스크가 UP-TO-DATE로 판정되고 직전 실행의 결과 XML이 그대로 남는다. 그 결과가 `skipped`였기 때문에 실제로는 아무것도 실행되지 않았는데 `BUILD SUCCESSFUL`로 보였고, 결과 XML의 timestamp로만 구분됐다. 스크립트가 항상 `cleanTest test`를 실행하도록 고정했다.
+- 판단: `SMK-002`의 STT provider tier는 실제 provider 호출로 근거를 확보했다. 다만 LiveKit 실서버 입장 증적은 여전히 없고 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이므로, `SMK-002` 본체와 `V119`는 계속 pending으로 둔다. `clova-nest`는 runtime 기본 provider가 아니므로 종료 조건에서 제외한다.
+- 검증: `RUN_SONIOX_STT_SMOKE=true SONIOX_STT_SMOKE_PCM_PATH=... ./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.SonioxSttTranscriptSmokeIntegrationTest` -> 1건 실행/0 skip/통과. env 없이 실행하면 1건 skip으로 기본 비활성이 유지된다. 전체 실행은 Backend 207건/실패 0/skip 2(Clova, Soniox provider-gated)다.
