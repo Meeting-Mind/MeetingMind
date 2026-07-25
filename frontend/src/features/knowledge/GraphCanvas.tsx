@@ -9,6 +9,7 @@ import {
   type Simulation
 } from "d3-force";
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, type BurstTarget } from "./introBurst";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
 
@@ -92,6 +93,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const adjacencyRef = useRef(new Map<string, Set<string>>());
     const movedRef = useRef(false);
     const fittedRef = useRef(false);
+    // 진입 모션 상태. 시작 시각이 null이면 모션이 끝났거나 아직 준비되지 않은 것이다.
+    const burstRef = useRef<{ startedAt: number; targets: BurstTarget[] } | null>(null);
     const insetsRef = useRef({ left: 0, right: 0 });
     insetsRef.current = insets ?? { left: 0, right: 0 };
 
@@ -133,6 +136,20 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       simulation.nodes(nodes);
       (simulation.force("link") as ForceLink<GraphNodeVM, GraphLinkVM>).links(links);
       applyForces();
+
+      // 진입 모션: 최종 배치를 먼저 계산해 두고 중앙에서 그 자리까지 직접 보간한다.
+      // 시뮬레이션을 중앙에서 그냥 시작하면 힘이 서서히 밀어내 흐물흐물하게 퍼진다.
+      // 움직임을 줄이도록 설정한 사용자에게는 모션 없이 최종 배치를 바로 보여준다.
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      if (nodes.length > 0 && !reduceMotion) {
+        simulation.alpha(1).stop();
+        // 충분히 수렴할 만큼만 미리 돌린다. 화면에는 그리지 않는다.
+        simulation.tick(220);
+        burstRef.current = { startedAt: performance.now(), targets: captureTargets(nodes) };
+      } else {
+        burstRef.current = null;
+      }
+
       simulation.alpha(0.9).restart();
       return undefined;
     }, [nodes, links]);
@@ -346,7 +363,41 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         // 데이터가 처음 그려질 때 한 번 화면 맞춤.
         if (!fittedRef.current && dataRef.current.nodes.length > 0) {
           fittedRef.current = true;
-          window.setTimeout(fitToView, 700);
+          // 진입 모션이 끝난 뒤에 맞춘다. 모션 중에 맞추면 중앙에 뭉친 상태를
+          // 기준으로 확대해 버려서 퍼진 다음 화면 밖으로 나간다.
+          window.setTimeout(fitToView, INTRO_BURST_MS + 120);
+        }
+
+        // 진입 모션 중에는 시뮬레이션을 멈추고 좌표를 직접 덮어쓴다. 둘이 동시에
+        // 위치를 건드리면 힘과 보간이 싸워 노드가 떨린다.
+        const burst = burstRef.current;
+        if (burst) {
+          const ratio = (performance.now() - burst.startedAt) / INTRO_BURST_MS;
+          const graphNodes = dataRef.current.nodes;
+          if (ratio >= 1) {
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const target = burst.targets[index];
+              if (target) {
+                graphNodes[index].x = target.x;
+                graphNodes[index].y = target.y;
+              }
+            }
+            burstRef.current = null;
+            // 모션이 끝난 뒤 시뮬레이션이 이어받는다. 알파를 낮게 줘서 자리가 튀지 않게 한다.
+            simRef.current?.alpha(0.12).restart();
+          } else {
+            simRef.current?.stop();
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const target = burst.targets[index];
+              if (!target) continue;
+              const moved = burstPosition(target, nodeProgress(ratio, index, graphNodes.length));
+              graphNodes[index].x = moved.x;
+              graphNodes[index].y = moved.y;
+              // 보간이 끝난 뒤 잔여 속도로 튀지 않도록 매 프레임 속도를 지운다.
+              graphNodes[index].vx = 0;
+              graphNodes[index].vy = 0;
+            }
+          }
         }
 
         const { display, search } = useKnowledgeGraphStore.getState();
