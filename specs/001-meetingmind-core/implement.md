@@ -2249,3 +2249,37 @@
   - 안전망 작동 실증: 같은 파일을 `V27`로 바꿔 25, 26에 구멍을 만든 뒤 재실행해 `migration versions must be contiguous starting at 1`으로 실패함을 확인했다. 즉 단정이 느슨해진 것이 아니다.
   - 임시 probe 파일은 삭제했고 마이그레이션 파일 수는 24로 원복했다. 전체 재실행 결과 Backend 206건/실패 0/skip 1을 유지한다.
 - 판단: 이제 마이그레이션 추가 시 이 테스트를 손댈 필요가 없고, 누락·중복·순서 오류·번호 건너뜀은 여전히 잡힌다.
+
+## T440 Soniox Realtime STT Provider Smoke
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/SonioxSttTranscriptSmokeIntegrationTest.java`, `scripts/run-db-tests.sh`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 배경: runbook이 지정한 유일한 provider 근거는 `ClovaSttTranscriptSmokeIntegrationTest`(`clova-nest`)였으나 실제 runtime 기본 provider는 `ConfiguredSttProvider`의 `soniox-realtime`이었다. 문서가 검증하려는 provider와 실제로 실행되는 provider가 달랐고 Clova 자격증명도 없었다. 결정에 따라 `soniox-realtime` 대상 opt-in smoke를 추가했다.
+- 구현: `RUN_SONIOX_STT_SMOKE=true` 게이트, `SONIOX_STT_SMOKE_PCM_PATH` 입력, 선택적 `SONIOX_STT_SMOKE_EXPECTED_TEXT` 단정. 통과 기준은 transcript `COMPLETED`, provider 기록 일치, segment 1건 이상, 전사 텍스트 non-blank, `TRANSCRIPT_COMPLETED` embedding job 정확히 1건이다.
+- 거짓 양성 차단: `ConfiguredSttProvider`는 primary 생성이 실패하면 `STT_FALLBACK_PROVIDER`(기본 `openai-realtime`)로 넘어간다. 그대로 두면 Soniox가 실패했는데 OpenAI가 전사해 통과할 수 있다. 테스트는 `STT_PROVIDER`와 `STT_FALLBACK_PROVIDER`를 모두 `soniox-realtime`으로 고정해 원래 예외가 다시 던져지게 하고, 주입된 `SttProvider.providerId()`가 `soniox-realtime`임을 먼저 단정한다.
+- 입력 데이터 판단: `backend/output/debug-audio/*-16k-1ch.wav`에 기존 16 kHz mono 녹음이 있었지만 실제 회의 음성이므로 외부 provider로 전송하지 않았다. macOS `say`와 `afconvert`로 합성 한국어 음성을 만들어 WAV 헤더를 제거한 raw PCM(약 5초)을 사용했다. 합성 입력은 기대 문구를 알 수 있어 검증도 강해지고 저장소에 오디오를 커밋하지 않는다.
+- 실행 증적: meeting `meeting-6e842ab8-ee8f-4b05-8534-68080350111a`, status `COMPLETED`, provider `soniox-realtime`, language `ko-KR`, segment 2건, `TRANSCRIPT_COMPLETED` embedding job 1건. 전사 결과는 `안녕하세요, 오늘 회의를 시작하겠습니다.` / `전사 스모크 테스트`로 합성 입력 문구와 일치했다.
+- 부수 회귀 차단 (`run-db-tests.sh`): 첫 실행에서 provider를 호출하지 않고 통과한 것처럼 보이는 문제가 있었다. Gradle은 환경변수를 `test` 태스크 입력으로 추적하지 않으므로, gate 환경변수만 바꿔 재실행하면 태스크가 UP-TO-DATE로 판정되고 직전 실행의 결과 XML이 그대로 남는다. 그 결과가 `skipped`였기 때문에 실제로는 아무것도 실행되지 않았는데 `BUILD SUCCESSFUL`로 보였고, 결과 XML의 timestamp로만 구분됐다. 스크립트가 항상 `cleanTest test`를 실행하도록 고정했다.
+- 판단: `SMK-002`의 STT provider tier는 실제 provider 호출로 근거를 확보했다. 다만 LiveKit 실서버 입장 증적은 여전히 없고 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이므로, `SMK-002` 본체와 `V119`는 계속 pending으로 둔다. `clova-nest`는 runtime 기본 provider가 아니므로 종료 조건에서 제외한다.
+- 검증: `RUN_SONIOX_STT_SMOKE=true SONIOX_STT_SMOKE_PCM_PATH=... ./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.SonioxSttTranscriptSmokeIntegrationTest` -> 1건 실행/0 skip/통과. env 없이 실행하면 1건 skip으로 기본 비활성이 유지된다. 전체 실행은 Backend 207건/실패 0/skip 2(Clova, Soniox provider-gated)다.
+
+## T442.1/T443/T444 BFF Redis Verification, Dev DB Migration State, LiveKit Real Server Smoke
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/service/LiveKitRealServerSmokeIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- `T442.1` (BFF skip 검증): BFF skip 6건은 전부 Redis-gated(`BFF_REDIS_INTEGRATION`)였다. `RedisSessionSharingIntegrationTest` 1건, `BffAuthRedisIntegrationTest` 3건, `RedisRefreshSingleFlightLockIntegrationTest` 1건, `RedisTokenVaultIntegrationTest` 1건이다. docker `meetingmind-redis-local`(6380)이 테스트 기본값과 일치해 바로 실행했고 88건/skip 0/실패 0으로 통과했다. Backend에서 9건 중 2건이 깨져 있던 것과 달리 BFF에는 숨은 결함이 없었다.
+- `T443` (V24 적용 상태): dev DB의 `flyway_schema_history`를 확인한 결과 V24가 `2026-07-26 01:30:59`에 이미 적용돼 있었다. Flyway CLI로 확인하니 `Current version of schema "public": 24`, `No migration necessary`였다. 문제는 적용 경로다. 이 시각은 `T441` 이전에 dev DB(5434)를 대상으로 DB 테스트를 돌린 시점이며, Spring context가 flyway를 실행한 부수 효과로 적용된 것이다. 결과 상태는 의도와 같지만 테스트 실행이 dev 스키마를 바꿀 수 있다는 뜻이므로, 이후 DB 검증은 `scripts/run-db-tests.sh`(5435)만 사용한다. 이 사례 자체가 `T441`의 근거다.
+- `T444` (LiveKit 실서버 smoke): 기존 `MeetingLiveKitTokenServiceTest`는 `LiveKitTokenService`를 mock으로 대체하므로 권한 분기와 응답 매핑만 검증하고, 자격증명 유효성이나 서버 도달성은 확인하지 않았다. `LiveKitRealServerSmokeIntegrationTest`를 추가해 실제 LiveKit Cloud에 room을 만들고 `listRooms`로 조회한 뒤 삭제하고, 삭제 후 조회로 잔존이 없음까지 단정한다. 발급 token은 payload를 디코드해 `iss`가 API key이고 `video.room`이 대상 room으로 스코프됨을 확인한다. `RUN_LIVEKIT_SMOKE` 게이트로 기본 비활성이며 DB를 쓰지 않는다.
+- `T444` 구현 세부: `java-jwt`는 `livekit-server`의 전이 의존이라 test compile classpath에 없다. 서명 검증이 목적이 아니라 claim 스코프 확인이므로 Jackson으로 payload만 직접 디코드했다. Retrofit 응답 실패 시 provider 원문 body를 노출하지 않고 status code만 남긴다.
+- `T444` 범위 한계: 매체 publish/subscribe는 검증하지 않는다. 실제 오디오/비디오 join은 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다. 따라서 `SMK-002`는 STT 전사(`T440`)와 LiveKit 서버 도달성(`T444`)까지 자동 증적을 확보했고, 브라우저 기반 실제 입장만 수동으로 남는다.
+- 검증:
+  - `cd bff && BFF_REDIS_INTEGRATION=true ./gradlew cleanTest test` -> 88건/skip 0/실패 0.
+  - `cd backend && RUN_LIVEKIT_SMOKE=true ./gradlew cleanTest test --tests com.meetingmind.demo.service.LiveKitRealServerSmokeIntegrationTest` -> 1건 실행/0 skip/통과.
+  - `./scripts/run-db-tests.sh` -> Backend 208건/실패 0/skip 3(Clova, Soniox, LiveKit provider-gated).
+
+## T445 SMK-003 Local Tier: Confirmed Report Index Linkage
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/ReportConfirmKnowledgeIndexIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 조사 결과: `SMK-003`의 기준은 "확정된 회의록이 검색 가능한 knowledge source를 만든다"였다. 실제 구조를 확인하니 `confirmMeetingReport`는 `project_knowledge` row를 만들지 않는다. `createProjectKnowledge`는 `SpaceController`의 사용자 수동 생성 경로에서만 호출된다. 대신 색인은 `meeting_reports`의 `current_report_embedding_job_trigger`가 `status='CONFIRMED' and is_current=true`일 때 `enqueue_embedding_job(..., 'REPORT_CONFIRMED')`로 처리한다. 즉 확정 회의록은 별도 knowledge 문서가 아니라 meeting source로 색인된다. 기준 문장이 실제 설계와 달라 오해를 유발했다.
+- 기존 커버리지 공백: `MigrationIntegrationTest`가 `5:REPORT_CONFIRMED`를 단정하지만, 이는 `meeting_reports`에 raw SQL로 직접 insert한 뒤 trigger 동작만 확인한 것이다. 애플리케이션 경로가 trigger 조건 두 가지(`CONFIRMED`, `is_current=true`)를 실제로 만족시키는지는 검증되지 않았다. `MeetingReport.confirmed()`가 `current=true`를 함께 설정하는 것에 의존하는데, 이 연결이 깨지면 회의록을 확정해도 색인이 걸리지 않고 조용히 누락된다.
+- 구현: `ReportConfirmKnowledgeIndexIntegrationTest`를 추가해 `saveReportCandidate` -> `confirmMeetingReport` 애플리케이션 경로로 검증한다. CANDIDATE 상태에서는 색인 작업이 없어야 하고, 확정 후 `REPORT_CONFIRMED` 작업이 정확히 1건 생기며, 그 작업이 space 범위이고 `project_knowledge_id`가 null인 meeting source임을 단정한다. AI provider를 쓰지 않으므로 결정론적이다.
+- 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
+- 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.

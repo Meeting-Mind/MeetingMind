@@ -62,7 +62,17 @@ docker exec "$CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -q \
 
 echo "[3/3] DB-gated 검증 실행"
 cd "$ROOT_DIR/backend"
+
+# `cleanTest`를 반드시 함께 실행한다.
+#
+# Gradle은 환경변수를 test 태스크 입력으로 추적하지 않는다. 그래서 gate 환경변수만
+# 바꿔 다시 돌리면 태스크가 UP-TO-DATE로 판정되고, 직전 실행의 결과 XML이 그대로
+# 남는다. 그 결과가 `skipped`였다면 실제로는 아무것도 실행되지 않았는데도 성공한
+# 것처럼 보인다. env-gated smoke에서는 이게 곧 거짓 근거다.
+#
+# 실제로 `RUN_SONIOX_STT_SMOKE=true`로 처음 실행했을 때 이 함정에 걸려 provider를
+# 호출하지 않고 이전 skip 결과를 재사용했다. 결과 XML의 timestamp로만 구분됐다.
 CI_POSTGRES_URL="jdbc:postgresql://localhost:$HOST_PORT/$DB_NAME" \
 CI_POSTGRES_USER="$DB_USER" \
 CI_POSTGRES_PASSWORD="$DB_PASSWORD" \
-exec ./gradlew test "$@"
+exec ./gradlew cleanTest test "$@"

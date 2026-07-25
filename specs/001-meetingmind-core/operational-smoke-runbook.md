@@ -71,13 +71,72 @@ Provider smoke 전에 local runtime 경로가 먼저 안정적으로 떠야 한�
 
 ### STT Provider Smoke
 
-미해결 불일치: 아래 opt-in 검증은 `clova-nest`를 대상으로 한다. 그러나 실제 runtime 기본
-provider는 `ConfiguredSttProvider`의 `STT_PROVIDER` 기본값 `soniox-realtime`이고 fallback은
-`openai-realtime`이다. 즉 문서가 지정한 유일한 provider 근거와 실제로 실행되는 provider가
-다르다. `SMK-002`를 닫기 전에 다음 중 하나를 먼저 결정해야 한다.
+provider별로 opt-in smoke가 나뉜다. 실제 runtime 기본 provider는 `ConfiguredSttProvider`의
+`STT_PROVIDER` 기본값인 **`soniox-realtime`**이므로, 기본 경로 검증은 Soniox smoke로 한다.
+`clova-nest`는 별도 자격증명이 있을 때만 실행한다. (`T440`)
 
-- `soniox-realtime` 대상 opt-in smoke를 추가한다. (실제 기본 경로를 검증)
-- 또는 smoke 대상 provider를 운영 기본값과 일치시킨다.
+#### Soniox Realtime Smoke (runtime 기본 경로)
+
+`SonioxSttTranscriptSmokeIntegrationTest`는 기본 비활성이다.
+
+| Env | Purpose |
+| --- | --- |
+| `RUN_SONIOX_STT_SMOKE=true` | Soniox provider smoke 활성화 |
+| `SONIOX_API_KEY` | Soniox 자격증명 |
+| `SONIOX_STT_SMOKE_PCM_PATH` | PCM s16le, mono, 16 kHz raw 샘플 경로 (WAV 헤더 없음) |
+| `SONIOX_STT_SMOKE_EXPECTED_TEXT` | (선택) 특정 문구까지 확인할 때 |
+| `CI_POSTGRES_URL` / `CI_POSTGRES_USER` / `CI_POSTGRES_PASSWORD` | 테스트 DB (`scripts/run-db-tests.sh`가 설정) |
+
+```bash
+RUN_SONIOX_STT_SMOKE=true SONIOX_STT_SMOKE_PCM_PATH=/path/to/sample.pcm ./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.SonioxSttTranscriptSmokeIntegrationTest
+```
+
+Pass criteria:
+
+- 실제로 `soniox-realtime`을 탔다. (fallback 대체가 아님)
+- Transcript status becomes `COMPLETED`이고 provider가 `soniox-realtime`으로 기록된다.
+- Segment가 1건 이상이고 전사 텍스트가 비어 있지 않다.
+- `TRANSCRIPT_COMPLETED` embedding job이 정확히 1건 enqueue된다.
+
+거짓 양성 주의: `ConfiguredSttProvider`는 primary 생성 실패 시 `STT_FALLBACK_PROVIDER`
+(기본 `openai-realtime`)로 넘어간다. 그대로 두면 Soniox가 실패했는데 OpenAI로 대체되어
+통과할 수 있다. 테스트는 fallback을 primary와 같게 고정하고 실제 `providerId()`를 단정해
+이 경로를 막는다.
+
+샘플 준비 주의: `backend/output/debug-audio/*.wav`는 실제 회의 녹음이므로 외부 provider
+smoke 입력으로 쓰지 않는다. 합성 음성으로 만들면 기대 문구를 알 수 있어 검증도 강해진다.
+macOS 예시는 `say`로 만든 뒤 `afconvert`로 16 kHz mono s16le WAV로 바꾸고 WAV 헤더를
+제거해 raw PCM으로 저장한다.
+
+로그 확인은 자동 단정이 아니라 수동 항목이다. 실행 후 provider 원문 오류, API key,
+raw audio 경로가 사용자 노출 출력에 남지 않았는지 로그에서 직접 확인한다.
+
+#### LiveKit Real Server Smoke
+
+`LiveKitRealServerSmokeIntegrationTest`는 기본 비활성이며 `RUN_LIVEKIT_SMOKE=true`일 때만
+실행된다. DB를 쓰지 않으므로 `run-db-tests.sh` 없이 실행할 수 있다.
+
+| Env | Purpose |
+| --- | --- |
+| `RUN_LIVEKIT_SMOKE=true` | LiveKit 실서버 smoke 활성화 |
+| `LIVEKIT_URL` (또는 `LIVEKIT_WS_URL`) | LiveKit 서버. `wss://`는 자동으로 `https://` API URL로 변환된다 |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | 서버 자격증명 |
+
+```bash
+cd backend && RUN_LIVEKIT_SMOKE=true ./gradlew cleanTest test --tests com.meetingmind.demo.service.LiveKitRealServerSmokeIntegrationTest
+```
+
+Pass criteria:
+
+- 실서버에 room이 생성되고 `listRooms`로 조회된다. (자격증명 유효 + 서버 도달)
+- 발급 token의 `iss`가 API key이고 `video.room`이 대상 room으로 스코프된다.
+- 삭제 후 조회에서 room이 남지 않는다.
+
+범위 한계: 매체 publish/subscribe는 검증하지 않는다. 실제 오디오/비디오 join은 브라우저
+client가 필요하므로 아래 product E2E 수동 절차에 남는다. `MeetingLiveKitTokenServiceTest`는
+mock 기반이라 권한 분기만 검증하며 실접속 근거가 아니다.
+
+#### Clova Nest Smoke (자격증명 보유 시)
 
 `ClovaSttTranscriptSmokeIntegrationTest` is intentionally disabled by default.
 
@@ -182,7 +241,10 @@ STT provider are running.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-07-25 | Codex | current working tree | SMK-001 | Local automated | PASS | `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_http_smoke`, `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.MeetingReportLifecycleServiceTest`, `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.ProjectAiServiceTest` | `tests.test_onprem_poc_http_smoke`는 provider env 부재로 1건 skip, 나머지 deterministic 검증은 통과 |
 | 2026-07-26 | Claude | `docs/ai-harness-test-matrix` @ 1b4dffc + local fixes | SMK-002 (local tier) | Local DB automated | PASS | `SttTranscriptFlowIntegrationTest` 1건 실행/0 skip, `MeetingLiveKitTokenServiceTest` 5건 실행/0 skip | 실제 PostgreSQL(5434)에서 transcript `COMPLETED` 전이, segment 순서/speaker 보존, `embedding_jobs` `TRANSCRIPT_COMPLETED` 1건 enqueue(DB trigger 경로)를 확인. LiveKit은 mock 기반이라 실제 서버 접속 근거는 아님. 이 검증은 `@Primary` 충돌로 그동안 깨져 있었고 env 미설정으로 skip되어 드러나지 않았음(V119.4) |
-| TBD | TBD | TBD | SMK-002 (provider tier) | Opt-in provider | BLOCKED | transcript/report IDs | Clova 키 부재 + 문서 지정 provider(`clova-nest`)와 runtime 기본 provider(`soniox-realtime`) 불일치. 위 "STT Provider Smoke" 결정 필요 |
-| TBD | TBD | TBD | SMK-003 | Opt-in provider | TBD | report/knowledge IDs | TBD |
+| 2026-07-26 | Claude | `feat/soniox-stt-smoke` @ becc81d+ | SMK-002 (provider tier, STT) | Opt-in provider | PASS | `SonioxSttTranscriptSmokeIntegrationTest` 1건 실행/0 skip. meeting `meeting-6e842ab8-ee8f-4b05-8534-68080350111a`, status `COMPLETED`, provider `soniox-realtime`, segments 2, `TRANSCRIPT_COMPLETED` embedding job 1 | 실제 Soniox realtime API 호출. 입력은 합성 한국어 음성(16 kHz mono s16le, 약 5초)이며 실제 회의 녹음을 쓰지 않았다. `providerId()` 단정으로 fallback 대체가 아님을 확인했다. 전사 결과가 입력 문구와 일치했다 |
+| 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-002 (provider tier, LiveKit) | Opt-in provider | PASS (server-side) | `LiveKitRealServerSmokeIntegrationTest` 1건 실행/0 skip. room create/list/delete 왕복, token `iss`=API key, `video.room` 스코프 일치 | 실제 LiveKit Cloud 호출로 자격증명 유효성과 서버 도달성을 확인했다. room은 삭제로 정리하고 조회로 잔존 없음을 단정한다. 매체(media) publish/subscribe는 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다 |
+| TBD | TBD | TBD | SMK-002 (provider tier, Clova) | Opt-in provider | N/A | — | `clova-nest` 자격증명 부재. runtime 기본 provider가 아니므로 `SMK-002` 종료 조건에서 제외한다 |
+| 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-003 (local tier, 색인 연결) | Local DB automated | PASS | `ReportConfirmKnowledgeIndexIntegrationTest` 1건 실행/0 skip | 앱 경로 `confirmMeetingReport`가 `REPORT_CONFIRMED` 색인 작업 1건을 만든다. CANDIDATE에서는 생기지 않음도 확인. 확정 회의록은 별도 `project_knowledge` 문서가 아니라 meeting source로 색인된다 |
+| TBD | TBD | TBD | SMK-003 (provider tier) | Opt-in provider | TBD | report/chunk IDs | 회의록 본문 AI 생성과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재되는 단계가 남는다 |
 | TBD | TBD | TBD | SMK-004 | Opt-in provider | TBD | answer/source IDs | TBD |
 | TBD | TBD | TBD | SMK-005 | Local/manual | TBD | account/meeting IDs | TBD |
