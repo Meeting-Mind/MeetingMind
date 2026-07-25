@@ -1107,9 +1107,10 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T441 [test-infra/db] [owner: Claude] [depends: V119.4] 격리된 테스트 DB를 확보한다. 결정: dev용 `meetingmind-postgres-local`은 그대로 두고 pgvector 기반 test 전용 docker 인스턴스를 띄워 `CI_POSTGRES_URL`을 그쪽으로 토대한다. `MigrationIntegrationTest`가 `migrationsExecuted`를 단정하므로 clean DB여야 하고, `ClovaSttTranscriptSmokeIntegrationTest`는 `@Transactional`이 아니라 dev 데이터를 오염시킨다. 산출물: `scripts/run-db-tests.sh` (CI와 같은 이미지, 매 실행 database drop/create로 pristine 보장, 5434 지정 시 거부).
 - [x] T442 [verification/tests] [owner: Claude] [depends: T441] Backend DB-gated 9건이 실제로 통과함을 확인했다. skip 10건 -> 1건(provider-gated `Clova`만 남음), 206건 실패 0. 실행 과정에서 `MigrationIntegrationTest`(V24 미반영)와 `JdbcWorkspaceStoreIntegrationTest`(전사 권한 정책 stale) 2건이 실제로 깨져 있었음을 확인하고 수정했다.
 - [x] T442.2 [verification/tests] [owner: Claude] [depends: T442] `MigrationIntegrationTest`의 하드코딩된 기대 버전 목록을 classpath 마이그레이션 파일에서 유도하도록 바꿔, 마이그레이션 추가가 정상 변경인데도 CI 실패로 나타나는 취약성을 제거한다. 탐색 실패 시 공허한 통과를 막는 단정과 기존의 연속성 보장을 함께 유지한다.
-- [ ] T442.1 [verification/tests] [owner: BFF] [depends: T442] BFF skip 6건도 같은 방식으로 실제 실행 여부를 확인한다.
-- [ ] SMK-002 [smoke/provider] [owner: Backend/AI/Frontend] [depends: T440,T441] STT provider 전사 증적은 `T440`에서 확보했다. 남은 것은 LiveKit 실서버 입장 증적이다. 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이라 실접속 근거가 아니다.
-- [ ] T443 [data/migration] [owner: Backend] V24 `ai_usage_events` 마이그레이션을 로컬 DB에 적용한다. 로컬은 V23까지만 적용된 상태이며 backend 재기동 시 flyway가 처리한다. `SMK-003` 진입 전 필요하고 `T439.1`의 전제다.
+- [x] T442.1 [verification/tests] [owner: Claude] [depends: T442] BFF skip 6건을 실제로 실행해 확인했다. 전부 Redis-gated였고 `BFF_REDIS_INTEGRATION=true`로 88건/skip 0/실패 0으로 통과한다. Backend와 달리 숨은 결함은 없었다.
+- [x] T444 [smoke/livekit] [owner: Claude] [depends: T440] LiveKit 실서버 도달성 smoke를 추가한다. `RUN_LIVEKIT_SMOKE` 게이트로 room create/list/delete 왕복과 token issuer/room 스코프를 검증하고, 실행 후 room을 남기지 않는다.
+- [ ] SMK-002 [smoke/provider] [owner: Backend/AI/Frontend] [depends: T440,T441,T444] STT 전사 증적(`T440`)과 LiveKit 서버 도달성 증적(`T444`)은 확보했다. 남은 것은 매체(media) publish/subscribe를 포함한 브라우저 기반 실제 입장 증적이며, 이는 product E2E 수동 절차다.
+- [x] T443 [data/migration] [owner: Claude] V24 `ai_usage_events`가 dev DB에 적용됐다(`2026-07-26 01:30:59`). 다만 이는 `T441` 이전에 dev DB를 대상으로 DB 테스트를 돌린 부수 효과로 적용된 것이다. 결과 상태는 의도와 같지만, dev DB에 직접 테스트를 돌리면 안 되는 이유를 그대로 보여주는 사례이므로 이후에는 `scripts/run-db-tests.sh`만 사용한다.
 
 ## M152 NonProd V2 AI Container Security Remediation
 

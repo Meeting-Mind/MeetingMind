@@ -2261,3 +2261,16 @@
 - 부수 회귀 차단 (`run-db-tests.sh`): 첫 실행에서 provider를 호출하지 않고 통과한 것처럼 보이는 문제가 있었다. Gradle은 환경변수를 `test` 태스크 입력으로 추적하지 않으므로, gate 환경변수만 바꿔 재실행하면 태스크가 UP-TO-DATE로 판정되고 직전 실행의 결과 XML이 그대로 남는다. 그 결과가 `skipped`였기 때문에 실제로는 아무것도 실행되지 않았는데 `BUILD SUCCESSFUL`로 보였고, 결과 XML의 timestamp로만 구분됐다. 스크립트가 항상 `cleanTest test`를 실행하도록 고정했다.
 - 판단: `SMK-002`의 STT provider tier는 실제 provider 호출로 근거를 확보했다. 다만 LiveKit 실서버 입장 증적은 여전히 없고 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이므로, `SMK-002` 본체와 `V119`는 계속 pending으로 둔다. `clova-nest`는 runtime 기본 provider가 아니므로 종료 조건에서 제외한다.
 - 검증: `RUN_SONIOX_STT_SMOKE=true SONIOX_STT_SMOKE_PCM_PATH=... ./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.SonioxSttTranscriptSmokeIntegrationTest` -> 1건 실행/0 skip/통과. env 없이 실행하면 1건 skip으로 기본 비활성이 유지된다. 전체 실행은 Backend 207건/실패 0/skip 2(Clova, Soniox provider-gated)다.
+
+## T442.1/T443/T444 BFF Redis Verification, Dev DB Migration State, LiveKit Real Server Smoke
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/service/LiveKitRealServerSmokeIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- `T442.1` (BFF skip 검증): BFF skip 6건은 전부 Redis-gated(`BFF_REDIS_INTEGRATION`)였다. `RedisSessionSharingIntegrationTest` 1건, `BffAuthRedisIntegrationTest` 3건, `RedisRefreshSingleFlightLockIntegrationTest` 1건, `RedisTokenVaultIntegrationTest` 1건이다. docker `meetingmind-redis-local`(6380)이 테스트 기본값과 일치해 바로 실행했고 88건/skip 0/실패 0으로 통과했다. Backend에서 9건 중 2건이 깨져 있던 것과 달리 BFF에는 숨은 결함이 없었다.
+- `T443` (V24 적용 상태): dev DB의 `flyway_schema_history`를 확인한 결과 V24가 `2026-07-26 01:30:59`에 이미 적용돼 있었다. Flyway CLI로 확인하니 `Current version of schema "public": 24`, `No migration necessary`였다. 문제는 적용 경로다. 이 시각은 `T441` 이전에 dev DB(5434)를 대상으로 DB 테스트를 돌린 시점이며, Spring context가 flyway를 실행한 부수 효과로 적용된 것이다. 결과 상태는 의도와 같지만 테스트 실행이 dev 스키마를 바꿀 수 있다는 뜻이므로, 이후 DB 검증은 `scripts/run-db-tests.sh`(5435)만 사용한다. 이 사례 자체가 `T441`의 근거다.
+- `T444` (LiveKit 실서버 smoke): 기존 `MeetingLiveKitTokenServiceTest`는 `LiveKitTokenService`를 mock으로 대체하므로 권한 분기와 응답 매핑만 검증하고, 자격증명 유효성이나 서버 도달성은 확인하지 않았다. `LiveKitRealServerSmokeIntegrationTest`를 추가해 실제 LiveKit Cloud에 room을 만들고 `listRooms`로 조회한 뒤 삭제하고, 삭제 후 조회로 잔존이 없음까지 단정한다. 발급 token은 payload를 디코드해 `iss`가 API key이고 `video.room`이 대상 room으로 스코프됨을 확인한다. `RUN_LIVEKIT_SMOKE` 게이트로 기본 비활성이며 DB를 쓰지 않는다.
+- `T444` 구현 세부: `java-jwt`는 `livekit-server`의 전이 의존이라 test compile classpath에 없다. 서명 검증이 목적이 아니라 claim 스코프 확인이므로 Jackson으로 payload만 직접 디코드했다. Retrofit 응답 실패 시 provider 원문 body를 노출하지 않고 status code만 남긴다.
+- `T444` 범위 한계: 매체 publish/subscribe는 검증하지 않는다. 실제 오디오/비디오 join은 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다. 따라서 `SMK-002`는 STT 전사(`T440`)와 LiveKit 서버 도달성(`T444`)까지 자동 증적을 확보했고, 브라우저 기반 실제 입장만 수동으로 남는다.
+- 검증:
+  - `cd bff && BFF_REDIS_INTEGRATION=true ./gradlew cleanTest test` -> 88건/skip 0/실패 0.
+  - `cd backend && RUN_LIVEKIT_SMOKE=true ./gradlew cleanTest test --tests com.meetingmind.demo.service.LiveKitRealServerSmokeIntegrationTest` -> 1건 실행/0 skip/통과.
+  - `./scripts/run-db-tests.sh` -> Backend 208건/실패 0/skip 3(Clova, Soniox, LiveKit provider-gated).

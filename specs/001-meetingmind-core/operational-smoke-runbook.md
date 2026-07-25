@@ -111,6 +111,31 @@ macOS 예시는 `say`로 만든 뒤 `afconvert`로 16 kHz mono s16le WAV로 바�
 로그 확인은 자동 단정이 아니라 수동 항목이다. 실행 후 provider 원문 오류, API key,
 raw audio 경로가 사용자 노출 출력에 남지 않았는지 로그에서 직접 확인한다.
 
+#### LiveKit Real Server Smoke
+
+`LiveKitRealServerSmokeIntegrationTest`는 기본 비활성이며 `RUN_LIVEKIT_SMOKE=true`일 때만
+실행된다. DB를 쓰지 않으므로 `run-db-tests.sh` 없이 실행할 수 있다.
+
+| Env | Purpose |
+| --- | --- |
+| `RUN_LIVEKIT_SMOKE=true` | LiveKit 실서버 smoke 활성화 |
+| `LIVEKIT_URL` (또는 `LIVEKIT_WS_URL`) | LiveKit 서버. `wss://`는 자동으로 `https://` API URL로 변환된다 |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | 서버 자격증명 |
+
+```bash
+cd backend && RUN_LIVEKIT_SMOKE=true ./gradlew cleanTest test --tests com.meetingmind.demo.service.LiveKitRealServerSmokeIntegrationTest
+```
+
+Pass criteria:
+
+- 실서버에 room이 생성되고 `listRooms`로 조회된다. (자격증명 유효 + 서버 도달)
+- 발급 token의 `iss`가 API key이고 `video.room`이 대상 room으로 스코프된다.
+- 삭제 후 조회에서 room이 남지 않는다.
+
+범위 한계: 매체 publish/subscribe는 검증하지 않는다. 실제 오디오/비디오 join은 브라우저
+client가 필요하므로 아래 product E2E 수동 절차에 남는다. `MeetingLiveKitTokenServiceTest`는
+mock 기반이라 권한 분기만 검증하며 실접속 근거가 아니다.
+
 #### Clova Nest Smoke (자격증명 보유 시)
 
 `ClovaSttTranscriptSmokeIntegrationTest` is intentionally disabled by default.
@@ -217,7 +242,7 @@ STT provider are running.
 | 2026-07-25 | Codex | current working tree | SMK-001 | Local automated | PASS | `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_http_smoke`, `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.MeetingReportLifecycleServiceTest`, `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.ProjectAiServiceTest` | `tests.test_onprem_poc_http_smoke`는 provider env 부재로 1건 skip, 나머지 deterministic 검증은 통과 |
 | 2026-07-26 | Claude | `docs/ai-harness-test-matrix` @ 1b4dffc + local fixes | SMK-002 (local tier) | Local DB automated | PASS | `SttTranscriptFlowIntegrationTest` 1건 실행/0 skip, `MeetingLiveKitTokenServiceTest` 5건 실행/0 skip | 실제 PostgreSQL(5434)에서 transcript `COMPLETED` 전이, segment 순서/speaker 보존, `embedding_jobs` `TRANSCRIPT_COMPLETED` 1건 enqueue(DB trigger 경로)를 확인. LiveKit은 mock 기반이라 실제 서버 접속 근거는 아님. 이 검증은 `@Primary` 충돌로 그동안 깨져 있었고 env 미설정으로 skip되어 드러나지 않았음(V119.4) |
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` @ becc81d+ | SMK-002 (provider tier, STT) | Opt-in provider | PASS | `SonioxSttTranscriptSmokeIntegrationTest` 1건 실행/0 skip. meeting `meeting-6e842ab8-ee8f-4b05-8534-68080350111a`, status `COMPLETED`, provider `soniox-realtime`, segments 2, `TRANSCRIPT_COMPLETED` embedding job 1 | 실제 Soniox realtime API 호출. 입력은 합성 한국어 음성(16 kHz mono s16le, 약 5초)이며 실제 회의 녹음을 쓰지 않았다. `providerId()` 단정으로 fallback 대체가 아님을 확인했다. 전사 결과가 입력 문구와 일치했다 |
-| TBD | TBD | TBD | SMK-002 (provider tier, LiveKit) | Opt-in provider | BLOCKED | room/participant IDs | LiveKit 실서버 입장 증적은 아직 없다. 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이라 token 발급 로직만 검증한다 |
+| 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-002 (provider tier, LiveKit) | Opt-in provider | PASS (server-side) | `LiveKitRealServerSmokeIntegrationTest` 1건 실행/0 skip. room create/list/delete 왕복, token `iss`=API key, `video.room` 스코프 일치 | 실제 LiveKit Cloud 호출로 자격증명 유효성과 서버 도달성을 확인했다. room은 삭제로 정리하고 조회로 잔존 없음을 단정한다. 매체(media) publish/subscribe는 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다 |
 | TBD | TBD | TBD | SMK-002 (provider tier, Clova) | Opt-in provider | N/A | — | `clova-nest` 자격증명 부재. runtime 기본 provider가 아니므로 `SMK-002` 종료 조건에서 제외한다 |
 | TBD | TBD | TBD | SMK-003 | Opt-in provider | TBD | report/knowledge IDs | TBD |
 | TBD | TBD | TBD | SMK-004 | Opt-in provider | TBD | answer/source IDs | TBD |
