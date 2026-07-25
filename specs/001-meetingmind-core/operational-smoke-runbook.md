@@ -22,7 +22,8 @@ OpenAI-compatible generation, embedding, and public callback checks are opt-in.
 | --- | --- | --- | --- |
 | SMK-001 | 전체 | PASS | AI unit + on-prem HTTP smoke |
 | SMK-002 | local tier / STT provider / LiveKit 도달성 | PASS | `V119.4`, `T440`, `T444` |
-| SMK-002 | 매체 publish/subscribe join | **수동 대기** | 브라우저 필요, 자동화 불가 |
+| SMK-002 | 매체 publish/subscribe join | PASS | `T454` (Playwright 2 context, opt-in) |
+| SMK-002 | 장치 권한 프롬프트 / 실제 음성 품질 | **수동 잔여** | fake media로 덮이지 않는 범위 |
 | SMK-003 | 회의록 본문 생성 | PASS | `T449` |
 | SMK-003 | 확정 -> 색인 작업 생성 | PASS | `T445` |
 | SMK-003 | worker 소비 -> `report` chunk | PASS | `T447` |
@@ -34,7 +35,8 @@ OpenAI-compatible generation, embedding, and public callback checks are opt-in.
 `T453`이 Playwright로 덮는다. **두 축은 서로를 대신하지 못한다** — Playwright는 backend를
 `test` 프로파일(in-memory)로 띄우므로 SQL 결함을 잡지 못한다.
 
-`V119` 마감에 남은 것은 `SMK-002` 매체 join 하나뿐이며, 이것만 브라우저 실조작이 필요하다.
+`SMK-002` 매체 축도 `T454`로 자동화됐다. 남은 수동 범위는 fake media가 대신할 수 없는
+**장치 권한 프롬프트, prejoin 장치 선택 UX, 실제 음성 품질** 세 가지로 좁혀졌다.
 
 ## Local Deterministic Checks
 
@@ -292,6 +294,7 @@ STT provider are running.
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` @ becc81d+ | SMK-002 (provider tier, STT) | Opt-in provider | PASS | `SonioxSttTranscriptSmokeIntegrationTest` 1건 실행/0 skip. meeting `meeting-6e842ab8-ee8f-4b05-8534-68080350111a`, status `COMPLETED`, provider `soniox-realtime`, segments 2, `TRANSCRIPT_COMPLETED` embedding job 1 | 실제 Soniox realtime API 호출. 입력은 합성 한국어 음성(16 kHz mono s16le, 약 5초)이며 실제 회의 녹음을 쓰지 않았다. `providerId()` 단정으로 fallback 대체가 아님을 확인했다. 전사 결과가 입력 문구와 일치했다 |
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-002 (provider tier, LiveKit) | Opt-in provider | PASS (server-side) | `LiveKitRealServerSmokeIntegrationTest` 1건 실행/0 skip. room create/list/delete 왕복, token `iss`=API key, `video.room` 스코프 일치 | 실제 LiveKit Cloud 호출로 자격증명 유효성과 서버 도달성을 확인했다. room은 삭제로 정리하고 조회로 잔존 없음을 단정한다. 매체(media) publish/subscribe는 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다 |
 | TBD | TBD | TBD | SMK-002 (provider tier, Clova) | Opt-in provider | N/A | — | `clova-nest` 자격증명 부재. runtime 기본 provider가 아니므로 `SMK-002` 종료 조건에서 제외한다 |
+| 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-002 (media join) | Opt-in (LiveKit 자격증명) | PASS | `frontend/e2e/live-media.spec.ts` 1건 실행/통과 | 브라우저 2개 context가 같은 회의에 접속해 서로를 원격 참가자로 본다. 원격 목록은 `isConnected && !isLocal`만 렌더하므로 구독 성립의 근거다. `No other participants` -> 상대 등장 전이를 함께 단정해 "원래부터 떠 있던 것"과 구분했다. `RUN_LIVEKIT_MEDIA_E2E=true` opt-in이며 CI에는 `backend/.env`가 없어 실행되지 않는다. **게이트 없이 돌린 skip은 통과 근거가 아니다.** 장치 권한 프롬프트·prejoin 장치 선택·실제 음성 품질은 fake media로 덮이지 않아 수동으로 남는다 |
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-003 (local tier, 색인 연결) | Local DB automated | PASS | `ReportConfirmKnowledgeIndexIntegrationTest` 1건 실행/0 skip | 앱 경로 `confirmMeetingReport`가 `REPORT_CONFIRMED` 색인 작업 1건을 만든다. CANDIDATE에서는 생기지 않음도 확인. 확정 회의록은 별도 `project_knowledge` 문서가 아니라 meeting source로 색인된다 |
 | 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-003 (provider tier, embedding worker) | Opt-in provider (OpenAI 과금) | PASS | job `embedding-job-f4cd7b44...`(7 chunk), `embedding-job-90559ff3...`(9 chunk) | worker는 구현되어 있었고 local 실행 경로가 없었다(`run-ai.sh`는 FastAPI만, compose worker는 `profiles: ["ai"]`). `scripts/run-embedding-worker.sh` 추가 후 `REPORT_CONFIRMED` 2건이 각각 1회 시도로 COMPLETED, active `report` chunk 3건 전부 1536차원 vector 보유. 기존 `INTERNAL_ERROR` 실패는 환경성이었고 재실행으로 해소됐다. 회의록 **본문 AI 생성**은 여전히 별도 단계다 |
 | 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-003 (본문 생성) | Opt-in provider (OpenAI 과금) | PASS | `meeting-1b4438c0…` transcript 37건 -> markdown 976자, decision 3 / actionItem 3 / model `gpt-4.1-mini-2025-04-14` | `/api/internal/meeting-ai/generate-report`는 자체 검색을 하지 않고 Backend가 전달한 source만 쓴다. `unsupported=false`이고 인용 6건이 전부 전달 범위 안(범위 밖 0건). 음성 2건은 HTTP 403 `AI_CONTEXT_FORBIDDEN`(다른 회의 source 혼입 / 허용되지 않은 source type). 응답 필드는 `supported`가 아니라 `unsupported`다 |

@@ -2284,6 +2284,19 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T454 SMK-002 Media Axis — Two-Participant Publish/Subscribe
+
+- 변경 파일: `frontend/e2e/live-media.spec.ts`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 덮는 범위: `T444`는 LiveKit **서버 도달성**만 덮는다(room create/list/delete, token 스코프). 브라우저 client가 없어 매체 경로는 검증되지 않았고, 그래서 `SMK-002` 매체 축이 수동으로 남아 있었다. 이 스펙이 그 축을 브라우저 2개로 자동화한다.
+- 구성: 호스트가 Space와 회의를 만들고 두 번째 사용자를 회의 참가자로 넣는다. 두 사용자가 각각 별도 browser context로 prejoin(`Join Now`)을 거쳐 live room에 들어간다. Chromium fake device(`--use-fake-device-for-media-stream`, `--use-fake-ui-for-media-stream`)를 쓰지 않으면 `getUserMedia`가 권한 프롬프트에서 멈춘다. `test.use({ launchOptions })`는 describe 안에 두면 worker를 새로 강제해 Playwright가 거부하므로 파일 top-level에 둔다.
+- 단정: 원격 참가자 목록은 `isConnected && !isLocal`로 걸러진 것만 렌더하므로, 상대의 볼륨 컨트롤(`{name} volume`)이 보인다는 것은 **실제로 접속해 구독됐다**는 뜻이다. 양쪽에서 서로를 본다.
+- 음성 기준선: 첫 참가자가 혼자 있을 때 `No other participants`가 보이는 것을 **먼저** 단정한다. 이것이 없으면 뒤의 양성 단정이 원래부터 떠 있던 것을 본 것인지 구분할 수 없다. "없음 -> 있음" 전이가 성립해야 공유 room이 실제로 동작한 것이다.
+- 선행 단정: UI를 건드리기 전에 `POST /api/v1/meetings/{id}/livekit-token`이 성공하는지 확인한다. 자격증명이 죽어 있으면 UI 단정은 의미가 없고, 실패 원인도 화면 타임아웃이 아니라 토큰 응답으로 드러나야 한다.
+- 발견: `participantType=member`는 `SPACE_ACCESS_DENIED`("member participant는 SpaceMember여야 합니다")로 거부된다. 회의 초대만 받은 사용자는 `guest`여야 한다. 경계가 의도대로 동작함을 확인한 셈이다.
+- **opt-in인 이유**: `LiveKitTokenService`는 CWD의 `.env`를 읽고 Playwright backend webServer의 cwd가 `backend/`이므로 로컬에서는 `backend/.env`의 자격증명이 쓰인다. CI에는 그 파일이 없어 토큰 발급이 `LIVEKIT_NOT_CONFIGURED`가 된다. 게이트 없이 두면 CI가 항상 실패하고, 조건부 skip으로 두면 "통과처럼 보이는 skip"이 된다. 그래서 `RUN_LIVEKIT_MEDIA_E2E=true` 명시적 opt-in으로 뒀다. **게이트 없이 돌린 결과의 skip은 통과 근거가 아니다.**
+- 검증: `cd frontend && RUN_LIVEKIT_MEDIA_E2E=true BFF_REDIS_PORT=6380 npx playwright test live-media` -> 1건 실행/통과. 게이트 없이 전체 실행 시 7 passed / 1 skipped로 skip 경로도 정상이다.
+- **fake media로 덮지 못하는 것**: 실제 마이크/카메라 권한 프롬프트, prejoin 장치 선택 UX, 실제 오디오 품질. 이 세 가지는 여전히 사람이 확인해야 하며 `SMK-002`의 진짜 수동 잔여다.
+
 ## T453 SMK-005 Browser Axis — Automated Instead of Manual
 
 - 변경 파일: `frontend/e2e/guest-acl-ui.spec.ts`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
