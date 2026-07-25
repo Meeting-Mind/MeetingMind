@@ -41,7 +41,7 @@ function statusLabel(report: ReportDetailResponse) {
 export function MeetingReportPage({ session }: Props) {
   const { meetingId = "", spaceId = "" } = useParams();
   const [report, setReport] = useState<ReportDetailResponse | null>(null);
-  const [reports, setReports] = useState<ReportSummary[]>([]);
+  const [_reports, setReports] = useState<ReportSummary[]>([]);
   const [sources, setSources] = useState<AiSource[]>([]);
   const [summary, setSummary] = useState("");
   const [markdown, setMarkdown] = useState("");

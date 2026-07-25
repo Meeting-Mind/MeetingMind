@@ -135,7 +135,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       applyForces();
       simulation.alpha(0.9).restart();
       return undefined;
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nodes, links]);
 
     useEffect(() => () => {
@@ -158,7 +157,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     useEffect(() => {
       applyForces();
       simRef.current?.alpha(0.4).restart();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [forces]);
 
     /* --- imperative API --- */
@@ -329,7 +327,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         canvas.removeEventListener("pointerleave", handlePointerLeave);
         canvas.removeEventListener("wheel", handleWheel);
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [onSelect]);
 
     /* --- render loop --- */
@@ -469,7 +466,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
       frameId = requestAnimationFrame(draw);
       return () => cancelAnimationFrame(frameId);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     return <canvas ref={canvasRef} className="block h-full w-full" aria-label="지식 그래프" role="img" />;

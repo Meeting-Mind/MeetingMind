@@ -21,7 +21,6 @@ import {
   ShieldAlert,
   LogOut,
   Building,
-  Activity,
   Filter,
   Mic,
   MicOff,
@@ -112,7 +111,6 @@ import type {
   SpaceSummary,
   SpaceMembersResponse,
   ProjectKnowledgeItem,
-  KnowledgeGraphNode,
   MeetingDetailResponse,
   MeetingParticipantSummary,
   SpaceMemberSummary,
@@ -125,18 +123,6 @@ import type {
 
 // --- Components ---
 
-const GlossaryTerm = ({ children, definition }: { children: React.ReactNode, definition: string }) => {
-  return (
-    <span className="relative group inline-block cursor-help font-bold text-foreground border-b border-dashed border-foreground/40 hover:border-foreground transition-colors">
-      {children}
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-foreground text-background text-xs font-normal rounded-lg opacity-0 group-hover:opacity-100 transition-all translate-y-1 group-hover:translate-y-0 pointer-events-none z-50 text-left shadow-xl">
-        <span className="font-bold block mb-1 text-primary-foreground/90 text-[10px] uppercase tracking-wider">Project Term</span>
-        {definition}
-        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-foreground"></span>
-      </span>
-    </span>
-  );
-};
 
 function renderMarkdownInline(value: string, keyPrefix: string) {
   return value.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
@@ -1706,7 +1692,7 @@ const ProjectHome = () => {
   const { session } = useAuthState();
   const { spaceDetail, spaceLoading, spaceError, reloadSpace } = useOutletContext<ShellOutletContext>();
   const [members, setMembers] = useState<SpaceMembersResponse["members"]>([]);
-  const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
+  const [_knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
   const [instantMeetingPending, setInstantMeetingPending] = useState(false);
   const [instantMeetingError, setInstantMeetingError] = useState<string | null>(null);
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
@@ -2738,7 +2724,6 @@ const MeetingList = () => {
 // 5. Meeting Context Layout (/spaces/:spaceId/meetings/:meetingId/*)
 const MeetingContextLayout = () => {
   const { spaceId, meetingId } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
   const { session } = useAuthState();
   const { locale } = useAppPreferences();
@@ -5474,7 +5459,6 @@ const LiveMeeting = () => {
   const [participants, setParticipants] = useState<LiveParticipantCard[]>([]);
   const [activeSpeakerSid, setActiveSpeakerSid] = useState<string | null>(null);
   const [dictionaryTerms, setDictionaryTerms] = useState<DomainTerm[]>([]);
-  const [livePanel, setLivePanel] = useState<"transcript" | "chat">("transcript");
   const [selectedDictionaryTerm, setSelectedDictionaryTerm] = useState<DomainTerm | null>(null);
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: string; text: string; time: string; local?: boolean }>>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -7138,7 +7122,6 @@ type ModalType =
 const Modal = ({ type, onClose }: { type: ModalType; onClose: () => void }) => {
   const [value, setValue] = useState("");
   const [role, setRole] = useState("Editor");
-  const [confirmed, setConfirmed] = useState(false);
 
   if (!type) return null;
 
@@ -7943,15 +7926,6 @@ const PermissionDenied = ({ type = "project" }: { type?: "project" | "meeting" |
   );
 };
 
-const PlaceholderPage = ({ title }: { title: string }) => (
-  <div className="p-8 flex flex-col items-center justify-center h-full text-center">
-    <div className="w-12 h-12 bg-muted rounded flex items-center justify-center mb-4">
-      <Activity className="w-6 h-6 text-muted-foreground" />
-    </div>
-    <h2 className="text-lg font-semibold mb-2">{title}</h2>
-    <p className="text-sm text-muted-foreground max-w-sm">This screen is part of the 21-page architecture but is currently a placeholder awaiting detailed implementation.</p>
-  </div>
-);
 
 // --- Router Setup ---
 // This is the active frontend route source. main.tsx renders App directly.
