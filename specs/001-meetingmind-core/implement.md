@@ -2284,6 +2284,19 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T447 SMK-003 Provider Tier — Embedding Worker Consumes REPORT_CONFIRMED
+
+- 변경 파일: `scripts/run-embedding-worker.sh`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 조사 결과 1 — 미구현이 아니라 실행 공백이다: `ai/app/embedding_worker.py`의 `EmbeddingWorker.run_once()`/`main()` poll 루프, `claim_job`/`complete_job`/`record_failure`/`retry_delay_for`가 모두 구현되어 있다. 문제는 local에서 이 프로세스를 띄우는 경로가 없다는 것이다. `scripts/run-ai.sh`는 `uvicorn app.main:app`만 실행하고, `compose.local.yml:146`의 `meetingmind-ai-worker`는 `profiles: ["ai"]` 뒤에 있어 `docker compose up -d`로는 뜨지 않는다. 결과적으로 `embedding_jobs`가 소비되지 않고 PENDING으로 누적된다. 실측으로 가장 오래된 PENDING이 `oldestPendingAgeSeconds=20624`(약 5.7시간)였다.
+- 조사 결과 2 — 기존 실패 3건은 코드 결함이 아니었다: dev DB에 `INTERNAL_ERROR`로 4회 재시도 소진된 작업이 3건(그중 `REPORT_CONFIRMED` 2건) 있었다. 과금 전에 무료로 원인을 좁히기 위해 provider 호출 이전 단계인 `load_snapshot`만 3건 모두 재실행했고 전부 정상이었다(각 3/7/9 chunk). 이후 `REPORT_CONFIRMED` 2건을 재큐잉해 실행하니 둘 다 1회 시도로 성공했다. 즉 2026-07-24 00:31~01:20 구간의 환경성 실패이며, 해당 기간 `ai/app/embedding_{provider,worker}.py`와 `repository.py`에는 커밋도 없다.
+- 관측성 공백(후속 필요): `normalize_failure_code`가 미분류 예외를 전부 `INTERNAL_ERROR`로 접고 `embedding_jobs`에는 메시지를 남기는 컬럼이 없다. 실패 작업만 보고는 원인을 알 수 없어, 위 진단도 재실행으로만 좁힐 수 있었다.
+- 검증(실 provider, OpenAI 과금 발생): `text-embedding-3-small` / dimension 1536.
+  - `REPORT_CONFIRMED` `embedding-job-f4cd7b44...`(meeting-0e6afc58) -> COMPLETED, chunkCount 7, activated=true.
+  - `REPORT_CONFIRMED` `embedding-job-90559ff3...`(meeting-1b8ae733) -> COMPLETED, chunkCount 9, activated=true. 이 건은 신규 `scripts/run-embedding-worker.sh`로 소비시켜 스크립트 자체의 양성 대조로 삼았다(빈 큐 폴링만으로는 스크립트가 동작한다는 증거가 되지 않는다).
+  - 최종 상태: `embedding_jobs`에 `REPORT_CONFIRMED` 3건 전부 COMPLETED, PENDING 0. `embedding_chunks`의 active `report` chunk 3건이 모두 1536차원 vector를 가진다. 이전 generation의 transcript chunk 4건은 `is_active=false`로 교체되어 generation swap도 함께 확인됐다.
+- 남은 실패 2건은 별개다: `INVALID_SOURCE` 1건(전사 세그먼트가 없는 회의 — 정상 동작), `INTERNAL_ERROR` 1건(`TRANSCRIPT_COMPLETED`, 재큐잉하지 않음).
+- 범위 한계: dev DB(5434)에 대해 실행했으므로 `scripts/run-db-tests.sh`가 쓰는 격리 테스트 DB와 무관하다. 실패 작업 재큐잉은 dev 데이터를 변경한다. 자동화된 회귀 테스트는 아니며, 이 단계는 실 provider 과금 때문에 opt-in으로 남는다.
+
 ## T446 SMK-005 Guest ACL Negative on Real Database
 
 - 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/GuestSpaceAclNegativeIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.

@@ -209,6 +209,34 @@ Pass criteria:
 - Provider model, duration, and source counts are recorded without prompt/answer/secret text.
 - Validator passes against the generated result JSON.
 
+### Embedding Worker Smoke (SMK-003 provider tier)
+
+Embedding worker는 FastAPI app(`app.main`)이 아니라 **독립 프로세스**다. `scripts/run-ai.sh`는
+worker를 띄우지 않고, `compose.local.yml`의 `meetingmind-ai-worker`는 `profiles: ["ai"]` 뒤에
+있어 기본 `docker compose up -d`로는 뜨지 않는다. 그래서 local에서 `embedding_jobs`가 소비되지
+않고 PENDING으로 쌓인다. `app/main.py`만 보면 worker가 없는 것처럼 보이니 주의한다.
+
+```bash
+./scripts/run-embedding-worker.sh
+```
+
+실제 embedding provider를 호출하므로 **OpenAI 과금이 발생한다**. 기본값은
+`AI_EMBEDDING_PROVIDER=openai`, `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`,
+dimension 1536이며 `OPENAI_API_KEY`는 루트 `.env`에서 읽는다.
+
+Pass criteria:
+
+- `REPORT_CONFIRMED` 작업이 `COMPLETED`가 되고 로그에 `embedding_job_completed`와 `activated=true`가 남는다.
+- `embedding_chunks`에 `source_type='report'`, `is_active=true`, `vector_dims(embedding)=1536`인 행이 생긴다.
+- 이전 generation chunk가 `is_active=false`로 교체된다.
+
+빈 큐를 폴링하는 것만으로는 통과 근거가 되지 않는다. 반드시 소비된 작업 ID와 chunk 수를
+함께 남긴다. 과금 없이 원인을 좁히려면 provider 호출 이전 단계인 `load_snapshot`만 따로
+실행해 볼 수 있다.
+
+`INTERNAL_ERROR`는 미분류 예외의 포괄 코드이고 `embedding_jobs`에 메시지 컬럼이 없어
+실패 행만으로는 원인을 알 수 없다. 재실행으로 좁히는 것 외의 방법이 현재 없다.
+
 ### End-to-end Product Smoke
 
 Use this only after backend, BFF legacy mode, frontend, PostgreSQL, Redis, LiveKit, and
@@ -245,7 +273,7 @@ STT provider are running.
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-002 (provider tier, LiveKit) | Opt-in provider | PASS (server-side) | `LiveKitRealServerSmokeIntegrationTest` 1건 실행/0 skip. room create/list/delete 왕복, token `iss`=API key, `video.room` 스코프 일치 | 실제 LiveKit Cloud 호출로 자격증명 유효성과 서버 도달성을 확인했다. room은 삭제로 정리하고 조회로 잔존 없음을 단정한다. 매체(media) publish/subscribe는 브라우저 client가 필요하므로 product E2E 수동 절차로 남는다 |
 | TBD | TBD | TBD | SMK-002 (provider tier, Clova) | Opt-in provider | N/A | — | `clova-nest` 자격증명 부재. runtime 기본 provider가 아니므로 `SMK-002` 종료 조건에서 제외한다 |
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-003 (local tier, 색인 연결) | Local DB automated | PASS | `ReportConfirmKnowledgeIndexIntegrationTest` 1건 실행/0 skip | 앱 경로 `confirmMeetingReport`가 `REPORT_CONFIRMED` 색인 작업 1건을 만든다. CANDIDATE에서는 생기지 않음도 확인. 확정 회의록은 별도 `project_knowledge` 문서가 아니라 meeting source로 색인된다 |
-| TBD | TBD | TBD | SMK-003 (provider tier) | Opt-in provider | TBD | report/chunk IDs | 회의록 본문 AI 생성과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재되는 단계가 남는다 |
+| 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-003 (provider tier, embedding worker) | Opt-in provider (OpenAI 과금) | PASS | job `embedding-job-f4cd7b44...`(7 chunk), `embedding-job-90559ff3...`(9 chunk) | worker는 구현되어 있었고 local 실행 경로가 없었다(`run-ai.sh`는 FastAPI만, compose worker는 `profiles: ["ai"]`). `scripts/run-embedding-worker.sh` 추가 후 `REPORT_CONFIRMED` 2건이 각각 1회 시도로 COMPLETED, active `report` chunk 3건 전부 1536차원 vector 보유. 기존 `INTERNAL_ERROR` 실패는 환경성이었고 재실행으로 해소됐다. 회의록 **본문 AI 생성**은 여전히 별도 단계다 |
 | TBD | TBD | TBD | SMK-004 | Opt-in provider | TBD | answer/source IDs | TBD |
 | 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-005 (server ACL) | Local DB automated | PASS | `GuestSpaceAclNegativeIntegrationTest` 1건 실행/0 skip | 실 DB에서 회의 전용 GUEST가 초대 밖 회의 상세, Space 회의/멤버/knowledge 목록, Space 상세 전부 거부됨을 확인. 회의 참가가 Space 멤버십으로 승격되지 않음도 확인. 양성 대조로 자기 회의 읽기는 성공하는 것을 먼저 단정한다 |
 | TBD | TBD | TBD | SMK-005 (browser) | Manual | TBD | account/meeting IDs | UI가 서버 경계를 우회하는 경로는 브라우저 수동 확인이 남는다 |
