@@ -77,7 +77,10 @@ jobs:
         env:
           BFF_REDIS_INTEGRATION: "true"
           BFF_REDIS_PORT: "6379"
-        run: ./gradlew clean test bootJar
+        # `clean`이 아니라 `cleanTest`를 쓴다. Gradle은 환경변수를 test 입력으로
+        # 추적하지 않아 BFF_REDIS_INTEGRATION만 바뀌면 UP-TO-DATE로 건너뛴다.
+        # 그 보호는 유지하면서, 전체 재컴파일까지 하지는 않는다.
+        run: ./gradlew cleanTest test bootJar
 
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
@@ -128,7 +131,10 @@ jobs:
           AUTH_TEST_MIGRATION_PASSWORD: meetingmind_auth_migrator_ci
           AUTH_TEST_RUNTIME_USER: meetingmind_auth_app
           AUTH_TEST_RUNTIME_PASSWORD: meetingmind_auth_app_ci
-        run: ./gradlew clean test bootJar
+        # `clean`이 아니라 `cleanTest`를 쓴다. Gradle은 환경변수를 test 입력으로
+        # 추적하지 않아 BFF_REDIS_INTEGRATION만 바뀌면 UP-TO-DATE로 건너뛴다.
+        # 그 보호는 유지하면서, 전체 재컴파일까지 하지는 않는다.
+        run: ./gradlew cleanTest test bootJar
 
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
@@ -209,7 +215,10 @@ jobs:
           cache: gradle
 
       - name: Test and package Realtime STT
-        run: ./gradlew clean test bootJar
+        # `clean`이 아니라 `cleanTest`를 쓴다. Gradle은 환경변수를 test 입력으로
+        # 추적하지 않아 BFF_REDIS_INTEGRATION만 바뀌면 UP-TO-DATE로 건너뛴다.
+        # 그 보호는 유지하면서, 전체 재컴파일까지 하지는 않는다.
+        run: ./gradlew cleanTest test bootJar
 
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
@@ -311,8 +320,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Chromium은 매 실행 새로 내려받으면 1분 가까이 걸린다. Playwright 버전이
+      # 같으면 바이너리도 같으므로 package-lock.json 해시를 key로 캐시한다.
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      # 캐시가 있어도 --with-deps의 OS 패키지는 필요하므로 별도로 설치한다.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Run login and meeting access E2E
         run: npm run test:e2e
@@ -404,6 +428,21 @@ jobs:
           echo "stt=$(docker image inspect meetingmind-stt:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "cert_loader=$(docker image inspect meetingmind-cert-loader:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "ai_envoy=$(docker image inspect meetingmind-ai-envoy:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+
+      # Trivy는 취약점 DB를 매번 새로 내려받는다(수십 MB). 하루 단위로 캐시하면
+      # 스캔 7건의 시작 지연이 사라진다. DB가 하루 지나면 새로 받으므로
+      # 탐지 최신성은 유지된다.
+      - name: Resolve Trivy cache day
+        id: trivy-day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Trivy vulnerability database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ steps.trivy-day.outputs.day }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
 
       - name: Install checksum-verified Trivy
         env:
