@@ -1,0 +1,14 @@
+spring:
+  ssl:
+    bundle:
+      pem:
+        meetingmind-internal:
+          keystore:
+            certificate: file:${MEETINGMIND_TLS_CERTIFICATE:/run/meetingmind/tls/tls.crt}
+            private-key: file:${MEETINGMIND_TLS_PRIVATE_KEY:/run/meetingmind/tls/tls.key}
+          truststore:
+            certificate: file:${MEETINGMIND_TLS_CA:/run/meetingmind/tls/ca.crt}
+
+meetingmind:
+  internal-tls:
+    bundle-name: meetingmind-internal

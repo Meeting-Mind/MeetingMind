@@ -1072,3 +1072,19 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T431 [backend/assets] [owner: Codex] 로컬 파일 저장 기반 JPEG/PNG/WebP(5MB) 업로드 endpoint와 Space 대표 이미지 URL 모델을 추가한다. Space 이미지는 OWNER/ADMIN만 업로드할 수 있고, 프로필은 본인만 수정한다.
 - [x] T432 [frontend/assets] [owner: Codex] 실제 런타임 `App.tsx`의 Project Settings와 Account Settings에 이미지 업로드, 미리보기, 제거, 저장 흐름을 연결한다.
 - [x] V117 [verification] [owner: Codex] Backend/Frontend compile 및 build, BFF proxy route 검증 결과를 `implement.md`에 기록한다.
+
+## M152 NonProd V2 AI Container Security Remediation
+
+### Milestone Goal
+
+Perl이 없는 공식 Python 3.12.13 / Alpine 3.24 runtime으로 전환해 NonProd V2 AI ARM64 child의 ECR scan을 CRITICAL/HIGH 0으로 만든다.
+
+| ID | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T433 | [x] | ai/security-discovery | Codex | Codex | - | `ai/Dockerfile`, `ai/requirements.txt`, `specs/001-meetingmind-core/{plan,tasks,implement}.md` | trixie와 bookworm ARM64 image의 package, apt candidate, local Trivy, ECR child scan을 비교하고 Debian Essential Perl이 원인임을 확정한다. | Bookworm child `sha256:2f8aa4212b745b4259b55f4e4ebfc3881aada8b85f4ded0469b5eb306ebe5161`가 ECR CRITICAL 3/HIGH 5로 실패했고 apt fixed version이 없으며 requirements가 원인이 아님을 기록했다. |
+| V119 | [x] | ai/security-verification | 사용자+Codex | Codex | T433 | ECR ARM64 child scan 결과, `specs/001-meetingmind-core/implement.md` | Bookworm 후보의 ECR 결과로 기존 해결 가정을 반증한다. | `status=COMPLETE`, CRITICAL 3/HIGH 5/MEDIUM 4/LOW 1과 CRITICAL Perl CVE 3개가 기록돼 있다. |
+| T434 | [x] | ai/container | Codex | Codex | T433,V119 | `ai/Dockerfile` | base를 pinned Python 3.12.13 / Alpine 3.24로 바꾸고 `bash`, Alpine non-root user 생성만 추가한다. | ARM64 image build 성공, Bash 존재, Perl 부재, non-root `meetingmind` 확인. 애플리케이션 코드와 requirements는 변경하지 않았다. |
+| T435 | [x] | ai/compatibility | Codex | Codex | T434 | `ai/Dockerfile`, `ai/**` read-only test input | musllinux native module import, compileall, 전체 unit test, on-prem Bash wrapper 경계를 검증한다. | native import/compileall/Bash syntax 통과. AI unit 189건 중 182건 통과, 외부 PostgreSQL/OpenAI 조건부 7건만 기존 skip. |
+| T436 | [x] | ci/security-gate | Codex | Codex | T435 | `.github/workflows/ci.yml` | AI image에 한해 `--ignore-unfixed` 없는 Trivy HIGH/CRITICAL gate를 적용해 ECR과 다른 false-pass를 막는다. | local final image 전체 HIGH/CRITICAL 0, CI AI command 정적 검토와 `git diff --check` 통과. |
+| T437 | [x] | ecr/security-scan | 사용자+Codex | Codex | T436, 사용자 push 승인 | ECR `meetingmind-nonprod-v2-ai`, 새 immutable tag | 사용자 승인 후 local-scanned single ARM64 manifest를 push하고 returned child digest로 scan을 조회한다. | ECR tag `c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`가 동일 digest `sha256:c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`로 등록됐고 scan `COMPLETE`, findings `[]`, severity `{}`이다. |
+| T438 | [x] | docs/closeout | Codex | Codex | T437 | `specs/001-meetingmind-core/{tasks,implement}.md`, `.specify/memory/session-handoff.local.md` | 실제 image digest, size, test, Trivy, ECR 결과와 남은 MEDIUM/LOW를 기록한다. | 실행 결과가 문서와 일치하고 Terraform/ECS/runtime 미변경 및 미실행 사유가 남아 있다. |

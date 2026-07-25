@@ -3,6 +3,7 @@ package com.meetingmind.bff.proxy;
 import com.meetingmind.bff.auth.DownstreamUnauthorizedException;
 import com.meetingmind.bff.config.DownstreamProxyProperties;
 import com.meetingmind.bff.config.DownstreamProxyProperties.ServicePolicy;
+import com.meetingmind.bff.config.InternalHttpClientFactory;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -20,11 +21,18 @@ public class DownstreamHttpClient {
     private final Map<DownstreamService, DownstreamGuard> guards;
 
     public DownstreamHttpClient(DownstreamProxyProperties properties, Clock clock) {
+        this(properties, clock, null);
+    }
+
+    public DownstreamHttpClient(
+            DownstreamProxyProperties properties,
+            Clock clock,
+            InternalHttpClientFactory internalHttpClientFactory) {
         this.clients = new EnumMap<>(DownstreamService.class);
         this.guards = new EnumMap<>(DownstreamService.class);
         for (DownstreamService service : DownstreamService.values()) {
             ServicePolicy policy = properties.policy(service);
-            clients.put(service, restClient(policy));
+            clients.put(service, restClient(policy, internalHttpClientFactory));
             guards.put(service, new DownstreamGuard(
                     policy.maxConcurrent(),
                     policy.failureThreshold(),
@@ -100,8 +108,13 @@ public class DownstreamHttpClient {
         }
     }
 
-    private RestClient restClient(ServicePolicy policy) {
-        HttpClient httpClient = HttpClient.newBuilder()
+    private RestClient restClient(
+            ServicePolicy policy,
+            InternalHttpClientFactory internalHttpClientFactory) {
+        HttpClient.Builder builder = internalHttpClientFactory == null
+                ? HttpClient.newBuilder()
+                : internalHttpClientFactory.newBuilder();
+        HttpClient httpClient = builder
                 .connectTimeout(policy.connectTimeout())
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);

@@ -1,0 +1,45 @@
+expected_aws_account_id = "123456789012"
+
+# Add the operator's current public IP only when enabling the temporary listener.
+allowed_ingress_cidrs     = []
+enable_http_smoke_listener = false
+
+# Keep these false until every runtime gate in README.md is complete.
+enable_runtime_services    = false
+runtime_enabled_services   = []
+runtime_gates_acknowledged = false
+enable_autoscaling         = false
+
+# T047-B~D mTLS gates. Material evidence unlocks only the private validation
+# mode; the normal runtime gate additionally needs AWS runtime-verified evidence.
+internal_mtls_material_ready    = false
+internal_mtls_runtime_verified  = false
+enable_mtls_validation_services = false
+mtls_validation_services        = []
+
+# Foundation-only placeholder. Runtime services use service_image_digests.
+image_tag = "bootstrap"
+
+# Add only verified ECR child manifest digests. Do not use a manifest-list digest.
+service_image_digests = {}
+
+# Immutable meetingmind-cert-loader digest, required for validation and runtime.
+cert_loader_image_digest = null
+
+# Immutable mirrored AI Envoy sidecar digest, required whenever AI starts.
+ai_envoy_image_digest = null
+
+# Q-013 must approve final Multi-AZ counts before release.
+service_desired_counts = {
+  bff          = 1
+  auth         = 1
+  core         = 1
+  ai           = 1
+  realtime-stt = 1
+}
+
+alarm_email = null
+
+enable_github_oidc       = false
+github_oidc_provider_arn = null
+github_oidc_subjects     = []

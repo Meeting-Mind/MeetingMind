@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "environment": "nonprod-v2",
+  "service": "core",
+  "serviceAccount": "meetingmind-core",
+  "spiffeId": "spiffe://meetingmind.internal/ns/nonprod-v2/sa/meetingmind-core",
+  "dnsSans": [
+    "core.meetingmind.internal"
+  ],
+  "extendedKeyUsages": [
+    "clientAuth",
+    "serverAuth"
+  ]
+}

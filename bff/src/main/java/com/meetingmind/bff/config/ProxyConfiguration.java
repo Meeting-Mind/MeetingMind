@@ -12,7 +12,12 @@ public class ProxyConfiguration {
 
     @Bean
     DownstreamHttpClient downstreamHttpClient(
-            DownstreamProxyProperties properties, Clock tokenVaultClock) {
-        return new DownstreamHttpClient(properties, tokenVaultClock);
+            DownstreamProxyProperties properties,
+            Clock tokenVaultClock,
+            InternalHttpClientFactory internalHttpClientFactory) {
+        return new DownstreamHttpClient(
+                properties,
+                tokenVaultClock,
+                internalHttpClientFactory);
     }
 }

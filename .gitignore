@@ -49,3 +49,20 @@ ai/.env.*
 !*.env.example
 .claude
 .specify/memory/session-handoff.local.md
+
+# Terraform local state, working directories, variable values, and saved plans
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform backend configuration with real bucket names
+infra/aws/environments/nonprod-v2/backend.hcl

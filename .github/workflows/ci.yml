@@ -211,6 +211,22 @@ jobs:
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
 
+  cert_loader:
+    name: Certificate Loader
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Verify modules and test
+        run: >-
+          docker run --rm
+          --volume "$PWD/cert-loader:/src:ro"
+          --workdir /src
+          golang:1.26.5-alpine3.24@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
+          sh -c 'go mod verify && go test ./... && go vet ./...'
+
   migration:
     name: PostgreSQL Migration
     runs-on: ubuntu-latest
@@ -314,6 +330,7 @@ jobs:
       - auth
       - ai
       - stt
+      - cert_loader
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -322,6 +339,8 @@ jobs:
       auth_digest: ${{ steps.digests.outputs.auth }}
       ai_digest: ${{ steps.digests.outputs.ai }}
       stt_digest: ${{ steps.digests.outputs.stt }}
+      cert_loader_digest: ${{ steps.digests.outputs.cert_loader }}
+      ai_envoy_digest: ${{ steps.digests.outputs.ai_envoy }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -341,6 +360,37 @@ jobs:
       - name: Build Realtime STT image
         run: docker build --tag meetingmind-stt:ci stt
 
+      - name: Build ARM64 Certificate Loader image
+        run: >-
+          docker buildx build
+          --platform linux/arm64
+          --load
+          --tag meetingmind-cert-loader:ci
+          cert-loader
+
+      - name: Build ARM64 AI Envoy image
+        run: >-
+          docker buildx build
+          --platform linux/arm64
+          --load
+          --tag meetingmind-ai-envoy:ci
+          ai/envoy
+
+      - name: Validate AI Envoy configuration
+        run: |
+          mkdir -p /tmp/envoy-tls
+          openssl ecparam -name prime256v1 -genkey -noout -out /tmp/envoy-tls/tls.key
+          openssl req -new -x509 -key /tmp/envoy-tls/tls.key -out /tmp/envoy-tls/tls.crt -days 1 \
+            -subj "/CN=ci-validate-only" \
+            -addext "subjectAltName=URI:spiffe://meetingmind.internal/ns/nonprod-v2/sa/meetingmind-ai,DNS:ai.meetingmind.internal"
+          cp /tmp/envoy-tls/tls.crt /tmp/envoy-tls/ca.crt
+          chmod 644 /tmp/envoy-tls/tls.key /tmp/envoy-tls/tls.crt /tmp/envoy-tls/ca.crt
+          docker run --rm \
+            --volume "$PWD/ai/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro" \
+            --volume /tmp/envoy-tls:/run/meetingmind/tls:ro \
+            envoyproxy/envoy:distroless-v1.38.3@sha256:574348fada8eb1130b448132287d76626dfb07525b16668075382f8e154a45a8 \
+            -c /etc/envoy/envoy.yaml --mode validate
+
       - name: Capture image content digests
         id: digests
         run: |
@@ -349,6 +399,8 @@ jobs:
           echo "auth=$(docker image inspect meetingmind-auth:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "ai=$(docker image inspect meetingmind-ai:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "stt=$(docker image inspect meetingmind-stt:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          echo "cert_loader=$(docker image inspect meetingmind-cert-loader:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          echo "ai_envoy=$(docker image inspect meetingmind-ai-envoy:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
 
       - name: Install checksum-verified Trivy
         env:
@@ -372,10 +424,16 @@ jobs:
         run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-auth:ci
 
       - name: Scan AI image
-        run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-ai:ci
+        run: trivy image --exit-code 1 --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-ai:ci
 
       - name: Scan Realtime STT image
         run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-stt:ci
+
+      - name: Scan Certificate Loader image
+        run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-cert-loader:ci
+
+      - name: Scan AI Envoy image
+        run: trivy image --exit-code 1 --ignore-unfixed --no-progress --scanners vuln --severity HIGH,CRITICAL meetingmind-ai-envoy:ci
 
   secrets:
     name: Secret Scan
@@ -420,6 +478,7 @@ jobs:
       - frontend
       - ai
       - stt
+      - cert_loader
       - migration
       - playwright
       - containers
@@ -435,6 +494,7 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           AI_RESULT: ${{ needs.ai.result }}
           STT_RESULT: ${{ needs.stt.result }}
+          CERT_LOADER_RESULT: ${{ needs.cert_loader.result }}
           MIGRATION_RESULT: ${{ needs.migration.result }}
           PLAYWRIGHT_RESULT: ${{ needs.playwright.result }}
           CONTAINERS_RESULT: ${{ needs.containers.result }}
@@ -444,6 +504,7 @@ jobs:
           AUTH_DIGEST: ${{ needs.containers.outputs.auth_digest }}
           AI_DIGEST: ${{ needs.containers.outputs.ai_digest }}
           STT_DIGEST: ${{ needs.containers.outputs.stt_digest }}
+          CERT_LOADER_DIGEST: ${{ needs.containers.outputs.cert_loader_digest }}
         run: |
           {
             echo "## MeetingMind CI"
@@ -456,6 +517,7 @@ jobs:
             echo "| Frontend | lint + unit + build | ${FRONTEND_RESULT} |"
             echo "| AI | compile + unit | ${AI_RESULT} |"
             echo "| Realtime STT | test + bootJar | ${STT_RESULT} |"
+            echo "| Certificate Loader | Go test + vet | ${CERT_LOADER_RESULT} |"
             echo "| PostgreSQL | Flyway V1-V10 + pgvector | ${MIGRATION_RESULT} |"
             echo "| Playwright | login + meeting allow/deny | ${PLAYWRIGHT_RESULT} |"
             echo "| Containers | build + HIGH/CRITICAL scan | ${CONTAINERS_RESULT} |"
@@ -468,6 +530,7 @@ jobs:
             echo "- Auth Service: \`${AUTH_DIGEST:-not-produced}\`"
             echo "- AI: \`${AI_DIGEST:-not-produced}\`"
             echo "- Realtime STT: \`${STT_DIGEST:-not-produced}\`"
+            echo "- Certificate Loader: \`${CERT_LOADER_DIGEST:-not-produced}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce required results
@@ -479,6 +542,7 @@ jobs:
             ${{ needs.frontend.result }}
             ${{ needs.ai.result }}
             ${{ needs.stt.result }}
+            ${{ needs.cert_loader.result }}
             ${{ needs.migration.result }}
             ${{ needs.playwright.result }}
             ${{ needs.containers.result }}

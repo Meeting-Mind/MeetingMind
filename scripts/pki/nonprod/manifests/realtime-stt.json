@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "environment": "nonprod-v2",
+  "service": "stt",
+  "serviceAccount": "meetingmind-realtime-stt",
+  "spiffeId": "spiffe://meetingmind.internal/ns/nonprod-v2/sa/meetingmind-realtime-stt",
+  "dnsSans": [
+    "stt.meetingmind.internal"
+  ],
+  "extendedKeyUsages": [
+    "serverAuth"
+  ]
+}
