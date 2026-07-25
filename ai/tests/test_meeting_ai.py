@@ -45,7 +45,7 @@ from app.main import (
     meeting_chat,
     parse_report_response,
     parse_task_candidates_response,
-    require_internal_service_token,
+    require_internal_caller,
     search_postgres_sources,
     validation_exception_handler,
 )
@@ -776,13 +776,13 @@ class InternalServiceAuthTest(unittest.IsolatedAsyncioTestCase):
             return accepted_response
 
         with patch.dict(os.environ, {"AI_INTERNAL_SERVICE_TOKEN": "service-secret"}, clear=False):
-            missing = await require_internal_service_token(
+            missing = await require_internal_caller(
                 self.request("/api/internal/meeting-ai/chat"), call_next
             )
-            invalid = await require_internal_service_token(
+            invalid = await require_internal_caller(
                 self.request("/api/internal/meeting-ai/chat", "wrong"), call_next
             )
-            accepted = await require_internal_service_token(
+            accepted = await require_internal_caller(
                 self.request("/api/internal/meeting-ai/chat", "service-secret"), call_next
             )
 
@@ -798,7 +798,7 @@ class InternalServiceAuthTest(unittest.IsolatedAsyncioTestCase):
             return accepted_response
 
         with patch.dict(os.environ, {}, clear=True):
-            response = await require_internal_service_token(
+            response = await require_internal_caller(
                 self.request("/api/meeting-ai/chat"), call_next
             )
 

@@ -1754,22 +1754,34 @@ app.add_middleware(
 )
 
 
+XFCC_HEADER = "x-forwarded-client-cert"
+
+
 @app.middleware("http")
 async def request_context_and_internal_auth(request: FastApiRequest, call_next: Any) -> Any:
     trace_token = bind_trace_id(request.headers.get(TRACE_ID_HEADER))
     try:
-        response = await require_internal_service_token(request, call_next)
+        response = await require_internal_caller(request, call_next)
         response.headers[TRACE_ID_HEADER] = current_trace_id()
         return response
     finally:
         reset_trace_id(trace_token)
 
 
-async def require_internal_service_token(request: FastApiRequest, call_next: Any) -> Any:
+async def require_internal_caller(request: FastApiRequest, call_next: Any) -> Any:
     if request.url.path.startswith("/api/internal/"):
-        expected = get_env("AI_INTERNAL_SERVICE_TOKEN")
-        provided = request.headers.get("X-MeetingMind-Service-Token")
-        if not expected or not provided or not hmac.compare_digest(expected, provided):
+        mode = get_env("AI_INTERNAL_AUTH_MODE", "shared-token")
+        if mode == "mtls-proxy":
+            authorized = has_verified_proxy_identity(request)
+        elif mode == "shared-token":
+            expected = get_env("AI_INTERNAL_SERVICE_TOKEN")
+            provided = request.headers.get("X-MeetingMind-Service-Token")
+            authorized = bool(
+                expected and provided and hmac.compare_digest(expected, provided)
+            )
+        else:
+            authorized = False
+        if not authorized:
             return JSONResponse(
                 status_code=401,
                 content={
@@ -1780,6 +1792,33 @@ async def require_internal_service_token(request: FastApiRequest, call_next: Any
                 },
             )
     return await call_next(request)
+
+
+def has_verified_proxy_identity(request: FastApiRequest) -> bool:
+    """Envoy가 SANITIZE_SET으로 재작성한 XFCC의 검증된 URI만 신뢰한다.
+
+    허용 principal 미설정, 헤더 부재/중복, 다중 certificate element,
+    quoted/escaped 값, URI key 부재/중복, principal 불일치는 모두 거부한다.
+    """
+    allowed = get_env("AI_INTERNAL_ALLOWED_SPIFFE_ID")
+    if not allowed or not allowed.startswith("spiffe://"):
+        return False
+    values = request.headers.getlist(XFCC_HEADER)
+    if len(values) != 1:
+        return False
+    element = values[0]
+    if not element or "," in element or '"' in element:
+        return False
+    uris: list[str] = []
+    for field in element.split(";"):
+        key, separator, value = field.partition("=")
+        if not key or not separator or not value:
+            return False
+        if key == "URI":
+            uris.append(value)
+    if len(uris) != 1:
+        return False
+    return hmac.compare_digest(uris[0], allowed)
 
 
 @app.exception_handler(HTTPException)
@@ -1890,6 +1929,7 @@ def health() -> dict[str, Any]:
         ),
         "database_configured": bool(get_env("AI_DATABASE_URL")),
         "internal_service_token_configured": bool(get_env("AI_INTERNAL_SERVICE_TOKEN")),
+        "internal_auth_mode": get_env("AI_INTERNAL_AUTH_MODE", "shared-token"),
     }
 
 
