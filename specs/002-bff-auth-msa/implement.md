@@ -27,6 +27,9 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 | 2026-07-17 | T032 Auth Runtime | Auth Service | Codex | `auth/src/main/**`, `auth/src/test/**`, Compose/CI/root 및 Auth 계약/data/plan/analyze | local/Google 자격 검증, refresh family rotation/reuse, revoke-all, 감사/outbox와 workload/fail-closed signer 경계 구현 |
 | 2026-07-17 | T033 Auth Keys/JWKS | Auth Service | Codex | `auth/**`, `backend/**/auth/target/**`, Compose/env 및 Auth 계약/data/plan/tasks/analyze | AWS KMS RS256 signer, rotation key ring, 내부 JWKS와 비활성 Resource validator 구현 |
 | 2026-07-23 | T043-1~3 STT CI Integration | Integration | Codex | `.github/workflows/ci.yml`, `specs/002-bff-auth-msa/clarify.md`, `specs/002-bff-auth-msa/tasks.md` | STT Gradle test/bootJar, Docker build/digest, Trivy scan과 CI Gate/summary 편입 |
+| 2026-07-24 | T040 Q-023 Platform Decision | Platform | 사용자/Codex | `clarify.md`, `plan.md`, `tasks.md`, `adr/002-ecs-fargate.md` | Cloud Map Private DNS `meetingmind.internal`, direct mTLS, 공통 내부 CA, 서비스별 SPIFFE URI SAN 인증서와 NonProd ECS force deployment rotation 확정 |
+| 2026-07-25 | T047-B/C2 Implementation Plan | Platform/Security | 사용자/Codex | `infra/aws/nonprod-v2/mtls-implementation-plan.md`, `clarify.md`, `plan.md`, `tasks.md`, V2 plan/README | offline NonProd CA, 전용 ARM64 cert-loader, 서비스별 TLS bundle, AI Envoy와 material/runtime gate 분리 계획 확정 |
+| 2026-07-25 | T047-B1 Offline PKI Tooling | Platform/Security | Codex | `scripts/pki/nonprod/**`, `tasks.md`, `implement.md` | encrypted offline CA, 5개 exact service manifest, leaf 발급·검증과 bundle JSON 도구를 표준 라이브러리/OpenSSL로 구현 |
 | 2026-07-18 | T036 CI Security Hardening | Integration | Codex | `bff/build.gradle`, `auth/build.gradle`, `.gitleaksignore`, 관련 spec/plan/tasks/implement | BFF/Auth 수정 가능 취약점 제거와 테스트 fixture Gitleaks 오탐 정밀 예외 처리 |
 | 2026-07-23 | T037 CI Dependency Sync | Integration | Codex | `frontend/package-lock.json`, `backend/build.gradle`, `auth/build.gradle`, `tasks.md`, `implement.md` | 병합에서 누락된 Frontend peer lock 항목 복원과 Core/Auth PostgreSQL JDBC 취약점 수정 |
 | 2026-07-18 | T034 Auth Data Migration | Data | Codex | Core V13, `auth/src/migration/**`, PostgreSQL tests, migration runbook과 Core/Auth data/ERD/plan/tasks | 문자열 업무 PK를 보존한 UUID projection, 반복 가능한 User/AuthIdentity offline 이전과 exact reconciliation 구현 |
@@ -101,7 +104,7 @@ M001 문서·설계 기준선, M002의 T010~T016 Web BFF 호환 경로, M003의 
 - T030은 refresh credential을 AuthSession별 하나의 family로 고정하고 BFF single-flight 밖의 grace를 허용하지 않는다. rotation은 credential row lock, 이전 `usedAt`/`replacementId`, 새 leaf insert와 AuthSession 갱신을 원자 처리하며 사용된 credential 재사용 시 해당 기기 family와 AuthSession을 `REFRESH_REUSE`로 폐기한다.
 - Access는 AWS KMS 비반출 RSA-2048 key의 `RS256`으로 서명하고 `meetingmind-core|ai|livekit` 단일 audience별 10분 JWT를 발급한다. 필수 header/claim, 60초 skew, 90일 rotation, 1시간 overlap과 5분 JWKS cache를 Auth 계약에 고정하고 업무 RBAC/ACL은 token에 넣지 않는다.
 - 로그아웃의 DB revoke와 `AuthSessionRevokedV1` transactional outbox를 함께 커밋한다. BFF/Resource Service는 at-least-once event를 idempotent 처리해 `sid`를 `denyUntil`까지 로컬 denylist에 유지하며 중앙 Auth/Redis 매 요청 조회를 추가하지 않는다.
-- 내부 endpoint는 mTLS SPIFFE workload identity, 서비스별 Security Group과 principal/endpoint allowlist를 동시에 요구한다. 인증서 제품은 Q-023/T040에 남기되 shared secret/client credential 방식으로 계약을 되돌리지 않는다.
+- 내부 endpoint는 mTLS SPIFFE workload identity, 서비스별 Security Group과 principal/endpoint allowlist를 동시에 요구한다. Q-023에서 Cloud Map Private DNS, direct mTLS, 공통 내부 CA와 NonProd 수동 rotation을 확정했으며 shared secret/client credential 방식으로 계약을 되돌리지 않는다.
 - 모든 기기 로그아웃은 최근 10분 `authenticatedAt` 또는 local 비밀번호/새 Google credential 재인증을 요구한다. Q-016 결정과 T032 Auth revoke-all/outbox, T035 session index를 선행한 뒤 T024에서 실제 UI/API를 연결했다.
 - target Token Bundle을 audience별 access expiry와 schema version 2로 확장하고 AuthSession `refreshFamilyId`, AuthOutboxEvent를 data model/ERD에 추가했다. 이는 future Auth DB와 Vault document의 forward-only 변경이며 현재 Backend DB나 BFF runtime code는 T030에서 수정하지 않았다.
 - `auth`를 Java 21/Spring Boot 3.5.14 독립 Gradle 프로젝트와 비루트 Docker image로 추가했다. 기존 Java 운영 스택과 같은 버전을 사용하고 health/JDBC/Flyway/PostgreSQL 외에 T031 범위를 넘는 인증·키 의존성은 추가하지 않았다.
@@ -271,7 +274,243 @@ Refresh rotation은 기존 V1의 `usedAt/replacementId` check, replacement FK와
 
 - 2026-07-21: T039 NonProd network design을 시작했다. 서울 리전(`ap-northeast-2`), VPC `10.20.0.0/16`, 2개 AZ의 Public `/24`, Private app `/20`, Data `/24` subnet 기준을 `infra/aws/nonprod/network/**`와 `adr/001-nonprod-vpc.md`에 기록했다. 사용자가 예산은 필요하면 늘릴 수 있으므로 비용을 이유로 계획을 임의 변경하지 말라고 정정해, 비용/Free Tier 문구를 계획 변경 요인이 아니라 별도 운영 모니터링 맥락으로 분리했다. 첨부된 AWS foundation 진행 현황은 `infra/aws/foundation-status.md`에 정리했다. 2026-07-23 공식 Terraform 1.6.6 Docker 이미지에서 `fmt -check -recursive`와 AWS provider 초기화 후 `validate`가 통과했다. 실제 AWS `plan/apply`와 콘솔 검증은 실행하지 않았다.
 - 2026-07-23: NonProd 배포 플랫폼을 EKS에서 ECS Fargate로 변경했다. `adr/002-ecs-fargate.md`가 기존 EKS 결정을 대체하며, 사용자가 완료로 확정한 ECR/lifecycle, 단일 ECS cluster, service-linked role, 공통 execution role, 서비스별 task role/SG/7일 Log Group, NAT/private route 상태를 T041과 `infra/aws/foundation-status.md`에 기록했다. 이 변경은 문서만 갱신했으며 AWS 리소스와 애플리케이션 코드는 변경하지 않았다. API endpoint/payload와 데이터 모델은 영향이 없어 유지했고 contract 파일은 배포 플랫폼 annotation만 ECS Security Group/ALB 경계로 갱신했다. `analyze.md`는 당시 검증 결과를 보존하는 읽기 전용 역사 기록이므로 수정하지 않았다.
-- Q-013/Q-023 service discovery, mTLS/SPIFFE 제품, SLO/RTO/RPO.
-- mTLS/SPIFFE 인증서 발급·회전 제품과 event transport 제품 선택은 Q-023/T040에서 한다. identity/event 의미는 T030 계약을 유지한다.
+- Q-013 SLO/RTO/RPO와 Q-024 정식 edge 보안.
+- Q-023의 Cloud Map source와 staged runtime/digest gate는 T047-A에서 구현했다. direct mTLS 인증서 발급·delivery/rotation, 애플리케이션 TLS와 principal negative 검증은 T047-B~D 후속 작업으로 남아 있으며 identity/event 의미는 T030 계약을 유지한다.
 - Auth outbox transport publisher/consumer, Phase 1 revoke 실패의 암호화된 durable retry queue와 운영 경보는 T045 출시 gate다.
 - T035에서 T033 Resource validator를 실제 Core 요청 경로의 `DUAL` resolver에 연결했다. legacy issuer 종료는 7일 관측 뒤 Core `TARGET_ONLY` 전환과 별도 운영 승인이 필요하다.
+## T044 진행 기록
+
+- STT에 `spring-boot-starter-actuator`를 추가하고 `/actuator/health/liveness`, `/actuator/health/readiness` probe를 구성했다.
+- liveness는 `livenessState`만 사용하고 readiness는 `readinessState,db`를 사용해 DB 장애 시 readiness만 실패하도록 했다.
+- 로컬 `./gradlew test bootJar`는 승인된 실행으로 성공했다.
+
+## T054 NonProd V2 Terraform 계획
+
+- 기존 수작업 NonProd를 import하지 않고 같은 계정의 새 `nonprod-v2` 환경을 병렬 구축하기로 한 사용자 결정을 반영했다.
+- `infra/aws/nonprod-v2/implementation-plan.md`에 Terraform source 구조, state bootstrap, VPC/Regional NAT/NACL/route/SG/VPC endpoint, KMS/IAM/ECR/CloudWatch, RDS/Valkey/Secrets Manager, ALB/ECS 구현 계약과 단계별 완료 기준을 기록했다.
+- 기존 RDS 데이터는 이관하지 않고 빈 PostgreSQL 16에서 시작한다. RDS master는 RDS-managed secret, Valkey는 IAM authentication을 사용한다. Terraform은 그 밖의 secret container와 IAM만 관리하고 실제 application/provider 값은 사용자가 AWS Console에서 입력해 state에 장기 secret 원문을 넣지 않는다.
+- 도메인 발급 전 ALB DNS는 제한된 smoke test에만 사용한다. `Secure` cookie, Route 53/ACM/CloudFront/WAF와 LiveKit Egress WSS end-to-end는 도메인 발급 후 T059 출시 gate로 분리했다.
+- Q-013 SLO/RTO/RPO와 Q-024 정식 edge 보안은 기반 Terraform 구현과 분리된 blocking decision으로 유지한다. Q-023은 2026-07-24 사용자 결정으로 해소됐고 T047 구현 gate로 이동했다.
+- 기존 T044 actuator 변경과 검증 기록은 수정하거나 되돌리지 않았다. 이번 작업은 문서만 변경했으며 Terraform 코드 작성, AWS `plan/apply`, AWS 리소스 변경과 애플리케이션 테스트는 수행하지 않았다.
+
+### T054 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| `git diff --check` | Pass | tracked 문서 변경에 whitespace 오류 없음 |
+| 오래된 IaC 결정 scan | Pass | superseded network/STT/tag 결정 표현을 V2 병렬 구축 기준으로 정리함 |
+| Task table shape | Pass | T039 이후 task row의 열 수가 표 계약과 일치함 |
+| Terraform/AWS validation | Not run | 계획 문서 단계이며 Terraform 코드와 AWS 리소스를 생성하지 않음 |
+
+## T055~T057 NonProd V2 Terraform 코드
+
+- Terraform 1.15.8과 AWS Provider 6.56.0 기준으로 `infra/aws/bootstrap/state`, 재사용 모듈과 `infra/aws/environments/nonprod-v2` root를 구현했다.
+- State bootstrap은 versioning/SSE-KMS/Block Public Access/TLS-only S3 bucket policy와 native S3 lockfile backend 값을 출력하며 bucket과 KMS key에 `prevent_destroy`를 적용한다.
+- Network는 `10.20.0.0/16`, 2개 AZ Public/Private/Data subnet, IGW, Regional NAT Gateway automatic mode, route table, 명시적 기본 NACL, VPC Flow Logs와 S3/interface endpoint를 구성한다.
+- Security/KMS/IAM/ECR은 서비스별 SG, application/data/log/JWT key, execution/task role, immutable KMS-encrypted ECR와 선택적 GitHub OIDC role을 구성한다.
+- Data는 빈 PostgreSQL 16 Single-AZ RDS의 RDS-managed master secret과 Valkey 7.2 primary+replica Multi-AZ/IAM authentication을 구성한다. Terraform은 application/provider secret container만 만들고 version은 만들지 않는다.
+- ALB/ECS/CloudWatch는 public ALB와 BFF/STT target group, Fargate cluster/task definition/service module, 7일 encrypted Log Group, dashboard와 alarm을 구성한다.
+- `enable_runtime_services=false`를 기본값으로 두고 Q-013/Q-023, secret version, DB bootstrap, image push와 BFF Valkey IAM client가 준비되기 전 ECS Service 생성을 차단했다. HTTP smoke listener도 제한 CIDR이 없으면 plan이 실패한다.
+- `.gitignore`에 Terraform working directory, state, 실제 tfvars와 saved plan을 추가했고 두 root의 `.terraform.lock.hcl`은 추적 대상으로 유지했다.
+
+### T055~T057 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Terraform format | Pass | `terraform fmt -check -recursive infra/aws` |
+| State bootstrap validate | Pass | Terraform 1.15.8, AWS Provider 6.56.0 |
+| NonProd V2 validate | Pass | 전체 local module과 environment root schema 검증 |
+| Mock foundation plan | Pass | `terraform test`; 기본 runtime off, HTTP CIDR gate, runtime acknowledgement 3/3 |
+| State bootstrap AWS plan | Pass | `meetingmind-nonprod` profile, `9 add / 0 change / 0 destroy`; saved plan은 `/private/tmp` |
+| Terraform source secret scan | Pass | `gitleaks dir --no-banner --redact infra/aws`; 165.73 KB, no leaks found |
+| NonProd V2 AWS plan | Not run | remote state bootstrap을 아직 apply하지 않아 S3 backend가 존재하지 않음 |
+| AWS apply | Not run | 사용자가 코드 구현을 요청했으며 resource 생성 승인은 별도 단계 |
+| Application tests | Not run | 이번 변경은 Terraform/docs/.gitignore이며 기존 STT application 변경을 수정하지 않음 |
+
+## T047-A/E Internal Discovery와 Source Least Privilege
+
+- Cloud Map Private DNS namespace `meetingmind.internal`와 `auth`, `core`, `ai`, `stt` A record service를 foundation에 추가했다. BFF는 public ALB 경계를 유지하므로 내부 service registry에 등록하지 않는다.
+- ECS Service는 Cloud Map registry ARN을 선택적으로 받아 private task IP를 등록한다. 내부 endpoint는 `https://auth.meetingmind.internal:8082`, `https://core.meetingmind.internal:8080`, `https://ai.meetingmind.internal:8000`, `https://stt.meetingmind.internal:8083`의 exact map만 허용한다.
+- 전역 kill switch 외에 `runtime_enabled_services`, 서비스별 SHA-256 image digest, desired count와 `internal_mtls_ready`를 별도 gate로 추가했다. 따라서 기본 foundation plan은 runtime off이고, mTLS 애플리케이션 경계가 검증되기 전에는 acknowledgement와 digest가 있어도 ECS Service를 만들 수 없다.
+- 공통 execution role을 서비스별 execution role로 분리하고 각 역할이 자신의 secret ARN만 읽도록 IAM policy를 좁혔다. Security Group egress는 내부 caller→callee port, DB/cache, VPC endpoint HTTPS로 명시했고 외부 provider HTTPS만 동적 IP 특성 때문에 NonProd 임시 예외로 남겼다.
+- SNS alarm topic은 customer-managed Logs KMS key를 사용하도록 바꾸고 SNS service principal에 SourceAccount/SourceArn 조건을 둔 최소 KMS grant를 추가했다.
+- T047-A는 source 검증 완료로 닫았다. T047-E의 실제 AWS principal 교차 거부와 reachability 검증은 apply 뒤 수행해야 하므로 완료로 표시하지 않았다.
+
+### T047-A/E 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Terraform format | Pass | `terraform fmt -recursive infra/aws` 후 변경 없음 |
+| State bootstrap validate | Pass | Terraform provider schema 검증 |
+| NonProd V2 validate | Pass | Cloud Map, ECS registry, service별 IAM과 runtime gate 전체 schema 검증 |
+| Mock Terraform tests | Pass | `terraform test`; foundation/HTTP CIDR/acknowledgement/global switch/digest/staged Auth/mTLS gate 7/7 |
+| IaC HIGH/CRITICAL scan | Pass with reviewed exceptions | `trivy config --skip-check-update --severity HIGH,CRITICAL --exit-code 1 infra/aws/modules`; 탐지 0, public ALB 1건과 외부 provider TCP 443 4건은 2026-10-31 만료 inline 예외 |
+| Terraform source secret scan | Pass | `gitleaks dir --no-banner --redact infra/aws`; 203.63 KB, no leaks found |
+| `git diff --check` | Pass | whitespace 오류 없음 |
+| AWS plan/apply와 runtime negative test | Not run | remote backend/apply 승인과 T047-B~D mTLS 구현이 선행돼야 함 |
+| Application tests | Not run | 이번 슬라이스는 Terraform/docs만 변경했고 애플리케이션 runtime은 수정하지 않음 |
+
+## T047-C1 Java mTLS Runtime과 Core Health
+
+- BFF/Auth/Core/STT에 `/run/meetingmind/tls/tls.crt`, `tls.key`, `ca.crt`를 읽는 `meetingmind-internal` PEM SSL bundle과 opt-in `mtls` profile을 추가했다. 로컬·test 기본 profile은 기존 HTTP 동작을 유지한다.
+- BFF의 Auth login/refresh/revoke와 Core projection/downstream client, Core의 Auth JWKS/AI/STT client는 같은 internal SSL bundle로 client certificate와 CA trust를 적용한다. JDK HTTPS hostname verification은 비활성화하지 않았다.
+- Auth/Core/STT workload filter는 Tomcat이 검증한 client certificate의 URI SAN에서 정확히 하나의 SPIFFE principal만 읽는다. 누락, allowlist 불일치와 둘 이상의 SPIFFE URI SAN은 fail closed하고 production profile은 test principal header를 무시한다.
+- Core→STT 호출에 남아 있던 `X-MeetingMind-Service-Token` 전송과 `core/stt-internal-token` Terraform secret/IAM 참조를 제거했다. AI는 Q-029가 열려 있어 shared token을 유지하고 T047-C2에서 제거한다.
+- Core에 이미 다른 Java 서비스가 사용하는 Spring Boot Actuator를 추가했다. liveness는 process 상태만, `db` profile readiness는 DB를 포함하며 ECS task definition source에 Core liveness health check를 연결했다.
+- Uvicorn은 TLS client certificate 요구 옵션은 제공하지만 ASGI TLS extension으로 certificate chain을 application에 전달하지 않는다. 검증되지 않은 forwarded header를 추가하지 않고 AI termination/runtime 선택을 Q-029로 기록했다.
+
+### T047-C1 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| BFF full tests | Pass | `./gradlew test`; SSL bundle client factory와 기존 auth/session/proxy 전체 회귀 |
+| Auth full tests | Pass | `./gradlew test`; 단일 허용 SPIFFE URI SAN 수락과 ambiguous identity 거부 포함 |
+| Core full tests | Pass | `./gradlew test`; internal SSL client factory, Core principal, liveness/readiness와 STT token 제거 포함 |
+| STT full tests | Pass | `./gradlew test`; Core certificate principal 수락, wrong principal와 production test header 거부 포함 |
+| Terraform format/validate | Pass | `terraform fmt -recursive infra/aws`, NonProd V2 `terraform validate` |
+| Terraform mock tests | Pass | runtime gate/Cloud Map/IAM/ECS source 7/7 |
+| Changed source secret scan | Pass with broader baseline pending | Auth/Core/STT/infra와 이번에 변경한 BFF 파일은 no leaks; 변경 범위 밖 `bff/src` finding 8건은 별도 baseline triage 필요 |
+| `git diff --check` | Pass | whitespace 오류 없음 |
+| 실제 TLS handshake와 AWS runtime | Not run | CA/certificate file delivery와 Q-029/T047-B가 선행돼야 함 |
+| Core DB runtime privilege test | Not run | NonProd V2 DB bootstrap/apply와 runtime/migrator credential version이 아직 없음 |
+
+## T047-B/C2 Offline PKI, cert-loader와 AI Envoy 계획
+
+- Q-029를 AI Task의 Envoy sidecar로 결정했다. Envoy가 external XFCC를 sanitize하고 exact Core SPIFFE URI를 TLS/RBAC로 검증한 뒤 loopback Uvicorn에 verified URI만 전달하며 FastAPI가 exact 단일 URI를 재검증한다.
+- AWS Private CA 대신 repository 밖 암호화 저장소의 offline NonProd root/intermediate CA를 사용한다. Terraform은 CA/private key/leaf secret version을 만들거나 읽지 않고 서비스별 TLS bundle secret container와 최소 IAM만 관리한다.
+- 전용 ARM64 cert-loader는 task role로 자신의 bundle을 가져와 chain, key match, validity, URI/DNS SAN과 EKU를 검증하고 `/run/meetingmind/tls`에 원자적으로 기록한다. loader 실패 시 application/Envoy가 시작되지 않는다.
+- 공식 AWS CLI image의 shell/JSON/PEM 도구는 지원 인터페이스가 아니므로 Go 정적 binary와 AWS SDK v2를 기본 구현으로 정했다. 이는 새 runtime 의존성을 추가하지만 작고 검증 가능한 image, 표준 `crypto/x509` 검증과 secret redaction을 얻기 위한 제한된 선택이다.
+- 기존 `internal_mtls_ready`의 순환을 material-ready와 runtime-verified gate로 분리한다. private validation mode에서 Auth→AI/STT→Core를 public traffic 없이 검증하고 positive/negative/rotation evidence 뒤에만 정상 runtime acknowledgement를 허용한다.
+- 구체 identity/bundle schema, 파일 경계, 단계, 검증 행렬과 rollback은 `infra/aws/nonprod-v2/mtls-implementation-plan.md`에 기록했다. 이번 작업은 계획 문서만 변경했으며 PKI material 생성, AWS secret write, Terraform apply와 ECS deployment는 수행하지 않았다.
+
+## T047-B1 Offline PKI Tooling
+
+- `scripts/pki/nonprod/manifests/*.json`에 BFF/Auth/Core/AI/Realtime STT의 exact service account, 단일 SPIFFE URI SAN, DNS SAN과 EKU 계약을 고정했다. manifest field 추가·누락과 승인된 값의 변경은 발급 전에 거부한다.
+- `scripts/pki/nonprod/pki.py`에 AES-256으로 암호화한 ECDSA P-256 root/intermediate CA 초기화, 90일 leaf 발급, chain·validity·P-256·certificate/private-key·SAN/EKU 검증과 Secrets Manager TLS bundle JSON 생성을 구현했다. root는 5년, intermediate는 1년이며 leaf 만료까지 30일 이하면 `rotationRequired=true`를 반환한다.
+- 출력은 absolute path를 명시해야 하고 repository 내부, 기존 경로, symlink와 group/other permission이 열린 parent를 거부한다. CA/passphrase/private key 입력도 repository 밖의 non-symlink private 경계만 허용한다. 발급 material은 `0700` staging에서 완성한 뒤 rename하고 private key와 bundle JSON은 `0600`으로 기록한다.
+- 새 dependency는 추가하지 않았다. Python 3 표준 라이브러리는 JSON/경로·권한/원자 쓰기와 오류 redaction을 담당하고 시스템 OpenSSL은 key/X.509/chain을 담당한다. shell-only 대안은 JSON·SAN/EKU 파싱과 fail-closed path 검사가 취약하고, 별도 Python X.509 package는 현재 범위에 불필요해 선택하지 않았다.
+- `scripts/pki/nonprod/README.md`에 외부 암호화 위치, passphrase file, 발급·검증·bundle 명령과 Production CA 분리 원칙을 기록했다. 이 구현과 검증에서는 실제 NonProd CA/private key를 생성하지 않았고 테스트 전용 material은 OS 임시 디렉터리에서만 생성 후 삭제했다.
+
+### T047-B1 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Offline PKI integration | Pass | `PYTHONDONTWRITEBYTECODE=1 python3 scripts/pki/nonprod/test_pki.py`; 임시 encrypted CA로 5개 service certificate와 bundle 생성·검증, 10 tests |
+| Identity negative matrix | Pass | wrong/multiple SPIFFE URI, wrong/wildcard DNS, IP SAN, wrong EKU와 변경된 manifest 거부 |
+| Certificate negative matrix | Pass | certificate/private-key mismatch, expired/not-yet-valid certificate와 90일 초과 leaf 거부 경계 검증 |
+| Output custody | Pass | repository 내부, symlink, `0755` parent와 group/other permission이 열린 private input 거부; CA key encryption과 bundle `0600` 확인 |
+| Python syntax/CLI | Pass | 별도 temp pycache로 `compileall`, executable CLI/test entrypoint와 `--help` 확인 |
+| Secret scan | Pass | `gitleaks dir --no-banner --redact scripts/pki/nonprod`; private key/certificate PEM marker와 실제 passphrase 없음 |
+| `git diff --check` | Pass | T047-B1 source/docs에 whitespace 오류 없음 |
+| Terraform/AWS/ECS | Not run | T047-B1 범위 밖이며 Terraform, secret version write, AWS apply와 ECS deployment를 수행하지 않음 |
+| Application regression | Not run | Java/AI application runtime은 변경하지 않았고 이번 검증은 독립 PKI tooling에 한정함 |
+
+## T047-B2 ARM64 Certificate Loader
+
+- `cert-loader/`에 Go 1.26 정적 binary를 추가했다. loader는 ECS task role의 기본 credential chain으로 exact service secret ARN과 `AWSCURRENT`, `AWSPENDING` 또는 `AWSPREVIOUS` stage만 읽으며 secret value를 flag나 환경변수로 받지 않는다.
+- binary에 BFF/Auth/Core/AI/STT의 service, SPIFFE URI, DNS SAN과 순서가 고정된 EKU 계약을 내장했다. strict JSON, leaf+intermediate와 intermediate+root chain, ECDSA P-256/SHA-256, CA constraints, 최대 90일 validity, key match, exact SAN/EKU와 bundle metadata를 모두 검증한다. 만료까지 30일 이하면 rotation 대상으로 표시한다.
+- 출력은 `/run/meetingmind/tls`로 고정하고 `os.Root` 경계의 빈 non-symlink, group/other non-writable directory만 허용한다. `0700` `.staging-*` 안에서 `fsync`와 `10001:10001` chown을 끝낸 뒤 `tls.key` `0400`, `tls.crt`/`ca.crt` `0444`를 rename하며 중간 실패 시 노출된 파일과 staging을 모두 제거한다.
+- 성공 로그는 fingerprint, expiry와 secret version ID만, 실패 로그는 고정 error code만 기록한다. AWS cause, ARN, identity 입력, JSON, PEM과 private key는 출력하지 않는다.
+- AWS SDK for Go v2 `config`와 `service/secretsmanager`만 새 dependency로 추가하고 `go.sum`으로 고정했다. 공식 task-role credential/GetSecretValue 지원을 사용하면서 직접 SigV4/credential provider 구현을 피하기 위한 선택이며, AWS CLI+shell/OpenSSL 대안은 strict schema·X.509 계약·원자 세 파일 쓰기·오류 redaction을 하나의 최소 runtime으로 제공하지 못해 제외했다. 상세 근거와 실행 계약은 `cert-loader/README.md`에 기록했다.
+- Docker builder는 공식 Go 1.26.5 Alpine 3.24 manifest digest로 고정했고 `$BUILDPLATFORM`에서 `CGO_ENABLED=0 GOOS=linux GOARCH=arm64`로 교차 컴파일한다. runtime은 CA bundle과 binary만 담은 scratch image이며 loader의 제한된 init 작업을 위해 `0:0`으로 실행한다.
+- CI에 독립 Go module/test/vet job과 ARM64 image build, content digest summary, Trivy HIGH/CRITICAL gate를 추가했다. 이 단계에서는 실제 NonProd CA/private key, certificate 결과물 또는 secret value를 생성·저장하지 않았다.
+
+### T047-B2 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Go module/test/vet | Pass | 고정 builder image에서 `go mod verify`, `go test -cover ./...`, `go vet ./...`; CLI 52.4%, loader 81.5% statement coverage |
+| Five-service bundle contract | Pass | 메모리에서만 만든 일회성 ECDSA CA/leaf로 BFF/Auth/Core/AI/STT exact SPIFFE/DNS/EKU와 30일 rotation boundary 검증 |
+| Certificate negative matrix | Pass | malformed/unknown/trailing JSON, malformed PEM, expired/not-yet-valid/90일 초과 leaf, wrong/multiple SPIFFE, wrong/wildcard DNS, IP/email SAN, wrong/unknown EKU, key mismatch, untrusted/inconsistent chain 거부 |
+| Secret source/config boundary | Pass | exact ARN/region/account/service suffix, version stage와 response stage/version/payload 형태 검증; AWS 오류 cause는 고정 code로 redaction |
+| Atomic output boundary | Pass | output symlink/group·other writable/non-empty target/empty material 거부, exact file mode 검증과 injected second rename 실패 후 final/staging 파일 0건 |
+| ARM64 static image | Pass | `docker buildx build --platform linux/arm64 --load`; image `sha256:95902308d47e831e8f1b0a9ab08720b8fffc546ad61cc3e6c66bb66fad8c5a09`, Linux ARM64, scratch, CGO disabled, `0:0`, 3,505,968 bytes |
+| Fail-closed runtime log | Pass | 인자 없는 ARM64 container가 exit 1과 `cert_loader_failed code=config_invalid`만 출력 |
+| Image vulnerability scan | Pass | Trivy 0.72.0 `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL`; Go binary finding 0 |
+| Source secret scan | Pass | `gitleaks dir --no-banner --redact cert-loader`; 56.79 KB, no leaks found. private-key/AWS access-key marker 별도 검사도 0건 |
+| CI/diff validation | Pass | Ruby YAML parser로 workflow 문법 확인, `git diff --check` 통과 |
+| Race detector | Not run | 고정 Alpine builder의 static CGO-off 환경에는 race detector가 요구하는 CGO toolchain이 없음. fail-closed 경계는 일반 단위 테스트와 vet로 검증했고 새 test-only system dependency는 추가하지 않음 |
+| AWS/Terraform/ECS | Not run | T047-B2 범위 밖이고 AWS secret read/write, Terraform plan/apply와 ECS deployment를 수행하지 않음 |
+
+## T047-B3 Terraform Certificate Delivery와 Gate 분리
+
+- `modules/secrets`에 값 없는 서비스별 TLS bundle secret container(`bff|auth|core|ai|stt`/`tls-bundle`)와 resource policy를 추가했다. 각 bundle은 `aws:PrincipalArn`이 해당 서비스 task role이 아닌 모든 principal의 `GetSecretValue`를 명시적으로 거부하므로 다른 서비스 role은 identity policy 부재(implicit deny)와 resource policy(explicit deny) 두 단계에서 차단된다. Console 운영자도 값 입력 후 재조회할 수 없으며 이는 의도된 경계로 README에 기록했다.
+- `modules/iam`에 task role 전용 `read-own-tls-bundle` 정책을 추가했다. 각 서비스는 자기 bundle ARN 하나의 `DescribeSecret`/`GetSecretValue`와 exact data KMS key decrypt만 얻는다. 기존 execution role secret 정책에는 TLS bundle을 추가하지 않아 bundle이 container 환경변수로 주입될 경로를 만들지 않았다.
+- `modules/ecs-task`에 optional `tls_bundle` 입력을 추가했다. 활성 시 task-scoped ephemeral volume `meetingmind-tls`, `essential=false`·`0:0` cert-loader init container(read-write mount, read-only root filesystem, `cert-loader` log stream), application container의 `dependsOn cert-loader:SUCCESS`, read-only `/run/meetingmind/tls` mount와 고정 `10001:10001` app user를 구성한다. loader command에는 secret ARN, version stage, exact service/SPIFFE/DNS/EKU 기대값과 출력 경로만 들어가며 secret 값은 Terraform state/task definition/env 어디에도 존재하지 않는다.
+- 순환하던 `internal_mtls_ready`를 제거하고 `internal_mtls_material_ready`(private validation만 허용)와 `internal_mtls_runtime_verified`(정상 runtime 허용)로 분리했다. `enable_mtls_validation_services`+`mtls_validation_services`는 BFF를 변수 validation에서 거부하고, material evidence·서비스별 digest·cert-loader digest·desired count를 요구하며, HTTP smoke listener 및 `enable_runtime_services`와 상호 배타다. validation mode에서는 ALB target group 연결도 비워 public traffic 경로를 제거한다. 정상 runtime gate는 이제 `internal_mtls_runtime_verified`와 cert-loader digest를 추가로 요구한다.
+- mTLS wiring(`mtls` Spring profile, loader container, volume)은 validation 또는 runtime mode가 켜질 때만 task definition에 들어가므로 기본 foundation plan의 task definition은 이전과 동일하게 application container 하나만 갖는다. cert-loader ECR repository를 추가했고 loader image는 `cert_loader_image_digest`로 digest 고정한다.
+- Terraform은 여전히 secret version, CA/leaf material, AWS apply를 만들거나 수행하지 않는다. AI Envoy sidecar와 shared token 제거는 T047-C2, 실제 AWS cross-secret IAM 거부 evidence는 T047-D 범위다.
+
+### T047-B3 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Terraform format | Pass | `terraform fmt -recursive infra/aws` 후 변경 없음 |
+| NonProd V2 validate | Pass | Terraform 1.15.8; secrets/iam/ecs-task 모듈과 environment root 전체 schema 검증 |
+| Mock Terraform tests | Pass | `terraform test` 15/15; foundation 기본값에서 TLS secret container 존재·loader 미배선, runtime gate의 runtime-verified/cert-loader digest 요구, validation gate의 material/digest/smoke-listener/BFF 거부, validation·runtime 상호 배타, private validation plan에서 `cert-loader`가 application보다 먼저 시작하는 container 순서 검증 |
+| Cross-service bundle read 거부(source) | Pass | task role Allow는 자기 bundle ARN 1개뿐이고 bundle resource policy가 비소유 principal `GetSecretValue`를 explicit deny; 실제 AWS 거부 evidence는 T047-D에서 수집 |
+| Secret 원문 부재 | Pass | Terraform은 secret version을 생성/조회하지 않고 loader에는 ARN·기대 identity만 전달; task definition/env/output에 bundle 값 경로 없음 |
+| IaC HIGH/CRITICAL scan | Pass | `trivy config --skip-check-update --severity HIGH,CRITICAL --exit-code 1 infra/aws/modules` 탐지 0. environments snapshot 모드가 재보고한 3건은 기존 inline 예외(public ALB, endpoints egress)와 snapshot 렌더링 artifact(SNS는 실제로 customer-managed key 사용)로 이번 변경 밖 |
+| Terraform source secret scan | Pass | `gitleaks dir --no-banner --redact infra/aws`; 243.37 KB, no leaks found |
+| `git diff --check` | Pass | whitespace 오류 없음 |
+| AWS plan/apply와 runtime 거부 검증 | Not run | remote backend plan/apply와 secret version 입력은 Phase 8 이후 별도 사용자 승인 범위이며, cross-secret IAM 거부 runtime evidence는 T047-D에서 수행 |
+| Application regression | Not run | 이번 슬라이스는 Terraform/docs만 변경했고 Java/AI/loader source는 수정하지 않음 |
+
+## T047-B4 Rotation Runbook, Verifier와 CA Overlap 계약 (source 준비)
+
+- `infra/aws/nonprod-v2/rotation-runbook.md`에 leaf rotation(`AWSPENDING` 입력 → canary 검증 → `AWSCURRENT` 승격 → 해당 서비스만 force deployment → 확인), `AWSCURRENT` rollback과 3단계 CA overlap(old+new trust 확장 → 새 CA leaf caller/callee 순서 배포 → old trust 제거) 절차를 실행 명령 수준으로 고정했다. evidence는 시각/version ID/fingerprint/task revision만 허용하고 PEM·private key·`get-secret-value`는 기록을 금지한다.
+- 별도 verifier binary는 만들지 않았다. 오프라인 사전 검증은 기존 `pki.py verify`/`bundle`이, AWS 사후 검증은 cert-loader 자신이 담당한다. 서비스 task definition으로 standalone canary task를 실행하되 cert-loader command만 `--version-stage AWSPENDING`으로 override하면 실제 배포와 동일한 코드 경로로 pending bundle을 검증하며, canary는 ECS service 밖이라 Cloud Map 등록과 트래픽이 없다. 새 코드 대신 기존 구현을 재사용하는 결정이며 runbook 2장에 기록했다.
+- 구현 중 계약 충돌을 발견했다: T047-B2 loader와 B1 PKI 검증기가 `caBundlePem`을 정확히 `(intermediate, root)` 1쌍으로 고정해 plan 10장의 old+new trust 동시 배포가 불가능했다. `mtls-implementation-plan.md` 5.1에 쌍 계약을 먼저 명시한 뒤 loader `bundle.go`와 `pki.py`를 확장했다: 쌍 1~2개 허용, 각 쌍의 독립 CA/chain 검증, presented intermediate가 정확히 한 쌍과 일치, 중복 intermediate/root·홀수 개·만료 쌍 거부. overlap window 밖 기본 계약(1쌍)은 그대로다.
+- `scripts/pki/nonprod/README.md`와 `cert-loader/README.md`에 overlap 계약을, `tasks.md` T047-B4 row에 실제 수정 파일 범위와 준비 완료 상태를 반영했다. 완료 기준인 drill evidence는 AWS private validation deployment(T048-V)와 Phase 8 사용자 승인 뒤에만 수집할 수 있어 T047-B4는 완료로 표시하지 않았다.
+- Terraform, AWS secret write, ECS deployment, 실제 NonProd CA/leaf 생성은 수행하지 않았다. 테스트 material은 Go 테스트의 메모리 내 일회성 CA와 Python 테스트의 OS 임시 디렉터리 CA뿐이며 종료 시 삭제된다.
+
+### T047-B4 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Go module/test/vet | Pass | 고정 Go 1.26.5 Alpine builder에서 `go mod verify`, `go test -cover ./...`, `go vet ./...`; loader 82.9%, CLI 52.4% statement coverage |
+| Loader CA overlap matrix | Pass | issuing pair 첫/두 번째 위치 수용과 4-cert trust 원본 보존, 중복 쌍·중복 root·홀수 개·issuing pair 부재·만료 쌍 거부 |
+| 기존 loader negative 회귀 | Pass | wrong CA/different intermediate/missing root 등 기존 chain·identity·JSON·output 경계 테스트 전체 통과 |
+| PKI overlap integration | Pass | `PYTHONDONTWRITEBYTECODE=1 python3 scripts/pki/nonprod/test_pki.py` 11/11; 두 번째/세 번째 일회성 CA로 old/new leaf 검증, 4-cert bundle JSON 생성, 중복 쌍·홀수 개·issuing pair 부재 거부 |
+| ARM64 image rebuild | Pass | `docker buildx build --platform linux/arm64 --load`; image `sha256:e40a3166...3fe94f`, scratch, 3,506,818 bytes. 검증 후 로컬 태그 삭제 |
+| Image vulnerability scan | Pass | Trivy `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL` finding 0 |
+| Source secret scan | Pass | `gitleaks dir --no-banner --redact`를 `cert-loader`, `scripts/pki/nonprod`, `infra/aws/nonprod-v2`에 개별 실행; 모두 no leaks |
+| `git diff --check` | Pass | whitespace 오류 없음 |
+| Rotation/rollback/CA overlap drill | Not run | 완료 기준 evidence는 실제 AWS `AWSPENDING`/`AWSCURRENT`/ECS force deployment가 필요하며 T048-V private validation과 Phase 8 사용자 승인 뒤 runbook대로 수집한다 |
+| Terraform/AWS 변경 | Not run | 이번 슬라이스는 runbook/도구/계약 문서만 변경했고 Terraform source와 AWS 리소스는 수정하지 않음 |
+
+## T047-C2 AI Envoy mTLS 경계와 ECS Shared Token 제거
+
+- `ai/envoy/envoy.yaml`에 static Envoy config를 고정했다. `0.0.0.0:8000` downstream TLS는 client certificate 필수, cert-loader 산출물 사용, TLS validation과 HTTP RBAC 모두 exact Core SPIFFE URI SAN만 허용한다. `SANITIZE_SET`으로 외부 XFCC를 제거하고 검증된 URI만 재생성하며 admin은 `127.0.0.1:9901`에만 bind하고 access log에는 XFCC/certificate/secret을 남기지 않는다. upstream은 `127.0.0.1:8001` loopback Uvicorn 하나다.
+- `ai/envoy/Dockerfile`은 upstream `envoyproxy/envoy:distroless-v1.38.3`을 manifest digest로 고정하고 config만 복사하며 `10001:10001`로 실행한다. distroless에는 shell이 없어 container health check 대신 AI app health check가 loopback으로 app `/health`와 admin `/ready`를 함께 확인하는 방식을 택했고 `ai/envoy/README.md`에 기록했다.
+- FastAPI에 `AI_INTERNAL_AUTH_MODE`(`shared-token` 기본 | `mtls-proxy`)를 추가했다. `mtls-proxy`의 `/api/internal/**`는 정확히 하나의 XFCC 헤더, 단일 certificate element, quoted/escaped 값 거부, 정확히 하나의 `URI=` key, `AI_INTERNAL_ALLOWED_SPIFFE_ID`와의 상수시간 일치를 모두 요구하고 shared token 헤더를 무시한다. allowed principal 미설정과 unknown mode는 fail closed다. `shared-token` mode는 local/on-prem PoC 호환 경계로 유지하되 ECS에는 넣지 않는다.
+- Terraform ecs-task 모듈에 `envoy_sidecar`(tls_bundle 필수 validation, task port 인수, read-only TLS mount, `cert-loader:SUCCESS` 의존, read-only root)와 `container_command`를 추가했다. AI task는 mTLS mode에서 Envoy가 8000을 받고 Uvicorn command가 `127.0.0.1:8001`로 override되며, container 순서는 `cert-loader → envoy → ai`다.
+- ECS 경계에서 Core→AI shared token을 제거했다: `core/ai-internal-token` secret container, Core/AI task definition의 `AI_INTERNAL_SERVICE_TOKEN` 주입과 execution role secret 참조를 모두 삭제했다. Core 코드는 token 미설정 시 헤더를 생략하므로 Java 변경 없이 완결된다. AI에는 `AI_INTERNAL_AUTH_MODE`/`AI_INTERNAL_ALLOWED_SPIFFE_ID` 환경변수를 추가했고, envoy image는 새 `ai-envoy` ECR repository와 `ai_envoy_image_digest` 변수로 digest 고정하며 AI가 validation/runtime allowlist에 있으면 gate가 digest를 요구한다.
+- CI containers job에 ARM64 AI Envoy 빌드, 일회성 self-signed material 기반 `--mode validate`, content digest 출력과 Trivy HIGH/CRITICAL gate를 추가했다.
+- `ai/envoy/local_mtls_check.sh`는 OS 임시 디렉터리의 일회성 CA(정식 manifest 계약 사용)로 로컬 positive/negative matrix를 자동 검증하고 종료 시 material/컨테이너를 삭제한다.
+
+### T047-C2 검증
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| AI 전체 unit tests | Pass | `python -m unittest discover -s tests` 196개(신규 XFCC 경계 7개 포함), `compileall` 통과 |
+| FastAPI XFCC 경계 | Pass | 정상 단일 XFCC 수락; 헤더 부재/중복, 다중 element, 다중/부재 URI key, wrong principal, quoted 값, malformed field, spoofed token 헤더, allowed principal 미설정, unknown mode 모두 401 fail closed; shared-token mode는 XFCC를 무시 |
+| Envoy config validate | Pass | 고정 digest 이미지에서 `--mode validate` OK (일회성 self-signed material) |
+| 로컬 mTLS matrix | Pass | `ai/envoy/local_mtls_check.sh`; Core client certificate 200 + sanitize된 단일 `URI=core` XFCC, no-cert/wrong-CA/wrong-SPIFFE(BFF) TLS 거부, spoofed XFCC 교체 확인, 타 컨테이너에서 direct `8001` 접근 거부 |
+| ARM64 Envoy image | Pass | `docker buildx --platform linux/arm64` 빌드 성공, Trivy `--ignore-unfixed` HIGH/CRITICAL 0건, 검증 후 로컬 태그 삭제 |
+| Terraform validate/mock tests | Pass | `terraform validate`, `terraform test` 16/16; AI validation의 envoy digest 요구와 `cert-loader,envoy,ai` container 순서 assert 포함 |
+| Shared token 제거 | Pass | Terraform source에서 `core/ai-internal-token` container/참조/주입 0건; Core는 token 미설정 시 헤더 생략을 코드로 확인 |
+| CI YAML/diff | Pass | Ruby YAML parser로 workflow 문법 확인, `git diff --check` 통과 |
+| Source secret scan | Pass | `gitleaks dir --no-banner --redact`를 `ai`, `infra/aws`에 개별 실행; no leaks |
+| 실제 AWS runtime 거부 | Not run | ECS/Cloud Map/SG 계층의 runtime positive/negative는 T048-V/T047-D에서 수집 |
+| Envoy ECR mirror push | Not run | 검토된 digest의 ECR mirror는 Phase 6/8의 AWS 작업이며 별도 승인 뒤 수행 |
+
+## NonProd V2 Foundation 정렬 Apply (T048-V 준비)
+
+- 사용자 승인 하에 저장된 plan을 실제 NonProd V2(account `825820234979`)에 apply했다: 64 추가 / 3 변경 / 16 삭제, 오류 0건.
+- 삭제 16건은 모두 기록된 결정과 일치한다: 공용 execution role→서비스별 분리(T047-A) 3건, `core/ai-internal-token`(T047-C2)·`core/stt-internal-token`(T047-C1) secret 2건(7일 recovery window), 광범위 egress→최소권한 교체 6건, task definition 신규 revision 교체 5건. 실행 중 ECS 서비스는 0개로 중단 영향 없음.
+- 추가분에는 TLS bundle secret 5개+cross-service read deny policy, task-role `read-own-tls-bundle` 정책, `cert-loader`/`ai-envoy` ECR, Cloud Map namespace/서비스, mTLS gate가 포함된다.
+- Apply 후 drift 2종을 소스에서 수정해 plan을 `No changes`로 수렴시켰다: Cloud Map의 빈 `health_check_custom_config {}`는 API에 저장되지 않아 영구 replace를 만들므로 `failure_threshold = 1`로 고정(빈 서비스 4개 1회 교체), default NACL은 `subnet_ids` 미선언으로 영구 diff가 생겨 public/private/data subnet을 명시했다. 수정 후 mock tests 16/16 재통과.
+- 다음 순서: 7개 이미지 ECR push(digest 기록), `/Users/sjs/CA` offline CA 생성과 5개 bundle `AWSCURRENT` 입력(Phase 8), validation mode 활성화(T048-V).
+
+다음 경계는 T048-V다. material gate 충족 뒤 public traffic 없이 Auth→AI/STT→Core private validation service를 시작하고 loader/Envoy/application health와 Cloud Map 등록을 확인한다.

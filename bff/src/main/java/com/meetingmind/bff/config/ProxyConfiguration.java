@@ -15,7 +15,12 @@ public class ProxyConfiguration {
     DownstreamHttpClient downstreamHttpClient(
             DownstreamProxyProperties properties,
             Clock tokenVaultClock,
+            InternalHttpClientFactory internalHttpClientFactory,
             MeterRegistry meterRegistry) {
-        return new DownstreamHttpClient(properties, tokenVaultClock, meterRegistry);
+        return new DownstreamHttpClient(
+                properties,
+                tokenVaultClock,
+                internalHttpClientFactory,
+                meterRegistry);
     }
 }

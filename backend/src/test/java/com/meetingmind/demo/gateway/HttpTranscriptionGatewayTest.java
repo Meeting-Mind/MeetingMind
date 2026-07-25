@@ -17,12 +17,10 @@ class HttpTranscriptionGatewayTest {
     @Test
     void startsATranscriptionAgainstTheInternalSttApi() throws Exception {
         AtomicReference<String> receivedMethod = new AtomicReference<>();
-        AtomicReference<String> receivedToken = new AtomicReference<>();
         AtomicReference<String> receivedBody = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/internal/v1/transcriptions", exchange -> {
             receivedMethod.set(exchange.getRequestMethod());
-            receivedToken.set(exchange.getRequestHeaders().getFirst("X-MeetingMind-Service-Token"));
             receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] response = "{\"sessionId\":\"session-1\",\"status\":\"PROCESSING\",\"egressId\":\"egress-1\"}"
                     .getBytes(StandardCharsets.UTF_8);
@@ -35,7 +33,7 @@ class HttpTranscriptionGatewayTest {
         try {
             HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
                     HttpClient.newHttpClient(), new ObjectMapper(),
-                    "http://127.0.0.1:" + server.getAddress().getPort(), "internal-test-token"
+                    "http://127.0.0.1:" + server.getAddress().getPort()
             );
 
             TranscriptionHandle handle = gateway.start(new TranscriptionStartCommand(
@@ -45,7 +43,6 @@ class HttpTranscriptionGatewayTest {
             assertThat(handle.sessionId()).isEqualTo("session-1");
             assertThat(handle.egressId()).isEqualTo("egress-1");
             assertThat(receivedMethod.get()).isEqualTo("POST");
-            assertThat(receivedToken.get()).isEqualTo("internal-test-token");
             assertThat(receivedBody.get()).contains("\"meetingId\":\"meeting-1\"");
         } finally {
             server.stop(0);
@@ -66,7 +63,7 @@ class HttpTranscriptionGatewayTest {
         try {
             HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
                     HttpClient.newHttpClient(), new ObjectMapper(),
-                    "http://127.0.0.1:" + server.getAddress().getPort(), ""
+                    "http://127.0.0.1:" + server.getAddress().getPort()
             );
 
             assertThat(gateway.activeSessionId("meeting-1")).isEqualTo("session-1");
@@ -88,7 +85,7 @@ class HttpTranscriptionGatewayTest {
         try {
             HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
                     HttpClient.newHttpClient(), new ObjectMapper(),
-                    "http://127.0.0.1:" + server.getAddress().getPort(), ""
+                    "http://127.0.0.1:" + server.getAddress().getPort()
             );
 
             gateway.stop("meeting-1", "session-1");
@@ -110,7 +107,7 @@ class HttpTranscriptionGatewayTest {
         try {
             HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
                     HttpClient.newHttpClient(), new ObjectMapper(),
-                    "http://127.0.0.1:" + server.getAddress().getPort(), ""
+                    "http://127.0.0.1:" + server.getAddress().getPort()
             );
 
             assertThatThrownBy(() -> gateway.stop("meeting-1", "session-1"))
@@ -134,7 +131,7 @@ class HttpTranscriptionGatewayTest {
         try {
             HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
                     HttpClient.newHttpClient(), new ObjectMapper(),
-                    "http://127.0.0.1:" + server.getAddress().getPort(), ""
+                    "http://127.0.0.1:" + server.getAddress().getPort()
             );
 
             var partials = gateway.partials("meeting-1");
@@ -158,7 +155,7 @@ class HttpTranscriptionGatewayTest {
         try {
             HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
                     HttpClient.newHttpClient(), new ObjectMapper(),
-                    "http://127.0.0.1:" + server.getAddress().getPort(), ""
+                    "http://127.0.0.1:" + server.getAddress().getPort()
             );
 
             assertThatThrownBy(() -> gateway.status("meeting-1"))

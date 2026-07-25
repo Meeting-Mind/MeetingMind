@@ -3,6 +3,7 @@ package com.meetingmind.demo.auth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.demo.auth.target.HttpJwksSource;
 import com.meetingmind.demo.auth.target.TargetAccessTokenValidator;
+import com.meetingmind.demo.config.InternalHttpClientFactory;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -33,6 +34,7 @@ class CoreAccessTokenConfiguration {
             @Value("${meetingmind.auth.target.allow-test-principal-header:false}")
                     boolean allowTestPrincipalHeader,
             @Value("${meetingmind.auth.target.test-principal:}") String testPrincipal,
+            InternalHttpClientFactory internalHttpClientFactory,
             Environment environment) {
         boolean testHeaderAllowed = allowTestPrincipalHeader
                 && environment.acceptsProfiles(Profiles.of(
@@ -40,7 +42,7 @@ class CoreAccessTokenConfiguration {
         Map<String, String> headers = testHeaderAllowed
                 ? Map.of("X-MeetingMind-Test-Principal", requireTestPrincipal(testPrincipal))
                 : Map.of();
-        HttpClient client = HttpClient.newBuilder()
+        HttpClient client = internalHttpClientFactory.newBuilder()
                 .connectTimeout(requestTimeout)
                 .build();
         return new TargetAccessTokenValidator(

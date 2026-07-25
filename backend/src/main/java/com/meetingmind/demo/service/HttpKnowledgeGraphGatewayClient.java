@@ -2,6 +2,7 @@ package com.meetingmind.demo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.demo.config.InternalHttpClientFactory;
 import com.meetingmind.demo.dto.KnowledgeGraphResponse;
 import com.meetingmind.demo.dto.ai.KnowledgeGraphGatewayRequest;
 import java.io.IOException;
@@ -29,6 +30,7 @@ public class HttpKnowledgeGraphGatewayClient implements KnowledgeGraphGatewayCli
     @Autowired
     public HttpKnowledgeGraphGatewayClient(
             ObjectMapper objectMapper,
+            InternalHttpClientFactory internalHttpClientFactory,
             @Value("${meetingmind.ai.base-url:http://localhost:8000}") String aiBaseUrl,
             @Value("${meetingmind.ai.service-token:}") String serviceToken,
             @Value("${meetingmind.ai.guard.max-concurrent:16}") int maxConcurrent,
@@ -36,7 +38,7 @@ public class HttpKnowledgeGraphGatewayClient implements KnowledgeGraphGatewayCli
             @Value("${meetingmind.ai.guard.open-duration:30s}") Duration openDuration
     ) {
         this(
-                HttpClient.newHttpClient(),
+                internalHttpClientFactory.newBuilder().build(),
                 objectMapper,
                 aiBaseUrl,
                 serviceToken,

@@ -1,8 +1,12 @@
 package com.meetingmind.demo.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.security.cert.X509Certificate;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -54,6 +58,41 @@ class CoreWorkloadIdentityFilterTest {
         filter.doFilter(request, response, new MockFilterChain());
 
         assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void acceptsOneAllowedCertificatePrincipalAndRejectsAmbiguousIdentity() throws Exception {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("prod");
+        CoreWorkloadIdentityFilter filter = new CoreWorkloadIdentityFilter(
+                Set.of(BFF_PRINCIPAL), false, environment, new ObjectMapper());
+        MockHttpServletRequest allowed = request();
+        allowed.setAttribute(
+                "jakarta.servlet.request.X509Certificate",
+                new X509Certificate[]{certificate(List.of(List.of(6, BFF_PRINCIPAL)))});
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(allowed, new MockHttpServletResponse(), chain);
+
+        assertThat(chain.getRequest()).isSameAs(allowed);
+
+        MockHttpServletRequest ambiguous = request();
+        ambiguous.setAttribute(
+                "jakarta.servlet.request.X509Certificate",
+                new X509Certificate[]{certificate(List.of(
+                        List.of(6, BFF_PRINCIPAL),
+                        List.of(6, "spiffe://meetingmind.internal/ns/meetingmind/sa/attacker")))});
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(ambiguous, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    private X509Certificate certificate(List<List<?>> subjectAlternativeNames) throws Exception {
+        X509Certificate certificate = mock(X509Certificate.class);
+        when(certificate.getSubjectAlternativeNames()).thenReturn(subjectAlternativeNames);
+        return certificate;
     }
 
     private MockHttpServletRequest request() {

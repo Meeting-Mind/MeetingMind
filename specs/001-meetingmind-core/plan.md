@@ -708,3 +708,173 @@ M037은 M033에서 연결한 회의 목록·생성·수정·삭제에 상세 조
 4. 회의/보고서 영속화 추가
 5. Meeting AI 서버 컨텍스트 조립을 backend 권한 필터 뒤로 이동
 6. Project Knowledge와 권한 기반 RAG 추가
+
+## M152 NonProd V2 AI Container Security Remediation
+
+### Objective
+
+NonProd V2 AI ARM64 child image의 ECR basic scan을 `COMPLETE`, `CRITICAL=0`,
+`HIGH=0`으로 만든다. 애플리케이션 코드와 Python requirements는 실제 호환성 또는
+취약점 근거가 생기기 전까지 변경하지 않는다.
+
+### Current Evidence
+
+- 기존 실제 tag는 `fa44a0b57558f8cf9fdde1c4fb07b6e0edec0fe3`이고, ARM64/Linux
+  child `sha256:aac696f91b0b6a0c8ee3b323173ade44537a90f1ebd9628d8f80a58859424300`
+  scan은 CRITICAL 4/HIGH 8을 반환했다.
+- Bookworm 후보 ARM64 child
+  `sha256:2f8aa4212b745b4259b55f4e4ebfc3881aada8b85f4ded0469b5eb306ebe5161`
+  ECR scan도 CRITICAL 3/HIGH 5/MEDIUM 4/LOW 1로 실패했다.
+- Bookworm CRITICAL은 source package `perl`의 `CVE-2026-57433`,
+  `CVE-2026-12087`, `CVE-2026-13221`이다. 설치된 `perl-base`,
+  `coreutils`, `util-linux`는 Debian Essential/required package라서
+  강제 purge를 지원 가능한 해결책으로 사용하지 않는다.
+- Debian Bookworm security repository에는 위 CRITICAL을 모두 해결하는
+  fixed Perl package가 없다. `apt-get update/upgrade`로 해결되지 않는다.
+- `CVE-2026-13221`은 upstream note상 Perl 5.37.10에서 도입됐지만 ECR은
+  Perl 5.36 package를 finding으로 반환하므로, 오탐 여부와 무관하게 package
+  기반 ECR gate는 통과하지 못한다.
+- 공식 `python:3.12.13-alpine3.24` base의 Trivy 전체 scan은
+  CRITICAL 0/HIGH 0이며, 현재 requirements의 ARM64 musllinux wheel을
+  FastAPI, psycopg-binary, pydantic-core, uvloop, httptools, PyYAML,
+  watchfiles, websockets까지 모두 확인했다.
+
+### Decision
+
+- CRITICAL/HIGH 0건을 우선하므로 Debian slim을 유지하지 않고, Amazon Inspector가
+  지원하는 Alpine 3.24 기반 공식 Python image로 전환한다.
+- target base index:
+  `python:3.12.13-alpine3.24@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df`
+- target base Linux/ARM64 child:
+  `sha256:900229622a576409d52f7a66b24cf441415a828d7e503b0107bf56452a4e44ac`
+- `ai/onprem_poc_run.sh`와 `ai/onprem_poc_prepare_eval_db.sh`가 Bash 문법을
+  사용하므로 runtime에 `bash`만 `apk add --no-cache`로 추가한다.
+- Alpine user 생성은 `addgroup -S`와 `adduser -S -G`를 사용한다.
+- `ai/requirements.txt`는 변경하지 않는다. base의 pip MEDIUM/LOW는
+  HIGH/CRITICAL remediation과 분리하며, 전체 finding 0이 별도 정책으로
+  확정될 때만 runtime pip 제거를 후속 판단한다.
+- ECR push는 사용자 명시 승인 전에는 실행하지 않는다.
+- ECS task definition/runtime 변경, Terraform apply, `enable_runtime_services`,
+  `runtime_gates_acknowledged` 변경은 M152 범위에서 실행하지 않는다. ECR 승인은
+  이 금지를 확장하지 않으며, 별도 후속 task와 별도 사용자 요청이 필요하다.
+
+### File Ownership and Change Boundary
+
+- 작업 인원: 사용자 1명, Codex 1개 agent, 병렬 workstream 없음.
+- 구현 owner: `ai/Dockerfile`.
+- CI gate owner: `.github/workflows/ci.yml`의 AI image scan command만.
+- 기록 owner: `specs/001-meetingmind-core/{plan,tasks,implement}.md`와
+  `.specify/memory/session-handoff.local.md`.
+- 변경 금지: `ai/app/**`, Backend/Frontend/BFF/STT, Terraform,
+  ECS runtime 설정, secrets, `ai/requirements.txt`.
+- 같은 파일을 다른 agent와 동시에 수정하지 않는다.
+
+### Target Dockerfile Shape
+
+```dockerfile
+FROM python:3.12.13-alpine3.24@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apk add --no-cache bash \
+    && addgroup -S meetingmind \
+    && adduser -S -G meetingmind -h /app meetingmind
+```
+
+나머지 `WORKDIR`, `COPY`, pip install, non-root `USER`, `CMD`는 기존 경계를
+유지한다. 설치 package를 늘려 build 문제를 가리는 방식은 사용하지 않는다.
+
+### Implementation Order
+
+1. `git status --short`와 현재 `ai/Dockerfile` diff를 다시 확인한다.
+2. base와 user/package 생성 command만 위 target shape로 수정한다.
+3. BuildKit Dockerfile check를 실행한다.
+4. cache/provenance 없는 Linux/ARM64 단일 child image를 로컬 build한다.
+5. OS/architecture/non-root/Perl 부재와 Bash 존재를 확인한다.
+6. ARM64 musllinux native module import, compileall, AI 전체 unit test,
+   on-prem Bash wrapper test를 실행한다.
+7. Trivy를 `--ignore-unfixed` 없이 실행해 CRITICAL/HIGH 0을 확인한다.
+8. `.github/workflows/ci.yml`의 AI scan만 `--ignore-unfixed` 없는
+   HIGH/CRITICAL gate로 강화하고 다른 image scan 정책은 이번 범위에서 유지한다.
+9. `git diff --check`, 변경 범위, image size/digest를 기록한다.
+10. 사용자 승인 없이는 멈춘다. 승인 후에만 새 immutable tag로 single ARM64
+    manifest를 ECR에 push하고 child digest scan을 확인한다.
+11. ECR 결과가 0/0일 때 T437/T438과 `implement.md`를 완료 처리한다.
+
+### Local Verification Commands
+
+```bash
+docker build --check --platform linux/arm64 ai
+
+docker build \
+  --platform linux/arm64 \
+  --provenance=false \
+  --no-cache \
+  --tag meetingmind-ai:security-alpine \
+  ai
+
+docker image inspect meetingmind-ai:security-alpine \
+  --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} size={{.Size}} user={{.Config.User}}'
+
+docker run --rm --platform linux/arm64 meetingmind-ai:security-alpine \
+  sh -c 'python --version; cat /etc/os-release; id; command -v bash; ! command -v perl'
+
+docker run --rm --platform linux/arm64 meetingmind-ai:security-alpine \
+  python -c 'import psycopg, uvloop, httptools, pydantic_core, yaml'
+
+docker run --rm --platform linux/arm64 meetingmind-ai:security-alpine \
+  python -m compileall app onprem_poc_smoke.py onprem_poc_validate.py
+
+docker run --rm --platform linux/arm64 \
+  --volume "$PWD/ai:/workspace/MeetingMind/ai:ro" \
+  --volume "$PWD/frontend/src:/workspace/MeetingMind/frontend/src:ro" \
+  --volume "$PWD/compose.local.yml:/workspace/MeetingMind/compose.local.yml:ro" \
+  --workdir /workspace/MeetingMind/ai \
+  meetingmind-ai:security-alpine \
+  python -m unittest discover -s tests -v
+
+trivy image \
+  --exit-code 1 \
+  --no-progress \
+  --scanners vuln \
+  --severity HIGH,CRITICAL \
+  meetingmind-ai:security-alpine
+
+git diff --check
+```
+
+### ECR User-Approval Gate
+
+- 새 tag는 수정 commit의 full SHA를 사용한다. 기존
+  `fa44a0b57558f8cf9fdde1c4fb07b6e0edec0fe3`를 덮어쓰지 않는다.
+- `--provenance=false` single-platform image를 push해 tag digest 자체가
+  Linux/ARM64 child digest가 되도록 한다.
+- push 전 로컬 Trivy 대상 image와 push 대상 image ID가 같은지 확인한다.
+- scan-on-push 후 `describe-image-scan-findings`는 tag가 아니라 returned child
+  digest로 조회한다.
+- `status=COMPLETE`, CRITICAL/HIGH key 부재 또는 0, 애플리케이션 smoke 성공이
+  모두 충족되기 전에는 ECS runtime gate를 진행하지 않는다.
+
+### Acceptance Criteria
+
+- Dockerfile check warning 0.
+- final image `linux/arm64`, Python 3.12.13, Alpine 3.24, non-root
+  `meetingmind`.
+- `bash` 존재, `perl` 미포함.
+- 현재 requirements 변경 없이 native module import 성공.
+- AI unit 189건 기준 회귀 없음. 외부 DB/OpenAI 조건부 test는 기존 skip만 허용.
+- Trivy 전체 HIGH/CRITICAL scan 0건. `--ignore-unfixed` 사용 금지.
+- ECR ARM64 child scan `COMPLETE`, CRITICAL 0, HIGH 0.
+- secret 출력/기록 없음, Terraform/ECS/runtime 변경 없음.
+
+### Rollback and Fallback
+
+- ECS runtime을 변경하지 않으므로 local/ECR candidate 실패 시 배포 rollback은
+  필요 없다. candidate tag만 사용하지 않는다.
+- Alpine 호환성 문제가 생기면 임의 package 추가 전에 실패 package와 wheel/runtime
+  원인을 기록한다.
+- Alpine으로 해결할 수 없고 Debian 유지가 필수라면 즉시 구현을 중단한다.
+  Bookworm security update가 나오기 전에는 CRITICAL/HIGH 0을 만들 수 없으므로
+  vulnerability exception 또는 다른 minimal runtime 선택을 사용자 결정으로 올린다.

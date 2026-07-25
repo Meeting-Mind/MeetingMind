@@ -2,6 +2,7 @@ package com.meetingmind.demo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.demo.config.InternalHttpClientFactory;
 import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.ProjectAiGatewayChatRequest;
 import java.io.IOException;
@@ -29,14 +30,15 @@ public class HttpProjectAiGatewayClient implements ProjectAiGatewayClient {
     @Autowired
     public HttpProjectAiGatewayClient(
             ObjectMapper objectMapper,
+            InternalHttpClientFactory internalHttpClientFactory,
             @Value("${meetingmind.ai.base-url:http://localhost:8000}") String aiBaseUrl,
             @Value("${meetingmind.ai.service-token:}") String serviceToken,
             @Value("${meetingmind.ai.guard.max-concurrent:16}") int maxConcurrent,
             @Value("${meetingmind.ai.guard.failure-threshold:3}") int failureThreshold,
             @Value("${meetingmind.ai.guard.open-duration:30s}") Duration openDuration
     ) {
-        this(
-                HttpClient.newHttpClient(),
+this(
+                internalHttpClientFactory.newBuilder().build(),
                 objectMapper,
                 aiBaseUrl,
                 serviceToken,
