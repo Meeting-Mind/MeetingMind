@@ -338,7 +338,17 @@ class JdbcWorkspaceStoreIntegrationTest {
         MeetingTranscript processing = service.startMeetingTranscript(owner.id(), meeting.meeting().id(), "clova-nest");
         assertThat(processing.status()).isEqualTo(TranscriptStatus.PROCESSING);
         assertThat(processing.retentionUntil()).isNotNull();
+
+        // 전사 관리 권한은 `88effad`에서 host 전용에서 회의 read 권한으로 완화됐다.
+        // 따라서 참가자인 VIEWER는 권한으로 막히지 않고 중복 시작만 막힌다.
         assertThatThrownBy(() -> service.startMeetingTranscript(viewer.id(), meeting.meeting().id(), "clova-nest"))
+                .isInstanceOf(AuthorizationException.class)
+                .extracting("code")
+                .isEqualTo("TRANSCRIPTION_ALREADY_PROCESSING");
+
+        // 완화된 정책이 회의 밖 사용자까지 열어주지는 않는다는 음성 검증은 유지한다.
+        User outsider = store.saveUser(user("transcript-outsider-" + suffix, now));
+        assertThatThrownBy(() -> service.startMeetingTranscript(outsider.id(), meeting.meeting().id(), "clova-nest"))
                 .isInstanceOf(AuthorizationException.class)
                 .extracting("code")
                 .isEqualTo("MEETING_ACCESS_DENIED");

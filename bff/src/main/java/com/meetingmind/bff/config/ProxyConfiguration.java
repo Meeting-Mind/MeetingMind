@@ -1,6 +1,7 @@
 package com.meetingmind.bff.config;
 
 import com.meetingmind.bff.proxy.DownstreamHttpClient;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -14,10 +15,12 @@ public class ProxyConfiguration {
     DownstreamHttpClient downstreamHttpClient(
             DownstreamProxyProperties properties,
             Clock tokenVaultClock,
-            InternalHttpClientFactory internalHttpClientFactory) {
+            InternalHttpClientFactory internalHttpClientFactory,
+            MeterRegistry meterRegistry) {
         return new DownstreamHttpClient(
                 properties,
                 tokenVaultClock,
-                internalHttpClientFactory);
+                internalHttpClientFactory,
+                meterRegistry);
     }
 }

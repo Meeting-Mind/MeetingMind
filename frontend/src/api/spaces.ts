@@ -14,6 +14,7 @@ import type {
   ResolveInvitationRequest,
   ResolveSpaceInvitationResponse,
   SpaceDetail,
+  SpaceAiUsageResponse,
   SpaceListResponse,
   SpaceMembersResponse,
   SpaceInvitationListResponse,
@@ -71,6 +72,17 @@ export async function leaveSpace(_session: AuthSession, spaceId: string): Promis
 
 export async function fetchSpaceDetail(_session: AuthSession, spaceId: string): Promise<SpaceDetail> {
   return requestJson<SpaceDetail>(`/api/v1/spaces/${encodeURIComponent(spaceId)}`, { headers: undefined });
+}
+
+export async function fetchSpaceAiUsage(
+  _session: AuthSession,
+  spaceId: string,
+  window: "day" | "week" | "month" = "month"
+): Promise<SpaceAiUsageResponse> {
+  return requestJson<SpaceAiUsageResponse>(
+    `/api/v1/spaces/${encodeURIComponent(spaceId)}/ai/usage?window=${encodeURIComponent(window)}`,
+    { headers: undefined }
+  );
 }
 
 export async function fetchSpaceMembers(_session: AuthSession, spaceId: string): Promise<SpaceMembersResponse> {

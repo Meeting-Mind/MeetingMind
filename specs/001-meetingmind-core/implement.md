@@ -2083,6 +2083,113 @@
 - 변경 결정: S3 연동은 폐기하고 로컬 파일 저장소(`MEETINGMIND_IMAGE_UPLOAD_DIR`, 기본 `.local-uploads/images`)를 사용한다. 이미지는 `/api/v1/assets/images/{profiles|spaces}/{ownerId}/{filename}` 경로로 제공하며 BFF proxy를 경유한다.
 - 검증: `cd backend && ./gradlew compileJava`, `./gradlew test --tests com.meetingmind.demo.controller.SpaceControllerTest`, `cd bff && ./gradlew compileJava && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest`, `cd frontend && npm run build`, `git diff --check`를 통과했다. Frontend는 기존 Vite chunk-size warning만 남았다.
 
+## M043 AI Reliability Harness and Operational Verification Planning
+
+- 목표: 요구사항 정의서 기준으로 AI 기능의 운영 검증 범위를 먼저 고정한다. 범위는 Meeting AI, Project AI, AI Report, Task extraction, Terms Dictionary, RAG retrieval, STT/LiveKit smoke, 외부 provider 장애 대응, Prometheus/Grafana 관측이다.
+- 변경 파일: `specs/001-meetingmind-core/ai-harness-strategy.md`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 결정: AI 하네스는 권한 선필터, scope envelope, evidence gate, citation validation, prompt injection guard, token budget, provider failure normalization, log redaction을 독립 검증 단위로 둔다. STT/LiveKit/OpenAI/RAG 실제 smoke는 provider credential이 필요한 opt-in 검증으로 분리한다.
+- 현재 근거: `test-matrix.md`의 SR-005, SR-007, SR-008은 STT/RAG/provider 품질의 기존 검증 근거로 유지한다. BFF `DownstreamGuard`, Backend/Core `AiGatewayGuard`, BFF/Backend Prometheus endpoint, AI `/metrics` 기준선은 코드와 테스트로 확인됐다.
+- 남은 작업: AH-001~AH-014 자동 테스트, SMK-003~SMK-005 smoke, 외부 API provider failure execution matrix, STT gateway/AI provider worker guard 보강, Grafana dashboard/provisioning 추가.
+- 검증: 문서 전용 변경으로 backend/frontend/ai build는 실행하지 않는다. Markdown/diff sanity만 실행한다.
+
+## T435.1 AI Harness Unit Coverage
+
+- 변경 파일: `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: Project AI에서 `allowedMeetingIds=[]`가 전체 회의 허용으로 확장되지 않고 Postgres RAG request에 빈 tuple로 전달되는지 테스트했다. source context limit은 지정 개수만 유지하고 순서를 바꾸지 않는지 검증했다. supported 응답 관측 로그가 질문 원문, source 원문, answer 원문을 포함하지 않는지도 추가로 고정했다.
+- 범위: AI runtime behavior는 변경하지 않고 기존 harness 정책의 회귀 테스트만 추가했다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai` 71건 통과.
+
+## T435.2 AI Harness Scope Rejection and Report Context Limit
+
+- 변경 파일: `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: Project AI 요청에서 `allowedMeetingIds=[]`인데 회의 source가 직접 제공되면 `AI_CONTEXT_FORBIDDEN`으로 거부되는지 테스트했다. AI Report 생성은 provider에 전달하는 untrusted source context를 첫 12개 source로 제한하는지 검증했다.
+- 범위: AI runtime behavior는 변경하지 않고, 빈 회의 권한 범위와 report context budget이 후속 변경으로 넓어지지 않도록 회귀 테스트만 추가했다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai` 73건 통과.
+
+## T436.1 Operational Smoke Runbook
+
+- 변경 파일: `specs/001-meetingmind-core/operational-smoke-runbook.md`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: STT/LiveKit/AI Report/RAG smoke를 기본 local deterministic check와 provider opt-in check로 분리했다. AI unit/on-prem HTTP smoke, PostgreSQL-backed STT/report/AI service tests, `RUN_CLOVA_STT_SMOKE=true` provider smoke, AI on-prem/OpenAI-compatible final smoke, product E2E manual flow를 같은 runbook에 정리했다.
+- 결정: provider credential, PCM sample, public callback URL, local OpenAI-compatible provider endpoint는 기본 CI 요구사항이 아니다. 실제 provider smoke는 opt-in으로만 실행하고, 실행 결과는 runbook의 execution record template에 기록한다.
+- 안전 기준: provider failure는 normalized error와 trace ID 중심으로 기록하고, prompt/STT/report/answer/API key/LiveKit token 원문은 로그나 smoke output에 남기지 않는다. `allowedMeetingIds=[]`일 때 meeting source를 검색하지 않는 기존 AI harness 기준도 smoke failure handling rule에 연결했다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_http_smoke`는 현재 provider HTTP env가 없어 1건 skip으로 정상 종료했다. `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_smoke tests.test_onprem_poc_validate tests.test_onprem_poc_run_script` 69건 통과, `cd ai && ./.venv/bin/python -m compileall app onprem_poc_smoke.py onprem_poc_validate.py tests/test_onprem_poc_smoke.py tests/test_onprem_poc_validate.py tests/test_onprem_poc_run_script.py` 통과, `git diff --check -- specs/001-meetingmind-core/operational-smoke-runbook.md specs/001-meetingmind-core/test-matrix.md specs/001-meetingmind-core/tasks.md specs/001-meetingmind-core/implement.md` 통과.
+
+## T437 External API Reliability Policy
+
+- 변경 파일: `specs/001-meetingmind-core/contracts/external-reliability.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: Google OAuth, Auth JWKS, LiveKit, Soniox/OpenAI/Clova STT, Backend/Core -> AI, AI text generation/embedding provider, PostgreSQL/pgvector, Redis, SMTP에 대한 timeout, retry 허용 범위, fallback, 사용자 메시지, 로그 금지 항목을 표로 고정했다.
+- 근거: BFF는 `DownstreamGuard`와 `DownstreamHttpClient`로 bulkhead/circuit open/half-open probe를 이미 사용한다. Backend/Core는 `application.yml`의 `jwks-request-timeout=2s`, `HttpMeetingAiGatewayClient`/`HttpProjectAiGatewayClient`/`HttpKnowledgeGraphGatewayClient`의 `30s`, `HttpReportAiGatewayClient`/`HttpTaskAiGatewayClient`의 `60s`, `HttpTranscriptionGateway`의 `10s`, AI `text_generation_provider.py` timeout 설정을 기준으로 문서를 작성했다.
+- 결정: 근거 없음/저품질은 `200 unsupported=true`, provider timeout/connection/malformed output은 `503 AI_PROVIDER_UNAVAILABLE`로 정규화한다. mutation은 자동 retry하지 않고, background embedding job만 backoff retry를 허용한다. provider 원문 오류, prompt, transcript, answer, token, secret은 사용자 응답과 로그에 노출하지 않는다.
+- 후속 gap: Prometheus/Grafana 노출과 dashboard는 `T439` 후속이다.
+- 검증: `git diff --check -- specs/001-meetingmind-core/contracts/external-reliability.md specs/001-meetingmind-core/tasks.md specs/001-meetingmind-core/test-matrix.md specs/001-meetingmind-core/implement.md` 통과.
+
+## T438 Backend/Core AI Gateway Guard
+
+- 변경 파일: `backend/src/main/java/com/meetingmind/demo/service/AiGatewayGuard.java`, `backend/src/main/java/com/meetingmind/demo/service/AiGatewayGuardPolicy.java`, `backend/src/main/java/com/meetingmind/demo/service/AiGatewayGuardRejectedException.java`, `backend/src/main/java/com/meetingmind/demo/service/HttpMeetingAiGatewayClient.java`, `backend/src/main/java/com/meetingmind/demo/service/HttpProjectAiGatewayClient.java`, `backend/src/main/java/com/meetingmind/demo/service/HttpReportAiGatewayClient.java`, `backend/src/main/java/com/meetingmind/demo/service/HttpTaskAiGatewayClient.java`, `backend/src/main/java/com/meetingmind/demo/service/HttpKnowledgeGraphGatewayClient.java`, `backend/src/main/resources/application.yml`, `backend/src/test/java/com/meetingmind/demo/service/AiGatewayGuardTest.java`, `backend/src/test/java/com/meetingmind/demo/service/HttpMeetingAiGatewayClientTest.java`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: Backend/Core -> AI internal HTTP 경계에 공통 `AiGatewayGuard`를 추가했다. guard는 semaphore bulkhead, 연속 실패 임계치, open duration, half-open probe를 제공한다. Meeting/Project/Report/Task/Knowledge Graph gateway client는 같은 정책 키를 사용하고, 회로가 열린 경우에도 기존 `AiGatewayException` 경로로 정규화해 상위 service의 `503 AI_PROVIDER_UNAVAILABLE` 또는 `503 KNOWLEDGE_GRAPH_UNAVAILABLE` 매핑을 유지한다.
+- 설정: `meetingmind.ai.guard.max-concurrent`, `meetingmind.ai.guard.failure-threshold`, `meetingmind.ai.guard.open-duration` 기본값 `16`, `3`, `30s`를 추가했다.
+- 검증: `cd backend && ./gradlew test --tests com.meetingmind.demo.service.AiGatewayGuardTest --tests com.meetingmind.demo.service.HttpMeetingAiGatewayClientTest` 통과.
+- 남은 제약: 이번 범위는 Backend/Core -> AI gateway 경계만 보호한다. STT gateway bulkhead/circuit과 AI service 내부 provider worker 분리는 별도 작업으로 남는다.
+
+## T439 Prometheus and Observability Baseline
+
+- 변경 파일: `bff/build.gradle`, `bff/src/main/resources/application.yml`, `bff/src/main/java/com/meetingmind/bff/observability/DownstreamGuardMetrics.java`, `bff/src/main/java/com/meetingmind/bff/config/ProxyConfiguration.java`, `bff/src/main/java/com/meetingmind/bff/proxy/DownstreamGuard.java`, `bff/src/main/java/com/meetingmind/bff/proxy/DownstreamHttpClient.java`, `bff/src/test/java/com/meetingmind/bff/BffHealthEndpointTest.java`, `bff/src/test/java/com/meetingmind/bff/proxy/DownstreamGuardTest.java`, `backend/build.gradle`, `backend/src/main/resources/application.yml`, `backend/src/test/java/com/meetingmind/demo/BackendActuatorEndpointTest.java`, `ai/requirements.txt`, `ai/app/observability.py`, `ai/app/repository.py`, `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/contracts/observability.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: BFF와 Backend에 Prometheus registry와 endpoint exposure를 추가했다. BFF `DownstreamGuard`는 service별 rejection/opened/open gauge를 기록한다. AI는 `/metrics` endpoint를 노출하고 endpoint duration/source count, provider duration/token usage/failure, RAG retrieval duration/result count, embedding queue gauge를 기록한다.
+- 기준: Grafana panel 기준은 `contracts/observability.md`에 고정했다. STT/LiveKit custom metric은 이번 범위에서 패널 요구만 정의하고 구현은 후속으로 남겼다.
+- 보안: metric label과 로그에 prompt, transcript 원문, answer 원문, secret, token, DSN을 넣지 않는다.
+- 남은 제약: Backend STT/LiveKit custom metric, Grafana dashboard json/provisioning, Prometheus scrape config는 아직 미구현이다.
+- 후속 UI 결정: Space Overview의 `Knowledge Indexed`는 운영 의미가 약하므로 화면 지표에서 제외하고, Space 단위 `AI Usage/quota` 지표로 대체한다. 이 값은 frontend 계산으로 만들지 않고 Backend/AI 집계 API로 노출한다. 최소 필드는 `limit`, `totalRequests`, `totalInputTokens`, `totalOutputTokens`, `usagePercent`, `meetingAiRequests`, `projectAiRequests`, `reportAiRequests`다.
+
+## M043 Requirement Matrix Tightening
+
+- 변경 파일: `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: 기존 `Authz and LiveKit Access` 중심 문서를 요구사항 기반 전사 검증 매트릭스로 재정렬했다. 문서 앞단에 현재 상태 표를 추가해 권한, AI scope, STT/LiveKit smoke, AI Report -> Knowledge, guest/ACL negative, 외부 API resilience, observability를 한 번에 읽을 수 있게 했다.
+- 결정: 현재 완료로 강하게 말할 수 있는 범위는 `권한/LiveKit access 자동화`, `AI harness 일부 자동화`, `Prometheus endpoint 기준선`, `external reliability policy 문서화`까지다. `SMK-003~SMK-005`, `AH 전항목 자동화`, `Grafana provisioning`, `STT/LiveKit custom metric`은 아직 완료로 표기하지 않는다.
+- 이유: 지금 필요한 것은 새 smoke를 과장해서 완료 처리하는 것이 아니라, 요구사항 정의서 기준으로 어디까지 자동화되었고 어디가 수동/미완료인지 흔들림 없이 보이게 만드는 것이다.
+- 검증: `git diff --check -- specs/001-meetingmind-core/test-matrix.md specs/001-meetingmind-core/implement.md` 통과.
+
+## T435.3 AI Harness Provider Contract Drift Fix
+
+- 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: AI unittest가 오래된 2-value provider mock `(text, model)`과 현재 runtime 3-value contract `(text, model, usage)`가 섞여 있던 문제를 정리했다. `ai/app/main.py`는 forward-ref union import 오류 없이 테스트에서 import 가능하도록 정리했고, `ai/tests/test_meeting_ai.py`는 report/task/project/meeting harness mock을 모두 최신 contract에 맞췄다.
+- 원인: provider usage metric이 runtime에는 이미 추가되었는데, 테스트 fixture와 일부 응답 모델 annotation이 이전 계약에 머물러 있었다. 그 결과 unittest가 실제 harness 검증 전에 import/runtime unpack error로 먼저 깨졌다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai` 76건 통과. `AH-008`, report untrusted context, task context limit, provider error normalization, log redaction 회귀가 함께 검증된다.
+
+## T436.2 Local Deterministic Smoke Re-run
+
+- 변경 파일: `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: `operational-smoke-runbook.md` 기준으로 provider key 없이 돌릴 수 있는 deterministic smoke를 다시 실행해 현재 기준선을 확인했다.
+- 실행 결과:
+  - `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai` -> 76건 통과
+  - `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_http_smoke` -> 1건 skip, 정상 종료
+  - `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.MeetingReportLifecycleServiceTest` -> 통과
+  - `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.ProjectAiServiceTest` -> 통과
+- 판단: `SMK-001` 로컬 자동화 기준선은 유지된다. `SMK-002~SMK-005`는 여전히 provider/env/browser 수동 검증이 필요하므로 완료 처리하지 않는다.
+
+## V119.1 Requirement Verification Sync
+
+- 변경 파일: `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/operational-smoke-runbook.md`, `specs/001-meetingmind-core/contracts/external-reliability.md`, `specs/001-meetingmind-core/tasks.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: 요구사항 ID별 상태표를 현재 실행 결과에 맞게 다시 맞췄다. `SMK-001`은 2026-07-25 local deterministic PASS로 기록했고, `SMK-002~SMK-005`는 provider/env/browser 의존성이 남아 있는 opt-in/manual 영역으로 유지했다. 외부 API 장애 대응 정책은 문서 규칙만 남기지 않고 BFF/Backend/AI의 실제 runtime class와 test 파일까지 매핑했다.
+- 판단: 지금 단계에서 완료라고 말할 수 있는 것은 문서/자동화 기준선 정합성이다. 실제 운영 smoke 전부 완료는 아니다. 따라서 `V119` 본체는 계속 pending이고, 문서 동기화 하위 작업만 완료 처리했다.
+- 검증: `git diff --check -- specs/001-meetingmind-core/test-matrix.md specs/001-meetingmind-core/operational-smoke-runbook.md specs/001-meetingmind-core/contracts/external-reliability.md specs/001-meetingmind-core/tasks.md specs/001-meetingmind-core/implement.md` 통과.
+
+## V119.2 Guard and Metrics Evidence Sync
+
+- 변경 파일: `specs/001-meetingmind-core/test-matrix.md`, `specs/001-meetingmind-core/contracts/external-reliability.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: 문서가 여전히 `T438` 이전 계획 상태를 일부 유지하고 있던 부분을 정리했다. Backend/Core -> AI guard가 이미 runtime에 반영되어 있다는 점과, BFF/Backend Prometheus endpoint 검증이 실제 테스트로 통과한다는 점을 현재 상태표와 정책 문서에 다시 연결했다.
+- 검증:
+  - `cd backend && ./gradlew test --tests com.meetingmind.demo.service.AiGatewayGuardTest --tests com.meetingmind.demo.BackendActuatorEndpointTest`
+  - `cd bff && ./gradlew test --tests com.meetingmind.bff.BffHealthEndpointTest --tests com.meetingmind.bff.proxy.DownstreamGuardTest`
+  - `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`
+- 판단: 이제 남은 큰 검증 공백은 `SMK-002~005` 실행 증적, `AH-009` token budget 자동화, Grafana/STT-LiveKit 관측 보강이다. 문서 기준선과 구현 사이의 드리프트는 이 범위에서 정리됐다.
+
+## V119.3 Local Runtime Smoke Entry Fix
+
+- 변경 파일: `scripts/run-ai.sh`, `scripts/run-local-stack.sh`, `specs/001-meetingmind-core/operational-smoke-runbook.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: provider smoke 진입 전제였던 local runtime 실행 경로를 정리했다. `scripts/run-ai.sh`는 project virtualenv의 `ai/.venv/bin/uvicorn`을 우선 사용하도록 바꿨고, `scripts/run-local-stack.sh`는 AI까지 같이 올리도록 보완했다.
+- 원인: 기존 AI 실행 스크립트는 system `python3 -m uvicorn`에 의존했다. 이 상태에서는 개발 환경에 따라 AI 서버가 뜨지 않거나, 8000 포트에 남은 stale listener 때문에 smoke가 false negative로 보일 수 있었다.
+- 판단: 이 수정은 `SMK-002~005` 완료가 아니라 smoke 진입 조건 정리다. 남은 것은 실제 provider/browser/manual 증적 채우기다.
+
 ## M152 NonProd V2 AI Container Security Remediation
 
 - 원인: `ai/Dockerfile`의 가변 `python:3.12-slim`은 현재 Python 3.12.13 / Debian 13.6 trixie로 해석된다. 실제 NonProd V2 ARM64 tag의 OS 패키지는 Debian 저장소 최신 버전이었지만 Amazon Inspector의 ECR 지원 Debian 범위는 11/12라서 trixie가 지원 경계 밖에 있었다. ECR finding의 `glibc`, `perl`, `sqlite3`, `util-linux`, `diffutils`는 OS package이고 FastAPI/Starlette/Uvicorn/psycopg가 원인이 아니었다.
@@ -2099,3 +2206,46 @@
 - T437 ECR 결과: 사용자 승인 후 local image `meetingmind-ai:security-alpine`을 ECR `meetingmind-nonprod-v2-ai`에 immutable tag `c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`로 push했다. 수정 commit을 만들지 않은 상태였으므로 tag는 push 대상 single ARM64 image의 full config/image digest를 사용했다. ECR returned manifest/child digest는 로컬과 같은 `sha256:c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`이고 media type은 `application/vnd.docker.container.image.v1+json`이다. ECR reported image size는 36,485,437 bytes다.
 - T437 ECR scan: `describe-image-scan-findings`를 tag가 아닌 returned child digest로 조회했으며 `status=COMPLETE`, `description=The scan was completed successfully.`, `findings=[]`, `findingSeverityCounts={}`를 반환했다. 따라서 ECR basic scan 기준 CRITICAL/HIGH 0이며 MEDIUM/LOW도 0이다.
 - T438 closeout: T434~T438을 완료 처리했다. 로컬 Trivy는 `--ignore-unfixed` 없이 HIGH/CRITICAL 0, ECR child scan은 COMPLETE/0/0으로 일치했다. secret 출력/기록은 없었고 `ai/app/**`, `ai/requirements.txt`, Backend/Frontend/BFF/STT, Terraform, ECS/runtime 설정은 변경하지 않았다. 기존 사용자 변경은 보존했고 commit/push는 수행하지 않았다.
+
+## V119.4 SMK-002 Local Tier Evidence and Merge Regression Fix
+
+- 변경 파일: `backend/src/main/resources/application.yml`, `backend/src/test/java/com/meetingmind/demo/service/SttTranscriptFlowIntegrationTest.java`, `scripts/run-local-stack.sh`, `specs/001-meetingmind-core/operational-smoke-runbook.md`, `specs/001-meetingmind-core/implement.md`.
+- 배경: `SMK-002` 진입을 준비하면서 dev 병합 직후의 backend 기동 경로와 STT 전사 지속성 검증을 실제로 실행했다. 문서상 근거로 지정돼 있던 검증이 실제로는 한 번도 실행된 적 없음을 확인했다.
+- 회귀 1 (backend 기동 불가): dev 병합(`1b4dffc`)이 `backend/src/main/resources/application.yml`에 `management:` 블록을 중복 생성했다. dev는 파일 상단에 `include: health`만 있는 블록을 추가했고, 이 브랜치는 `T439`에서 하단에 `include: health,info,prometheus`와 `endpoints.access.default`, `prometheus.access`를 포함한 블록을 갖고 있었다. 두 삽입 위치가 겹치지 않아 git이 충돌 없이 양쪽을 모두 남겼고, 같은 document 안에 같은 key가 두 번 생겨 SnakeYAML `DuplicateKeyException`으로 Spring context 자체가 로드되지 않았다. dev 블록은 이 브랜치 블록의 진부분집합이므로 상단 dev 블록을 제거하고 `T439` 블록만 남겼다.
+- 회귀 1 발견 지연 이유: 8080에 떠 있던 backend 프로세스는 병합 이전에 기동된 것이라 병합된 설정을 읽지 않았다. 따라서 실행 중인 서비스만 보면 정상으로 보였고, 새로 기동하는 순간에만 실패하는 상태였다.
+- 회귀 2 (SMK-002 근거 미실행): `SttTranscriptFlowIntegrationTest`는 `@Primary` `SttProvider` 후보가 둘이 되어 `NoUniqueBeanDefinitionException`으로 context 로드에 실패하는 상태였다. `ConfiguredSttProvider`가 `b327508`에서 `@Primary`를 얻었고 테스트도 fake를 `@Primary`로 등록했기 때문이다. 이 테스트는 `@EnabledIfEnvironmentVariable(CI_POSTGRES_URL)`로 게이트되어 있고 지금까지 그 env가 설정된 실행이 없었기 때문에 계속 skip으로 넘어가 깨진 사실이 드러나지 않았다. runbook은 이 테스트를 `SMK-002` local 근거로 지정하고 있었으므로, 해당 근거는 실제로 존재하지 않았다.
+- 회귀 2 수정 방식: 테스트 fake의 `@Primary`를 제거하고 `STT_PROVIDER=fake-clova` system property로 `ConfiguredSttProvider`가 fake를 선택하게 했다. `DotenvConfig.optional`이 system property를 최우선으로 읽으므로 운영과 같은 provider 선택 경로를 그대로 통과하며, `@Primary`를 우회하지 않는다.
+- `SMK-002` local tier 실행 결과 (실제 PostgreSQL, docker `meetingmind-postgres-local`, host port 5434):
+  - `SttTranscriptFlowIntegrationTest` -> 1건 실행/0 skip/통과. transcript `COMPLETED` 전이, segment 2건 순서 및 speaker 보존, `embedding_jobs`의 `TRANSCRIPT_COMPLETED` 1건 enqueue를 확인했다. enqueue는 `V12__finalize_vector_search_jobs.sql`의 `meeting_transcript_embedding_job_trigger`가 수행하므로 실제 DB trigger 경로까지 검증된다.
+  - `MeetingLiveKitTokenServiceTest` -> 5건 실행/0 skip/통과. LiveKit token 발급 시 room/identity/만료와 권한 거부 분기를 확인했다. 단 이는 mock 기반이므로 실제 LiveKit 서버 접속 근거는 아니다.
+  - `BackendActuatorEndpointTest` 2건, `CoreHealthEndpointTest` 1건 통과로 회귀 1 수정이 `T439` prometheus 노출과 dev가 추가한 health 검증을 동시에 만족함을 확인했다.
+- `run-local-stack.sh` 보완: runbook이 요구하던 "smoke 진입 전 포트 점유 확인"이 스크립트에 구현돼 있지 않았다. backend/ai/bff/frontend 포트를 기동 전에 모두 확인해 점유 시 점유 프로세스를 출력하고 중단하도록 했고, `nohup` 직후 생존 여부까지 확인해 포트 bind 실패나 venv 누락으로 즉시 죽은 경우를 성공으로 보고하지 않게 했다. 기존 프로세스를 자동으로 종료하지는 않는다.
+- 남은 `SMK-002` 공백: provider tier는 여전히 미완료다. runbook이 지정한 opt-in 검증은 `ClovaSttTranscriptSmokeIntegrationTest`(`RUN_CLOVA_STT_SMOKE`) 하나인데 이는 `clova-nest`를 대상으로 한다. 반면 실제 runtime 기본 provider는 `ConfiguredSttProvider`의 `soniox-realtime`이고 fallback은 `openai-realtime`이다. 현재 환경에는 Soniox/OpenAI 키가 있고 Clova 키는 없으므로, 문서가 지정한 근거는 실행할 수 없고 실제로 실행될 provider에는 대응 smoke가 없다. 이 불일치를 먼저 정리해야 `SMK-002`를 닫을 수 있다.
+- 판단: 이번 범위로 `SMK-002`의 local tier 근거는 처음으로 실제 확보됐고, 병합으로 들어온 기동 불가 회귀도 제거됐다. 그러나 LiveKit 실제 입장과 provider STT 전사 증적은 확보하지 못했으므로 `SMK-002` 본체와 `V119`는 계속 pending으로 둔다.
+- 검증: `cd backend && CI_POSTGRES_URL=... ./gradlew test --tests com.meetingmind.demo.domain.SttTranscriptFlowIntegrationTest --tests com.meetingmind.demo.domain.MeetingLiveKitTokenServiceTest --tests com.meetingmind.demo.BackendActuatorEndpointTest --tests com.meetingmind.demo.CoreHealthEndpointTest` 통과, `zsh -n scripts/run-local-stack.sh` 통과, 점유 포트 상태에서 preflight가 exit 1로 중단함을 확인했다.
+
+## T441/T442 Isolated Test DB and DB-gated Verification Recovery
+
+- 변경 파일: `scripts/run-db-tests.sh`, `backend/src/test/java/com/meetingmind/demo/MigrationIntegrationTest.java`, `backend/src/test/java/com/meetingmind/demo/domain/JdbcWorkspaceStoreIntegrationTest.java`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 계기: PR #56의 CI `PostgreSQL Migration` job이 실패했다. `V119.4`에서 세운 가설("skip 뒤에 깨진 검증이 더 있다")이 CI에서 먼저 확인된 것이다.
+- 회귀 1 (`MigrationIntegrationTest`): `7a3f70d`이 `V24__create_ai_usage_events.sql`을 추가했지만 이 테스트의 하드코딩된 단정을 갱신하지 않았다. `migrationsExecuted == 13`과 `containsExactly("1".."23")`이 V24로 각각 14와 "24" 포함으로 바뀌어야 했다. dev CI(79da6dd)는 V24가 없어 green이었으므로 이 브랜치가 유발한 회귀다. 로컬에서는 `CI_POSTGRES_URL` 미설정으로 계속 skip되어 드러나지 않았다.
+- 회귀 2 (`JdbcWorkspaceStoreIntegrationTest`): `completesTranscriptAndEnqueuesOneEmbeddingJob`이 회의 VIEWER의 전사 시작에 `MEETING_ACCESS_DENIED`를 기대했으나 실제는 `TRANSCRIPTION_ALREADY_PROCESSING`이었다. 원인은 `88effad`이 `requireTranscriptManagement`를 `requireParticipantManagement`에서 `requireReadAccess`로 의도적으로 완화한 것이다("Any active meeting participant may contribute to the shared transcript" 주석 명시). 즉 코드가 아니라 테스트가 stale했다. 이 테스트도 DB-gated로 어디서도 실행되지 않아 방치돼 있었다.
+- 회귀 2 수정 방식: 기대값만 바꾸면 음성 권한 커버리지가 사라지므로, VIEWER는 완화된 정책대로 `TRANSCRIPTION_ALREADY_PROCESSING`을 받도록 고치고, 회의 밖 사용자(outsider)로 `MEETING_ACCESS_DENIED` 음성 검증을 새로 추가해 권한 경계 자체는 계속 검증하게 했다.
+- `T441` 산출물: `scripts/run-db-tests.sh`. CI `PostgreSQL Migration` job과 같은 `pgvector/pgvector:0.8.2-pg16-bookworm`을 쓰고, dev용 `meetingmind-postgres-local`(5434)과 분리된 `meetingmind-postgres-test`(5435)를 사용한다. `MigrationIntegrationTest`가 pristine DB를 요구하므로(재실행 시 `expected: 10 but was: 0`) 매 실행마다 남은 연결을 끊고 database를 drop/create한다. 실수로 5434를 지정하면 거부한다.
+- `T442` 실행 결과: Backend 206건 실패 0, **skip 10건 -> 1건**. 이전까지 한 번도 실행되지 않던 DB-gated 9건(`MigrationIntegrationTest` 1, `JdbcWorkspaceStoreIntegrationTest` 4, `JdbcAuthStoreIntegrationTest` 3, `SttTranscriptFlowIntegrationTest` 1)이 모두 실행/통과한다. 남은 skip 1건은 provider credential이 필요한 `ClovaSttTranscriptSmokeIntegrationTest`이며 `T440` 범위다.
+- 판단: `V119.4`에서 제기한 "증적을 쌓기 전에 증적 경로가 실제로 도는지 먼저 확인한다"는 순서 원칙이 실제로 회귀 2건을 찾아냈다. 두 건 모두 skip 때문에 장기간 은폐돼 있었고, 하나는 이 브랜치가 유발한 것이었다. BFF skip 6건은 `T442.1`로 남긴다.
+- 검증: `./scripts/run-db-tests.sh --console=plain` -> Backend 206건/실패 0/skip 1. 스크립트 재실행 시에도 pristine 리셋으로 `MigrationIntegrationTest`가 반복 통과한다.
+
+## T442.2 Migration Test Brittleness Removal
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/MigrationIntegrationTest.java`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 계기: `T441/T442`에서 V24 누락으로 깨진 단정을 `13 -> 14`, 버전 목록에 `"24"` 추가로 고쳤는데, 이는 증상만 없앤 수정이었다. 기대 버전 목록이 하드코딩돼 있어 마이그레이션을 추가할 때마다 두 곳을 손으로 갱신해야 하고, 갱신을 잊으면 **정상적인 마이그레이션 추가가 CI 실패로 나타난다**. V24가 정확히 그 사례였다.
+- 구현: 기대 버전 목록을 classpath의 `db/migration` 실제 파일에서 유도하도록 바꿨다. `migrationsExecuted`는 `expectedVersions.size() - LEGACY_CHECKPOINT`로, 버전 목록 단정은 `containsExactlyElementsOf(expectedVersions)`로 바꿨다. `.target("10")` legacy 체크포인트는 마이그레이션이 append-only이므로 `LEGACY_CHECKPOINT` 상수로 고정 유지했다.
+- 동적 단정의 함정 차단: 파일 탐색이 실패해 빈 목록이 되면 단정들이 공허하게 통과한다. 이를 막기 위해 탐색 결과가 `LEGACY_CHECKPOINT`보다 많아야 한다는 단정을 먼저 두었고, 중복 버전 금지도 추가했다.
+- 기존 보장 유지: 하드코딩 목록이 암묵적으로 보장했던 "1부터 빈틈없이 이어짐"을 명시적 단정으로 승격했다. 동적으로 바꾸면서 이 보장을 조용히 잃지 않도록 한 것이다. 의도적으로 번호를 건너뛸 일이 생기면 이 단정만 명시적으로 조정하면 된다.
+- 검증:
+  - 현재 상태 통과: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest` -> 1건 실행/0 skip/통과.
+  - 취약성 제거 실증: 임시 `V25`를 추가한 상태로 재실행해 통과를 확인했다. 하드코딩이었다면 이 지점에서 실패한다.
+  - 안전망 작동 실증: 같은 파일을 `V27`로 바꿔 25, 26에 구멍을 만든 뒤 재실행해 `migration versions must be contiguous starting at 1`으로 실패함을 확인했다. 즉 단정이 느슨해진 것이 아니다.
+  - 임시 probe 파일은 삭제했고 마이그레이션 파일 수는 24로 원복했다. 전체 재실행 결과 Backend 206건/실패 0/skip 1을 유지한다.
+- 판단: 이제 마이그레이션 추가 시 이 테스트를 손댈 필요가 없고, 누락·중복·순서 오류·번호 건너뜀은 여전히 잡힌다.

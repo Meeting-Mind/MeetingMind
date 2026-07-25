@@ -129,8 +129,8 @@ public class AuthService {
         String pictureUrl = request.pictureUrl() == null || request.pictureUrl().isBlank()
                 ? null
                 : request.pictureUrl().trim();
-        if (!isHttpUrl(pictureUrl)) {
-            throw new AuthException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "프로필 이미지는 http 또는 https URL이어야 합니다.");
+        if (!isAllowedImageUrl(pictureUrl)) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "프로필 이미지는 http, https 또는 앱 내부 이미지 경로여야 합니다.");
         }
         return AuthUserResponse.from(store.updateProfile(user, request.displayName().trim(), pictureUrl));
     }
@@ -180,12 +180,16 @@ public class AuthService {
         return new AuthException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_INVALID", "refresh token이 올바르지 않습니다.");
     }
 
-    private boolean isHttpUrl(String value) {
-        if (value == null) {
+    private boolean isAllowedImageUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("/api/v1/assets/images/")) {
             return true;
         }
         try {
-            URI uri = URI.create(value);
+            URI uri = URI.create(trimmed);
             return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                     && uri.getHost() != null;
         } catch (IllegalArgumentException exception) {

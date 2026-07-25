@@ -25,7 +25,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -38,6 +37,13 @@ import org.springframework.transaction.annotation.Transactional;
 @EnabledIfEnvironmentVariable(named = "CI_POSTGRES_URL", matches = ".+")
 @Transactional
 class SttTranscriptFlowIntegrationTest {
+
+    static {
+        // ConfiguredSttProvider는 유일한 @Primary SttProvider로 남아야 한다.
+        // 테스트용 fake를 @Primary로 올리면 primary 후보가 둘이 되어 주입이 실패하므로,
+        // 실제 운영 경로와 같게 provider 선택 설정으로 fake를 고르게 한다.
+        System.setProperty("STT_PROVIDER", "fake-clova");
+    }
 
     @Autowired
     private WorkspaceStore store;
@@ -129,7 +135,6 @@ class SttTranscriptFlowIntegrationTest {
     static class SttTestConfiguration {
 
         @Bean
-        @Primary
         CapturingSttProvider capturingSttProvider() {
             return new CapturingSttProvider();
         }

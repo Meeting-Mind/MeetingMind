@@ -35,12 +35,13 @@ class BffProxyControllerTest {
 
     private final DownstreamHttpClient downstreamClient = mock(DownstreamHttpClient.class);
     private final BffTokenManager tokenManager = mock(BffTokenManager.class);
+    private final AiUsageRecorder aiUsageRecorder = mock(AiUsageRecorder.class);
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         BffProxyController controller = new BffProxyController(
-                new ProxyRouteRegistry(), downstreamClient, tokenManager);
+                new ProxyRouteRegistry(), downstreamClient, tokenManager, aiUsageRecorder);
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new BffAuthExceptionHandler(
                         new BffRolloutMetrics(new SimpleMeterRegistry())))
@@ -73,6 +74,7 @@ class BffProxyControllerTest {
         ArgumentCaptor<ProxyRequest> request = ArgumentCaptor.forClass(ProxyRequest.class);
         verify(downstreamClient).execute(
                 eq(DownstreamService.CORE), request.capture(), eq("Bearer internal-access"));
+        verify(aiUsageRecorder).recordIfPresent(any(), any(), any());
         org.assertj.core.api.Assertions.assertThat(request.getValue().query().getFirst("cursor"))
                 .isEqualTo("next");
     }
@@ -103,6 +105,7 @@ class BffProxyControllerTest {
         ArgumentCaptor<ProxyRequest> request = ArgumentCaptor.forClass(ProxyRequest.class);
         verify(downstreamClient).execute(
                 eq(DownstreamService.CORE), request.capture(), eq("Bearer internal-access"));
+        verify(aiUsageRecorder).recordIfPresent(any(), any(), any());
         org.assertj.core.api.Assertions.assertThat(request.getValue().path())
                 .isEqualTo("/api/v1/spaces/space-123e4567-e89b-12d3-a456-426614174000/instant-meetings");
     }

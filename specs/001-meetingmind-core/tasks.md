@@ -1073,6 +1073,44 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T432 [frontend/assets] [owner: Codex] 실제 런타임 `App.tsx`의 Project Settings와 Account Settings에 이미지 업로드, 미리보기, 제거, 저장 흐름을 연결한다.
 - [x] V117 [verification] [owner: Codex] Backend/Frontend compile 및 build, BFF proxy route 검증 결과를 `implement.md`에 기록한다.
 
+## M043 AI Reliability Harness and Operational Verification
+
+### Milestone Goal
+
+요구사항 정의서 기준으로 AI, STT, LiveKit, RAG, 외부 API, 모니터링의 검증 기준을 하나의 실행 가능한 매트릭스로 정리하고, AI가 권한·근거·토큰·오류 정책을 지키는지 자동 검증할 하네스 기준을 만든다.
+
+- [x] T433 [docs/test] [owner: Codex] 요구사항 테스트 매트릭스에 AI scope, RAG, STT/LiveKit smoke, AI Report to Knowledge, 외부 API resilience, monitoring 항목을 추가한다. 예상 파일: `test-matrix.md`.
+- [x] T434 [docs/ai] [owner: Codex] AI harness 전략을 문서화한다. Meeting AI/Project AI scope, permission prefilter, evidence gate, citation validation, token budget, provider failure, log redaction을 포함한다. 예상 파일: `ai-harness-strategy.md`.
+- [ ] T435 [ai/tests] [owner: Backend/AI] [depends: T434] AH-001~AH-014를 자동 테스트로 분리한다. 우선순위는 no evidence, low relevance, invalid citation, prompt injection, token budget, log redaction이다.
+- [x] T435.1 [ai/tests] [owner: Codex] [depends: T434] Project AI의 빈 `allowedMeetingIds` scope, source context limit, supported response log redaction 회귀 테스트를 추가한다.
+- [x] T435.2 [ai/tests] [owner: Codex] [depends: T435.1] Project AI의 빈 `allowedMeetingIds`에서 제공된 회의 source를 거부하고, AI Report provider context가 상위 12개 source로 제한되는 회귀 테스트를 추가한다.
+- [x] T435.3 [ai/tests] [owner: Codex] [depends: T435.2] Meeting AI/AI Report/Task extraction의 untrusted context guard와 provider usage contract 회귀 테스트를 최신 3-value provider contract에 맞춰 복구한다.
+- [ ] T436 [smoke] [owner: Backend/AI/Frontend] [depends: T435] STT/LiveKit/AI Report/RAG smoke를 opt-in 실행으로 정리한다. 실제 provider key가 필요한 항목은 local deterministic test와 분리한다.
+- [x] T436.1 [docs/smoke] [owner: Codex] [depends: T435.2] STT/LiveKit/AI Report/RAG smoke를 local deterministic check와 provider opt-in check로 분리한 실행 runbook을 작성한다.
+- [x] T436.2 [smoke/local] [owner: Codex] [depends: T436.1] runbook의 local deterministic smoke 기준선(AI unittest, on-prem http smoke skip 확인, Backend report/project AI integration test)을 실제로 재실행하고 결과를 `implement.md`에 기록한다.
+- [x] T437 [contracts/reliability] [owner: Backend/BFF/AI] [depends: T434] 외부 API별 timeout, retry, fallback, 사용자 오류 메시지 정책을 API/운영 문서로 고정한다. 예상 파일: `contracts/external-reliability.md`, `implement.md`, `test-matrix.md`.
+- [x] T438 [backend-ai-resilience] [owner: Backend/AI] [depends: T437] BFF 외 Backend/Core -> AI/provider 경계에도 circuit/bulkhead 또는 동등한 안전장치를 보강한다.
+- [x] T439 [observability] [owner: Backend/BFF/AI] [depends: T437] Prometheus metric endpoint와 Grafana dashboard 기준을 추가한다. STT latency, AI duration/token/source count, RAG retrieval, provider failure, downstream guard 상태를 포함한다.
+- [ ] T439.1 [observability/frontend-backend] [owner: Backend/AI/Frontend] [depends: T439] Space Overview의 `Knowledge Indexed`를 운영 지표에서 제거하고, Space 단위 AI Usage/quota API와 UI 기준을 정의한다. token total, request count, feature별 usage, usage percent를 포함한다.
+- [ ] V119 [verification] [owner: QA/Integration] [depends: T435,T436,T438,T439] 요구사항 ID별 통과/미통과/수동검증/환경필요 상태를 갱신하고, 실행 결과를 `implement.md`에 기록한다.
+- [x] V119.1 [verification/docs] [owner: Codex] [depends: T435.3,T436.2,T437,T439] 요구사항 ID별 현재 상태표와 local deterministic smoke 실행 결과, env/manual blocker를 `test-matrix.md`, `operational-smoke-runbook.md`, `implement.md`에 동기화한다.
+- [x] V119.4 [verification/smoke] [owner: Claude] [depends: V119.3] dev 병합이 만든 `application.yml` `management:` 중복키 회귀를 제거하고, `SttTranscriptFlowIntegrationTest`의 `@Primary` SttProvider 충돌을 고쳐 `SMK-002` local tier 근거를 실제로 확보한다. `run-local-stack.sh`에 runbook이 요구한 포트 점유 preflight를 구현한다.
+
+### SMK-002 Closure Path
+
+검증 순서 원칙: 증적을 쌓기 전에 증적 경로가 실제로 실행되는지 먼저 확인한다. `V119.4`에서
+`SttTranscriptFlowIntegrationTest`가 skip 뒤에서 깨진 채 방치돼 있었고 runbook이 그것을
+`SMK-002` 근거로 지정하고 있었다. 같은 패턴이 남은 DB-gated 검증에도 있을 수 있으므로
+`T441`, `T442`를 provider smoke 실행보다 앞에 둔다.
+
+- [ ] T440 [smoke/stt-provider] [owner: Backend/AI] [depends: V119.4] runtime 기본 provider와 smoke 대상 불일치를 해소한다. 결정: `soniox-realtime` 대상 opt-in smoke를 추가한다. `ClovaSttTranscriptSmokeIntegrationTest`와 같은 패턴으로 `RUN_SONIOX_STT_SMOKE` 게이트를 쓰고, transcript `COMPLETED`, segment 1건 이상, `TRANSCRIPT_COMPLETED` enqueue 1건, provider 원문 오류/API key 미노출을 통과 기준으로 둔다. 예상 파일: `backend/src/test/java/com/meetingmind/demo/domain/SonioxSttTranscriptSmokeIntegrationTest.java`, `operational-smoke-runbook.md`.
+- [x] T441 [test-infra/db] [owner: Claude] [depends: V119.4] 격리된 테스트 DB를 확보한다. 결정: dev용 `meetingmind-postgres-local`은 그대로 두고 pgvector 기반 test 전용 docker 인스턴스를 띄워 `CI_POSTGRES_URL`을 그쪽으로 토대한다. `MigrationIntegrationTest`가 `migrationsExecuted`를 단정하므로 clean DB여야 하고, `ClovaSttTranscriptSmokeIntegrationTest`는 `@Transactional`이 아니라 dev 데이터를 오염시킨다. 산출물: `scripts/run-db-tests.sh` (CI와 같은 이미지, 매 실행 database drop/create로 pristine 보장, 5434 지정 시 거부).
+- [x] T442 [verification/tests] [owner: Claude] [depends: T441] Backend DB-gated 9건이 실제로 통과함을 확인했다. skip 10건 -> 1건(provider-gated `Clova`만 남음), 206건 실패 0. 실행 과정에서 `MigrationIntegrationTest`(V24 미반영)와 `JdbcWorkspaceStoreIntegrationTest`(전사 권한 정책 stale) 2건이 실제로 깨져 있었음을 확인하고 수정했다.
+- [x] T442.2 [verification/tests] [owner: Claude] [depends: T442] `MigrationIntegrationTest`의 하드코딩된 기대 버전 목록을 classpath 마이그레이션 파일에서 유도하도록 바꿔, 마이그레이션 추가가 정상 변경인데도 CI 실패로 나타나는 취약성을 제거한다. 탐색 실패 시 공허한 통과를 막는 단정과 기존의 연속성 보장을 함께 유지한다.
+- [ ] T442.1 [verification/tests] [owner: BFF] [depends: T442] BFF skip 6건도 같은 방식으로 실제 실행 여부를 확인한다.
+- [ ] SMK-002 [smoke/provider] [owner: Backend/AI/Frontend] [depends: T440,T441] LiveKit 실서버 입장과 실제 provider STT 전사 증적을 확보한다. 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이라 실접속 근거가 아니다.
+- [ ] T443 [data/migration] [owner: Backend] V24 `ai_usage_events` 마이그레이션을 로컬 DB에 적용한다. 로컬은 V23까지만 적용된 상태이며 backend 재기동 시 flyway가 처리한다. `SMK-003` 진입 전 필요하고 `T439.1`의 전제다.
+
 ## M152 NonProd V2 AI Container Security Remediation
 
 ### Milestone Goal

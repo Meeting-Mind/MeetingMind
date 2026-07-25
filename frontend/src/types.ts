@@ -563,6 +563,23 @@ export interface SpaceDetail {
   aiEntrypoints: Array<"project-ai" | "meeting-ai">;
 }
 
+export interface SpaceAiUsageFeatureBreakdown {
+  feature: "meeting-ai" | "project-ai" | "report-ai";
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface SpaceAiUsageResponse {
+  window: "day" | "week" | "month";
+  limit: number | null;
+  totalRequests: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  usagePercent: number | null;
+  features: SpaceAiUsageFeatureBreakdown[];
+}
+
 export interface DashboardRecentActivity {
   id: string;
   spaceId: string;

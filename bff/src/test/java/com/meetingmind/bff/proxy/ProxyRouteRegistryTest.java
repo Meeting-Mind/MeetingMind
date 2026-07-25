@@ -61,6 +61,8 @@ class ProxyRouteRegistryTest {
                 .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces/" + spaceId + "/knowledge/graph").orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
+        assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces/" + spaceId + "/ai/usage").orElseThrow().service())
+                .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.POST, "/api/v1/spaces/" + spaceId + "/tasks").orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.PATCH,

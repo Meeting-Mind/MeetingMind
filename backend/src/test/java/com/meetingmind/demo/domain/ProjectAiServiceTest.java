@@ -73,6 +73,14 @@ class ProjectAiServiceTest {
         assertThat(context.gateway.captured.question()).isEqualTo("권한 정책은?");
         assertThat(context.gateway.captured.allowedMeetingIds()).containsExactly(allowedMeeting.meeting().id());
         assertThat(context.gateway.captured.history()).isEmpty();
+        assertThat(context.store.findAiUsageEvents(space.space().id(), FIXED_CLOCK.instant().minusSeconds(60)))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.feature().apiValue()).isEqualTo("project-ai");
+                    assertThat(event.inputTokens()).isEqualTo(150);
+                    assertThat(event.outputTokens()).isEqualTo(61);
+                    assertThat(event.totalTokens()).isEqualTo(211);
+                });
     }
 
     @Test
@@ -191,7 +199,8 @@ class ProjectAiServiceTest {
                         new MeetingAccessPolicy(spaceAccessPolicy)
                 ),
                 gateway,
-                history
+                history,
+                workspace
         );
         return new TestContext(store, workspace, gateway, history, service);
     }
@@ -273,7 +282,9 @@ class ProjectAiServiceTest {
                     "응답",
                     List.of(new AiSource("knowledge-1", "projectKnowledge", "권한 정책", "근거")),
                     false,
-                    "test-model"
+                    null,
+                    "test-model",
+                    new AiChatResponse.AiUsageMetrics("openai", "responses", false, 910, 150, 61, null)
             );
         }
     }

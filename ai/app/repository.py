@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .embedding_provider import EmbeddingProvider, EmbeddingProviderError
-from .observability import elapsed_ms, log_event
+from .observability import elapsed_ms, log_event, record_embedding_queue, record_retrieval
 from .rag import (
     RagBuildRequest,
     RagChunk,
@@ -163,12 +163,18 @@ class PostgresEmbeddingRepository:
                 from embedding_jobs
                 """
             ).fetchone()
-        return EmbeddingQueueMetrics(
+        metrics = EmbeddingQueueMetrics(
             pending_count=int(row["pending_count"]),
             processing_count=int(row["processing_count"]),
             failed_count=int(row["failed_count"]),
             oldest_pending_age_seconds=max(0, int(row["oldest_pending_age_seconds"])),
         )
+        record_embedding_queue(
+            pending_count=metrics.pending_count,
+            processing_count=metrics.processing_count,
+            failed_count=metrics.failed_count,
+        )
+        return metrics
 
     def load_snapshot(self, job: EmbeddingJob) -> EmbeddingSnapshot | None:
         with self._connect(self._dsn, row_factory=dict_row) as connection:
@@ -732,11 +738,13 @@ class PostgresRagRetriever:
             results = self._repository.hybrid_search(request, vectors[0])
         except (EmbeddingProviderError, RetrievalUnavailableError) as error:
             self._log_search("ai_retrieval_failed", request, started_at, error_type=type(error).__name__)
+            record_retrieval(request.scope, elapsed_ms(started_at), None, outcome="failed")
             if isinstance(error, RetrievalUnavailableError):
                 raise
             raise RetrievalUnavailableError("query embedding unavailable") from error
         except Exception as error:
             self._log_search("ai_retrieval_failed", request, started_at, error_type=type(error).__name__)
+            record_retrieval(request.scope, elapsed_ms(started_at), None, outcome="failed")
             raise
 
         self._log_search(
@@ -746,6 +754,7 @@ class PostgresRagRetriever:
             result_count=len(results),
             source_type_count=len({result.chunk.sourceType for result in results}),
         )
+        record_retrieval(request.scope, elapsed_ms(started_at), len(results), outcome="completed")
         return results
 
     @staticmethod
