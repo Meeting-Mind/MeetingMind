@@ -14786,3 +14786,138 @@ body.app-theme.meeting-access-body {
   background: var(--app-success-soft);
   color: color-mix(in srgb, var(--app-success) 78%, var(--app-text-strong));
 }
+
+/* Visible color pass: strengthen hierarchy without changing layout structure. */
+.mm-app-shell {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--app-accent) 10%, transparent) 0, transparent 28%),
+    linear-gradient(180deg, var(--app-bg) 0%, var(--app-canvas) 100%);
+}
+
+.mm-app-shell > .workspace-catalog-sidebar {
+  background: linear-gradient(180deg, var(--app-surface) 0%, color-mix(in srgb, var(--app-surface) 92%, var(--app-accent-soft)) 100%);
+}
+
+.mm-app-shell .workspace-catalog-topbar {
+  background: color-mix(in srgb, var(--app-surface) 96%, var(--app-accent-soft));
+  backdrop-filter: blur(12px);
+}
+
+.mm-app-shell .workspace-catalog-sidebar-section {
+  color: var(--app-subtle);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.mm-app-shell .workspace-catalog-nav-item {
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.mm-app-shell .workspace-catalog-nav-item:hover {
+  border-color: color-mix(in srgb, var(--app-accent) 18%, white);
+}
+
+.mm-app-shell .workspace-catalog-nav-item.active {
+  border-color: color-mix(in srgb, var(--app-accent) 28%, white);
+  background: linear-gradient(180deg, var(--app-accent-soft) 0%, color-mix(in srgb, var(--app-accent-soft) 72%, white) 100%);
+  color: var(--app-accent-text);
+  font-weight: 800;
+}
+
+.mm-app-shell .workspace-catalog-nav-icon.active,
+.mm-app-shell .workspace-catalog-icon-button:hover,
+.mm-app-shell .workspace-catalog-filter-button.is-active {
+  color: var(--app-accent-text);
+}
+
+.mm-app-shell .workspace-catalog-card,
+.mm-app-shell .workspace-dashboard-primary,
+.mm-app-shell .workspace-dashboard-activity,
+.mm-app-shell .meeting-content-surface,
+.mm-app-shell .project-settings-surface,
+.mm-app-shell .team-members-surface,
+.mm-app-shell .project-meetings-surface,
+.mm-app-shell .project-tasks-surface,
+.mm-app-shell .project-knowledge-surface,
+.mm-app-shell .meeting-detail-shell {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.mm-app-shell .workspace-catalog-card::before,
+.mm-app-shell .workspace-dashboard-primary::before,
+.mm-app-shell .workspace-dashboard-activity::before,
+.mm-app-shell .project-settings-surface::before,
+.mm-app-shell .team-members-surface::before,
+.mm-app-shell .project-meetings-surface::before,
+.mm-app-shell .project-tasks-surface::before,
+.mm-app-shell .project-knowledge-surface::before {
+  content: "";
+  display: block;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+  background: linear-gradient(90deg, var(--app-accent) 0%, color-mix(in srgb, var(--app-ai) 65%, var(--app-accent)) 48%, var(--app-knowledge) 100%);
+  opacity: 0.9;
+}
+
+.mm-app-shell .workspace-catalog-create,
+.mm-app-shell .workspace-catalog-card-action,
+.mm-app-shell .project-overview-actions .primary,
+.mm-app-shell .project-next-banner a,
+.mm-app-shell .project-next-banner button,
+.mm-app-shell .workspace-calendar-create button,
+.mm-app-shell .project-list-open {
+  box-shadow: 0 10px 24px rgba(23, 90, 183, 0.18);
+  font-weight: 700;
+}
+
+.mm-app-shell .workspace-catalog-create-mark {
+  color: #fff;
+}
+
+.mm-app-shell .workspace-catalog-sort,
+.mm-app-shell .workspace-catalog-filter-button,
+.mm-app-shell .workspace-catalog-pagination button,
+.mm-app-shell .team-members-pagination button,
+.mm-app-shell .workspace-calendar-view-tabs button {
+  font-weight: 600;
+}
+
+.mm-app-shell .workspace-catalog-pagination button.active,
+.mm-app-shell .team-members-pagination button.active,
+.mm-app-shell .workspace-calendar-view-tabs button.active {
+  box-shadow: 0 8px 18px rgba(23, 90, 183, 0.16);
+}
+
+.mm-app-shell .workspace-catalog-tag,
+.mm-app-shell .workspace-home-count {
+  font-weight: 700;
+}
+
+.mm-app-shell .workspace-catalog-tag.tone-1 {
+  border-color: color-mix(in srgb, var(--app-ai) 22%, white);
+  background: var(--app-ai-soft);
+  color: var(--app-ai);
+}
+
+.mm-app-shell .workspace-catalog-tag.tone-2 {
+  border-color: color-mix(in srgb, var(--app-knowledge) 22%, white);
+  background: var(--app-knowledge-soft);
+  color: var(--app-knowledge);
+}
+
+.mm-app-shell .workspace-catalog-tag.tone-3 {
+  border-color: color-mix(in srgb, var(--app-action) 22%, white);
+  background: var(--app-action-soft);
+  color: var(--app-action);
+}
+
+.mm-app-shell .workspace-catalog-empty,
+.mm-app-shell .workspace-catalog-plan {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--app-knowledge-soft) 80%, white) 0%, var(--app-surface) 100%);
+}
+
+.mm-app-shell .project-ai-panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--app-surface) 96%, var(--app-ai-soft)) 0%, var(--app-surface) 100%);
+}

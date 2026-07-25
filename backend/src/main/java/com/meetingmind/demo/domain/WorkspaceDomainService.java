@@ -43,6 +43,11 @@ public class WorkspaceDomainService {
     private static final int DASHBOARD_ACTIVITY_LIMIT = 10;
     private static final int DASHBOARD_ACTION_ITEM_LIMIT = 10;
     private static final int DASHBOARD_LATEST_REPORT_LIMIT = 5;
+    private static final List<AiUsageFeature> SPACE_AI_USAGE_FEATURES = List.of(
+            AiUsageFeature.MEETING_AI,
+            AiUsageFeature.PROJECT_AI,
+            AiUsageFeature.REPORT_AI
+    );
 
     private final WorkspaceStore store;
     private final SpaceAccessPolicy spaceAccessPolicy;
@@ -234,8 +239,8 @@ public class WorkspaceDomainService {
         if (namePresent && (name == null || name.isBlank())) {
             throw invalidRequest("Space 이름은 blank일 수 없습니다.");
         }
-        if (imageUrlPresent && !isHttpUrl(imageUrl)) {
-            throw invalidRequest("대표 이미지는 http 또는 https URL이어야 합니다.");
+        if (imageUrlPresent && !isAllowedImageUrl(imageUrl)) {
+            throw invalidRequest("대표 이미지는 http, https 또는 앱 내부 이미지 경로여야 합니다.");
         }
         Space updated = store.updateSpace(
                 spaceId,
@@ -265,12 +270,16 @@ public class WorkspaceDomainService {
         spaceAccessPolicy.requireMemberManagement(spaceAccessContext(spaceId, actorUserId));
     }
 
-    private boolean isHttpUrl(String value) {
+    private boolean isAllowedImageUrl(String value) {
         if (value == null || value.isBlank()) {
             return true;
         }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("/api/v1/assets/images/")) {
+            return true;
+        }
         try {
-            URI uri = URI.create(value.trim());
+            URI uri = URI.create(trimmed);
             return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                     && uri.getHost() != null;
         } catch (IllegalArgumentException exception) {
@@ -1222,6 +1231,55 @@ public class WorkspaceDomainService {
         return value.trim();
     }
 
+    private AiUsageFeature parseAiUsageFeature(String value) {
+        try {
+            return AiUsageFeature.parse(value);
+        } catch (IllegalArgumentException exception) {
+            throw invalidRequest("AI usage feature 값이 올바르지 않습니다.");
+        }
+    }
+
+    private String normalizeAiUsageWindow(String value) {
+        String normalized = blankToNull(value);
+        if (normalized == null) {
+            return "month";
+        }
+        return switch (normalized.toLowerCase(Locale.ROOT)) {
+            case "day", "week", "month" -> normalized.toLowerCase(Locale.ROOT);
+            default -> throw invalidRequest("AI usage window 값이 올바르지 않습니다.");
+        };
+    }
+
+    private Instant aiUsageWindowStart(String value) {
+        String normalized = normalizeAiUsageWindow(value);
+        Instant now = Instant.now(clock);
+        return switch (normalized) {
+            case "day" -> now.minus(Duration.ofDays(1));
+            case "week" -> now.minus(Duration.ofDays(7));
+            default -> now.minus(Duration.ofDays(30));
+        };
+    }
+
+    private SpaceAiUsageFeatureSummary summarizeAiUsageFeature(List<AiUsageEvent> events, AiUsageFeature feature) {
+        List<AiUsageEvent> filtered = events.stream()
+                .filter(event -> event.feature() == feature)
+                .toList();
+        return new SpaceAiUsageFeatureSummary(
+                feature.apiValue(),
+                filtered.size(),
+                filtered.stream()
+                        .map(AiUsageEvent::inputTokens)
+                        .filter(value -> value != null)
+                        .mapToInt(Integer::intValue)
+                        .sum(),
+                filtered.stream()
+                        .map(AiUsageEvent::outputTokens)
+                        .filter(value -> value != null)
+                        .mapToInt(Integer::intValue)
+                        .sum()
+        );
+    }
+
     private MeetingJoinRequest requireMeetingJoinRequestById(String meetingId, String requestId) {
         requireMeeting(meetingId);
         return store.findMeetingJoinRequestByIdForUpdate(meetingId, requestId)
@@ -1300,6 +1358,70 @@ public class WorkspaceDomainService {
                 .toList();
         List<Meeting> meetings = store.findProjectAiMeetings(spaceId, actorUserId);
         return new ProjectAiContextCandidates(knowledge, meetings);
+    }
+
+    @Transactional
+    public RecordedAiUsage recordAiUsageEvent(
+            String actorUserId,
+            String spaceId,
+            String meetingId,
+            String feature,
+            String provider,
+            String apiStyle,
+            boolean streamed,
+            Integer inputTokens,
+            Integer outputTokens,
+            Integer totalTokens,
+            Long totalMs
+    ) {
+        requireUser(actorUserId);
+        AiUsageFeature usageFeature = parseAiUsageFeature(feature);
+        String resolvedSpaceId = blankToNull(spaceId);
+        String resolvedMeetingId = blankToNull(meetingId);
+        if (resolvedSpaceId == null && resolvedMeetingId == null) {
+            throw invalidRequest("spaceId 또는 meetingId 중 하나는 필요합니다.");
+        }
+        if (resolvedMeetingId != null) {
+            Meeting meeting = requireMeeting(resolvedMeetingId);
+            meetingAccessPolicy.requireReadAccess(meetingAccessContext(resolvedMeetingId, actorUserId));
+            resolvedSpaceId = meeting.spaceId();
+        }
+        if (resolvedSpaceId == null) {
+            throw invalidRequest("AI usage의 spaceId를 확인할 수 없습니다.");
+        }
+        spaceAccessPolicy.requireSpaceAccess(spaceAccessContext(resolvedSpaceId, actorUserId));
+        store.saveAiUsageEvent(new AiUsageEvent(
+                "ai-usage-" + UUID.randomUUID(),
+                resolvedSpaceId,
+                resolvedMeetingId,
+                usageFeature,
+                blankToNull(provider),
+                blankToNull(apiStyle),
+                streamed,
+                inputTokens,
+                outputTokens,
+                totalTokens,
+                totalMs,
+                Instant.now(clock)
+        ));
+        return new RecordedAiUsage(resolvedSpaceId, usageFeature.apiValue());
+    }
+
+    @Transactional(readOnly = true)
+    public SpaceAiUsage spaceAiUsage(String actorUserId, String spaceId, String window) {
+        requireUser(actorUserId);
+        spaceAccessPolicy.requireSpaceAccess(spaceAccessContext(spaceId, actorUserId));
+        List<AiUsageEvent> events = store.findAiUsageEvents(spaceId, aiUsageWindowStart(window));
+        List<SpaceAiUsageFeatureSummary> features = SPACE_AI_USAGE_FEATURES.stream()
+                .map(feature -> summarizeAiUsageFeature(events, feature))
+                .toList();
+        return new SpaceAiUsage(
+                normalizeAiUsageWindow(window),
+                features.stream().mapToInt(SpaceAiUsageFeatureSummary::requests).sum(),
+                features.stream().mapToInt(SpaceAiUsageFeatureSummary::inputTokens).sum(),
+                features.stream().mapToInt(SpaceAiUsageFeatureSummary::outputTokens).sum(),
+                features
+        );
     }
 
     @Transactional(readOnly = true)
@@ -2349,5 +2471,25 @@ public class WorkspaceDomainService {
     }
 
     public record ProjectAiContextCandidates(List<ProjectKnowledge> projectKnowledge, List<Meeting> meetings) {
+    }
+
+    public record RecordedAiUsage(String spaceId, String feature) {
+    }
+
+    public record SpaceAiUsage(
+            String window,
+            int totalRequests,
+            int totalInputTokens,
+            int totalOutputTokens,
+            List<SpaceAiUsageFeatureSummary> features
+    ) {
+    }
+
+    public record SpaceAiUsageFeatureSummary(
+            String feature,
+            int requests,
+            int inputTokens,
+            int outputTokens
+    ) {
     }
 }

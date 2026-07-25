@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import hmac
 import logging
@@ -8,7 +10,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Request as FastApiRequest
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from .grounding import (
@@ -55,6 +57,9 @@ from .observability import (
     current_trace_id,
     observe_ai_endpoint as observe_endpoint,
     log_event,
+    prometheus_payload,
+    record_provider_completed,
+    record_provider_failed,
     reset_trace_id,
 )
 
@@ -157,6 +162,7 @@ class MeetingAiChatResponse(BaseModel):
     unsupported: bool = False
     unsupportedReason: UnsupportedReason | None = None
     model: str
+    usage: AiUsageMetrics | None = None
 
 
 class BackendMeetingAiSource(BaseModel):
@@ -211,6 +217,7 @@ class ProjectAiChatResponse(BaseModel):
     unsupported: bool = False
     unsupportedReason: UnsupportedReason | None = None
     model: str
+    usage: AiUsageMetrics | None = None
 
 
 class BackendProjectAiSource(BaseModel):
@@ -336,6 +343,7 @@ class GenerateReportResponse(BaseModel):
     unsupported: bool = False
     unsupportedReason: UnsupportedReason | None = None
     model: str
+    usage: AiUsageMetrics | None = None
 
 
 class ParticipantItem(BaseModel):
@@ -374,6 +382,17 @@ class ExtractTasksResponse(BaseModel):
     unsupported: bool = False
     unsupportedReason: UnsupportedReason | None = None
     model: str
+    usage: AiUsageMetrics | None = None
+
+
+class AiUsageMetrics(BaseModel):
+    provider: str
+    apiStyle: str
+    stream: bool
+    totalMs: int
+    inputTokens: int | None = None
+    outputTokens: int | None = None
+    outputTokenEstimate: int | None = None
 
 
 def observe_ai_endpoint(endpoint: str, operation: Any) -> Any:
@@ -440,7 +459,7 @@ def call_text_generation(
     *,
     timeout_seconds: int = TEXT_DEFAULT_TIMEOUT_SECONDS,
     response_format: dict[str, Any] | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, "AiUsageMetrics"]:
     try:
         result = get_text_generation_provider().generate(
             developer_content,
@@ -449,7 +468,18 @@ def call_text_generation(
             response_format=response_format,
         )
     except TextGenerationProviderError as error:
+        provider = normalize_provider_id(get_env("AI_TEXT_PROVIDER", "openai"))
+        record_provider_failed(provider=provider, api_style=get_env("AI_TEXT_API_STYLE", "responses"), stream=get_env("AI_TEXT_STREAM", "false").lower() == "true")
         raise provider_unavailable() from error
+    record_provider_completed(
+        provider=result.metrics.provider,
+        api_style=result.metrics.apiStyle,
+        stream=result.metrics.stream,
+        total_ms=result.metrics.totalMs,
+        input_tokens=result.metrics.inputTokens,
+        output_tokens=result.metrics.outputTokens,
+        output_token_estimate=result.metrics.outputTokenEstimate,
+    )
     log_event(
         LOGGER,
         "ai_provider_completed",
@@ -465,7 +495,19 @@ def call_text_generation(
         outputTokens=result.metrics.outputTokens,
         outputTokenEstimate=result.metrics.outputTokenEstimate,
     )
-    return result.text, result.model
+    return (
+        result.text,
+        result.model,
+        AiUsageMetrics(
+            provider=result.metrics.provider,
+            apiStyle=result.metrics.apiStyle,
+            stream=result.metrics.stream,
+            totalMs=result.metrics.totalMs,
+            inputTokens=result.metrics.inputTokens,
+            outputTokens=result.metrics.outputTokens,
+            outputTokenEstimate=result.metrics.outputTokenEstimate,
+        ),
+    )
 
 
 def call_openai_text(
@@ -474,7 +516,7 @@ def call_openai_text(
     *,
     timeout_seconds: int = OPENAI_DEFAULT_TIMEOUT_SECONDS,
     response_format: dict[str, Any] | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, "AiUsageMetrics"]:
     """Legacy test hook; actual text generation is provider-selected."""
     return call_text_generation(
         developer_content,
@@ -485,7 +527,7 @@ def call_openai_text(
 
 
 def call_openai(payload: MeetingAiAskRequest) -> MeetingAiAskResponse:
-    text, model = call_openai_text(
+    text, model, usage = call_openai_text(
         developer_content=(
             "너는 MeetingMind의 회의 분석 Assistant다. "
             "반드시 제공된 회의 맥락만 근거로 답하고, 없는 내용은 추정하지 말고 "
@@ -497,7 +539,7 @@ def call_openai(payload: MeetingAiAskRequest) -> MeetingAiAskResponse:
             f"[사용자 질문]\n{payload.question}"
         ),
     )
-    return MeetingAiAskResponse(answer=text, model=model)
+    return MeetingAiAskResponse(answer=text, model=model, usage=usage)
 
 
 def normalize_term(value: str) -> str:
@@ -1121,7 +1163,7 @@ def explain_term_from_sources(term: str, sources: list[AiSource]) -> ExplainTerm
             model="context-only",
         )
 
-    text, model = call_openai_text(
+    text, model, usage = call_openai_text(
         developer_content=(
             f"{UNTRUSTED_CONTEXT_RULE}"
             "너는 MeetingMind의 회의 중 용어 설명 Assistant다. "
@@ -1151,6 +1193,7 @@ def explain_term_from_sources(term: str, sources: list[AiSource]) -> ExplainTerm
             unsupported=True,
             unsupportedReason=grounded.reason,
             model=model,
+            usage=usage,
         )
 
     cited_sources = select_cited_sources(sources, grounded.source_ids)
@@ -1160,6 +1203,7 @@ def explain_term_from_sources(term: str, sources: list[AiSource]) -> ExplainTerm
         sourceType=cited_sources[0].type,
         sources=cited_sources,
         model=model,
+        usage=usage,
     )
 
 
@@ -1188,7 +1232,7 @@ def answer_meeting_chat(
             model="context-only",
         )
 
-    text, model = call_openai_text(
+    text, model, usage = call_openai_text(
         developer_content=(
             f"{UNTRUSTED_CONTEXT_RULE}"
             "너는 MeetingMind의 회의별 챗봇이다. "
@@ -1218,12 +1262,14 @@ def answer_meeting_chat(
             unsupported=True,
             unsupportedReason=grounded.reason,
             model=model,
+            usage=usage,
         )
 
     return MeetingAiChatResponse(
         answer=grounded.answer,
         sources=select_cited_sources(sources, grounded.source_ids),
         model=model,
+        usage=usage,
     )
 
 
@@ -1272,7 +1318,7 @@ def generate_report_from_sources(
             model="context-only",
         )
 
-    text, model = call_openai_text(
+    text, model, usage = call_openai_text(
         developer_content=(
             f"{UNTRUSTED_CONTEXT_RULE}"
             "너는 MeetingMind의 회의 보고서 생성 Assistant다. "
@@ -1298,7 +1344,7 @@ def generate_report_from_sources(
     )
 
     try:
-        return parse_report_response(text, model=model, sources=sources)
+        return parse_report_response(text, model=model, sources=sources, usage=usage)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise provider_unavailable() from error
 
@@ -1308,13 +1354,14 @@ def parse_report_response(
     *,
     model: str,
     sources: list[AiSource],
+    usage: "AiUsageMetrics | None" = None,
 ) -> GenerateReportResponse:
     source_ids = [source.sourceId for source in sources]
     data = extract_json_object(value)
     if not isinstance(data.get("supported"), bool):
         raise ValueError("supported must be a boolean")
     if not data["supported"]:
-        return unsupported_report(model=model, reason="MODEL_UNSUPPORTED")
+        return unsupported_report(model=model, reason="MODEL_UNSUPPORTED", usage=usage)
 
     summary = str(data.get("summary") or "").strip()
     markdown = str(data.get("markdown") or "").strip()
@@ -1357,7 +1404,7 @@ def parse_report_response(
 
     cited_source_ids = cited_ids_for_report(decisions, action_items)
     if not cited_source_ids:
-        return unsupported_report(model=model, reason="UNVERIFIED_OUTPUT")
+        return unsupported_report(model=model, reason="UNVERIFIED_OUTPUT", usage=usage)
 
     return GenerateReportResponse(
         summary=summary,
@@ -1366,6 +1413,7 @@ def parse_report_response(
         markdown=markdown,
         sources=select_cited_sources(sources, cited_source_ids),
         model=model,
+        usage=usage,
     )
 
 
@@ -1373,6 +1421,7 @@ def unsupported_report(
     *,
     model: str,
     reason: UnsupportedReason,
+    usage: "AiUsageMetrics | None" = None,
 ) -> GenerateReportResponse:
     message = "제공된 회의 맥락에서는 검증 가능한 보고서 항목을 생성할 수 없습니다."
     return GenerateReportResponse(
@@ -1384,6 +1433,7 @@ def unsupported_report(
         unsupported=True,
         unsupportedReason=reason,
         model=model,
+        usage=usage,
     )
 
 
@@ -1443,7 +1493,7 @@ def extract_tasks_from_sources(
         [participant.model_dump(exclude_none=True) for participant in participants],
         ensure_ascii=False,
     )
-    text, model = call_openai_text(
+    text, model, usage = call_openai_text(
         developer_content=(
             f"{UNTRUSTED_CONTEXT_RULE}"
             "너는 MeetingMind의 회의 종료 태스크 후보 추출 Assistant다. "
@@ -1464,7 +1514,7 @@ def extract_tasks_from_sources(
     )
 
     try:
-        return parse_task_candidates_response(text, model=model, sources=sources)
+        return parse_task_candidates_response(text, model=model, sources=sources, usage=usage)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise provider_unavailable() from error
 
@@ -1474,6 +1524,7 @@ def parse_task_candidates_response(
     *,
     model: str,
     sources: list[AiSource],
+    usage: "AiUsageMetrics | None" = None,
 ) -> ExtractTasksResponse:
     source_ids = [source.sourceId for source in sources]
     data = extract_json_object(value)
@@ -1486,6 +1537,7 @@ def parse_task_candidates_response(
             unsupported=True,
             unsupportedReason="MODEL_UNSUPPORTED",
             model=model,
+            usage=usage,
         )
 
     tasks: list[TaskCandidate] = []
@@ -1513,6 +1565,7 @@ def parse_task_candidates_response(
             unsupported=True,
             unsupportedReason="UNVERIFIED_OUTPUT",
             model=model,
+            usage=usage,
         )
 
     cited_source_ids = tuple(
@@ -1522,6 +1575,7 @@ def parse_task_candidates_response(
         tasks=tasks,
         sources=select_cited_sources(sources, cited_source_ids),
         model=model,
+        usage=usage,
     )
 
 
@@ -1691,7 +1745,7 @@ def answer_project_chat(
             model="context-only",
         )
 
-    text, model = call_openai_text(
+    text, model, usage = call_openai_text(
         developer_content=(
             f"{UNTRUSTED_CONTEXT_RULE}"
             "너는 MeetingMind의 프로젝트별 챗봇이다. "
@@ -1725,12 +1779,14 @@ def answer_project_chat(
             unsupported=True,
             unsupportedReason=grounded.reason,
             model=model,
+            usage=usage,
         )
 
     return ProjectAiChatResponse(
         answer=grounded.answer,
         sources=select_cited_sources(sources, grounded.source_ids),
         model=model,
+        usage=usage,
     )
 
 
@@ -1891,6 +1947,18 @@ def health() -> dict[str, Any]:
         "database_configured": bool(get_env("AI_DATABASE_URL")),
         "internal_service_token_configured": bool(get_env("AI_INTERNAL_SERVICE_TOKEN")),
     }
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    dsn = get_env("AI_DATABASE_URL")
+    if dsn:
+        try:
+            PostgresEmbeddingRepository(dsn).queue_metrics()
+        except Exception:
+            pass
+    body, content_type = prometheus_payload()
+    return Response(content=body, media_type=content_type)
 
 
 def health_bool_env(key: str, default: str) -> bool:

@@ -15,7 +15,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import com.meetingmind.bff.auth.DownstreamUnauthorizedException;
 import com.meetingmind.bff.config.DownstreamProxyProperties;
 import com.meetingmind.bff.config.DownstreamProxyProperties.ServicePolicy;
+import com.meetingmind.bff.observability.DownstreamGuardMetrics;
 import com.sun.net.httpserver.HttpServer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.time.Clock;
@@ -135,7 +137,9 @@ class DownstreamHttpClientTest {
                     2,
                     Duration.ofSeconds(1));
             DownstreamHttpClient client = new DownstreamHttpClient(
-                    new DownstreamProxyProperties(policy, policy, policy), Clock.systemUTC());
+                    new DownstreamProxyProperties(policy, policy, policy),
+                    Clock.systemUTC(),
+                    new SimpleMeterRegistry());
 
             assertThatThrownBy(() -> client.execute(
                             DownstreamService.CORE,
@@ -156,7 +160,14 @@ class DownstreamHttpClientTest {
         Map<DownstreamService, RestClient> clients = new EnumMap<>(DownstreamService.class);
         clients.put(service, restClient);
         Map<DownstreamService, DownstreamGuard> guards = new EnumMap<>(DownstreamService.class);
-        guards.put(service, new DownstreamGuard(2, 3, Duration.ofSeconds(30), Clock.systemUTC()));
+        guards.put(
+                service,
+                new DownstreamGuard(
+                        2,
+                        3,
+                        Duration.ofSeconds(30),
+                        Clock.systemUTC(),
+                        new DownstreamGuardMetrics(new SimpleMeterRegistry(), service.name().toLowerCase())));
         return new DownstreamHttpClient(clients, guards);
     }
 

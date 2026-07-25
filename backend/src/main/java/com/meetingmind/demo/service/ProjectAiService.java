@@ -3,6 +3,7 @@ package com.meetingmind.demo.service;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
+import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.BackendProjectAiChatRequest;
 import com.meetingmind.demo.dto.ai.ProjectAiGatewayChatRequest;
@@ -27,6 +28,7 @@ public class ProjectAiService {
     private final AiSearchScopeResolver scopeResolver;
     private final ProjectAiGatewayClient aiGatewayClient;
     private final ProjectAiHistoryStore historyStore;
+    private final WorkspaceDomainService workspaceDomainService;
     private final Clock clock;
 
     @Autowired
@@ -34,17 +36,19 @@ public class ProjectAiService {
             AuthService authService,
             AiSearchScopeResolver scopeResolver,
             ProjectAiGatewayClient aiGatewayClient,
-            ProjectAiHistoryStore historyStore
+            ProjectAiHistoryStore historyStore,
+            WorkspaceDomainService workspaceDomainService
     ) {
         this.authService = authService;
         this.scopeResolver = scopeResolver;
         this.aiGatewayClient = aiGatewayClient;
         this.historyStore = historyStore;
+        this.workspaceDomainService = workspaceDomainService;
         this.clock = Clock.systemUTC();
     }
 
     public ProjectAiService(AuthService authService, AiSearchScopeResolver scopeResolver, ProjectAiGatewayClient aiGatewayClient) {
-        this(authService, scopeResolver, aiGatewayClient, new InMemoryProjectAiHistoryStore());
+        this(authService, scopeResolver, aiGatewayClient, new InMemoryProjectAiHistoryStore(), null);
     }
 
     public AiChatResponse chat(String authorizationHeader, String spaceId, BackendProjectAiChatRequest request) {
@@ -61,6 +65,7 @@ public class ProjectAiService {
                             .map(message -> new ProjectAiGatewayChatRequest.HistoryTurn(message.role(), message.content()))
                             .toList()
             ));
+            recordUsage(user.id(), scope.spaceId(), response);
             LOGGER.info(
                     "ai_gateway_completed endpoint=project-ai.chat traceId={} durationMs={} sourceCount={} unsupported={} unsupportedReason={}",
                     RequestTrace.currentOrCreate(), elapsedMillis(startedAt), response.sources().size(),
@@ -91,5 +96,43 @@ public class ProjectAiService {
 
     private static long elapsedMillis(long startedAt) {
         return Math.max(0, (System.nanoTime() - startedAt) / 1_000_000);
+    }
+
+    private void recordUsage(String actorUserId, String spaceId, AiChatResponse response) {
+        if (workspaceDomainService == null) {
+            return;
+        }
+        AiChatResponse.AiUsageMetrics usage = response.usage();
+        if (usage == null) {
+            return;
+        }
+        workspaceDomainService.recordAiUsageEvent(
+                actorUserId,
+                spaceId,
+                null,
+                "project-ai",
+                usage.provider(),
+                usage.apiStyle(),
+                usage.stream(),
+                usage.inputTokens(),
+                usage.outputTokens(),
+                totalTokens(usage),
+                (long) usage.totalMs()
+        );
+    }
+
+    private Integer totalTokens(AiChatResponse.AiUsageMetrics usage) {
+        Integer inputTokens = usage.inputTokens();
+        Integer outputTokens = usage.outputTokens();
+        if (inputTokens != null && outputTokens != null) {
+            return inputTokens + outputTokens;
+        }
+        if (inputTokens != null && usage.outputTokenEstimate() != null) {
+            return inputTokens + usage.outputTokenEstimate();
+        }
+        if (outputTokens != null) {
+            return outputTokens;
+        }
+        return inputTokens;
     }
 }

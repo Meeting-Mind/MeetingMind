@@ -963,6 +963,63 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
+    AiUsageEvent saveAiUsageEvent(AiUsageEvent event) {
+        jdbc.update(
+                """
+                insert into ai_usage_events (
+                    id, space_id, meeting_id, feature, provider, api_style, streamed,
+                    input_tokens, output_tokens, total_tokens, total_ms, created_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict (id) do update set
+                    space_id = excluded.space_id,
+                    meeting_id = excluded.meeting_id,
+                    feature = excluded.feature,
+                    provider = excluded.provider,
+                    api_style = excluded.api_style,
+                    streamed = excluded.streamed,
+                    input_tokens = excluded.input_tokens,
+                    output_tokens = excluded.output_tokens,
+                    total_tokens = excluded.total_tokens,
+                    total_ms = excluded.total_ms,
+                    created_at = excluded.created_at
+                """,
+                event.id(), event.spaceId(), event.meetingId(), event.feature().apiValue(),
+                event.provider(), event.apiStyle(), event.streamed(), event.inputTokens(),
+                event.outputTokens(), event.totalTokens(), event.totalMs(), timestamp(event.createdAt())
+        );
+        return event;
+    }
+
+    @Override
+    List<AiUsageEvent> findAiUsageEvents(String spaceId, Instant fromInclusive) {
+        return jdbc.query(
+                """
+                select id, space_id, meeting_id, feature, provider, api_style, streamed,
+                       input_tokens, output_tokens, total_tokens, total_ms, created_at
+                from ai_usage_events
+                where space_id = ? and created_at >= ?
+                order by created_at desc, id
+                """,
+                (rs, rowNum) -> new AiUsageEvent(
+                        rs.getString("id"),
+                        rs.getString("space_id"),
+                        rs.getString("meeting_id"),
+                        AiUsageFeature.parse(rs.getString("feature")),
+                        rs.getString("provider"),
+                        rs.getString("api_style"),
+                        rs.getBoolean("streamed"),
+                        (Integer) rs.getObject("input_tokens"),
+                        (Integer) rs.getObject("output_tokens"),
+                        (Integer) rs.getObject("total_tokens"),
+                        (Long) rs.getObject("total_ms"),
+                        rs.getTimestamp("created_at").toInstant()
+                ),
+                spaceId,
+                timestamp(fromInclusive)
+        );
+    }
+
+    @Override
     AuditEvent addAuditEvent(
             String type,
             String actorUserId,

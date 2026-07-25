@@ -197,6 +197,10 @@ public abstract class WorkspaceStore {
 
     abstract List<ProjectKnowledge> findProjectKnowledge(String spaceId);
 
+    abstract AiUsageEvent saveAiUsageEvent(AiUsageEvent event);
+
+    abstract List<AiUsageEvent> findAiUsageEvents(String spaceId, Instant fromInclusive);
+
     abstract AuditEvent addAuditEvent(
             String type,
             String actorUserId,

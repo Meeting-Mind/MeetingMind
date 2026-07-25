@@ -14,14 +14,17 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 class DownstreamGuardTest {
 
     @Test
     void rejectsBeyondTheBulkheadWithoutQueueing() throws Exception {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         DownstreamGuard guard = new DownstreamGuard(
-                1, 3, Duration.ofSeconds(30), Clock.systemUTC());
+                1, 3, Duration.ofSeconds(30), Clock.systemUTC(),
+                new com.meetingmind.bff.observability.DownstreamGuardMetrics(meterRegistry, "test"));
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -35,6 +38,10 @@ class DownstreamGuardTest {
 
             assertThatThrownBy(() -> guard.execute(() -> "second"))
                     .isInstanceOf(DownstreamGuardRejectedException.class);
+            assertThat(meterRegistry.get("meetingmind.bff.downstream.guard.rejections")
+                    .tag("service", "test")
+                    .counter()
+                    .count()).isEqualTo(1.0d);
 
             release.countDown();
             assertThat(first.get(1, TimeUnit.SECONDS)).isEqualTo("ok");
@@ -47,7 +54,13 @@ class DownstreamGuardTest {
     @Test
     void opensAfterTheFailureThresholdAndClosesAfterOneSuccessfulProbe() {
         MutableClock clock = new MutableClock(Instant.parse("2026-07-16T00:00:00Z"));
-        DownstreamGuard guard = new DownstreamGuard(1, 2, Duration.ofSeconds(10), clock);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        DownstreamGuard guard = new DownstreamGuard(
+                1,
+                2,
+                Duration.ofSeconds(10),
+                clock,
+                new com.meetingmind.bff.observability.DownstreamGuardMetrics(meterRegistry, "test"));
         AtomicInteger calls = new AtomicInteger();
 
         for (int attempt = 0; attempt < 2; attempt++) {
@@ -67,12 +80,22 @@ class DownstreamGuardTest {
         clock.advance(Duration.ofSeconds(11));
         assertThat(guard.execute(() -> "probe-ok")).isEqualTo("probe-ok");
         assertThat(guard.execute(() -> "closed-ok")).isEqualTo("closed-ok");
+        assertThat(meterRegistry.get("meetingmind.bff.downstream.guard.opened")
+                .tag("service", "test")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("meetingmind.bff.downstream.guard.open")
+                .tag("service", "test")
+                .gauge()
+                .value()).isEqualTo(0.0d);
     }
 
     @Test
     void aCallAdmittedBeforeOpeningCannotCloseTheCircuitLater() throws Exception {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         DownstreamGuard guard = new DownstreamGuard(
-                2, 1, Duration.ofSeconds(30), Clock.systemUTC());
+                2, 1, Duration.ofSeconds(30), Clock.systemUTC(),
+                new com.meetingmind.bff.observability.DownstreamGuardMetrics(meterRegistry, "test"));
         CountDownLatch successEntered = new CountDownLatch(1);
         CountDownLatch releaseSuccess = new CountDownLatch(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -92,6 +115,10 @@ class DownstreamGuardTest {
 
             assertThatThrownBy(() -> guard.execute(() -> "must-stay-open"))
                     .isInstanceOf(DownstreamGuardRejectedException.class);
+            assertThat(meterRegistry.get("meetingmind.bff.downstream.guard.open")
+                    .tag("service", "test")
+                    .gauge()
+                    .value()).isEqualTo(1.0d);
         } finally {
             releaseSuccess.countDown();
             executor.shutdownNow();

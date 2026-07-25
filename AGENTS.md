@@ -23,6 +23,14 @@ MeetingMind는 회의 기록을 프로젝트 지식 자산으로 전환하는 AI
 
 ## 운영 계층
 
+### Frontend Runtime Route Source
+
+현재 프론트 런타임의 진입점은 `frontend/src/main.tsx`에서 직접 렌더링하는
+`frontend/src/App.tsx`이다. 따라서 실제 화면 동작과 라우트 변경은 먼저 `App.tsx`의
+`createBrowserRouter`와 해당 컴포넌트를 확인해야 한다. `frontend/src/routes/AppRoutes.tsx`는
+현재 런타임에 연결되지 않은 병행 라우트 구현이므로, 활성 동작의 수정 대상으로 간주하지 않는다.
+두 라우트 체계를 통합하거나 전환하는 작업은 별도 마이그레이션 태스크로 먼저 결정한다.
+
 MeetingMind는 7개 개념 계층을 사용하되, 물리 파일 수는 작게 유지한다.
 
 | Concept Layer | Meaning | Physical Location | Read Timing |

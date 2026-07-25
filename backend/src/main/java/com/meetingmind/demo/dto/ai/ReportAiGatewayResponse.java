@@ -9,7 +9,8 @@ public record ReportAiGatewayResponse(
         String markdown,
         List<Source> sources,
         boolean unsupported,
-        String model
+        String model,
+        AiChatResponse.AiUsageMetrics usage
 ) {
     public ReportAiGatewayResponse {
         decisions = decisions == null ? List.of() : List.copyOf(decisions);

@@ -1072,3 +1072,25 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T431 [backend/assets] [owner: Codex] 로컬 파일 저장 기반 JPEG/PNG/WebP(5MB) 업로드 endpoint와 Space 대표 이미지 URL 모델을 추가한다. Space 이미지는 OWNER/ADMIN만 업로드할 수 있고, 프로필은 본인만 수정한다.
 - [x] T432 [frontend/assets] [owner: Codex] 실제 런타임 `App.tsx`의 Project Settings와 Account Settings에 이미지 업로드, 미리보기, 제거, 저장 흐름을 연결한다.
 - [x] V117 [verification] [owner: Codex] Backend/Frontend compile 및 build, BFF proxy route 검증 결과를 `implement.md`에 기록한다.
+
+## M043 AI Reliability Harness and Operational Verification
+
+### Milestone Goal
+
+요구사항 정의서 기준으로 AI, STT, LiveKit, RAG, 외부 API, 모니터링의 검증 기준을 하나의 실행 가능한 매트릭스로 정리하고, AI가 권한·근거·토큰·오류 정책을 지키는지 자동 검증할 하네스 기준을 만든다.
+
+- [x] T433 [docs/test] [owner: Codex] 요구사항 테스트 매트릭스에 AI scope, RAG, STT/LiveKit smoke, AI Report to Knowledge, 외부 API resilience, monitoring 항목을 추가한다. 예상 파일: `test-matrix.md`.
+- [x] T434 [docs/ai] [owner: Codex] AI harness 전략을 문서화한다. Meeting AI/Project AI scope, permission prefilter, evidence gate, citation validation, token budget, provider failure, log redaction을 포함한다. 예상 파일: `ai-harness-strategy.md`.
+- [ ] T435 [ai/tests] [owner: Backend/AI] [depends: T434] AH-001~AH-014를 자동 테스트로 분리한다. 우선순위는 no evidence, low relevance, invalid citation, prompt injection, token budget, log redaction이다.
+- [x] T435.1 [ai/tests] [owner: Codex] [depends: T434] Project AI의 빈 `allowedMeetingIds` scope, source context limit, supported response log redaction 회귀 테스트를 추가한다.
+- [x] T435.2 [ai/tests] [owner: Codex] [depends: T435.1] Project AI의 빈 `allowedMeetingIds`에서 제공된 회의 source를 거부하고, AI Report provider context가 상위 12개 source로 제한되는 회귀 테스트를 추가한다.
+- [x] T435.3 [ai/tests] [owner: Codex] [depends: T435.2] Meeting AI/AI Report/Task extraction의 untrusted context guard와 provider usage contract 회귀 테스트를 최신 3-value provider contract에 맞춰 복구한다.
+- [ ] T436 [smoke] [owner: Backend/AI/Frontend] [depends: T435] STT/LiveKit/AI Report/RAG smoke를 opt-in 실행으로 정리한다. 실제 provider key가 필요한 항목은 local deterministic test와 분리한다.
+- [x] T436.1 [docs/smoke] [owner: Codex] [depends: T435.2] STT/LiveKit/AI Report/RAG smoke를 local deterministic check와 provider opt-in check로 분리한 실행 runbook을 작성한다.
+- [x] T436.2 [smoke/local] [owner: Codex] [depends: T436.1] runbook의 local deterministic smoke 기준선(AI unittest, on-prem http smoke skip 확인, Backend report/project AI integration test)을 실제로 재실행하고 결과를 `implement.md`에 기록한다.
+- [x] T437 [contracts/reliability] [owner: Backend/BFF/AI] [depends: T434] 외부 API별 timeout, retry, fallback, 사용자 오류 메시지 정책을 API/운영 문서로 고정한다. 예상 파일: `contracts/external-reliability.md`, `implement.md`, `test-matrix.md`.
+- [x] T438 [backend-ai-resilience] [owner: Backend/AI] [depends: T437] BFF 외 Backend/Core -> AI/provider 경계에도 circuit/bulkhead 또는 동등한 안전장치를 보강한다.
+- [x] T439 [observability] [owner: Backend/BFF/AI] [depends: T437] Prometheus metric endpoint와 Grafana dashboard 기준을 추가한다. STT latency, AI duration/token/source count, RAG retrieval, provider failure, downstream guard 상태를 포함한다.
+- [ ] T439.1 [observability/frontend-backend] [owner: Backend/AI/Frontend] [depends: T439] Space Overview의 `Knowledge Indexed`를 운영 지표에서 제거하고, Space 단위 AI Usage/quota API와 UI 기준을 정의한다. token total, request count, feature별 usage, usage percent를 포함한다.
+- [ ] V119 [verification] [owner: QA/Integration] [depends: T435,T436,T438,T439] 요구사항 ID별 통과/미통과/수동검증/환경필요 상태를 갱신하고, 실행 결과를 `implement.md`에 기록한다.
+- [x] V119.1 [verification/docs] [owner: Codex] [depends: T435.3,T436.2,T437,T439] 요구사항 ID별 현재 상태표와 local deterministic smoke 실행 결과, env/manual blocker를 `test-matrix.md`, `operational-smoke-runbook.md`, `implement.md`에 동기화한다.

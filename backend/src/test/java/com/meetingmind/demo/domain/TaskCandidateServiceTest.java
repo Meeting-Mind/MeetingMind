@@ -294,7 +294,8 @@ class TaskCandidateServiceTest {
                         1_000, 5_000, "ERD 수정안을 문서화합니다."
                 )),
                 false,
-                "test-model"
+                "test-model",
+                null
         );
     }
 

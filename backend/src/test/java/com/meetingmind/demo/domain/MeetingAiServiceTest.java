@@ -87,6 +87,14 @@ class MeetingAiServiceTest {
         assertThat(context.gateway.captured.projectId()).isEqualTo(space.space().id());
         assertThat(context.gateway.captured.meetingId()).isEqualTo(meeting.meeting().id());
         assertThat(context.gateway.captured.question()).isEqualTo("후속 작업이 뭐야?");
+        assertThat(context.store.findAiUsageEvents(space.space().id(), FIXED_CLOCK.instant().minusSeconds(60)))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.feature().apiValue()).isEqualTo("meeting-ai");
+                    assertThat(event.inputTokens()).isEqualTo(120);
+                    assertThat(event.outputTokens()).isEqualTo(48);
+                    assertThat(event.totalTokens()).isEqualTo(168);
+                });
     }
 
     @Test
@@ -150,7 +158,8 @@ class MeetingAiServiceTest {
                         workspace,
                         new MeetingAccessPolicy(new SpaceAccessPolicy())
                 ),
-                gateway
+                gateway,
+                workspace
         );
         return new TestContext(store, workspace, gateway, service);
     }
@@ -195,7 +204,9 @@ class MeetingAiServiceTest {
                     "응답",
                     List.of(new AiSource("source-1", "transcript", "Sprint Planning #12", "근거")),
                     false,
-                    "test-model"
+                    null,
+                    "test-model",
+                    new AiChatResponse.AiUsageMetrics("openai", "responses", false, 820, 120, 48, null)
             );
         }
 

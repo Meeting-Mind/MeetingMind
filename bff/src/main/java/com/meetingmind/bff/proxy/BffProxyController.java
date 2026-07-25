@@ -24,14 +24,17 @@ public class BffProxyController {
     private final ProxyRouteRegistry routeRegistry;
     private final DownstreamHttpClient downstreamClient;
     private final BffTokenManager tokenManager;
+    private final AiUsageRecorder aiUsageRecorder;
 
     public BffProxyController(
             ProxyRouteRegistry routeRegistry,
             DownstreamHttpClient downstreamClient,
-            BffTokenManager tokenManager) {
+            BffTokenManager tokenManager,
+            AiUsageRecorder aiUsageRecorder) {
         this.routeRegistry = routeRegistry;
         this.downstreamClient = downstreamClient;
         this.tokenManager = tokenManager;
+        this.aiUsageRecorder = aiUsageRecorder;
     }
 
     @RequestMapping("/api/v1/**")
@@ -53,6 +56,7 @@ public class BffProxyController {
                 request,
                 route.service().audience(),
                 authorization -> downstreamClient.execute(route.service(), proxyRequest, authorization));
+        aiUsageRecorder.recordIfPresent(request, route, response);
         HttpHeaders responseHeaders = new HttpHeaders();
         if (response.contentType() != null) {
             responseHeaders.setContentType(response.contentType());

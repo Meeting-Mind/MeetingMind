@@ -54,6 +54,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.PATCH, SPACE, DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/image", DownstreamService.CORE),
             route(HttpMethod.DELETE, SPACE, DownstreamService.CORE),
+            route(HttpMethod.GET, SPACE + "/ai/usage", DownstreamService.CORE),
             route(HttpMethod.GET, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/meetings", DownstreamService.CORE),
             route(HttpMethod.POST, SPACE + "/instant-meetings", DownstreamService.CORE),

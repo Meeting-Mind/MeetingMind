@@ -3,6 +3,8 @@ package com.meetingmind.bff.proxy;
 import com.meetingmind.bff.auth.DownstreamUnauthorizedException;
 import com.meetingmind.bff.config.DownstreamProxyProperties;
 import com.meetingmind.bff.config.DownstreamProxyProperties.ServicePolicy;
+import com.meetingmind.bff.observability.DownstreamGuardMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -19,7 +21,7 @@ public class DownstreamHttpClient {
     private final Map<DownstreamService, RestClient> clients;
     private final Map<DownstreamService, DownstreamGuard> guards;
 
-    public DownstreamHttpClient(DownstreamProxyProperties properties, Clock clock) {
+    public DownstreamHttpClient(DownstreamProxyProperties properties, Clock clock, MeterRegistry meterRegistry) {
         this.clients = new EnumMap<>(DownstreamService.class);
         this.guards = new EnumMap<>(DownstreamService.class);
         for (DownstreamService service : DownstreamService.values()) {
@@ -29,7 +31,8 @@ public class DownstreamHttpClient {
                     policy.maxConcurrent(),
                     policy.failureThreshold(),
                     policy.openDuration(),
-                    clock));
+                    clock,
+                    new DownstreamGuardMetrics(meterRegistry, service.name().toLowerCase())));
         }
     }
 

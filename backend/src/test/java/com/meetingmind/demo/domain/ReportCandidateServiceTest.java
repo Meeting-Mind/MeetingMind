@@ -11,6 +11,7 @@ import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.authz.MeetingAccessPolicy;
 import com.meetingmind.demo.authz.SpaceAccessPolicy;
 import com.meetingmind.demo.authz.SpaceRole;
+import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayResponse;
 import com.meetingmind.demo.dto.ai.ReportCandidateGenerationResponse;
@@ -68,6 +69,14 @@ class ReportCandidateServiceTest {
                     assertThat(report.version()).isEqualTo(1);
                     assertThat(report.current()).isFalse();
                     assertThat(report.markdown()).startsWith("## 요약");
+                });
+        assertThat(context.store.findAiUsageEvents(space.space().id(), FIXED_CLOCK.instant().minusSeconds(60)))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.feature().apiValue()).isEqualTo("report-ai");
+                    assertThat(event.inputTokens()).isEqualTo(220);
+                    assertThat(event.outputTokens()).isEqualTo(84);
+                    assertThat(event.totalTokens()).isEqualTo(304);
                 });
     }
 
@@ -172,7 +181,8 @@ class ReportCandidateServiceTest {
                         1_000, 5_000, "권한 필터를 먼저 적용합니다."
                 )),
                 false,
-                "test-model"
+                "test-model",
+                new AiChatResponse.AiUsageMetrics("openai", "responses", false, 1_420, 220, 84, null)
         );
     }
 

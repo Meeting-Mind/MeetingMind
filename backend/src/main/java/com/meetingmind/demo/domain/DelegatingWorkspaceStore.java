@@ -83,5 +83,7 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
     @Override Optional<TaskCard> findTaskCardBySourceCandidateId(String candidateId) { return delegate.findTaskCardBySourceCandidateId(candidateId); }
     @Override ProjectKnowledge saveProjectKnowledge(ProjectKnowledge knowledge) { return delegate.saveProjectKnowledge(knowledge); }
     @Override List<ProjectKnowledge> findProjectKnowledge(String spaceId) { return delegate.findProjectKnowledge(spaceId); }
+    @Override AiUsageEvent saveAiUsageEvent(AiUsageEvent event) { return delegate.saveAiUsageEvent(event); }
+    @Override List<AiUsageEvent> findAiUsageEvents(String spaceId, Instant fromInclusive) { return delegate.findAiUsageEvents(spaceId, fromInclusive); }
     @Override AuditEvent addAuditEvent(String type, String actorUserId, String targetUserId, String resourceId, String beforeValue, String afterValue, Instant createdAt) { return delegate.addAuditEvent(type, actorUserId, targetUserId, resourceId, beforeValue, afterValue, createdAt); }
 }
