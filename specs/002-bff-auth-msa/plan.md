@@ -36,6 +36,7 @@ flowchart LR
     Edge -->|"static assets"| S3["Frontend S3"]
     Edge -->|"API origin"| ALB["Public ALB"]
     ALB -->|"target port 8081"| BFF["BFF ECS Service"]
+    ALB -->|"LiveKit Egress WSS, target port 8083"| STT
     BFF --> Session["BFF Redis Session"]
     BFF --> Vault["Encrypted Token Vault"]
     BFF -->|"TCP 8082"| Auth["Auth ECS Service"]
@@ -58,16 +59,17 @@ flowchart LR
 - Auth Service: User/AuthIdentity/AuthSession, 자격 검증, access/refresh 발급·회전·폐기와 JWKS를 소유한다.
 - Core Resource API: Space/Meeting/권한/AI source 선필터를 유지하고 access JWT subject 이후 최신 RBAC/ACL을 자신의 DB에서 평가한다.
 - AI: 기존 FastAPI를 독립 ECS Service로 배포하며 Core의 TCP `8000` 호출만 허용하고 public 브라우저 호출을 허용하지 않는다.
-- Realtime STT: `stt/` 독립 Spring Boot 서비스를 ECS Service로 배포하며 컨테이너 포트 `8083`, Core의 TCP `8083` 호출만 허용한다. LiveKit/STT provider secret과 STT DB는 서비스 경계 안에서 관리한다.
+- Realtime STT: `stt/` 독립 Spring Boot 서비스를 ECS Service로 배포하며 컨테이너 포트 `8083`을 사용한다. 업무 API는 Core SG만 허용하고 LiveKit Egress audio의 `/ws/egress-audio/*` WSS 경로만 ALB SG와 짧은 수명의 1회용 token 경계로 별도 허용한다. LiveKit/STT provider secret과 STT DB는 서비스 경계 안에서 관리한다.
 - LiveKit: LiveKit Cloud를 사용하며 참가자 token은 Core 권한 검증 뒤 제한적으로 발급한다.
 - Data: BFF session Redis, Auth DB, Core DB를 논리적으로 분리하고 신규 서비스는 다른 서비스 DB를 직접 조회하지 않는다.
-- Platform: 서울 `ap-northeast-2`의 NonProd 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI/Realtime STT를 각각 ECS Service와 Task Definition으로 운영한다. Fargate Task는 2개 AZ의 private app subnet, public ALB는 public subnet에 배치하고 private outbound는 NAT Gateway를 사용한다.
+- Platform: 서울 `ap-northeast-2`의 `nonprod-v2` 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI/Realtime STT를 각각 ECS Service와 Task Definition으로 운영한다. Fargate Task는 2개 AZ의 private app subnet, public ALB는 public subnet에 배치하고 private outbound는 Regional NAT Gateway automatic mode를 사용한다.
 - Isolation: 각 서비스는 별도 Task Role, Security Group, 7일 보존 CloudWatch Log Group을 가진다. 공통 ECS Task Execution Role은 ECR pull과 로그 전송 등 실행 권한으로 제한한다.
 - Images: ECR repository는 `bff`, `auth`, `core`, `ai`, `realtime-stt`로 분리하고 immutable tag와 Git commit SHA를 사용한다. NonProd는 기본 scan-on-push만 사용하고 Inspector enhanced ECR scanning은 비활성화한다.
-- Frontend/Edge: React 정적 자산은 S3에 배포하고 Route 53 → CloudFront/WAF → ALB → BFF 경로로 API 요청을 전달한다.
-- Realtime STT rollout: 코드와 Dockerfile은 `stt/`에 준비되어 있다. 배포 전 Actuator liveness/readiness, STT DB migration, Secrets Manager, Core→STT service discovery와 workload identity를 검증한다. 외부 ALB에는 직접 연결하지 않는다.
-- Reuse/IaC: 기존 VPC, public/private/data subnet, route table, NAT Gateway와 S3 Gateway Endpoint를 재사용한다. 현재 VPC Terraform은 보존하고 장기적으로 ECS/ALB/IAM/Security Group/CloudWatch를 모듈 및 환경별 변수로 전환한다.
-- Tags: 수작업 NonProd 리소스는 `Project=meetingmind`, `Environment=nonprod`, `ManagedBy=manual`, `Service=<서비스명>`을 사용한다. 공용 리소스의 `Service` 값은 리소스별 공통 명칭을 별도 확정한다.
+- Frontend/Edge: 목표 경로는 React S3와 Route 53 → CloudFront/WAF → ALB → BFF/STT target group이다. 도메인 발급 전에는 ALB DNS와 제한된 source CIDR로 인프라 smoke test만 수행하며 `Secure` cookie와 LiveKit WSS end-to-end를 출시 완료로 보지 않는다.
+- Realtime STT rollout: 코드와 Dockerfile은 `stt/`에 준비되어 있다. 배포 전 Actuator liveness/readiness, STT DB migration, Secrets Manager, Core→STT service discovery/workload identity와 LiveKit Egress WSS token 검증을 통과한다.
+- Rebuild/IaC: 기존 수작업 리소스는 import하지 않고 같은 계정에 `10.20.0.0/16`의 새 `nonprod-v2` stack을 병렬 구축한다. 기존 환경은 V2 검증·전환·관측 기간이 끝날 때까지 유지하고 별도 승인으로 정리한다. 상세 순서는 `infra/aws/nonprod-v2/implementation-plan.md`를 따른다.
+- State/Secrets: Terraform `>=1.10,<2.0`, versioned/encrypted S3 backend와 native lockfile을 사용한다. RDS master는 RDS-managed secret, Valkey는 IAM authentication을 사용한다. Terraform은 그 밖의 secret container와 IAM만 만들고 실제 application/provider 값은 사용자가 Console에서 입력한다.
+- Tags: V2 공통 tag는 `Project=MeetingMind`, `Environment=nonprod-v2`, `ManagedBy=terraform`, `Repository=Meeting-Mind/MeetingMind`다. 공용 리소스는 `Service=platform`, 서비스 전용 리소스는 서비스명을 사용한다.
 
 ## Technical Decisions
 
@@ -83,9 +85,13 @@ flowchart LR
 | Service access | KMS RSA-2048 `RS256`, 단일 audience별 10분 JWT + JWKS | Resource Service가 Auth Service에 매 요청 의존하지 않고 로컬 검증하며 다른 서비스 token 재사용을 막는다. | ES256, shared HMAC, opaque introspection |
 | Refresh reuse | AuthSession별 1회용 family, grace 없음 | BFF single-flight로 정상 동시성을 처리하고 재사용이 감지된 의심 기기만 전체 폐기한다. | 이전 token만 거부, 사용자 전체 폐기, grace window |
 | Access revoke | Auth transactional outbox + `sid` event + Resource local denylist | 중앙 조회 장애 전파 없이 로그아웃 access를 빠르게 차단하고 최악의 잔여 위험을 10분 TTL+60초 skew로 제한한다. | 매 요청 중앙 denylist/introspection, short JWT only |
-| Workload auth | mTLS SPIFFE identity + Security Group/allowlist | shared secret 없이 workload를 상호 인증하고 principal 단위 최소 권한을 적용한다. 구체 discovery/인증서 제품은 Q-023에서 확정한다. | OAuth client credentials, 자체 요청 서명 |
+| Workload auth | Direct mTLS with service certificates containing SPIFFE URI SAN + Cloud Map Private DNS + Security Group/allowlist | public ALB와 shared secret 없이 private stable address와 caller identity를 함께 검증한다. 공통 내부 CA가 서비스별 인증서를 발급하고 NonProd는 Secrets Manager version 교체 후 ECS force deployment로 rotation한다. | ECS Service Connect managed TLS, SPIRE/Envoy sidecar, OAuth client credentials |
 | Google auth | 기존 ID credential 검증 유지 | 현재 요구는 Google API 권한이 아닌 로그인이다. | 즉시 Authorization Code/OIDC |
 | Deployment | AWS ECS Fargate, single-region Multi-AZ | Kubernetes control plane과 EC2 node 운영 없이 서비스별 독립 배포·스케일링·장애 격리를 제공한다. | EKS, ECS on EC2, multi-region |
+| NonProd IaC transition | 기존 import 없는 병렬 `nonprod-v2` rebuild | 수작업 drift와 불완전한 import를 기준선으로 고착하지 않고 전체 resource graph를 한 state에서 재현한다. | 기존 resource import, 수작업 환경 계속 확장 |
+| Terraform state | versioned/SSE-KMS S3 backend + native lockfile | state 복구와 동시 실행 방지를 제공하고 신규 DynamoDB lock table을 피한다. | local state, S3+DynamoDB lock |
+| NonProd outbound | Regional NAT Gateway automatic mode | AZ별 수동 NAT/route 운영 없이 workload presence에 맞춘 Multi-AZ outbound를 제공한다. | AZ별 zonal NAT, 단일 zonal NAT |
+| Secret value ownership | RDS-managed master, Valkey IAM auth, 나머지는 Terraform metadata/IAM + Console secret version | plan/state/`.tfvars`의 장기 secret 원문 노출을 피한다. | Terraform `secret_string`, 평문 환경 변수 |
 | Media | LiveKit Cloud | UDP/TURN/media node 운영을 애플리케이션 장애 경계에서 분리한다. | Self-host LiveKit |
 | Data ownership | Database per service target | 공유 DB 변경과 장애 전파를 줄인다. | Shared schema |
 | User ID bridge | Core 문자열 PK 유지 + `auth_user_id UUID` projection | 업무 FK 재작성 없이 Auth/JWT UUID subject와 Core 사용자를 결정적으로 연결한다. | legacy subject 유지, Core PK/FK 일괄 UUID 전환 |
@@ -216,7 +222,7 @@ flowchart LR
 | Frontend | 사용자 | Codex | token 저장 제거, session bootstrap, logout | `frontend/src/auth/**`, API clients, `App.tsx` | Browser-BFF contract, BFF endpoints |
 | Backend compatibility | 사용자 | Codex | 현재 Backend token/API를 BFF internal client로 안전하게 수용 | `backend/**`, `bff/**` | BFF foundation |
 | Auth Service | 사용자 | Codex | User/AuthIdentity/AuthSession 추출, JWT/JWKS/refresh/revoke outbox | future `auth/**` | T030, BFF compatibility |
-| Platform | 사용자 | Codex | ECS Fargate, ALB, ECR, IAM, Security Group, CloudWatch, Redis/RDS/KMS | future `infra/**`, Dockerfiles | Q-013, Q-023~Q-026, service images |
+| Platform | 사용자 | Codex | ECS Fargate, ALB, Cloud Map, direct mTLS, ECR, IAM, Security Group, CloudWatch, Valkey/RDS/KMS | `infra/aws/**`, Dockerfiles | Q-013, Q-024, service images |
 
 ## Conflict Boundaries
 
@@ -245,13 +251,34 @@ flowchart LR
 6. current/all-device logout과 expiry/refresh 회귀를 검증한다.
 7. T030 refresh/JWT/revoke/workload 계약에 따라 Auth Service를 추출한다.
 8. Core가 Auth JWKS로 access를 로컬 검증하고 기존 Auth package 호환 경로를 종료한다.
-9. NonProd VPC를 `ap-northeast-2`에 만들고 2개 AZ의 Public/Private/Data subnet을 검증한다.
-10. NonProd 단일 ECS Fargate 클러스터, ECR, NAT/private route, 공통 execution role과 서비스별 task role/security group/log group 기준선을 확인한다.
-11. BFF/Auth/Core/AI/STT 이미지를 immutable Git SHA tag로 ECR에 push하고 서비스별 Task Definition을 등록한다.
-12. Public ALB/Target Group/Listener와 ECS Service를 구성하고 Fargate Task를 2개 AZ private app subnet에 배치한다.
-13. 내부 service discovery, Secrets Manager/Parameter Store, mTLS/SPIFFE 구현과 서비스별 SLO/RTO/RPO를 확정·연결한다.
-14. NonProd health/log/alarm/autoscaling/AZ 장애 검증 뒤 같은 Terraform 모듈과 환경별 변수 구조를 별도 Production 계정에 적용한다.
-15. Realtime STT를 Core 전용 내부 서비스로 배포하고 STT session start→audio→stop 및 task replacement를 검증한다.
+9. S3 remote state bootstrap과 provider/tag/root module 계약을 먼저 만든다.
+10. 새 `10.20.0.0/16` VPC, 2개 AZ Public/Private/Data subnet, IGW, Regional NAT Gateway, route/NACL/Flow Logs/VPC endpoint를 Terraform으로 만든다.
+11. KMS/IAM/ECR/CloudWatch Log Group과 서비스별 Security Group 기준선을 만든다.
+12. 빈 PostgreSQL 16 RDS, Valkey replication group과 Secrets Manager container를 만들고 사용자가 Console에서 실제 secret version을 입력한다.
+13. BFF/Auth/Core/AI/STT 이미지를 immutable Git SHA/digest로 ECR에 push하고 서비스별 Task Definition을 등록한다.
+14. Q-023 결정에 따라 Cloud Map Private DNS `meetingmind.internal`에 `auth`, `core`, `ai`, `stt`를 등록하고 direct mTLS 서비스 인증서·SPIFFE URI SAN·principal/endpoint allowlist를 구성한 뒤 ALB와 ECS Service를 연결하고 Fargate Task를 2개 AZ private app subnet에 배치한다.
+15. 도메인 전 제한된 ALB smoke test, 도메인 후 HTTPS/CloudFront/WAF/browser cookie/LiveKit WSS end-to-end를 검증한다.
+16. health/log/alarm/autoscaling/AZ·NAT·RDS·Valkey 장애 검증과 rollback drill 뒤 V2로 전환한다.
+17. 관측 기간이 끝나고 사용자가 별도 승인한 뒤 기존 수작업 환경을 정리한다.
+18. 검증된 모듈과 환경별 변수 구조를 별도 Production 계정에 적용할 준비를 한다.
+
+### T047 Internal Network Implementation Boundary
+
+1. Cloud Map Private DNS namespace와 `auth/core/ai/stt` service를 runtime off foundation에서 먼저 생성한다. ECS Task IP 등록은 서비스별 ECS Service가 활성화된 뒤 ECS가 관리한다.
+2. `enable_runtime_services`는 전역 kill switch로 유지하고 `runtime_enabled_services` allowlist로 Auth→AI/STT→Core→BFF 순차 배포를 지원한다. allowlist가 비었거나 acknowledgement, image digest, desired count가 누락되면 plan을 실패시킨다.
+3. Task Definition은 runtime 활성 서비스에 대해 ECR tag가 아니라 서비스별 `sha256` digest를 사용한다. runtime off foundation의 미등록 `bootstrap` tag는 Task Definition source 준비에만 허용한다.
+4. 내부 주소는 `https://auth.meetingmind.internal:8082`, `https://core.meetingmind.internal:8080`, `https://ai.meetingmind.internal:8000`, `https://stt.meetingmind.internal:8083`으로 고정한다.
+5. Cloud Map의 ECS-managed health는 container health와 Task state를 반영하지만 application readiness load balancer를 대신하지 않는다. container health는 liveness를 유지하고 caller timeout/circuit breaker와 readiness `503`을 별도로 검증한다.
+6. 인증서 private key는 Terraform이 생성하거나 state에 저장하지 않는다. T047-B는 repository 밖의 암호화된 offline NonProd root/intermediate CA, 서비스별 Secrets Manager 단일 TLS bundle과 전용 ARM64 `meetingmind-cert-loader`를 구현한다. Production CA는 별도 승인하고 NonProd CA를 재사용하지 않는다.
+7. 서비스 secret을 주입하는 execution role은 서비스별로 분리하고, Task SG egress는 내부 SG/데이터/VPC endpoint와 외부 provider용 TCP 443만 명시한다.
+8. source validation과 실제 AWS runtime 검증을 분리한다. `fmt`/`validate`/mock test/IaC scan 통과만으로 T047 전체를 완료 처리하지 않고 T047-D의 positive/negative runtime evidence까지 요구한다.
+9. Java 서비스는 `/run/meetingmind/tls/tls.crt`, `tls.key`, `ca.crt` 파일 계약과 Spring `meetingmind-internal` PEM SSL bundle을 사용한다. `mtls` profile에서 Auth/Core/STT server와 BFF/Core internal client에만 적용하고 외부 provider client와 BFF public listener에는 적용하지 않는다.
+10. 인증서 principal은 검증된 client certificate의 URI SAN에서 읽으며 정확히 하나의 `spiffe://meetingmind.internal/ns/nonprod-v2/sa/{serviceAccount}` identity만 수락한다. 운영 profile은 test principal header를 무시한다. AI는 Envoy가 external XFCC를 sanitize하고 exact Core SPIFFE를 RBAC로 검증한 뒤 verified URI만 loopback-bound Uvicorn에 전달하며 FastAPI가 이를 다시 allowlist와 대조한다.
+11. Auth/Core/STT의 mTLS profile은 main TLS port와 분리된 loopback-only HTTP management port를 사용한다. Core health는 Actuator liveness와 DB 포함 readiness를 분리하고 ECS container health는 liveness만 사용해 DB 장애 시 task 재시작 대신 readiness에서 traffic 수용을 중지한다.
+12. TLS secret은 서비스별 단일 JSON version에 certificate/private key/CA bundle을 함께 저장한다. loader는 ECS task role로 자신의 exact ARN만 읽고 chain, key match, validity, URI/DNS SAN과 EKU를 검증한 뒤 task-scoped volume에 원자적으로 기록한다.
+13. AI Envoy는 `0.0.0.0:8000`, Uvicorn은 `127.0.0.1:8001`만 사용한다. ECS target에서는 `AI_INTERNAL_SERVICE_TOKEN`과 Core shared-token header를 제거하되 local/on-prem compatibility mode는 별도 경계로 유지할 수 있다.
+14. 실제 runtime 검증 전 service 기동을 막는 순환을 제거하기 위해 certificate/image/local handshake 준비 gate와 AWS runtime verified gate를 분리한다. private validation mode는 public BFF/ALB traffic 없이 Auth→AI/STT→Core만 시작하며, 정상 staged runtime은 positive/negative/rotation evidence 이후에만 연다.
+15. 상세 identity, bundle schema, 구현 순서와 검증 행렬은 `infra/aws/nonprod-v2/mtls-implementation-plan.md`를 기준으로 한다.
 
 ## Test Plan
 
@@ -303,7 +330,7 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 4. BFF target 로그인은 Auth Service가 발급한 실제 `authSessionId`와 Auth User UUID를 session에 저장한다. Spring Session Redis의 principal/user index를 활성화해 T024가 사용자 전체 BffSession을 조회할 수 있게 한다.
 5. Core는 JWT header profile로 legacy HS256과 target `RS256/at+jwt/kid`를 먼저 분류하고 선택된 validator 하나만 실행한다. target 검증 실패를 legacy validator로 재시도하지 않아 downgrade를 막는다.
 6. target JWT `sub` UUID는 Core `users.auth_user_id`로 resource User를 찾고 기존 문자열 업무 FK를 사용한다. BFF는 target 인증 성공 뒤 Core target access+workload identity로 멱등 projection을 만들고 성공 후에만 Browser session을 만든다.
-7. local/CI는 test source signer와 test workload principal만 사용하고 runtime image에는 signer/private key를 넣지 않는다. 운영 mTLS 제품과 KMS/ECS Task Role 연결은 Q-023/T040 이후 출시 gate다.
+7. local/CI는 test source signer와 test workload principal만 사용하고 runtime image에는 signer/private key를 넣지 않는다. 운영 direct mTLS 인증서·공통 CA와 KMS/ECS Task Role 연결은 T047 구현·검증 이후 출시 gate다.
 8. 기존 직렬화 session/Token Bundle은 추측 변환하지 않고 강제 재로그인한다. 새 schema v1/v2는 같은 release에서 legacy/target provider rollback을 지원하되 provider 실패를 자동 fallback하지 않는다.
 9. 통합 검증은 Auth actual session/refresh/revoke, BFF audience selection·single-flight, 실제 Redis Auth UUID index, Core dual/target-only validation과 실제 PostgreSQL projection, Browser token 무노출과 명시적 legacy rollback을 포함한다.
 
@@ -319,11 +346,13 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 
 ### Phase 4 — AWS ECS Fargate NonProd Baseline
 
-- 기존 `ap-northeast-2` VPC의 Public/Private/Data subnet, route table, NAT Gateway와 S3 Gateway Endpoint를 재사용한다.
-- NonProd 전용 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI를 별도 ECS Service, Task Definition, Task Role, Security Group, 7일 CloudWatch Log Group으로 격리한다.
-- Frontend S3 + CloudFront/WAF, public ALB와 Target Group/Listener, private subnet의 Fargate Task를 연결한다.
-- immutable Git SHA ECR image, ALB/ECS health check, 로그·경보·Service Auto Scaling과 Multi-AZ failure drill을 통과한 서비스만 운영 전환한다.
-- NonProd 검증 뒤 ECS/ALB/IAM/Security Group/CloudWatch Terraform 모듈과 환경별 변수를 만들어 별도 Production 계정과 리소스에 같은 설계를 적용한다.
+- 기존 수작업 리소스를 import하지 않고 `ap-northeast-2`에 새 `nonprod-v2` Terraform stack을 병렬 구축한다.
+- S3 remote state 뒤 VPC/Public·Private·Data subnet/IGW/Regional NAT/route/NACL/VPC endpoint를 먼저 만든다.
+- 단일 ECS Fargate 클러스터에서 BFF/Auth/Core/AI/STT를 별도 ECS Service, Task Definition, Task Role, Security Group, 7일 CloudWatch Log Group으로 격리한다.
+- 빈 PostgreSQL 16 RDS와 Valkey replication group을 만들며 secret 실제 값은 Terraform 밖에서 Console로 입력한다.
+- 도메인 전에는 제한된 ALB smoke test만 허용하고, 도메인 후 S3+CloudFront/WAF, HTTPS ALB, browser cookie와 LiveKit WSS를 검증한다.
+- immutable Git SHA/digest ECR image, ALB/ECS health check, 로그·경보·Service Auto Scaling과 Multi-AZ failure drill을 통과한 서비스만 V2로 전환한다.
+- 관측 기간과 rollback 검증이 끝난 뒤 사용자 별도 승인으로 기존 환경을 정리하며, 검증된 모듈을 별도 Production 계정에 적용할 준비를 한다.
 
 ### Phase 5 — Domain Extraction
 
@@ -337,5 +366,5 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 | 1 BFF compatibility | M001 문서 합의, 현재 auth E2E 고정 | token 무노출/CSRF/refresh/logout 통합 테스트 | 안정 BFF release와 현재 Backend compatibility API/DB 보존 |
 | 2 Browser cutover | BFF 호환 E2E와 관측 지표 준비 | login/refresh/logout 오류율과 session 복원 기준 충족 | 신규 BFF readiness drain, 안정 BFF traffic 100% 복원, Redis/Vault 데이터 보존 |
 | 3 Auth extraction | T030 계약 완료, Auth DB migration 검증 | refresh reuse/revoke event/mTLS, dual validation/reconciliation/JWKS rotation 통과 | 신규 issuer 발급 중지, legacy issuer/DB 읽기 보존 |
-| 4 ECS Fargate baseline | ECS 기반 리소스 inventory 확인, Q-013/Q-023~Q-026 결정 | ALB/ECS Task/AZ/data/provider failure drill과 SLO 통과 | 이전 Task Definition revision/ECS deployment 복원, 데이터 파괴 금지 |
+| 4 ECS Fargate baseline | T054 V2 계획, 로컬 도구/SSO와 Q-013/Q-024 gate 확인 | Terraform 기반 ALB/ECS Task/AZ/data/provider failure drill과 SLO 통과 | 기존 수작업 환경 또는 이전 Task Definition revision으로 복원, 데이터 파괴 금지 |
 | 5 Domain extraction | 관측 근거와 별도 feature spec | API/event reconciliation와 독립 SLO 통과 | strangler route를 Core로 복원, forward-only 데이터 보존 |
