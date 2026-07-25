@@ -2284,6 +2284,15 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T448 SMK-004 Project AI Answers from Confirmed Report with Citation
+
+- 변경 파일: `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 대상 경로: `POST /api/internal/project-ai/chat`. `sources`가 비어 있으면 `build_backend_project_chat_sources`가 `search_postgres_sources`로 pgvector 검색을 수행하고, source type에 `report`가 포함된다. `T447`로 색인된 `report` chunk가 이 단계의 선행 조건이다.
+- 양성 2건: Space A(`space-9a7d73d7…`)에서 "베타 시작 시점" 질문에 `supported`로 답하며 인용 source에 확정 회의록 `report-738390bc…`가 포함된다. Space B(`space-fac05824…`)에서도 자기 Space의 `report-741bdeb4…`와 decision 3건이 인용된다. 서로 다른 Space에서 각각 성립하므로 특정 데이터에 우연히 맞은 결과가 아니다.
+- 음성 3건: 근거 없는 질문 -> `unsupported=true`, `LOW_RELEVANCE`. `allowedMeetingIds=[]` -> `NO_EVIDENCE`(회의 소유 source가 회의 scope 없이는 노출되지 않는다). 교차 Space(`projectId=B` + `allowedMeetingIds=A의 회의`) -> `unsupported=true`. 세 건의 reason이 서로 달라 일괄 거부가 아니다.
+- 응답 단정만으로 부족한 이유와 보완: unsupported 응답은 `sources`를 비우고 반환한다. 따라서 교차 Space 요청이 거부된 것이 **검색이 아무것도 반환하지 않아서인지**, 아니면 **검색은 누출했는데 모델이 답하지 못한 것인지** 응답만으로는 구분할 수 없다. `PostgresRagRetriever`를 직접 호출해 모델을 배제하고 확인했다. 올바른 scope에서는 8건(그중 대상 report 포함)이 반환되고, 교차 Space 요청에서는 Space B 자신의 `projectKnowledge` 4건만 반환되어 A의 source는 0건이었다. 양성 대조가 8건으로 비어있지 않으므로 공허한 통과가 아니다.
+- 범위 한계: AI 서버 내부 endpoint를 직접 호출했다. Backend의 권한 검증과 `allowedMeetingIds` 선필터를 거치는 public 경로(`POST /api/v1/spaces/{spaceId}/ai/chat`)의 end-to-end 검증은 별도다. 자동 회귀 테스트가 아니라 opt-in 수동 smoke이며 실 provider 과금이 발생한다.
+
 ## T447 SMK-003 Provider Tier — Embedding Worker Consumes REPORT_CONFIRMED
 
 - 변경 파일: `scripts/run-embedding-worker.sh`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
