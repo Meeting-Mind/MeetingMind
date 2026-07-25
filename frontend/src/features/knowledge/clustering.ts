@@ -1,11 +1,27 @@
+import { KNOWLEDGE_LAYER } from "./depth";
+import type { KnowledgeKind } from "./types";
+
 /**
  * 지식 그래프 묶어보기.
  *
- * 연결된 노드끼리 한 덩어리로 모은다. 기준을 "연결 관계"로 잡은 이유는 그래프가
- * 이미 갖고 있는 구조라 별도 계산이나 서버 변경이 필요 없고, 사용자가 화면에서
- * 보는 선과 묶음이 일치하기 때문이다. 임베딩으로 주제를 나누는 방식은 데이터가
- * 조금만 바뀌어도 묶음이 달라져 같은 화면을 다시 봤을 때 혼란스럽다.
+ * 기준은 셋이다. 모두 노드가 이미 갖고 있는 정보로 계산해 서버 변경이 필요 없고,
+ * 같은 데이터에 항상 같은 묶음이 나온다. 임베딩으로 주제를 나누는 방식은 데이터가
+ * 조금만 바뀌어도 묶음이 달라져 같은 화면을 다시 봤을 때 혼란스러워 넣지 않았다.
  */
+
+export type ClusterBasis = "link" | "meeting" | "layer";
+
+export const CLUSTER_BASIS_LABELS: Record<ClusterBasis, string> = {
+  link: "연결 관계",
+  meeting: "회의별",
+  layer: "성격별",
+};
+
+export const CLUSTER_BASIS_HINTS: Record<ClusterBasis, string> = {
+  link: "이어진 노드끼리 묶습니다. 화면의 선과 묶음이 일치합니다.",
+  meeting: "같은 회의에서 나온 것끼리 묶습니다. 회의 밖 지식은 따로 모입니다.",
+  layer: "공식 지식, 회의 결과물, 회의 원자료로 나눕니다.",
+};
 
 export const CLUSTER_MOTION_MS = 1100;
 
@@ -70,6 +86,65 @@ export function buildClusters(nodeIds: string[], links: Linked[]): Map<string, n
     result.set(id, indexByRoot.get(root) as number);
   }
   return result;
+}
+
+type Groupable = { id: string; kind: KnowledgeKind; sourceMeetingId: string | null };
+
+/**
+ * 회의별 묶음. 같은 회의에서 나온 노드가 한 덩어리다.
+ *
+ * 회의에 속하지 않은 지식은 모두 한 덩어리로 모은다. 각자 흩어 놓으면 지식이
+ * 많을 때 덩어리가 수십 개가 되어 화면이 못 쓰게 된다.
+ */
+export function clustersByMeeting(nodes: Groupable[]): Map<string, number> {
+  const indexByMeeting = new Map<string, number>();
+  const result = new Map<string, number>();
+  // 회의 없는 지식이 항상 0번을 갖게 먼저 자리를 잡는다. 번호가 흔들리면 색이 바뀐다.
+  indexByMeeting.set("", 0);
+  for (const node of nodes) {
+    const key = node.sourceMeetingId ?? "";
+    if (!indexByMeeting.has(key)) {
+      indexByMeeting.set(key, indexByMeeting.size);
+    }
+    result.set(node.id, indexByMeeting.get(key) as number);
+  }
+  return result;
+}
+
+/**
+ * 성격별 묶음. 깊이 축과 같은 구분(공식 지식 / 회의 결과물 / 회의 원자료)을 쓴다.
+ *
+ * 앞층이 0번이 되도록 층 값을 내림차순으로 매긴다. 그래야 덩어리 번호와 화면
+ * 앞뒤 순서가 어긋나지 않는다.
+ */
+export function clustersByLayer(nodes: Groupable[]): Map<string, number> {
+  const layers = [...new Set(nodes.map((node) => KNOWLEDGE_LAYER[node.kind] ?? 0))].sort(
+    (left, right) => right - left
+  );
+  const indexByLayer = new Map(layers.map((layer, index) => [layer, index]));
+  const result = new Map<string, number>();
+  for (const node of nodes) {
+    result.set(node.id, indexByLayer.get(KNOWLEDGE_LAYER[node.kind] ?? 0) ?? 0);
+  }
+  return result;
+}
+
+/** 기준에 맞는 묶음을 계산한다. */
+export function clustersFor(
+  basis: ClusterBasis,
+  nodes: Groupable[],
+  links: Linked[]
+): Map<string, number> {
+  if (basis === "meeting") {
+    return clustersByMeeting(nodes);
+  }
+  if (basis === "layer") {
+    return clustersByLayer(nodes);
+  }
+  return buildClusters(
+    nodes.map((node) => node.id),
+    links
+  );
 }
 
 /**

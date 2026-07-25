@@ -11,7 +11,7 @@ import {
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, shouldPlayIntro, type BurstTarget } from "./introBurst";
 import { depthOpacity, layerZ, perspectiveScale } from "./depth";
-import { CLUSTER_MOTION_MS, buildClusters, clusterCenters, easeInOut, slotOffset, swirlPosition } from "./clustering";
+import { CLUSTER_MOTION_MS, clusterCenters, clustersFor, easeInOut, slotOffset, swirlPosition, type ClusterBasis } from "./clustering";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
 
@@ -102,11 +102,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     // 묶어보기 전환 모션. 소용돌이로 자기 덩어리에 들어간다.
     const clusterRef = useRef<{ startedAt: number; from: BurstTarget[]; to: BurstTarget[] } | null>(null);
     const clusteredRef = useRef(false);
+    const clusterBasisRef = useRef<ClusterBasis>("link");
     const insetsRef = useRef({ left: 0, right: 0 });
     insetsRef.current = insets ?? { left: 0, right: 0 };
 
     const forces = useKnowledgeGraphStore((state) => state.forces);
     const clustered = useKnowledgeGraphStore((state) => state.clustered);
+    const clusterBasis = useKnowledgeGraphStore((state) => state.clusterBasis);
     const selectedId = useKnowledgeGraphStore((state) => state.selectedId);
     const selectedIdRef = useRef<string | null>(selectedId);
     selectedIdRef.current = selectedId;
@@ -192,10 +194,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
     /* --- 묶어보기 --- */
     useEffect(() => {
-      if (clusteredRef.current === clustered) {
+      // 기준만 바꿔도 다시 배치해야 한다. 묶인 상태에서 기준을 바꾸면 덩어리가
+      // 달라지는데 좌표가 그대로면 이전 묶음이 그대로 보인다.
+      const basisChanged = clusterBasisRef.current !== clusterBasis;
+      if (clusteredRef.current === clustered && !(clustered && basisChanged)) {
         return;
       }
       clusteredRef.current = clustered;
+      clusterBasisRef.current = clusterBasis;
       const graphNodes = dataRef.current.nodes;
       if (graphNodes.length === 0) {
         return;
@@ -205,10 +211,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       let to: BurstTarget[];
 
       if (clustered) {
-        const assignment = buildClusters(
-          graphNodes.map((node) => node.id),
-          dataRef.current.links
-        );
+        const assignment = clustersFor(clusterBasis, graphNodes, dataRef.current.links);
         const clusterCount = new Set(assignment.values()).size;
         // 덩어리 수가 늘수록 원을 키운다. 고정 반지름이면 덩어리끼리 겹친다.
         const centers = clusterCenters(clusterCount, 160 + clusterCount * 34);
@@ -240,7 +243,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       }
 
       clusterRef.current = { startedAt: performance.now(), from, to };
-    }, [clustered]);
+    }, [clustered, clusterBasis]);
 
     /* --- imperative API --- */
     function fitToView() {

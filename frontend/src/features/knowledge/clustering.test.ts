@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildClusters, clusterCenters, easeInOut, slotOffset, swirlPosition } from "./clustering";
+import {
+  buildClusters,
+  clusterCenters,
+  clustersByLayer,
+  clustersByMeeting,
+  clustersFor,
+  easeInOut,
+  slotOffset,
+  swirlPosition,
+} from "./clustering";
+import type { KnowledgeKind } from "./types";
 
 describe("buildClusters", () => {
   it("연결된 노드를 같은 덩어리로 묶는다", () => {
@@ -117,5 +127,89 @@ describe("easeInOut", () => {
     for (let step = 0; step <= 20; step += 1) {
       expect(easeInOut(step / 20)).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+
+function node(id: string, kind: KnowledgeKind, sourceMeetingId: string | null = null) {
+  return { id, kind, sourceMeetingId };
+}
+
+describe("clustersByMeeting", () => {
+  it("같은 회의에서 나온 것끼리 묶는다", () => {
+    const clusters = clustersByMeeting([
+      node("a", "decision", "m1"),
+      node("b", "action", "m1"),
+      node("c", "decision", "m2"),
+    ]);
+
+    expect(clusters.get("a")).toBe(clusters.get("b"));
+    expect(clusters.get("c")).not.toBe(clusters.get("a"));
+  });
+
+  it("회의에 속하지 않은 지식은 한 덩어리로 모은다", () => {
+    // 각자 흩어 놓으면 지식이 많을 때 덩어리가 수십 개가 되어 화면을 못 쓴다.
+    const clusters = clustersByMeeting([
+      node("k1", "manual"),
+      node("k2", "manual"),
+      node("k3", "external"),
+    ]);
+
+    expect(new Set(clusters.values()).size).toBe(1);
+  });
+
+  it("회의 없는 지식이 항상 0번이다", () => {
+    // 번호가 흔들리면 같은 화면을 다시 볼 때 덩어리 색이 바뀐다.
+    const withMeetingFirst = clustersByMeeting([node("a", "decision", "m1"), node("k", "manual")]);
+    const withKnowledgeFirst = clustersByMeeting([node("k", "manual"), node("a", "decision", "m1")]);
+
+    expect(withMeetingFirst.get("k")).toBe(0);
+    expect(withKnowledgeFirst.get("k")).toBe(0);
+  });
+});
+
+describe("clustersByLayer", () => {
+  it("성격이 같으면 한 덩어리다", () => {
+    const clusters = clustersByLayer([node("k1", "manual"), node("k2", "glossary")]);
+    expect(clusters.get("k1")).toBe(clusters.get("k2"));
+  });
+
+  it("공식 지식과 회의 원자료를 나눈다", () => {
+    const clusters = clustersByLayer([node("k", "manual"), node("t", "transcript")]);
+    expect(clusters.get("k")).not.toBe(clusters.get("t"));
+  });
+
+  it("앞층이 0번이다", () => {
+    // 덩어리 번호와 화면 앞뒤 순서가 어긋나면 색과 깊이가 따로 논다.
+    const clusters = clustersByLayer([
+      node("t", "transcript"),
+      node("r", "report"),
+      node("k", "manual"),
+    ]);
+
+    expect(clusters.get("k")).toBe(0);
+    expect(clusters.get("t")).toBe(2);
+  });
+});
+
+describe("clustersFor", () => {
+  const nodes = [node("a", "decision", "m1"), node("b", "manual")];
+
+  it("기준마다 다른 묶음을 준다", () => {
+    const byMeeting = clustersFor("meeting", nodes, []);
+    const byLayer = clustersFor("layer", nodes, []);
+    const byLink = clustersFor("link", nodes, [{ source: "a", target: "b" }]);
+
+    // 회의별: 회의 결과물과 지식이 갈린다
+    expect(byMeeting.get("a")).not.toBe(byMeeting.get("b"));
+    // 성격별: 회의 결과물과 공식 지식이 갈린다
+    expect(byLayer.get("a")).not.toBe(byLayer.get("b"));
+    // 연결 관계: 이어져 있으니 한 덩어리다
+    expect(byLink.get("a")).toBe(byLink.get("b"));
+  });
+
+  it("모르는 기준은 연결 관계로 처리한다", () => {
+    const clusters = clustersFor("link", nodes, []);
+    expect(clusters.size).toBe(2);
   });
 });

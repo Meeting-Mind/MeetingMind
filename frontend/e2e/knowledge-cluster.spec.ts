@@ -61,6 +61,39 @@ test("묶어보기 버튼이 동작한다", async ({ page, request }) => {
   await expect(page.getByRole("button", { name: "묶어보기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "재배치" })).toBeEnabled();
 
+  // 기준은 묶은 뒤에만 보인다. 묶지 않았는데 기준만 있으면 무엇을 고르는지 알 수 없다.
+  await expect(page.getByRole("button", { name: "회의별" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "묶어보기" }).click();
+  for (const label of ["연결 관계", "회의별", "성격별"]) {
+    await expect(page.getByRole("button", { name: label })).toBeVisible();
+  }
+  await expect(page.getByRole("button", { name: "연결 관계" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "회의별" }).click();
+  await expect(page.getByRole("button", { name: "회의별" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "연결 관계" })).toHaveAttribute("aria-pressed", "false");
+
   await page.waitForTimeout(1500);
   expect(errors, `런타임 오류: ${errors.join(" / ")}`).toEqual([]);
+});
+
+test("그래프 설정이 기본으로 닫혀 있다", async ({ page, request }) => {
+  await page.route("https://accounts.google.com/**", (route) => route.abort());
+  const owner = await signup(request, "settings-closed");
+  const space = await (await request.post(`${backendBaseUrl}/api/v1/spaces`, {
+    headers: { Authorization: `Bearer ${owner.accessToken}` },
+    data: { name: `설정 ${Date.now()}`, description: "x" }
+  })).json();
+
+  await signIn(page, owner, `/spaces/${space.id}/knowledge`);
+  await page.goto(`/spaces/${space.id}/knowledge`);
+
+  await expect(page.getByRole("button", { name: "묶어보기" })).toBeVisible({ timeout: 15000 });
+
+  // 그래프가 주인공이고 설정은 가끔 쓴다. 처음부터 화면을 가리면 안 된다.
+  // (설정 열기 버튼은 그래프 영역 안에 있어 노드가 없으면 렌더되지 않는다.
+  //  여기서 확인할 것은 패널이 열려 있지 않다는 사실이다.)
+  await expect(page.getByRole("button", { name: "그래프 설정 닫기" })).toHaveCount(0);
+  await expect(page.getByText("그래프 설정")).toHaveCount(0);
 });

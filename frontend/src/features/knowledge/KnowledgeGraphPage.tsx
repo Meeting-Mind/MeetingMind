@@ -1,4 +1,5 @@
 import { Group, Maximize2, Plus, RefreshCw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { CLUSTER_BASIS_HINTS, CLUSTER_BASIS_LABELS, type ClusterBasis } from "./clustering";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import type { ProjectKnowledgeDetailResponse, SpaceDetail } from "../../types";
@@ -24,7 +25,8 @@ export function KnowledgeGraphPage() {
   const { archive, restore } = useKnowledgeMutations(spaceId);
   const canvasRef = useRef<GraphCanvasHandle>(null);
   const nodeCacheRef = useRef(new Map<string, GraphNodeVM>());
-  const [settingsOpen, setSettingsOpen] = useState(true);
+  // 설정은 기본으로 닫아 둔다. 그래프가 주인공이고 설정은 가끔 쓴다.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<ProjectKnowledgeDetailResponse | null>(null);
   const [archived, setArchived] = useState<ProjectKnowledgeDetailResponse | null>(null);
@@ -34,6 +36,8 @@ export function KnowledgeGraphPage() {
   const showOrphans = useKnowledgeGraphStore((state) => state.showOrphans);
   const clustered = useKnowledgeGraphStore((state) => state.clustered);
   const setClustered = useKnowledgeGraphStore((state) => state.setClustered);
+  const clusterBasis = useKnowledgeGraphStore((state) => state.clusterBasis);
+  const setClusterBasis = useKnowledgeGraphStore((state) => state.setClusterBasis);
   const selectedId = useKnowledgeGraphStore((state) => state.selectedId);
   const setSelectedId = useKnowledgeGraphStore((state) => state.setSelectedId);
 
@@ -133,6 +137,27 @@ export function KnowledgeGraphPage() {
           >
             <Group className="h-3.5 w-3.5" /> {clustered ? "묶음 해제" : "묶어보기"}
           </button>
+          {/* 기준은 묶은 뒤에만 보여준다. 묶지 않았는데 기준만 있으면 무엇을 고르는지 알 수 없다. */}
+          {clustered ? (
+            <div className="flex overflow-hidden rounded-lg border border-[var(--app-line)]">
+              {(Object.keys(CLUSTER_BASIS_LABELS) as ClusterBasis[]).map((basis) => (
+                <button
+                  aria-pressed={clusterBasis === basis}
+                  className={`px-2.5 py-1.5 text-xs font-bold ${
+                    clusterBasis === basis
+                      ? "bg-[var(--app-accent)] text-white"
+                      : "text-[var(--app-muted)] hover:bg-[var(--app-surface-soft)]"
+                  } ${basis === "link" ? "" : "border-l border-[var(--app-line)]"}`}
+                  key={basis}
+                  onClick={() => setClusterBasis(basis)}
+                  title={CLUSTER_BASIS_HINTS[basis]}
+                  type="button"
+                >
+                  {CLUSTER_BASIS_LABELS[basis]}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <button
             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--app-line)] px-3 py-1.5 text-xs font-bold text-[var(--app-muted)] hover:bg-[var(--app-surface-soft)]"
             disabled={clustered}
@@ -200,8 +225,10 @@ export function KnowledgeGraphPage() {
           <>
             <GraphCanvas insets={insets} links={links} nodes={nodes} onSelect={handleSelect} ref={canvasRef} />
             {settingsOpen ? (
-              <div className="absolute left-3.5 top-3.5 z-10 max-h-[calc(100%-28px)]">
-                <GraphSettingsPanel allNodes={allNodes} onClose={() => setSettingsOpen(false)} />
+              <div className="pointer-events-none absolute inset-y-3.5 left-3.5 z-10 flex items-start">
+                <div className="pointer-events-auto max-h-full">
+                  <GraphSettingsPanel allNodes={allNodes} onClose={() => setSettingsOpen(false)} />
+                </div>
               </div>
             ) : (
               <button
