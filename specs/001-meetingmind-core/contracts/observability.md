@@ -76,6 +76,7 @@
 
 ## Gaps
 
-- Backend STT/LiveKit custom metric은 아직 미구현이다.
-- Grafana dashboard json/provisioning은 아직 미구현이다.
+- Backend STT/LiveKit custom metric은 아직 미구현이다. 없는 지표로 패널을 만들면 빈 화면만 나오므로 현재 dashboard에는 포함하지 않았다.
+- Grafana dashboard json/provisioning은 `infra/grafana/`에 구현했다(`T439.2`). AI 지표 8종은 실제 `/metrics` 출력과 대조해 존재를 확인했고, BFF 지표는 Micrometer 등록 코드 기준으로 변환 규칙을 적용했다.
+- BFF `/actuator/prometheus`가 `@SpringBootTest` 환경에서 Prometheus 노출 형식이 아닌 텍스트를 반환한다. 기존 테스트가 "비어 있지 않음"만 단정해 드러나지 않았다. 이 상태에서는 dashboard가 쓰는 BFF 지표 이름을 테스트로 고정할 수 없다.
 - Prometheus scrape 설정은 인프라 작업으로 분리한다.

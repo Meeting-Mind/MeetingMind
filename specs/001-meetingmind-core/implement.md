@@ -2284,6 +2284,17 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T439.2 Grafana Provisioning and Dashboards
+
+- 변경 파일: `infra/grafana/**`(신규 5개), `specs/001-meetingmind-core/contracts/observability.md`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 범위 결정: **provisioning + dashboard JSON까지**만 만든다. STT/LiveKit custom metric 추가는 backend/stt 코드 변경이 따라오므로 별도로 둔다.
+- 없는 지표로 패널을 만들지 않았다: `contracts/observability.md`가 STT/LiveKit 패널을 "최소 필요"로 적어 두었지만 해당 metric이 아직 구현되어 있지 않다. 없는 지표를 쿼리하면 Grafana는 오류를 내지 않고 **빈 패널**을 보여주므로, 만들어 두면 "대시보드가 있다"는 착각만 남는다. 그래서 제외하고 gap으로 남겼다.
+- AI 지표 검증: dashboard JSON에서 쿼리를 파싱해 지표 이름을 뽑고, 실행 중인 AI 서버의 `GET /metrics` 실제 출력과 대조했다. 8종 전부 존재하며 histogram은 `_bucket` 접미사까지 확인했다. 쿼리가 0개인 경우를 실패로 처리해 공허한 통과를 막았다.
+- BFF 지표: Micrometer 등록 코드에서 이름과 tag, meter 종류(Counter/Timer/Gauge)를 확인하고 Prometheus 변환 규칙을 적용했다(dot -> underscore, Counter `_total`, Timer `_seconds_count`/`_seconds_sum`). 실행 중인 BFF의 `/actuator/prometheus`는 인증이 걸려 있어(401) 직접 대조하지 못했다.
+- **부수 발견**: 지표 이름을 테스트로 고정하려 했으나, `@SpringBootTest` 환경의 BFF `/actuator/prometheus`가 **Prometheus 노출 형식이 아닌 텍스트**를 반환한다(dot 이름 + `value=`). 기존 `exposesPrometheusMetrics`는 "비어 있지 않음"만 단정해 이를 잡지 못하고 있었다. 원인 규명은 이 작업 범위를 넘으므로 추가하려던 테스트는 되돌리고 gap으로 기록했다. **지표 이름이 어긋나면 dashboard는 오류 없이 빈 패널이 되므로 조용히 실패한다** — 고정 테스트가 필요한 이유다.
+- 대시보드 구성: AI는 endpoint별 요청/실패율/지연 p50·p95, provider 소요 시간과 토큰 사용량, 요청당 근거 수, 검색 지연/결과 수, 색인 대기열. BFF는 guard 거부/circuit 상태, 브라우저 요청 결과와 지연, 토큰 재발급/세션 무효.
+- 색인 대기열 패널에는 `T447`에서 실제로 5시간 47분 방치됐던 사실을 설명으로 남겼다. 이 패널이 있었으면 그때 바로 드러났다.
+
 ## T439.1 Space AI Usage and Quota
 
 - 변경 파일: `backend/src/main/resources/application.yml`, `backend/src/main/java/com/meetingmind/demo/controller/AiUsageController.java`, `backend/src/test/java/com/meetingmind/demo/controller/AiUsageControllerTest.java`, `frontend/src/App.tsx`, `frontend/e2e/space-ai-usage.spec.ts`(신규), `specs/001-meetingmind-core/{tasks,implement}.md`.

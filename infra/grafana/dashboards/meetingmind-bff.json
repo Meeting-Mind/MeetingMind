@@ -1,0 +1,130 @@
+{
+  "uid": "meetingmind-bff",
+  "title": "MeetingMind BFF / Downstream",
+  "tags": ["meetingmind", "bff"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Downstream Guard",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Service별 guard 거부 수 (req/s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(meetingmind_bff_downstream_guard_rejections_total[5m]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Circuit open 상태",
+      "description": "1이면 열림(차단 중), 0이면 닫힘(정상). gauge라 현재 상태를 그대로 보여준다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "닫힘", "color": "green", "index": 0 },
+                "1": { "text": "열림", "color": "red", "index": 1 }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "meetingmind_bff_downstream_guard_open",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Circuit 열린 횟수 (누적 증가율)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(meetingmind_bff_downstream_guard_opened_total[5m]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Browser Traffic",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "브라우저 요청 결과별 비율 (req/s)",
+      "description": "meetingmind.bff.browser.requests는 Timer라 Prometheus에서 _seconds_count로 노출된다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation, outcome) (rate(meetingmind_bff_browser_requests_seconds_count[5m]))",
+          "legendFormat": "{{operation}} · {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "브라우저 요청 평균 소요 시간 (s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation) (rate(meetingmind_bff_browser_requests_seconds_sum[5m])) / clamp_min(sum by (operation) (rate(meetingmind_bff_browser_requests_seconds_count[5m])), 0.0000001)",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "토큰 재발급 / 세션 무효 (req/s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(meetingmind_bff_refresh_total[5m]))",
+          "legendFormat": "refresh · {{outcome}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(meetingmind_bff_session_invalid_total[5m])",
+          "legendFormat": "session invalid"
+        }
+      ]
+    }
+  ]
+}
