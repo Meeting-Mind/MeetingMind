@@ -10,6 +10,7 @@ import {
 } from "d3-force";
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, type BurstTarget } from "./introBurst";
+import { depthOpacity, layerZ, perspectiveScale } from "./depth";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
 
@@ -246,11 +247,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       let best: GraphNodeVM | null = null;
       let bestDistance = Infinity;
       const { nodeScale } = useKnowledgeGraphStore.getState().display;
+      // 그릴 때와 같은 원근을 적용한다. 안 하면 보이는 자리와 눌리는 자리가 달라진다.
       for (const node of dataRef.current.nodes) {
-        const dx = (node.x ?? 0) - worldX;
-        const dy = (node.y ?? 0) - worldY;
+        const depth = perspectiveScale(layerZ(node.kind));
+        const dx = (node.x ?? 0) * depth - worldX;
+        const dy = (node.y ?? 0) * depth - worldY;
         const distance = dx * dx + dy * dy;
-        const hitRadius = (node.radius * nodeScale + 6) / Math.min(k, 1);
+        const hitRadius = (node.radius * nodeScale * depth + 6) / Math.min(k, 1);
         if (distance < hitRadius * hitRadius && distance < bestDistance) {
           best = node;
           bestDistance = distance;
@@ -386,6 +389,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             // 모션이 끝난 뒤 시뮬레이션이 이어받는다. 알파를 낮게 줘서 자리가 튀지 않게 한다.
             simRef.current?.alpha(0.12).restart();
           } else {
+            // 좌표는 원근 이전 값이다. 그리기 단계에서 층 배율이 곱해지므로
+            // 중앙에서 퍼질 때 앞 층은 더 멀리, 뒤 층은 덜 퍼져 깊이가 함께 열린다.
             simRef.current?.stop();
             for (let index = 0; index < graphNodes.length; index += 1) {
               const target = burst.targets[index];
@@ -444,22 +449,31 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           }
           context.setLineDash(link.explicit ? [] : [4 / k, 4 / k]);
           context.beginPath();
-          context.moveTo(source.x ?? 0, source.y ?? 0);
-          context.lineTo(target.x ?? 0, target.y ?? 0);
+          // 노드와 같은 원근을 적용한다. 안 하면 선이 노드에서 떨어져 그려진다.
+          const sourceDepth = perspectiveScale(layerZ(source.kind));
+          const targetDepth = perspectiveScale(layerZ(target.kind));
+          context.moveTo((source.x ?? 0) * sourceDepth, (source.y ?? 0) * sourceDepth);
+          context.lineTo((target.x ?? 0) * targetDepth, (target.y ?? 0) * targetDepth);
           context.stroke();
           context.shadowBlur = 0;
         }
         context.setLineDash([]);
 
         /* nodes — 소프트 글로우 */
-        for (const node of dataRef.current.nodes) {
-          const radius = node.radius * display.nodeScale;
+        // 뒤 층부터 그린다. 순서가 뒤바뀌면 뒤 노드가 앞 노드를 덮어 깊이가 사라진다.
+        const byDepth = [...dataRef.current.nodes].sort((left, right) => layerZ(left.kind) - layerZ(right.kind));
+
+        for (const node of byDepth) {
+          const z = layerZ(node.kind);
+          const depth = perspectiveScale(z);
+          const radius = node.radius * display.nodeScale * depth;
           const dimmed = isDimmed(node);
           const isAnchor = anchor != null && node.id === anchor.id;
           const color = palette.kind[node.kind];
-          const nodeX = node.x ?? 0;
-          const nodeY = node.y ?? 0;
-          context.globalAlpha = dimmed ? 0.09 : 1;
+          // 원근 투영: 앞 층은 중심에서 멀어지고 뒤 층은 중심으로 모인다.
+          const nodeX = (node.x ?? 0) * depth;
+          const nodeY = (node.y ?? 0) * depth;
+          context.globalAlpha = dimmed ? 0.09 : depthOpacity(z);
           const glowRadius = palette.dark
             ? (isAnchor ? radius * 4 : radius * 2.9)
             : (isAnchor ? radius * 3.2 : radius * 2.3);
@@ -498,8 +512,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           const show = isAnchor || inNeighborhood || (searching && matchesQuery(node))
             || (neighborhood == null && (k >= display.labelThreshold || bigNode));
           if (!show || dimmed) continue;
-          const screenX = (node.x ?? 0) * k + x;
-          const screenY = (node.y ?? 0) * k + y + node.radius * display.nodeScale * k + 12;
+          const labelDepth = perspectiveScale(layerZ(node.kind));
+          const screenX = (node.x ?? 0) * labelDepth * k + x;
+          const screenY = (node.y ?? 0) * labelDepth * k + y + node.radius * display.nodeScale * labelDepth * k + 12;
           if (screenX < -80 || screenX > width + 80 || screenY < -20 || screenY > height + 20) continue;
           let alpha = isAnchor ? 1 : bigNode ? 0.95 : Math.min(1, (k - display.labelThreshold + 0.35) / 0.5);
           if (neighborhood != null || searching) alpha = Math.max(alpha, 0.95);
