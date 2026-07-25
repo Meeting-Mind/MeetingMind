@@ -1094,6 +1094,20 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [ ] T439.1 [observability/frontend-backend] [owner: Backend/AI/Frontend] [depends: T439] Space Overview의 `Knowledge Indexed`를 운영 지표에서 제거하고, Space 단위 AI Usage/quota API와 UI 기준을 정의한다. token total, request count, feature별 usage, usage percent를 포함한다.
 - [ ] V119 [verification] [owner: QA/Integration] [depends: T435,T436,T438,T439] 요구사항 ID별 통과/미통과/수동검증/환경필요 상태를 갱신하고, 실행 결과를 `implement.md`에 기록한다.
 - [x] V119.1 [verification/docs] [owner: Codex] [depends: T435.3,T436.2,T437,T439] 요구사항 ID별 현재 상태표와 local deterministic smoke 실행 결과, env/manual blocker를 `test-matrix.md`, `operational-smoke-runbook.md`, `implement.md`에 동기화한다.
+- [x] V119.4 [verification/smoke] [owner: Claude] [depends: V119.3] dev 병합이 만든 `application.yml` `management:` 중복키 회귀를 제거하고, `SttTranscriptFlowIntegrationTest`의 `@Primary` SttProvider 충돌을 고쳐 `SMK-002` local tier 근거를 실제로 확보한다. `run-local-stack.sh`에 runbook이 요구한 포트 점유 preflight를 구현한다.
+
+### SMK-002 Closure Path
+
+검증 순서 원칙: 증적을 쌓기 전에 증적 경로가 실제로 실행되는지 먼저 확인한다. `V119.4`에서
+`SttTranscriptFlowIntegrationTest`가 skip 뒤에서 깨진 채 방치돼 있었고 runbook이 그것을
+`SMK-002` 근거로 지정하고 있었다. 같은 패턴이 남은 DB-gated 검증에도 있을 수 있으므로
+`T441`, `T442`를 provider smoke 실행보다 앞에 둔다.
+
+- [ ] T440 [smoke/stt-provider] [owner: Backend/AI] [depends: V119.4] runtime 기본 provider와 smoke 대상 불일치를 해소한다. 결정: `soniox-realtime` 대상 opt-in smoke를 추가한다. `ClovaSttTranscriptSmokeIntegrationTest`와 같은 패턴으로 `RUN_SONIOX_STT_SMOKE` 게이트를 쓰고, transcript `COMPLETED`, segment 1건 이상, `TRANSCRIPT_COMPLETED` enqueue 1건, provider 원문 오류/API key 미노출을 통과 기준으로 둔다. 예상 파일: `backend/src/test/java/com/meetingmind/demo/domain/SonioxSttTranscriptSmokeIntegrationTest.java`, `operational-smoke-runbook.md`.
+- [ ] T441 [test-infra/db] [owner: Backend] [depends: V119.4] 격리된 테스트 DB를 확보한다. 결정: dev용 `meetingmind-postgres-local`은 그대로 두고 pgvector 기반 test 전용 docker 인스턴스를 띄워 `CI_POSTGRES_URL`을 그쪽으로 토대한다. `MigrationIntegrationTest`가 `migrationsExecuted == 10`을 단정하므로 clean DB여야 하고, `ClovaSttTranscriptSmokeIntegrationTest`는 `@Transactional`이 아니라 dev 데이터를 오염시킨다.
+- [ ] T442 [verification/tests] [owner: Backend/BFF] [depends: T441] DB-gated 검증이 실제로 통과하는지 확인한다. 대상은 Backend skip 9건(`MigrationIntegrationTest` 1, `JdbcAuthStoreIntegrationTest` 3, `JdbcWorkspaceStoreIntegrationTest` 4, `SttTranscriptFlowIntegrationTest` 1)과 BFF skip 6건이다. skip은 통과 근거가 아니므로 실행 후 `tests`/`skipped` 수를 함께 기록한다.
+- [ ] SMK-002 [smoke/provider] [owner: Backend/AI/Frontend] [depends: T440,T441] LiveKit 실서버 입장과 실제 provider STT 전사 증적을 확보한다. 현재 `MeetingLiveKitTokenServiceTest`는 mock 기반이라 실접속 근거가 아니다.
+- [ ] T443 [data/migration] [owner: Backend] V24 `ai_usage_events` 마이그레이션을 로컬 DB에 적용한다. 로컬은 V23까지만 적용된 상태이며 backend 재기동 시 flyway가 처리한다. `SMK-003` 진입 전 필요하고 `T439.1`의 전제다.
 
 ## M152 NonProd V2 AI Container Security Remediation
 

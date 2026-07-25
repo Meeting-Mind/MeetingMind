@@ -31,6 +31,16 @@ Backend checks that use PostgreSQL require `CI_POSTGRES_URL`, `CI_POSTGRES_USER`
 `CI_POSTGRES_PASSWORD`. Without those env vars, DB integration tests are skipped or not
 selected.
 
+주의: env가 없으면 `@EnabledIfEnvironmentVariable` 게이트 때문에 실패가 아니라 skip으로
+넘어간다. skip은 통과 근거가 아니므로 실행 후 `tests`/`skipped` 수를 함께 확인한다.
+
+로컬 PostgreSQL은 docker `meetingmind-postgres-local`이며 host port는 5432가 아니라
+**5434**다. `application-local.yml`의 `MEETINGMIND_DB_PORT` 기본값과 같다.
+
+```bash
+cd backend && CI_POSTGRES_URL="jdbc:postgresql://localhost:5434/meetingmind" CI_POSTGRES_USER="meetingmind" CI_POSTGRES_PASSWORD="meetingmind_local" ./gradlew test --tests com.meetingmind.demo.domain.SttTranscriptFlowIntegrationTest
+```
+
 ```bash
 cd backend
 ./gradlew test --tests com.meetingmind.demo.domain.MeetingLiveKitTokenServiceTest
@@ -60,6 +70,14 @@ Provider smoke 전에 local runtime 경로가 먼저 안정적으로 떠야 한�
 ## Provider Opt-in Checks
 
 ### STT Provider Smoke
+
+미해결 불일치: 아래 opt-in 검증은 `clova-nest`를 대상으로 한다. 그러나 실제 runtime 기본
+provider는 `ConfiguredSttProvider`의 `STT_PROVIDER` 기본값 `soniox-realtime`이고 fallback은
+`openai-realtime`이다. 즉 문서가 지정한 유일한 provider 근거와 실제로 실행되는 provider가
+다르다. `SMK-002`를 닫기 전에 다음 중 하나를 먼저 결정해야 한다.
+
+- `soniox-realtime` 대상 opt-in smoke를 추가한다. (실제 기본 경로를 검증)
+- 또는 smoke 대상 provider를 운영 기본값과 일치시킨다.
 
 `ClovaSttTranscriptSmokeIntegrationTest` is intentionally disabled by default.
 
@@ -163,7 +181,8 @@ STT provider are running.
 | Date | Tester | Build/branch | Smoke ID | Mode | Result | Evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-07-25 | Codex | current working tree | SMK-001 | Local automated | PASS | `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`, `cd ai && ./.venv/bin/python -m unittest tests.test_onprem_poc_http_smoke`, `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.MeetingReportLifecycleServiceTest`, `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.ProjectAiServiceTest` | `tests.test_onprem_poc_http_smoke`는 provider env 부재로 1건 skip, 나머지 deterministic 검증은 통과 |
-| TBD | TBD | TBD | SMK-002 | Opt-in provider | TBD | transcript/report IDs | TBD |
+| 2026-07-26 | Claude | `docs/ai-harness-test-matrix` @ 1b4dffc + local fixes | SMK-002 (local tier) | Local DB automated | PASS | `SttTranscriptFlowIntegrationTest` 1건 실행/0 skip, `MeetingLiveKitTokenServiceTest` 5건 실행/0 skip | 실제 PostgreSQL(5434)에서 transcript `COMPLETED` 전이, segment 순서/speaker 보존, `embedding_jobs` `TRANSCRIPT_COMPLETED` 1건 enqueue(DB trigger 경로)를 확인. LiveKit은 mock 기반이라 실제 서버 접속 근거는 아님. 이 검증은 `@Primary` 충돌로 그동안 깨져 있었고 env 미설정으로 skip되어 드러나지 않았음(V119.4) |
+| TBD | TBD | TBD | SMK-002 (provider tier) | Opt-in provider | BLOCKED | transcript/report IDs | Clova 키 부재 + 문서 지정 provider(`clova-nest`)와 runtime 기본 provider(`soniox-realtime`) 불일치. 위 "STT Provider Smoke" 결정 필요 |
 | TBD | TBD | TBD | SMK-003 | Opt-in provider | TBD | report/knowledge IDs | TBD |
 | TBD | TBD | TBD | SMK-004 | Opt-in provider | TBD | answer/source IDs | TBD |
 | TBD | TBD | TBD | SMK-005 | Local/manual | TBD | account/meeting IDs | TBD |

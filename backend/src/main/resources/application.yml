@@ -1,27 +1,6 @@
 server:
   port: 8080
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health
-  endpoint:
-    health:
-      show-details: never
-      probes:
-        enabled: true
-      group:
-        liveness:
-          include: livenessState
-        readiness:
-          include: readinessState
-  health:
-    livenessstate:
-      enabled: true
-    readinessstate:
-      enabled: true
-
 spring:
   application:
     name: meetingmind-backend
