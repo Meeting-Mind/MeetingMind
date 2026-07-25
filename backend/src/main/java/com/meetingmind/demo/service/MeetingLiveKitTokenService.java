@@ -5,6 +5,7 @@ import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.authz.MeetingAccessPolicy;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
+import com.meetingmind.demo.observability.BackendOperationMetrics;
 import com.meetingmind.demo.dto.LiveKitTokenResponse;
 import com.meetingmind.demo.dto.MeetingLiveKitTokenResponse;
 import org.springframework.http.HttpStatus;
@@ -17,20 +18,27 @@ public class MeetingLiveKitTokenService {
     private final WorkspaceDomainService workspaceDomainService;
     private final MeetingAccessPolicy meetingAccessPolicy;
     private final LiveKitTokenService liveKitTokenService;
+    private final BackendOperationMetrics metrics;
 
     public MeetingLiveKitTokenService(
             AuthService authService,
             WorkspaceDomainService workspaceDomainService,
             MeetingAccessPolicy meetingAccessPolicy,
-            LiveKitTokenService liveKitTokenService
+            LiveKitTokenService liveKitTokenService,
+            BackendOperationMetrics metrics
     ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
         this.meetingAccessPolicy = meetingAccessPolicy;
         this.liveKitTokenService = liveKitTokenService;
+        this.metrics = metrics;
     }
 
     public MeetingLiveKitTokenResponse issueMeetingToken(String authorizationHeader, String meetingId) {
+        return metrics.recordLiveKitTokenIssue(() -> issueMeetingTokenInternal(authorizationHeader, meetingId));
+    }
+
+    private MeetingLiveKitTokenResponse issueMeetingTokenInternal(String authorizationHeader, String meetingId) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
         meetingAccessPolicy.requireLiveKitAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
 

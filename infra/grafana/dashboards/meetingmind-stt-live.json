@@ -1,0 +1,149 @@
+{
+  "uid": "meetingmind-stt-live",
+  "title": "MeetingMind STT / Live",
+  "tags": ["meetingmind", "stt", "livekit"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "STT",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "전사 시작/종료 호출 수 (req/s)",
+      "description": "ConfiguredTranscriptionGateway에서 계측한다. in-process와 remote 두 모드 모두 이 wrapper를 지나므로 gateway mode를 바꿔도 지표가 끊기지 않는다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(meetingmind_stt_transcription_start_seconds_count[5m]))",
+          "legendFormat": "start · {{outcome}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (outcome) (rate(meetingmind_stt_transcription_stop_seconds_count[5m]))",
+          "legendFormat": "stop · {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "전사 시작 실패율",
+      "description": "STT provider나 gateway가 죽으면 여기서 먼저 보인다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(meetingmind_stt_transcription_start_seconds_count{outcome=\"failure\"}[5m])) / clamp_min(sum(rate(meetingmind_stt_transcription_start_seconds_count[5m])), 0.0000001)",
+          "legendFormat": "start 실패율"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "전사 시작 평균 소요 시간 (s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(meetingmind_stt_transcription_start_seconds_sum[5m])) / clamp_min(sum(rate(meetingmind_stt_transcription_start_seconds_count[5m])), 0.0000001)",
+          "legendFormat": "start"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(meetingmind_stt_transcription_stop_seconds_sum[5m])) / clamp_min(sum(rate(meetingmind_stt_transcription_stop_seconds_count[5m])), 0.0000001)",
+          "legendFormat": "stop"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "LiveKit",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "토큰 발급 수 (req/s)",
+      "description": "failure에는 권한 거부와 LIVEKIT_NOT_CONFIGURED가 함께 잡힌다. 자격증명 누락이면 failure만 계속 오른다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(meetingmind_livekit_token_issue_seconds_count[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "토큰 발급 평균 소요 시간 (s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(meetingmind_livekit_token_issue_seconds_sum[5m])) / clamp_min(sum(rate(meetingmind_livekit_token_issue_seconds_count[5m])), 0.0000001)",
+          "legendFormat": "token issue"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Report Confirm",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "회의록 확정 수 (req/s)",
+      "description": "확정은 색인 작업(REPORT_CONFIRMED)을 만든다. 이 그래프가 오르는데 AI 대시보드의 색인 대기열이 줄지 않으면 worker가 안 돌고 있는 것이다.",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(meetingmind_report_confirm_seconds_count[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "회의록 확정 평균 소요 시간 (s)",
+      "datasource": { "type": "prometheus", "uid": "meetingmind-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(meetingmind_report_confirm_seconds_sum[5m])) / clamp_min(sum(rate(meetingmind_report_confirm_seconds_count[5m])), 0.0000001)",
+          "legendFormat": "confirm"
+        }
+      ]
+    }
+  ]
+}

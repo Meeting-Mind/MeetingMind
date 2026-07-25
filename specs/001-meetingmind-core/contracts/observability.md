@@ -22,10 +22,13 @@
 ### Backend
 
 - Spring Boot actuator 기본 JVM/HTTP/processor metrics
-- 이후 추가 대상:
-  - STT callback latency
-  - LiveKit token issue latency/failure
-  - report confirm latency/failure
+- `meetingmind.stt.transcription.start{outcome}` (Timer)
+- `meetingmind.stt.transcription.stop{outcome}` (Timer)
+- `meetingmind.livekit.token.issue{outcome}` (Timer)
+- `meetingmind.report.confirm{outcome}` (Timer)
+
+label에는 식별자를 넣지 않는다. meetingId나 userId를 label로 쓰면 시계열이 무한히 늘어나고
+`NFR-LOG-01`의 식별 정보 비노출 원칙과도 충돌한다. `outcome`(success/failure)만 둔다.
 
 ### AI
 
@@ -63,11 +66,12 @@
 
 ### STT/Live
 
-- 현재는 dashboard 기준만 정의하고, 세부 metric 추가는 후속이다.
-- 최소 필요 패널:
-  - STT provider latency/failure
-  - LiveKit token latency/failure
-  - transcript completion rate
+`infra/grafana/dashboards/meetingmind-stt-live.json`으로 구현했다(`T439.4`).
+
+- 전사 시작/종료 호출 수와 실패율
+- 전사 시작/종료 평균 소요 시간
+- LiveKit token 발급 수와 평균 소요 시간
+- 회의록 확정 수와 평균 소요 시간
 
 ## Logging Constraints
 
@@ -76,7 +80,7 @@
 
 ## Gaps
 
-- Backend STT/LiveKit custom metric은 아직 미구현이다. 없는 지표로 패널을 만들면 빈 화면만 나오므로 현재 dashboard에는 포함하지 않았다.
+- Backend STT/LiveKit/report-confirm custom metric은 `T439.4`로 구현했고 dashboard에 연결했다. metric 이름은 `BackendMetricNamesTest`가 Prometheus 노출명으로 고정한다.
 - Grafana dashboard json/provisioning은 `infra/grafana/`에 구현했다(`T439.2`). AI 지표 8종은 실제 `/metrics` 출력과 대조해 존재를 확인했고, BFF 지표는 Micrometer 등록 코드 기준으로 변환 규칙을 적용했다.
 - BFF `/actuator/prometheus`가 `@SpringBootTest` 환경에서 Prometheus 노출 형식이 아닌 텍스트를 반환한다. 기존 테스트가 "비어 있지 않음"만 단정해 드러나지 않았다. 이 상태에서는 dashboard가 쓰는 BFF 지표 이름을 테스트로 고정할 수 없다.
 - Prometheus scrape 설정은 인프라 작업으로 분리한다.

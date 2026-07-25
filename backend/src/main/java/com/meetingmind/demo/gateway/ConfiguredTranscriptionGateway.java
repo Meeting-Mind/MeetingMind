@@ -1,6 +1,7 @@
 package com.meetingmind.demo.gateway;
 
 import com.meetingmind.demo.dto.MeetingDialogueResponse;
+import com.meetingmind.demo.observability.BackendOperationMetrics;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -19,11 +20,14 @@ import org.springframework.stereotype.Component;
 class ConfiguredTranscriptionGateway implements TranscriptionGateway {
 
     private final TranscriptionGateway delegate;
+    private final BackendOperationMetrics metrics;
 
     ConfiguredTranscriptionGateway(
             List<TranscriptionGateway> gateways,
+            BackendOperationMetrics metrics,
             @Value("${meetingmind.stt.gateway-mode:in-process}") String mode
     ) {
+        this.metrics = metrics;
         Map<String, TranscriptionGateway> byMode = gateways.stream().collect(Collectors.toMap(
                 gateway -> gateway instanceof HttpTranscriptionGateway ? "remote" : "in-process",
                 Function.identity()
@@ -34,9 +38,11 @@ class ConfiguredTranscriptionGateway implements TranscriptionGateway {
         }
     }
 
+    // 계측은 이 wrapper에만 둔다. in-process/remote 두 구현 모두 여기를 지나므로
+    // gateway mode를 바꿔도 지표가 끊기지 않는다.
     @Override
     public TranscriptionHandle start(TranscriptionStartCommand command) {
-        return delegate.start(command);
+        return metrics.recordTranscriptionStart(() -> delegate.start(command));
     }
 
     @Override
@@ -46,7 +52,7 @@ class ConfiguredTranscriptionGateway implements TranscriptionGateway {
 
     @Override
     public void stop(String meetingId, String sessionId) {
-        delegate.stop(meetingId, sessionId);
+        metrics.recordTranscriptionStop(() -> delegate.stop(meetingId, sessionId));
     }
 
     @Override
