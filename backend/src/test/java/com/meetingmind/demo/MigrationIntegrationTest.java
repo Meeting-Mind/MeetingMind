@@ -2,9 +2,13 @@ package com.meetingmind.demo;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -12,20 +16,62 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named = "CI_POSTGRES_URL", matches = ".+")
 class MigrationIntegrationTest {
 
+    /** `.target("10")` 시점까지의 legacy 체크포인트. 마이그레이션은 append-only이므로 고정값이다. */
+    private static final int LEGACY_CHECKPOINT = 10;
+
+    /**
+     * 기대 버전 목록을 하드코딩하지 않고 실제 마이그레이션 파일에서 유도한다.
+     * 하드코딩하면 마이그레이션을 추가할 때마다 정상 변경이 CI 실패로 나타난다.
+     */
+    private static List<String> migrationVersionsOnClasspath() throws Exception {
+        var resource = MigrationIntegrationTest.class.getClassLoader().getResource("db/migration");
+        assertThat(resource)
+                .as("db/migration must be on the test classpath")
+                .isNotNull();
+
+        List<String> versions;
+        try (Stream<Path> files = Files.list(Path.of(resource.toURI()))) {
+            versions = files
+                    .map(path -> path.getFileName().toString())
+                    .filter(name -> name.startsWith("V") && name.endsWith(".sql") && name.contains("__"))
+                    .map(name -> name.substring(1, name.indexOf("__")))
+                    .sorted(Comparator.comparingInt(Integer::parseInt))
+                    .toList();
+        }
+
+        // 탐색이 실패해 빈 목록이 되면 아래 단정들이 공허하게 통과한다. 그 상태를 먼저 막는다.
+        assertThat(versions)
+                .as("migration files must be discovered, otherwise the assertions below are vacuous")
+                .hasSizeGreaterThan(LEGACY_CHECKPOINT);
+        assertThat(versions).doesNotHaveDuplicates();
+        // 기존 하드코딩 목록이 암묵적으로 보장했던 "1부터 빈틈없이 이어짐"을 유지한다.
+        // 의도적으로 번호를 건너뛰게 되면 이 단정을 명시적으로 조정한다.
+        assertThat(versions)
+                .as("migration versions must be contiguous starting at 1")
+                .containsExactlyElementsOf(
+                        java.util.stream.IntStream.rangeClosed(1, versions.size())
+                                .mapToObj(String::valueOf)
+                                .toList()
+                );
+        return versions;
+    }
+
     @Test
     void appliesAllMigrationsToPostgres() throws Exception {
         String url = System.getenv("CI_POSTGRES_URL");
         String user = System.getenv("CI_POSTGRES_USER");
         String password = System.getenv("CI_POSTGRES_PASSWORD");
 
+        List<String> expectedVersions = migrationVersionsOnClasspath();
+
         var v10Result = Flyway.configure()
                 .dataSource(url, user, password)
                 .locations("classpath:db/migration")
-                .target("10")
+                .target(String.valueOf(LEGACY_CHECKPOINT))
                 .load()
                 .migrate();
 
-        assertThat(v10Result.migrationsExecuted).isEqualTo(10);
+        assertThat(v10Result.migrationsExecuted).isEqualTo(LEGACY_CHECKPOINT);
 
         try (var connection = DriverManager.getConnection(url, user, password);
              var statement = connection.createStatement()) {
@@ -72,7 +118,8 @@ class MigrationIntegrationTest {
                 .load()
                 .migrate();
 
-        assertThat(workspaceResult.migrationsExecuted).isEqualTo(14);
+        assertThat(workspaceResult.migrationsExecuted)
+                .isEqualTo(expectedVersions.size() - LEGACY_CHECKPOINT);
 
         try (var connection = DriverManager.getConnection(url, user, password)) {
             List<String> versions = new ArrayList<>();
@@ -85,9 +132,7 @@ class MigrationIntegrationTest {
                 }
             }
 
-            assertThat(versions).containsExactly(
-                    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24"
-            );
+            assertThat(versions).containsExactlyElementsOf(expectedVersions);
 
             try (var statement = connection.createStatement()) {
                 try (var rows = statement.executeQuery("""

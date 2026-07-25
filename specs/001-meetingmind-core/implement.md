@@ -2235,3 +2235,17 @@
 - `T442` 실행 결과: Backend 206건 실패 0, **skip 10건 -> 1건**. 이전까지 한 번도 실행되지 않던 DB-gated 9건(`MigrationIntegrationTest` 1, `JdbcWorkspaceStoreIntegrationTest` 4, `JdbcAuthStoreIntegrationTest` 3, `SttTranscriptFlowIntegrationTest` 1)이 모두 실행/통과한다. 남은 skip 1건은 provider credential이 필요한 `ClovaSttTranscriptSmokeIntegrationTest`이며 `T440` 범위다.
 - 판단: `V119.4`에서 제기한 "증적을 쌓기 전에 증적 경로가 실제로 도는지 먼저 확인한다"는 순서 원칙이 실제로 회귀 2건을 찾아냈다. 두 건 모두 skip 때문에 장기간 은폐돼 있었고, 하나는 이 브랜치가 유발한 것이었다. BFF skip 6건은 `T442.1`로 남긴다.
 - 검증: `./scripts/run-db-tests.sh --console=plain` -> Backend 206건/실패 0/skip 1. 스크립트 재실행 시에도 pristine 리셋으로 `MigrationIntegrationTest`가 반복 통과한다.
+
+## T442.2 Migration Test Brittleness Removal
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/MigrationIntegrationTest.java`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 계기: `T441/T442`에서 V24 누락으로 깨진 단정을 `13 -> 14`, 버전 목록에 `"24"` 추가로 고쳤는데, 이는 증상만 없앤 수정이었다. 기대 버전 목록이 하드코딩돼 있어 마이그레이션을 추가할 때마다 두 곳을 손으로 갱신해야 하고, 갱신을 잊으면 **정상적인 마이그레이션 추가가 CI 실패로 나타난다**. V24가 정확히 그 사례였다.
+- 구현: 기대 버전 목록을 classpath의 `db/migration` 실제 파일에서 유도하도록 바꿨다. `migrationsExecuted`는 `expectedVersions.size() - LEGACY_CHECKPOINT`로, 버전 목록 단정은 `containsExactlyElementsOf(expectedVersions)`로 바꿨다. `.target("10")` legacy 체크포인트는 마이그레이션이 append-only이므로 `LEGACY_CHECKPOINT` 상수로 고정 유지했다.
+- 동적 단정의 함정 차단: 파일 탐색이 실패해 빈 목록이 되면 단정들이 공허하게 통과한다. 이를 막기 위해 탐색 결과가 `LEGACY_CHECKPOINT`보다 많아야 한다는 단정을 먼저 두었고, 중복 버전 금지도 추가했다.
+- 기존 보장 유지: 하드코딩 목록이 암묵적으로 보장했던 "1부터 빈틈없이 이어짐"을 명시적 단정으로 승격했다. 동적으로 바꾸면서 이 보장을 조용히 잃지 않도록 한 것이다. 의도적으로 번호를 건너뛸 일이 생기면 이 단정만 명시적으로 조정하면 된다.
+- 검증:
+  - 현재 상태 통과: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest` -> 1건 실행/0 skip/통과.
+  - 취약성 제거 실증: 임시 `V25`를 추가한 상태로 재실행해 통과를 확인했다. 하드코딩이었다면 이 지점에서 실패한다.
+  - 안전망 작동 실증: 같은 파일을 `V27`로 바꿔 25, 26에 구멍을 만든 뒤 재실행해 `migration versions must be contiguous starting at 1`으로 실패함을 확인했다. 즉 단정이 느슨해진 것이 아니다.
+  - 임시 probe 파일은 삭제했고 마이그레이션 파일 수는 24로 원복했다. 전체 재실행 결과 Backend 206건/실패 0/skip 1을 유지한다.
+- 판단: 이제 마이그레이션 추가 시 이 테스트를 손댈 필요가 없고, 누락·중복·순서 오류·번호 건너뜀은 여전히 잡힌다.
