@@ -75,13 +75,13 @@ def response_content_for(body):
     combined = "\n".join(str(message.get("content", "")) for message in messages if isinstance(message, dict))
     if "meetingmind_onprem_smoke" in json.dumps(body, ensure_ascii=False):
         return '{"supported":true,"answer":"ok","sourceIds":["smoke-source"]}'
-    if "회의 보고서 생성" in combined:
+    if "회의록 생성" in combined:
         return (
-            '{"supported":true,"summary":"출시일과 QA 마감이 확정됐습니다.",'
+            '{"supported":true,'
+            '"summary":[{"text":"출시일과 QA 마감이 확정됐습니다.","sourceIds":["decision-001"]}],'
             '"decisions":[{"title":"출시일 확정","rationale":null,"sourceIds":["decision-001"]}],'
             '"actionItems":[{"title":"모바일 앱 QA 완료","assignee":"민지","dueDate":"2026-09-12",'
-            '"sourceIds":["action-001"],"confirmationState":"candidate"}],'
-            '"markdown":"## 요약\\n출시일과 QA 마감이 확정됐습니다."}'
+            '"sourceIds":["action-001"],"confirmationState":"candidate"}]}'
         )
     if "태스크 후보 추출" in combined:
         return (
