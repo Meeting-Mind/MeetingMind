@@ -247,4 +247,5 @@ STT provider are running.
 | 2026-07-26 | Claude | `feat/soniox-stt-smoke` | SMK-003 (local tier, 색인 연결) | Local DB automated | PASS | `ReportConfirmKnowledgeIndexIntegrationTest` 1건 실행/0 skip | 앱 경로 `confirmMeetingReport`가 `REPORT_CONFIRMED` 색인 작업 1건을 만든다. CANDIDATE에서는 생기지 않음도 확인. 확정 회의록은 별도 `project_knowledge` 문서가 아니라 meeting source로 색인된다 |
 | TBD | TBD | TBD | SMK-003 (provider tier) | Opt-in provider | TBD | report/chunk IDs | 회의록 본문 AI 생성과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재되는 단계가 남는다 |
 | TBD | TBD | TBD | SMK-004 | Opt-in provider | TBD | answer/source IDs | TBD |
-| TBD | TBD | TBD | SMK-005 | Local/manual | TBD | account/meeting IDs | TBD |
+| 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-005 (server ACL) | Local DB automated | PASS | `GuestSpaceAclNegativeIntegrationTest` 1건 실행/0 skip | 실 DB에서 회의 전용 GUEST가 초대 밖 회의 상세, Space 회의/멤버/knowledge 목록, Space 상세 전부 거부됨을 확인. 회의 참가가 Space 멤버십으로 승격되지 않음도 확인. 양성 대조로 자기 회의 읽기는 성공하는 것을 먼저 단정한다 |
+| TBD | TBD | TBD | SMK-005 (browser) | Manual | TBD | account/meeting IDs | UI가 서버 경계를 우회하는 경로는 브라우저 수동 확인이 남는다 |
