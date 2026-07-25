@@ -36,7 +36,10 @@ OpenAI-compatible generation, embedding, and public callback checks are opt-in.
 `test` 프로파일(in-memory)로 띄우므로 SQL 결함을 잡지 못한다.
 
 `SMK-002` 매체 축도 `T454`로 자동화됐다. 남은 수동 범위는 fake media가 대신할 수 없는
-**장치 권한 프롬프트, prejoin 장치 선택 UX, 실제 음성 품질** 세 가지로 좁혀졌다.
+**장치 권한 프롬프트, prejoin 장치 선택 UX, 실제 음성 품질** 세 가지다.
+
+이 세 가지는 **아직 수행되지 않았다.** 소유자 판단으로 `V119` 마감 조건에서 제외하고
+별도 항목으로 이월했다. 수행 전까지 실행 기록표에 PASS로 적지 않는다.
 
 ## Local Deterministic Checks
 
