@@ -1111,6 +1111,7 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T444 [smoke/livekit] [owner: Claude] [depends: T440] LiveKit 실서버 도달성 smoke를 추가한다. `RUN_LIVEKIT_SMOKE` 게이트로 room create/list/delete 왕복과 token issuer/room 스코프를 검증하고, 실행 후 room을 남기지 않는다.
 - [ ] SMK-002 [smoke/provider] [owner: Backend/AI/Frontend] [depends: T440,T441,T444] STT 전사 증적(`T440`)과 LiveKit 서버 도달성 증적(`T444`)은 확보했다. 남은 것은 매체(media) publish/subscribe를 포함한 브라우저 기반 실제 입장 증적이며, 이는 product E2E 수동 절차다.
 - [x] T443 [data/migration] [owner: Claude] V24 `ai_usage_events`가 dev DB에 적용됐다(`2026-07-26 01:30:59`). 다만 이는 `T441` 이전에 dev DB를 대상으로 DB 테스트를 돌린 부수 효과로 적용된 것이다. 결과 상태는 의도와 같지만, dev DB에 직접 테스트를 돌리면 안 되는 이유를 그대로 보여주는 사례이므로 이후에는 `scripts/run-db-tests.sh`만 사용한다.
+- [x] T445 [smoke/report-index] [owner: Claude] [depends: T441] `SMK-003` local tier: 애플리케이션 경로(`confirmMeetingReport`)가 `REPORT_CONFIRMED` 색인 작업을 만드는지 검증한다. 기존 `MigrationIntegrationTest`는 raw SQL insert로 trigger만 확인했고 앱 경로가 trigger 조건(`CONFIRMED` + `is_current=true`)을 만족시키는지는 미검증이었다. 확정 회의록은 별도 `project_knowledge` 문서가 아니라 meeting source로 색인된다는 점도 함께 기록한다. 본문 생성(AI provider)과 embedding worker 소비는 범위 밖이다.
 
 ## M152 NonProd V2 AI Container Security Remediation
 

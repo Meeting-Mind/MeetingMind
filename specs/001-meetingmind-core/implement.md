@@ -2274,3 +2274,12 @@
   - `cd bff && BFF_REDIS_INTEGRATION=true ./gradlew cleanTest test` -> 88건/skip 0/실패 0.
   - `cd backend && RUN_LIVEKIT_SMOKE=true ./gradlew cleanTest test --tests com.meetingmind.demo.service.LiveKitRealServerSmokeIntegrationTest` -> 1건 실행/0 skip/통과.
   - `./scripts/run-db-tests.sh` -> Backend 208건/실패 0/skip 3(Clova, Soniox, LiveKit provider-gated).
+
+## T445 SMK-003 Local Tier: Confirmed Report Index Linkage
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/ReportConfirmKnowledgeIndexIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 조사 결과: `SMK-003`의 기준은 "확정된 회의록이 검색 가능한 knowledge source를 만든다"였다. 실제 구조를 확인하니 `confirmMeetingReport`는 `project_knowledge` row를 만들지 않는다. `createProjectKnowledge`는 `SpaceController`의 사용자 수동 생성 경로에서만 호출된다. 대신 색인은 `meeting_reports`의 `current_report_embedding_job_trigger`가 `status='CONFIRMED' and is_current=true`일 때 `enqueue_embedding_job(..., 'REPORT_CONFIRMED')`로 처리한다. 즉 확정 회의록은 별도 knowledge 문서가 아니라 meeting source로 색인된다. 기준 문장이 실제 설계와 달라 오해를 유발했다.
+- 기존 커버리지 공백: `MigrationIntegrationTest`가 `5:REPORT_CONFIRMED`를 단정하지만, 이는 `meeting_reports`에 raw SQL로 직접 insert한 뒤 trigger 동작만 확인한 것이다. 애플리케이션 경로가 trigger 조건 두 가지(`CONFIRMED`, `is_current=true`)를 실제로 만족시키는지는 검증되지 않았다. `MeetingReport.confirmed()`가 `current=true`를 함께 설정하는 것에 의존하는데, 이 연결이 깨지면 회의록을 확정해도 색인이 걸리지 않고 조용히 누락된다.
+- 구현: `ReportConfirmKnowledgeIndexIntegrationTest`를 추가해 `saveReportCandidate` -> `confirmMeetingReport` 애플리케이션 경로로 검증한다. CANDIDATE 상태에서는 색인 작업이 없어야 하고, 확정 후 `REPORT_CONFIRMED` 작업이 정확히 1건 생기며, 그 작업이 space 범위이고 `project_knowledge_id`가 null인 meeting source임을 단정한다. AI provider를 쓰지 않으므로 결정론적이다.
+- 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
+- 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
