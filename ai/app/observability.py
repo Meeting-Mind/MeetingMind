@@ -31,6 +31,8 @@ _SAFE_FIELDS = frozenset(
         "chunkCount",
         "activated",
         "failureCode",
+        # 예외의 정규화된 타입 이름만 담는다. 메시지는 담지 않는다(`failure_detail_for` 참고).
+        "failureDetail",
         "willRetry",
         "pendingCount",
         "processingCount",

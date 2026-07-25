@@ -33,8 +33,9 @@ class FakeRepository:
         self.completed = (job, snapshot, vectors, model, dimension)
         return True
 
-    def record_failure(self, job, failure_code, retry_delay_seconds):
+    def record_failure(self, job, failure_code, retry_delay_seconds, failure_detail=None):
         self.failure = (job, failure_code, retry_delay_seconds)
+        self.failure_detail = failure_detail
 
     def queue_metrics(self):
         return self.metrics
@@ -90,6 +91,35 @@ class EmbeddingWorkerTest(unittest.TestCase):
 
         self.assertEqual(repository.failure[1:], ("PROVIDER_UNAVAILABLE", None))
         self.assertNotIn("secret provider detail", "\n".join(logs.output))
+
+    def test_failure_detail_records_exception_type_without_message(self):
+        job = embedding_job(attempt_count=4)
+        repository = FakeRepository(job, embedding_snapshot())
+        provider = FakeProvider(error=EmbeddingProviderError("secret provider detail"))
+
+        with self.assertLogs("meetingmind.ai.embedding", level="WARNING") as logs:
+            EmbeddingWorker(repository, provider).run_once()
+
+        self.assertEqual(repository.failure_detail, "app.embedding_provider.EmbeddingProviderError")
+        # 메시지는 provider 응답이나 DSN을 실어올 수 있어 저장하지도 로그에 남기지도 않는다.
+        self.assertNotIn("secret provider detail", repository.failure_detail)
+        self.assertNotIn("secret provider detail", "\n".join(logs.output))
+
+    def test_failure_detail_distinguishes_causes_behind_internal_error(self):
+        # INTERNAL_ERROR는 미분류 예외의 포괄 코드다. 같은 코드라도 원인이 구분돼야 한다.
+        job = embedding_job(attempt_count=4)
+        repository = FakeRepository(job, embedding_snapshot())
+        provider = FakeProvider(error=ZeroDivisionError("boom"))
+
+        with self.assertLogs("meetingmind.ai.embedding", level="WARNING") as logs:
+            EmbeddingWorker(repository, provider).run_once()
+
+        self.assertEqual(repository.failure[1], "INTERNAL_ERROR")
+        self.assertEqual(repository.failure_detail, "ZeroDivisionError")
+        # log_event는 _SAFE_FIELDS allowlist 밖의 key를 조용히 버린다. DB 값만 단정하면
+        # 로그에서 사라진 것을 놓치므로 로그 payload도 함께 단정한다.
+        payload = json.loads(logs.output[0].split("WARNING:meetingmind.ai.embedding:", 1)[1])
+        self.assertEqual(payload["failureDetail"], "ZeroDivisionError")
 
     def test_logs_safe_queue_metrics_after_processing(self):
         repository = FakeRepository(embedding_job(attempt_count=1), embedding_snapshot())

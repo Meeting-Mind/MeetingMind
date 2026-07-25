@@ -2284,6 +2284,16 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T452 Embedding Job Failure Cause Retention
+
+- 변경 파일: `backend/src/main/resources/db/migration/V25__add_embedding_job_failure_detail.sql`(신규), `ai/app/{embedding_worker,repository,observability}.py`, `ai/tests/test_embedding_worker.py`, `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 문제: `normalize_failure_code`가 미분류 예외를 전부 `INTERNAL_ERROR`로 접고 `embedding_jobs`에 원인을 남길 컬럼이 없었다. `T447`에서 dev DB의 `INTERNAL_ERROR` 3건을 진단할 때 실패 행만으로는 아무것도 알 수 없어 **재실행으로만** 환경성 실패임을 좁힐 수 있었다.
+- 구현: `V25`가 `failure_detail varchar(200)`과 `failure_detail is null or failure_code is not null` check 제약을 추가한다. worker는 `failure_detail_for(error)`로 예외의 정규화된 타입 이름(`app.embedding_provider.EmbeddingProviderError`, `ZeroDivisionError` 등)을 기록한다.
+- **예외 메시지를 저장하지 않는 이유**: provider 응답 본문이나 DSN(비밀번호 포함)이 예외 메시지에 실려 올 수 있어 `NFR-LOG-01` 원문 비노출 원칙과 충돌한다. 타입 이름만으로도 psycopg 오류와 provider 오류를 즉시 구분할 수 있어 진단 목적은 달성된다. 컬럼 comment에도 같은 제약을 남겼다.
+- 재시도 경로 처리: 재시도로 되돌릴 때 `failure_code`를 지우므로 `failure_detail`도 함께 지운다. 그러지 않으면 새 check 제약을 위반한다.
+- **로그 allowlist 함정**: `log_event`는 `_SAFE_FIELDS` allowlist 밖의 key를 조용히 버린다. `failureDetail`을 로그 호출에 추가했지만 allowlist에 없어 payload에서 사라졌고, DB 값만 단정한 첫 테스트는 이를 통과했다. allowlist에 추가하고 테스트가 로그 payload도 함께 단정하도록 고쳤다. 조용히 버려지는 필드는 단정 없이는 드러나지 않는다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests` -> 207건 / 실패 0 / skip 7. `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest` -> 1건 실행 / 0 skip / 0 실패로 `V25`가 pristine DB에 적용되고 classpath 유도 기대 목록에 반영됨을 확인했다. `BUILD SUCCESSFUL`은 근거가 아니므로 결과 XML의 `tests`/`skipped`를 직접 읽었다.
+
 ## T451 AH-009 — Shrink Order Defect in Report/Task Context
 
 - 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/{test-matrix,tasks,implement}.md`.
