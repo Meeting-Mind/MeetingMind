@@ -36,7 +36,10 @@ from app.main import (
     backend_project_chat,
     call_text_generation,
     call_openai_text,
+    context_token_budget,
+    estimate_tokens,
     explain_term,
+    format_untrusted_sources,
     extract_tasks,
     format_untrusted_sources,
     generate_report_from_sources,
@@ -1445,6 +1448,55 @@ class RagSafetyTest(unittest.TestCase):
             if source_id not in user_content
         ]
         self.assertEqual(len(dropped), 3)
+
+    def test_token_budget_drops_low_score_sources_beyond_the_budget(self):
+        # PERF-TOKEN-01 MVP 목표: 건수뿐 아니라 토큰으로도 상한을 잰다.
+        # 건수 상한만으로는 긴 segment가 예산을 넘길 수 있다.
+        sources = [
+            AiSource(
+                sourceId=f"segment-{index:03d}",
+                type="transcript",
+                text="긴 회의 발화입니다. " * 40,
+                relevanceScore=1.0 - (index * 0.1),
+            )
+            for index in range(5)
+        ]
+
+        unbounded = json.loads(format_untrusted_sources(sources))
+        bounded = json.loads(format_untrusted_sources(sources, token_budget=400))
+
+        # 양성 대조: 예산이 없으면 전부 들어간다. 이게 성립해야 축소가 예산 때문임을 안다.
+        self.assertEqual(len(unbounded), 5)
+        self.assertLess(len(bounded), len(unbounded))
+        # 남은 것은 score가 높은 쪽부터다.
+        kept_ids = [item["sourceId"] for item in bounded]
+        self.assertEqual(kept_ids, [f"segment-{index:03d}" for index in range(len(kept_ids))])
+
+    def test_token_budget_keeps_at_least_one_source(self):
+        # 전부 버리면 근거가 사라져 NO_EVIDENCE로 바뀐다. 그건 검색 실패 신호이지
+        # 예산 초과 신호가 아니므로 둘을 섞으면 안 된다.
+        sources = [
+            AiSource(sourceId="segment-000", type="transcript", text="매우 긴 발화. " * 200, relevanceScore=0.9)
+        ]
+
+        bounded = json.loads(format_untrusted_sources(sources, token_budget=1))
+
+        self.assertEqual(len(bounded), 1)
+
+    def test_token_estimate_counts_korean_more_heavily_than_ascii(self):
+        # CJK를 과대평가하는 방향이라 상한을 넘겨 잘리는 쪽으로 안전하게 틀린다.
+        self.assertGreater(estimate_tokens("회의록 요약"), estimate_tokens("meeting"))
+        self.assertEqual(estimate_tokens(""), 0)
+
+    def test_context_token_budget_falls_back_on_invalid_or_nonpositive_values(self):
+        with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET": "5000"}, clear=False):
+            self.assertEqual(context_token_budget("report"), 5000)
+            with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET_REPORT": "1200"}, clear=False):
+                self.assertEqual(context_token_budget("report"), 1200)
+            with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET_REPORT": "not-a-number"}, clear=False):
+                self.assertEqual(context_token_budget("report"), 5000)
+            with patch.dict(os.environ, {"AI_CONTEXT_TOKEN_BUDGET_REPORT": "0"}, clear=False):
+                self.assertEqual(context_token_budget("report"), 5000)
 
     def test_backend_generate_report_marks_sources_as_untrusted_context(self):
         payload = BackendGenerateReportRequest(

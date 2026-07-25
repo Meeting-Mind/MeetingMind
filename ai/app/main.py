@@ -1078,20 +1078,69 @@ def rag_source_to_ai_source(source: Any, *, relevance_score: float | None = None
     )
 
 
-def format_untrusted_sources(sources: list[AiSource], *, limit: int | None = None) -> str:
+def estimate_tokens(text: str) -> int:
+    """문자 기반 토큰 추정.
+
+    정확한 tokenizer(tiktoken)를 쓰지 않는다. 상한 판정에는 보수적 추정으로 충분하고,
+    ai 서비스에 모델별 인코딩 관리와 패키지 의존성을 늘리지 않기 위해서다.
+
+    한글/CJK는 대략 문자당 1토큰, 그 외는 4문자당 1토큰으로 본다. CJK를 과대평가하는
+    방향이라 상한을 넘겨 잘리는 쪽으로 안전하게 틀린다.
+    """
+    cjk = sum(1 for char in text if "　" <= char <= "鿿" or "가" <= char <= "힣")
+    return cjk + (len(text) - cjk + 3) // 4
+
+
+def context_token_budget(feature: str) -> int:
+    """기능별 문맥 토큰 예산. PERF-TOKEN-01이 요구한 '기능별 예산 분리'다.
+
+    `AI_CONTEXT_TOKEN_BUDGET`이 전역 기본값이고 `AI_CONTEXT_TOKEN_BUDGET_<FEATURE>`로
+    기능별로 덮어쓴다.
+    """
+    default_budget = get_env("AI_CONTEXT_TOKEN_BUDGET", "6000") or "6000"
+    raw_value = get_env(f"AI_CONTEXT_TOKEN_BUDGET_{feature.upper()}", default_budget) or default_budget
+    try:
+        budget = int(raw_value)
+    except ValueError:
+        return int(default_budget)
+    return budget if budget > 0 else int(default_budget)
+
+
+def format_untrusted_sources(
+    sources: list[AiSource],
+    *,
+    limit: int | None = None,
+    token_budget: int | None = None,
+) -> str:
     # AH-009: source가 상한을 넘으면 낮은 relevanceScore부터 버린다. 위치로만 자르면
     # 호출자가 score 순으로 넘기지 않는 경우(예: Backend가 transcript를 발화 순서로 보낼 때)
     # 높은 score 근거가 먼저 잘려 나간다. sorted는 stable이므로 score가 같거나 전부 None이면
     # 기존 순서가 그대로 유지된다. scope는 넓히지 않는다 — 정렬만 하고 source를 추가하지 않는다.
-    if limit is None:
+    if limit is None and token_budget is None:
         selected_sources = sources
     else:
-        ranked = sorted(sources, key=lambda source: -(source.relevanceScore or 0.0))
-        selected_sources = ranked[:limit]
-    return json.dumps(
-        [source.model_dump(exclude_none=True) for source in selected_sources],
-        ensure_ascii=False,
-    )
+        selected_sources = sorted(sources, key=lambda source: -(source.relevanceScore or 0.0))
+        if limit is not None:
+            selected_sources = selected_sources[:limit]
+
+    payload = [source.model_dump(exclude_none=True) for source in selected_sources]
+
+    if token_budget is not None:
+        # 건수 상한만으로는 긴 transcript segment가 예산을 넘길 수 있다. score 높은 쪽부터
+        # 담다가 예산을 넘는 지점에서 멈춘다. 최소 1건은 남긴다 — 전부 버리면 근거가 없어져
+        # NO_EVIDENCE로 바뀌는데, 이는 예산 초과가 아니라 검색 실패를 뜻하는 신호이므로
+        # 둘을 섞으면 안 된다.
+        kept: list[dict] = []
+        used_tokens = 0
+        for item in payload:
+            item_tokens = estimate_tokens(json.dumps(item, ensure_ascii=False))
+            if kept and used_tokens + item_tokens > token_budget:
+                break
+            kept.append(item)
+            used_tokens += item_tokens
+        payload = kept
+
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def parse_time_to_ms(value: str) -> int | None:
@@ -1182,7 +1231,7 @@ def explain_term_from_sources(term: str, sources: list[AiSource]) -> ExplainTerm
         ),
         user_content=(
             f"[용어]\n{term}\n\n"
-            f"[회의 source JSON]\n{format_untrusted_sources(sources)}"
+            f"[회의 source JSON]\n{format_untrusted_sources(sources, token_budget=context_token_budget('explain_term'))}"
         ),
         response_format=GROUNDED_ANSWER_RESPONSE_FORMAT,
     )
@@ -1253,7 +1302,7 @@ def answer_meeting_chat(
         user_content=(
             f"[회의 ID]\n{meeting_id}\n\n"
             f"[사용자 질문]\n{question}\n\n"
-            f"[검색된 회의 source JSON]\n{format_untrusted_sources(sources)}"
+            f"[검색된 회의 source JSON]\n{format_untrusted_sources(sources, token_budget=context_token_budget('meeting_chat'))}"
         ),
         response_format=GROUNDED_ANSWER_RESPONSE_FORMAT,
     )
@@ -1345,7 +1394,7 @@ def generate_report_from_sources(
             f"[출력 형식]\n{report_format}\n\n"
             f"[편집 지시 - 비신뢰 문맥]\n{instruction or ''}\n\n"
             f"[기존 보고서 본문 - 비신뢰 문맥]\n{current_report_markdown or ''}\n\n"
-            f"[회의 source JSON]\n{format_untrusted_sources(sources, limit=12)}"
+            f"[회의 source JSON]\n{format_untrusted_sources(sources, limit=12, token_budget=context_token_budget('report'))}"
         ),
         timeout_seconds=OPENAI_REPORT_TIMEOUT_SECONDS,
         response_format=REPORT_RESPONSE_FORMAT,
@@ -1516,7 +1565,7 @@ def extract_tasks_from_sources(
             f"[회의 ID]\n{meeting_id}\n\n"
             f"[회의 제목]\n{title}\n\n"
             f"[참석자 JSON]\n{participant_json}\n\n"
-            f"[회의 source JSON]\n{format_untrusted_sources(sources, limit=12)}"
+            f"[회의 source JSON]\n{format_untrusted_sources(sources, limit=12, token_budget=context_token_budget('tasks'))}"
         ),
         response_format=TASK_CANDIDATES_RESPONSE_FORMAT,
     )
@@ -1770,7 +1819,7 @@ def answer_project_chat(
             f"[프로젝트 ID]\n{project_id}\n\n"
             f"[사용자 질문]\n{question}\n\n"
             f"[이전 대화 - 비신뢰 문맥]\n{format_project_chat_history(history or [])}\n\n"
-            f"[검색된 프로젝트 source JSON]\n{format_untrusted_sources(sources)}"
+            f"[검색된 프로젝트 source JSON]\n{format_untrusted_sources(sources, token_budget=context_token_budget('project_chat'))}"
         ),
         response_format=GROUNDED_ANSWER_RESPONSE_FORMAT,
     )

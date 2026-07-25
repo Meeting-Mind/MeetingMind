@@ -291,7 +291,7 @@ Deferred from the current delivery phase. The scenarios remain the acceptance ba
 | AH-006 | Low relevance gate | retrieval score is below threshold | ask AI | provider is not called, `unsupported=true`, `LOW_RELEVANCE` | NFR-AI-01 |
 | AH-007 | Citation validation | provider returns unknown source ID | parse provider output | supported answer is rejected or downgraded to unsupported | NFR-AI-02 |
 | AH-008 | Prompt injection in source | transcript/knowledge contains role-change instruction | ask AI | source instruction is ignored and answer remains evidence-bound | NFR-AI-03 |
-| AH-009 | Token budget shrink | evidence exceeds context limit | assemble context | low-score evidence is removed first without widening scope (`T451`; 상한은 아직 token이 아니라 건수 — `T451.1`) | PERF-TOKEN-01~05 |
+| AH-009 | Token budget shrink | evidence exceeds context limit | assemble context | low-score evidence is removed first without widening scope (`T451`), and the cap is measured in estimated tokens per feature (`T451.1`) | PERF-TOKEN-01~05 |
 | AH-010 | Provider timeout | provider exceeds configured timeout | ask AI | `503 AI_PROVIDER_UNAVAILABLE`, no raw provider message | PERF-EXT-01, NFR-REL-01 |
 | AH-011 | Report/task source validation | candidate includes invalid source IDs | generate report/task candidates | invalid candidates are removed; no fake source is emitted | NFR-AI-02 |
 | AH-012 | Terms exact match | transcript contains registered term | render/explain term | glossary answer is local, no LLM call | PERF-AI-06, PERF-TOKEN-06 |

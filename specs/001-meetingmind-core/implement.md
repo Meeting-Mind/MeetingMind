@@ -2284,6 +2284,17 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T451.1 AH-009 — Token-Based Context Budget
+
+- 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/{test-matrix,tasks,implement}.md`.
+- 배경: `T451`이 고친 것은 "상한을 넘길 때 무엇을 먼저 버리는가"였고 상한 자체는 여전히 **건수**였다. `PERF-TOKEN-01`은 프로토타입 목표("기능별 기본 상한을 두고 초과 시 낮은 점수 근거부터 제거")와 MVP 목표("요청 전 토큰 예상치를 계산하고 상한 초과 요청을 자동 축소")를 나눠 두는데, 전자는 `T451`로 충족됐고 후자가 이 작업이다.
+- 토큰 측정 방식 결정: **문자 기반 추정**을 쓴다. `tiktoken`을 넣으면 정확하지만 `ai/requirements.txt` 의존성과 컨테이너 이미지가 커지고 모델별 인코딩 관리가 따라온다. 상한 판정에는 보수적 추정으로 충분하다. `estimate_tokens`는 한글/CJK를 문자당 1토큰, 그 외를 4문자당 1토큰으로 본다. CJK를 **과대평가**하는 방향이라 상한을 넘겨 잘리는 쪽으로 안전하게 틀린다.
+- 기능별 예산 분리(`PERF-TOKEN-01`이 명시한 요건): `AI_CONTEXT_TOKEN_BUDGET`이 전역 기본값(6000)이고 `AI_CONTEXT_TOKEN_BUDGET_<FEATURE>`로 덮어쓴다. 적용 대상은 `explain_term`, `meeting_chat`, `project_chat`, `report`, `tasks` 다섯이다. 값이 정수가 아니거나 0 이하면 전역 기본값으로 되돌린다.
+- **최소 1건은 남긴다**: 예산이 아무리 작아도 source를 전부 버리지 않는다. 전부 버리면 근거가 사라져 `NO_EVIDENCE`가 되는데, 그것은 **검색 실패** 신호이지 예산 초과 신호가 아니다. 둘을 섞으면 운영 중에 원인을 오판한다.
+- 적용 순서: score 정렬 -> 건수 상한(있으면) -> 토큰 예산. 예산은 직렬화된 JSON 기준으로 재므로 실제 전달량과 어긋나지 않는다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests` -> 211건 / 실패 0 / skip 7. 신규 4건이 실제로 실행됨을 `-v`로 확인했다. 예산 축소 테스트는 **예산 없이 5건 전부 들어간다**는 양성 대조를 함께 단정해, 축소가 예산 때문임을 고정했다.
+- 한계: 추정이므로 provider가 세는 실제 토큰과 다르다. 정확한 회계가 필요해지면 `tiktoken` 도입을 다시 판단한다. 출력 길이 제한(`PERF-TOKEN-05`)은 이 작업 범위 밖이다.
+
 ## T454 SMK-002 Media Axis — Two-Participant Publish/Subscribe
 
 - 변경 파일: `frontend/e2e/live-media.spec.ts`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
