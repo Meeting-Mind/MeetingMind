@@ -2284,6 +2284,19 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T453 SMK-005 Browser Axis — Automated Instead of Manual
+
+- 변경 파일: `frontend/e2e/guest-acl-ui.spec.ts`(신규), `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 판단 변경: `SMK-005` 브라우저 축을 "수동 필수"로 두고 있었으나 실제로는 자동화 자산이 이미 있었다. `playwright.config.ts`가 backend(`test` 프로파일) + BFF(legacy auth) + frontend dev server를 함께 띄우고, CI에 `Playwright` job이 `npm run test:e2e`(필터 없음)로 `e2e/` 전체를 실행한다. 새 스펙은 별도 배선 없이 CI에 포함된다.
+- 스펙 구성: 호스트가 Space와 회의 2개를 만들고 guest를 **한쪽 회의에만** 참가자로 넣는다(`role=VIEWER`, `participantType=guest`, Space 멤버로는 넣지 않음). 그 상태에서 guest가 UI로 Space 범위에 도달할 수 있는지 본다.
+  - Space 목록에 호스트 Space가 렌더되지 않는다.
+  - `/spaces/{id}`, `/meetings`, `/members`, `/knowledge`, 초대되지 않은 회의 상세를 **URL 직접 입력**해도 Space 이름과 회의 제목이 렌더되지 않는다.
+  - 같은 Space 범위 API가 guest 토큰에 대해 4xx로 거부된다. 화면에 안 보이는 것만으로는 클라이언트 필터로 가려둔 상태와 구분되지 않기 때문이다.
+- **음성 단정 유효성 고정**: 이 스펙의 부정 단정은 전부 `toHaveCount(0)`이라, 라우트 오타나 로그인 실패로 페이지가 아무것도 렌더하지 않아도 통과한다. 그래서 `space owner does see the space screens the guest is denied`를 함께 두어 **같은 URL에서 소유자에게는 보인다**는 것을 고정했다. 이 테스트가 깨지면 나머지 음성 단정은 무의미해진다. 추가로 guest 토큰으로 초대된 회의를 실제로 읽을 수 있음을 셋업 유효성 근거로 먼저 단정한다.
+- 계층 구분(중요): `playwright.config.ts`는 backend를 `SPRING_PROFILES_ACTIVE=test`로 띄우므로 **in-memory adapter**가 쓰인다. 이 스펙은 SQL 계층 결함을 잡지 못한다. SQL 축은 `T446`이 실 PostgreSQL로 담당한다. 두 축을 섞으면 "guest 테스트가 있으니 안전하다"는 잘못된 결론에 이르므로 스펙 상단 주석에 명시했다.
+- 검증: `cd frontend && BFF_REDIS_PORT=6380 npx playwright test` -> 7건 전부 통과(기존 3 + 신규 4). local Redis는 6379가 아니라 6380이라 override가 필요하지만 CI service는 6379이므로 CI에서는 불필요하다.
+- 남은 수동 범위: 없음. `SMK-005`의 브라우저 축은 이 스펙으로 닫힌다.
+
 ## V119 Status — 자동 검증 범위 마감, 수동 2건 잔여
 
 - `SMK-001~005` 중 **자동 검증이 가능한 범위는 전부 닫혔다**. `T445`(색인 작업 생성), `T446`(guest ACL), `T447`(worker 소비), `T448`(Project AI citation), `T449`(회의록 본문 생성)가 각각의 축을 덮는다.

@@ -28,10 +28,13 @@ OpenAI-compatible generation, embedding, and public callback checks are opt-in.
 | SMK-003 | worker 소비 -> `report` chunk | PASS | `T447` |
 | SMK-004 | 전체 | PASS | `T448` |
 | SMK-005 | 서버 ACL 경계 | PASS | `T446` |
-| SMK-005 | UI 우회 경로 | **수동 대기** | 브라우저 필요 |
+| SMK-005 | UI 우회 경로 | PASS | `T453` (Playwright, CI 포함) |
 
-자동화 가능한 범위는 모두 닫혔다. `V119` 마감은 위 **수동 2건**만 남아 있으며, 이 둘은
-브라우저 실조작이 필요해 에이전트가 대신 수행할 수 없다.
+`SMK-005`는 두 축이 모두 닫혔다. 서버 경계는 `T446`이 실 PostgreSQL로, UI 우회 경로는
+`T453`이 Playwright로 덮는다. **두 축은 서로를 대신하지 못한다** — Playwright는 backend를
+`test` 프로파일(in-memory)로 띄우므로 SQL 결함을 잡지 못한다.
+
+`V119` 마감에 남은 것은 `SMK-002` 매체 join 하나뿐이며, 이것만 브라우저 실조작이 필요하다.
 
 ## Local Deterministic Checks
 
@@ -294,4 +297,4 @@ STT provider are running.
 | 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-003 (본문 생성) | Opt-in provider (OpenAI 과금) | PASS | `meeting-1b4438c0…` transcript 37건 -> markdown 976자, decision 3 / actionItem 3 / model `gpt-4.1-mini-2025-04-14` | `/api/internal/meeting-ai/generate-report`는 자체 검색을 하지 않고 Backend가 전달한 source만 쓴다. `unsupported=false`이고 인용 6건이 전부 전달 범위 안(범위 밖 0건). 음성 2건은 HTTP 403 `AI_CONTEXT_FORBIDDEN`(다른 회의 source 혼입 / 허용되지 않은 source type). 응답 필드는 `supported`가 아니라 `unsupported`다 |
 | 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-004 | Opt-in provider (OpenAI 과금) | PASS | 인용 `report-738390bc…`, `report-741bdeb4…` / model `gpt-4.1-mini-2025-04-14` | Project AI가 확정 회의록을 인용해 답한다. 양성 2건(서로 다른 Space) + 음성 3건(`LOW_RELEVANCE`, `NO_EVIDENCE`, 교차 Space)으로 검증. unsupported 응답은 sources를 비우므로 응답만으로는 SQL 누출 여부를 알 수 없어, `PostgresRagRetriever`를 직접 호출해 모델과 무관하게 scope 강제를 확인했다(양성 8건 확보, 교차 누출 0건) |
 | 2026-07-26 | Claude | `feat/smk005-guest-acl-negative` | SMK-005 (server ACL) | Local DB automated | PASS | `GuestSpaceAclNegativeIntegrationTest` 1건 실행/0 skip | 실 DB에서 회의 전용 GUEST가 초대 밖 회의 상세, Space 회의/멤버/knowledge 목록, Space 상세 전부 거부됨을 확인. 회의 참가가 Space 멤버십으로 승격되지 않음도 확인. 양성 대조로 자기 회의 읽기는 성공하는 것을 먼저 단정한다 |
-| TBD | TBD | TBD | SMK-005 (browser) | Manual | TBD | account/meeting IDs | UI가 서버 경계를 우회하는 경로는 브라우저 수동 확인이 남는다 |
+| 2026-07-26 | Claude | `feat/smk003-embedding-worker` | SMK-005 (browser) | Local automated (Playwright) | PASS | `frontend/e2e/guest-acl-ui.spec.ts` 4건 / 전체 7건 통과 | 수동으로 두고 있었으나 Playwright 자산이 이미 있어 자동화했다. 회의 전용 GUEST가 Space 범위 화면에 URL 직접 입력으로도 도달하지 못하고 해당 API도 4xx로 거부된다. 음성 단정이 전부 `toHaveCount(0)`이라 공허하게 통과할 수 있어, **같은 URL에서 소유자에게는 보인다**는 양성 대조를 함께 고정했다. backend가 `test` 프로파일(in-memory)이므로 SQL 축은 `T446`이 별도로 담당한다 |
