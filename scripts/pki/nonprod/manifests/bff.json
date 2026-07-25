@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "environment": "nonprod-v2",
+  "service": "bff",
+  "serviceAccount": "meetingmind-bff",
+  "spiffeId": "spiffe://meetingmind.internal/ns/nonprod-v2/sa/meetingmind-bff",
+  "dnsSans": [],
+  "extendedKeyUsages": [
+    "clientAuth"
+  ]
+}
