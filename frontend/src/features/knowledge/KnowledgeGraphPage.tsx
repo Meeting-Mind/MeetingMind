@@ -1,4 +1,4 @@
-import { Maximize2, Plus, RefreshCw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Group, Maximize2, Plus, RefreshCw, SlidersHorizontal, Sparkles } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import type { ProjectKnowledgeDetailResponse, SpaceDetail } from "../../types";
@@ -32,6 +32,8 @@ export function KnowledgeGraphPage() {
 
   const hiddenKinds = useKnowledgeGraphStore((state) => state.hiddenKinds);
   const showOrphans = useKnowledgeGraphStore((state) => state.showOrphans);
+  const clustered = useKnowledgeGraphStore((state) => state.clustered);
+  const setClustered = useKnowledgeGraphStore((state) => state.setClustered);
   const selectedId = useKnowledgeGraphStore((state) => state.selectedId);
   const setSelectedId = useKnowledgeGraphStore((state) => state.setSelectedId);
 
@@ -119,8 +121,23 @@ export function KnowledgeGraphPage() {
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           <button
+            aria-pressed={clustered}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold ${
+              clustered
+                ? "border-[var(--app-accent)] bg-[var(--app-accent-soft)] text-[var(--app-accent-text)]"
+                : "border-[var(--app-line)] text-[var(--app-muted)] hover:bg-[var(--app-surface-soft)]"
+            }`}
+            onClick={() => setClustered(!clustered)}
+            title="연결된 노드끼리 덩어리로 모읍니다"
+            type="button"
+          >
+            <Group className="h-3.5 w-3.5" /> {clustered ? "묶음 해제" : "묶어보기"}
+          </button>
+          <button
             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--app-line)] px-3 py-1.5 text-xs font-bold text-[var(--app-muted)] hover:bg-[var(--app-surface-soft)]"
+            disabled={clustered}
             onClick={() => canvasRef.current?.reheat()}
+            title={clustered ? "묶음을 해제한 뒤 쓸 수 있습니다" : undefined}
             type="button"
           >
             <Sparkles className="h-3.5 w-3.5" /> 재배치

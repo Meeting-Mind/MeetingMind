@@ -11,6 +11,7 @@ import {
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, shouldPlayIntro, type BurstTarget } from "./introBurst";
 import { depthOpacity, layerZ, perspectiveScale } from "./depth";
+import { CLUSTER_MOTION_MS, buildClusters, clusterCenters, easeInOut, slotOffset, swirlPosition } from "./clustering";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
 
@@ -98,10 +99,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const burstRef = useRef<{ startedAt: number; targets: BurstTarget[] } | null>(null);
     // 진입 모션은 한 번만. 필터를 바꿀 때마다 다시 틀면 안 된다.
     const introPlayedRef = useRef(false);
+    // 묶어보기 전환 모션. 소용돌이로 자기 덩어리에 들어간다.
+    const clusterRef = useRef<{ startedAt: number; from: BurstTarget[]; to: BurstTarget[] } | null>(null);
+    const clusteredRef = useRef(false);
     const insetsRef = useRef({ left: 0, right: 0 });
     insetsRef.current = insets ?? { left: 0, right: 0 };
 
     const forces = useKnowledgeGraphStore((state) => state.forces);
+    const clustered = useKnowledgeGraphStore((state) => state.clustered);
     const selectedId = useKnowledgeGraphStore((state) => state.selectedId);
     const selectedIdRef = useRef<string | null>(selectedId);
     selectedIdRef.current = selectedId;
@@ -184,6 +189,58 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       applyForces();
       simRef.current?.alpha(0.4).restart();
     }, [forces]);
+
+    /* --- 묶어보기 --- */
+    useEffect(() => {
+      if (clusteredRef.current === clustered) {
+        return;
+      }
+      clusteredRef.current = clustered;
+      const graphNodes = dataRef.current.nodes;
+      if (graphNodes.length === 0) {
+        return;
+      }
+
+      const from = graphNodes.map((node) => ({ x: node.x ?? 0, y: node.y ?? 0 }));
+      let to: BurstTarget[];
+
+      if (clustered) {
+        const assignment = buildClusters(
+          graphNodes.map((node) => node.id),
+          dataRef.current.links
+        );
+        const clusterCount = new Set(assignment.values()).size;
+        // 덩어리 수가 늘수록 원을 키운다. 고정 반지름이면 덩어리끼리 겹친다.
+        const centers = clusterCenters(clusterCount, 160 + clusterCount * 34);
+        const sizes = new Map<number, number>();
+        for (const node of graphNodes) {
+          const index = assignment.get(node.id) ?? 0;
+          sizes.set(index, (sizes.get(index) ?? 0) + 1);
+        }
+        const seen = new Map<number, number>();
+        to = graphNodes.map((node) => {
+          const index = assignment.get(node.id) ?? 0;
+          const slot = seen.get(index) ?? 0;
+          seen.set(index, slot + 1);
+          const center = centers[index] ?? { x: 0, y: 0 };
+          const offset = slotOffset(slot, sizes.get(index) ?? 1);
+          return { x: center.x + offset.x, y: center.y + offset.y };
+        });
+      } else {
+        // 풀 때는 시뮬레이션이 스스로 자리를 잡게 둔다. 목표를 따로 계산하면
+        // 힘이 만들 배치와 어긋나 풀자마자 다시 움직인다.
+        // 고정을 풀어야 힘이 다시 자리를 잡는다. 안 풀면 덩어리가 그대로 남는다.
+        for (const node of graphNodes) {
+          node.fx = null;
+          node.fy = null;
+        }
+        clusterRef.current = null;
+        simRef.current?.alpha(0.7).restart();
+        return;
+      }
+
+      clusterRef.current = { startedAt: performance.now(), from, to };
+    }, [clustered]);
 
     /* --- imperative API --- */
     function fitToView() {
@@ -407,6 +464,38 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               graphNodes[index].x = moved.x;
               graphNodes[index].y = moved.y;
               // 보간이 끝난 뒤 잔여 속도로 튀지 않도록 매 프레임 속도를 지운다.
+              graphNodes[index].vx = 0;
+              graphNodes[index].vy = 0;
+            }
+          }
+        }
+
+        // 묶어보기 전환. 진입 모션과 같은 이유로 시뮬레이션을 멈추고 좌표를 덮어쓴다.
+        const cluster = clusterRef.current;
+        if (cluster) {
+          const ratio = (performance.now() - cluster.startedAt) / CLUSTER_MOTION_MS;
+          const graphNodes = dataRef.current.nodes;
+          if (ratio >= 1) {
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const target = cluster.to[index];
+              if (!target) continue;
+              graphNodes[index].x = target.x;
+              graphNodes[index].y = target.y;
+              // 덩어리를 유지하려면 고정해야 한다. 놓으면 힘이 다시 흩어 놓는다.
+              graphNodes[index].fx = target.x;
+              graphNodes[index].fy = target.y;
+            }
+            clusterRef.current = null;
+          } else {
+            simRef.current?.stop();
+            const eased = easeInOut(Math.max(0, ratio));
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const start = cluster.from[index];
+              const target = cluster.to[index];
+              if (!start || !target) continue;
+              const moved = swirlPosition(start, target, eased);
+              graphNodes[index].x = moved.x;
+              graphNodes[index].y = moved.y;
               graphNodes[index].vx = 0;
               graphNodes[index].vy = 0;
             }
