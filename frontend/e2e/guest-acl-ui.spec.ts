@@ -66,6 +66,14 @@ async function buildFixture(request: APIRequestContext, label: string): Promise<
   const host = await signup(request, `${label}-host`);
   const guest = await signup(request, `${label}-guest`);
 
+  // signup은 auth store에만 사용자를 만든다. workspace store에는 인증된 API를 한 번
+  // 호출할 때 `ensureUser`로 등록된다. 그 전에 참가자로 추가하면 UNAUTHORIZED가 난다.
+  // 실제 사용자도 초대 전에 로그인하므로 이 호출은 현실과 어긋나지 않는다.
+  const guestBootstrap = await request.get(`${backendBaseUrl}/api/v1/spaces`, {
+    headers: authorized(guest)
+  });
+  expect(guestBootstrap.ok(), "guest workspace 등록 실패").toBeTruthy();
+
   const stamp = Date.now();
   const spaceName = `Guest ACL UI Space ${stamp}`;
   const excludedMeetingTitle = `Excluded Meeting ${stamp}`;
@@ -98,7 +106,7 @@ async function buildFixture(request: APIRequestContext, label: string): Promise<
       data: { userId: guest.user.id, role: "VIEWER", participantType: "guest" }
     }
   );
-  expect(participantResponse.ok()).toBeTruthy();
+  expect(participantResponse.ok(), `참가자 등록 실패: ${await participantResponse.text()}`).toBeTruthy();
 
   return { host, guest, spaceId, spaceName, invitedMeetingId, excludedMeetingId, excludedMeetingTitle };
 }

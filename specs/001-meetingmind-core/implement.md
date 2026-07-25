@@ -2284,6 +2284,17 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T439.1 Space AI Usage and Quota
+
+- 변경 파일: `backend/src/main/resources/application.yml`, `backend/src/main/java/com/meetingmind/demo/controller/AiUsageController.java`, `backend/src/test/java/com/meetingmind/demo/controller/AiUsageControllerTest.java`, `frontend/src/App.tsx`, `frontend/e2e/space-ai-usage.spec.ts`(신규), `specs/001-meetingmind-core/{tasks,implement}.md`.
+- 착수 전 실측: API는 이미 있었다(`GET /api/v1/spaces/{spaceId}/ai/usage`, window/총계/기능별 집계). `limit`과 `usagePercent`만 `null` 하드코딩이었다. frontend에는 타입과 `fetchSpaceAiUsage`가 있었지만 **호출하는 화면이 없었다**. "Knowledge Indexed" 제거는 이미 끝나 있었다. 즉 남은 일은 quota 계산과 화면 연결이었다.
+- 결정: quota 상한은 **환경변수 전역 기본값**(`MEETINGMIND_AI_TOKEN_QUOTA`)에서 온다. Space별 컬럼을 두면 마이그레이션과 설정 UI가 따라오는데 프로토타입 단계에 비해 과하다. 값이 0 이하이거나 미설정이면 `limit`/`usagePercent`를 **둘 다 null로** 둔다. 0을 내려보내면 클라이언트가 "한도 0"으로 오해한다.
+- 결정: quota는 **표시 전용이며 초과해도 AI 호출을 차단하지 않는다**. 프로토타입에서 설정 실수로 팀 전체가 막히는 위험을 지지 않는다. `quotaOverrunIsReportedButNeverBlocks` 테스트가 이 결정을 고정한다 — 초과 이후에도 기록과 조회가 계속 성공함을 단정한다.
+- UI: Space 개요에 사용량 카드를 추가했다. 총 토큰, 요청 수, 기능별 내역을 보여주고 quota가 설정된 경우에만 진행률 막대와 퍼센트를 렌더한다. 100%를 넘으면 색을 바꾸되 "AI 사용은 계속됩니다"를 함께 표시해 차단이 아님을 분명히 한다. 조회가 실패하면 카드만 숨기고 개요 전체는 정상 동작한다.
+- **YAML 중복키를 스스로 만들었다가 잡았다**: `meetingmind.ai:` 블록이 이미 있는데 파일 앞쪽에 같은 키를 새로 열어 SnakeYAML `DuplicateKeyException`으로 backend가 기동하지 못했다. `V119.4`가 고쳤던 회귀와 정확히 같은 유형이며, `compileJava`는 통과했다. `T450`에서 만든 중복키 스캐너로 확인 후 기존 블록에 합쳤다. **YAML을 건드리면 컴파일이 아니라 기동으로 확인해야 한다**는 것이 다시 확인됐다.
+- 검증: `AiUsageControllerTest` 3건 실행 / 0 skip / 0 실패. `npm run build` 통과, 단위 테스트 22건 통과, lint 0 errors / 4 warnings(기존과 동일, 신규 경고 없음). Playwright `space-ai-usage` 1건 통과.
+- e2e를 따로 둔 이유: 카드가 조건부 렌더(`aiUsage ? ... : null`)라 조회가 실패하면 **조용히 사라진다**. 빌드도 단위 테스트도 그것을 잡지 못한다. 실제로 첫 실행에서 카드가 뜨지 않았고, 원인이 stale backend였음을 이 테스트가 드러냈다.
+
 ## T451.1 AH-009 — Token-Based Context Budget
 
 - 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/{test-matrix,tasks,implement}.md`.
@@ -2305,7 +2316,7 @@
 - 선행 단정: UI를 건드리기 전에 `POST /api/v1/meetings/{id}/livekit-token`이 성공하는지 확인한다. 자격증명이 죽어 있으면 UI 단정은 의미가 없고, 실패 원인도 화면 타임아웃이 아니라 토큰 응답으로 드러나야 한다.
 - 발견: `participantType=member`는 `SPACE_ACCESS_DENIED`("member participant는 SpaceMember여야 합니다")로 거부된다. 회의 초대만 받은 사용자는 `guest`여야 한다. 경계가 의도대로 동작함을 확인한 셈이다.
 - **opt-in인 이유**: `LiveKitTokenService`는 CWD의 `.env`를 읽고 Playwright backend webServer의 cwd가 `backend/`이므로 로컬에서는 `backend/.env`의 자격증명이 쓰인다. CI에는 그 파일이 없어 토큰 발급이 `LIVEKIT_NOT_CONFIGURED`가 된다. 게이트 없이 두면 CI가 항상 실패하고, 조건부 skip으로 두면 "통과처럼 보이는 skip"이 된다. 그래서 `RUN_LIVEKIT_MEDIA_E2E=true` 명시적 opt-in으로 뒀다. **게이트 없이 돌린 결과의 skip은 통과 근거가 아니다.**
-- 검증: `cd frontend && RUN_LIVEKIT_MEDIA_E2E=true BFF_REDIS_PORT=6380 npx playwright test live-media` -> 1건 실행/통과. 게이트 없이 전체 실행 시 7 passed / 1 skipped로 skip 경로도 정상이다.
+- 검증: 신선한 `test` 프로파일 스택(`PLAYWRIGHT_BACKEND_PORT=8090` 등)에서 `RUN_LIVEKIT_MEDIA_E2E=true` -> 1건 실행/통과. 게이트 없이 전체 실행 시 8 passed / 1 skipped로 skip 경로도 정상이다. 이 스펙도 `T453`과 같은 `ensureUser` 문제로 처음에는 stale backend에서만 통과했었고 같은 방식으로 고쳤다.
 - **fake media로 덮지 못하는 것**: 실제 마이크/카메라 권한 프롬프트, prejoin 장치 선택 UX, 실제 오디오 품질. 이 세 가지는 여전히 사람이 확인해야 하며 `SMK-002`의 진짜 수동 잔여다.
 
 ## T453 SMK-005 Browser Axis — Automated Instead of Manual
@@ -2318,7 +2329,9 @@
   - 같은 Space 범위 API가 guest 토큰에 대해 4xx로 거부된다. 화면에 안 보이는 것만으로는 클라이언트 필터로 가려둔 상태와 구분되지 않기 때문이다.
 - **음성 단정 유효성 고정**: 이 스펙의 부정 단정은 전부 `toHaveCount(0)`이라, 라우트 오타나 로그인 실패로 페이지가 아무것도 렌더하지 않아도 통과한다. 그래서 `space owner does see the space screens the guest is denied`를 함께 두어 **같은 URL에서 소유자에게는 보인다**는 것을 고정했다. 이 테스트가 깨지면 나머지 음성 단정은 무의미해진다. 추가로 guest 토큰으로 초대된 회의를 실제로 읽을 수 있음을 셋업 유효성 근거로 먼저 단정한다.
 - 계층 구분(중요): `playwright.config.ts`는 backend를 `SPRING_PROFILES_ACTIVE=test`로 띄우므로 **in-memory adapter**가 쓰인다. 이 스펙은 SQL 계층 결함을 잡지 못한다. SQL 축은 `T446`이 실 PostgreSQL로 담당한다. 두 축을 섞으면 "guest 테스트가 있으니 안전하다"는 잘못된 결론에 이르므로 스펙 상단 주석에 명시했다.
-- 검증: `cd frontend && BFF_REDIS_PORT=6380 npx playwright test` -> 7건 전부 통과(기존 3 + 신규 4). local Redis는 6379가 아니라 6380이라 override가 필요하지만 CI service는 6379이므로 CI에서는 불필요하다.
+- 검증: `cd frontend && PLAYWRIGHT_BACKEND_PORT=8090 PLAYWRIGHT_BFF_PORT=8091 PLAYWRIGHT_FRONTEND_PORT=5199 BFF_REDIS_PORT=6380 npx playwright test` -> 8건 통과 / 1 skip(opt-in). local Redis는 6379가 아니라 6380이라 override가 필요하지만 CI service는 6379이므로 CI에서는 불필요하다.
+- **정정(중요)**: 최초 실행은 이미 떠 있던 backend(포트 8080, 7시간 전 기동)에 붙어 통과했다. `reuseExistingServer: !CI`가 local에서 true라 Playwright가 기존 프로세스를 재사용했고, 그 프로세스는 `local` 프로파일(실 DB)이라 **CI가 쓰는 `test` 프로파일과 달랐다**. 별도 포트로 신선한 스택을 띄우자 4건이 실패했다. 즉 첫 통과는 CI 환경의 근거가 아니었다.
+- 실패 원인과 수정: `signup`은 auth store에만 사용자를 만든다. workspace store에는 컨트롤러의 `currentUser()`가 호출하는 `ensureUser`로 등록된다. guest가 인증 API를 한 번도 호출하지 않은 상태에서 참가자로 추가하면 `addMeetingParticipant`의 `requireUser(userId)`가 `UNAUTHORIZED`로 거부한다. fixture에서 guest가 `GET /api/v1/spaces`를 먼저 호출하도록 고쳤다. 실제 사용자도 초대 전에 로그인하므로 현실과 어긋나지 않는다.
 - 남은 수동 범위: 없음. `SMK-005`의 브라우저 축은 이 스펙으로 닫힌다.
 
 ## V119 Status — 자동 검증 범위 마감, 수동 2건 잔여

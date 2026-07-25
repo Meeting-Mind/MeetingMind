@@ -89,6 +89,13 @@ test.describe("SMK-002 media publish/subscribe", () => {
     const guest = await signup(request, "media-guest");
     const stamp = Date.now();
 
+    // signup은 auth store에만 사용자를 만든다. workspace store에는 인증된 API를 한 번
+    // 호출할 때 `ensureUser`로 등록되므로, 참가자로 추가하기 전에 먼저 등록시킨다.
+    const guestBootstrap = await request.get(`${backendBaseUrl}/api/v1/spaces`, {
+      headers: authorized(guest)
+    });
+    expect(guestBootstrap.ok(), "guest workspace 등록 실패").toBeTruthy();
+
     const spaceResponse = await request.post(`${backendBaseUrl}/api/v1/spaces`, {
       headers: authorized(host),
       data: { name: `Media Space ${stamp}`, description: "SMK-002 media axis" }

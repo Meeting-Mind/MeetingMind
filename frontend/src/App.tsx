@@ -74,6 +74,7 @@ import {
   resendSpaceInvitation,
   cancelSpaceInvitation,
   fetchSpaceDetail,
+  fetchSpaceAiUsage,
   fetchSpaceMembers,
   fetchSpaces,
   removeSpaceMember,
@@ -109,6 +110,7 @@ import type {
   DomainTerm,
   SpaceDetail,
   SpaceSummary,
+  SpaceAiUsageResponse,
   SpaceMembersResponse,
   ProjectKnowledgeItem,
   MeetingDetailResponse,
@@ -1698,6 +1700,7 @@ const ProjectHome = () => {
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
   const [taskCompletionError, setTaskCompletionError] = useState<string | null>(null);
   const [taskPage, setTaskPage] = useState(0);
+  const [aiUsage, setAiUsage] = useState<SpaceAiUsageResponse | null>(null);
   const korean = locale === "ko";
 
   useEffect(() => {
@@ -1706,6 +1709,7 @@ const ProjectHome = () => {
     if (!session || !spaceId || !spaceDetail) {
       setMembers([]);
       setKnowledgeItems([]);
+      setAiUsage(null);
       return () => {
         active = false;
       };
@@ -1713,15 +1717,18 @@ const ProjectHome = () => {
 
     void Promise.allSettled([
       fetchSpaceMembers(session, spaceId),
-      fetchProjectKnowledge(session, spaceId)
+      fetchProjectKnowledge(session, spaceId),
+      fetchSpaceAiUsage(session, spaceId, "month")
     ]).then((results) => {
       if (!active) {
         return;
       }
 
-      const [membersResult, knowledgeResult] = results;
+      const [membersResult, knowledgeResult, aiUsageResult] = results;
       setMembers(membersResult.status === "fulfilled" ? membersResult.value.members : []);
       setKnowledgeItems(knowledgeResult.status === "fulfilled" ? knowledgeResult.value.items : []);
+      // 사용량 조회가 실패해도 개요 화면 전체를 깨뜨리지 않는다. 카드만 숨긴다.
+      setAiUsage(aiUsageResult.status === "fulfilled" ? aiUsageResult.value : null);
     });
 
     return () => {
@@ -2007,6 +2014,64 @@ const ProjectHome = () => {
               )}
             </div>
           </div>
+
+          {/* AI Usage (T439.1). quota는 표시 전용이며 초과해도 AI 호출을 막지 않는다. */}
+          {aiUsage ? (
+            <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
+              <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+                <h3 className="font-semibold">{korean ? "이번 달 AI 사용량" : "AI Usage This Month"}</h3>
+                <span className="text-xs text-muted-foreground">
+                  {korean ? `요청 ${aiUsage.totalRequests}건` : `${aiUsage.totalRequests} requests`}
+                </span>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-2xl font-semibold tabular-nums">
+                    {(aiUsage.totalInputTokens + aiUsage.totalOutputTokens).toLocaleString()}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {korean ? "총 토큰" : "total tokens"}
+                    {aiUsage.limit !== null ? ` / ${aiUsage.limit.toLocaleString()}` : ""}
+                  </span>
+                </div>
+                {aiUsage.usagePercent !== null ? (
+                  <div className="space-y-1">
+                    <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${aiUsage.usagePercent >= 100 ? "bg-amber-500" : "bg-primary"}`}
+                        style={{ width: `${Math.min(100, aiUsage.usagePercent)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {korean ? `한도의 ${aiUsage.usagePercent}%` : `${aiUsage.usagePercent}% of quota`}
+                      {aiUsage.usagePercent >= 100
+                        ? korean
+                          ? " · 한도를 넘었지만 AI 사용은 계속됩니다"
+                          : " · over quota, AI remains available"
+                        : ""}
+                    </p>
+                  </div>
+                ) : null}
+                {aiUsage.features.filter((feature) => feature.requests > 0).length > 0 ? (
+                  <ul className="space-y-1 pt-1">
+                    {aiUsage.features.filter((feature) => feature.requests > 0).map((feature) => (
+                      <li className="flex items-center justify-between text-xs" key={feature.feature}>
+                        <span className="text-muted-foreground truncate">{feature.feature}</span>
+                        <span className="tabular-nums shrink-0">
+                          {(feature.inputTokens + feature.outputTokens).toLocaleString()}
+                          <span className="text-muted-foreground"> · {feature.requests}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {korean ? "아직 AI 사용 기록이 없습니다." : "No AI usage recorded yet."}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Side Column */}
