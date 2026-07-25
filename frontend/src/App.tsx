@@ -27,10 +27,19 @@ import {
   VideoOff,
   X,
   PanelLeftClose,
-  PanelLeftOpen,
-  Languages
+  PanelLeftOpen
 } from "lucide-react";
-import { AnimatedThemeToggler } from "./components/common/AnimatedThemeToggler";
+import { DisplayPreferences } from "./app/DisplayPreferences";
+import {
+  AppPreferencesContext,
+  LOCALE_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  storedLocale,
+  storedTheme,
+  useAppPreferences,
+  type AppLocale,
+  type ThemeMode
+} from "./app/preferences";
 import {
   ConnectionState,
   Room,
@@ -53,6 +62,7 @@ import {
 } from "./auth/session";
 import { subscribeToSessionInvalid } from "./auth/sessionInvalidation";
 import { KnowledgeGraphPage } from "./features/knowledge";
+import { LandingPage } from "./features/landing";
 import { useMeetingDialogueQuery } from "./features/transcription/hooks";
 import { filterTranscriptEntries } from "./features/transcription/selectors";
 import { AllDeviceLogoutModal } from "./components/AllDeviceLogoutModal";
@@ -475,63 +485,6 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-
-type ThemeMode = "light" | "dark";
-type AppLocale = "en" | "ko";
-type AppPreferences = {
-  theme: ThemeMode;
-  setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
-  locale: AppLocale;
-  setLocale: React.Dispatch<React.SetStateAction<AppLocale>>;
-};
-
-const AppPreferencesContext = createContext<AppPreferences | null>(null);
-const THEME_STORAGE_KEY = "meetingmind-theme";
-const LOCALE_STORAGE_KEY = "meetingmind-locale";
-
-function storedTheme(): ThemeMode {
-  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
-}
-
-function storedLocale(): AppLocale {
-  return window.localStorage.getItem(LOCALE_STORAGE_KEY) === "ko" ? "ko" : "en";
-}
-
-function useAppPreferences() {
-  const context = useContext(AppPreferencesContext);
-  if (!context) {
-    throw new Error("AppPreferencesContext is not available.");
-  }
-  return context;
-}
-
-function DisplayPreferences({ compact = false }: { compact?: boolean }) {
-  const { locale, setLocale, setTheme, theme } = useAppPreferences();
-  const korean = locale === "ko";
-  const nextThemeLabel = theme === "dark"
-    ? (korean ? "라이트 모드로 전환" : "Switch to light mode")
-    : (korean ? "다크 모드로 전환" : "Switch to dark mode");
-
-  return (
-    <div className={`flex items-center ${compact ? "gap-1" : "gap-2"}`}>
-      <AnimatedThemeToggler
-        dark={theme === "dark"}
-        label={nextThemeLabel}
-        onToggle={() => setTheme((current) => current === "dark" ? "light" : "dark")}
-      />
-      <button
-        aria-label={korean ? "Switch language to English" : "언어를 한국어로 전환"}
-        className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-        onClick={() => setLocale((current) => current === "ko" ? "en" : "ko")}
-        title={korean ? "Switch language to English" : "한국어로 전환"}
-        type="button"
-      >
-        <Languages className="h-3.5 w-3.5" />
-        {korean ? "KO" : "EN"}
-      </button>
-    </div>
-  );
-}
 
 function useAuthState() {
   const context = useContext(AuthContext);
@@ -1244,37 +1197,6 @@ const AppShell = () => {
 };
 
 // --- Pages ---
-
-// 1. Landing Page (/)
-const LandingPage = () => {
-  const navigate = useNavigate();
-  const { locale } = useAppPreferences();
-  const korean = locale === "ko";
-  return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center text-center p-8 relative">
-      <div className="absolute right-6 top-6"><DisplayPreferences /></div>
-      <div className="max-w-3xl space-y-6">
-        <div className="w-16 h-16 bg-foreground text-background rounded-xl flex items-center justify-center mx-auto mb-8">
-          <span className="text-2xl font-bold">M</span>
-        </div>
-        <h1 className="text-5xl font-bold tracking-tight text-foreground">
-          {korean ? <>회의가 끝난 뒤에도,<br />일이 이어지도록.</> : <>Meetings shouldn't be the end.<br />They should be the beginning.</>}
-        </h1>
-        <p className="text-xl text-muted-foreground">
-          {korean ? "MeetingMind는 회의를 전사, 태스크, 프로젝트 지식, AI로 연결합니다." : "MeetingMind seamlessly connects your meetings to transcripts, tasks, knowledge bases, and AI. Experience the continuous collaboration cycle."}
-        </p>
-        <div className="pt-8">
-          <button
-            onClick={() => navigate('/spaces')}
-            className="bg-foreground text-background px-8 py-3 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors inline-flex items-center gap-2"
-          >
-            {korean ? "워크스페이스로 이동" : "Go to Workspaces"} <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // 2. Workspace Home (/spaces)
 const WorkspaceHome = () => {
@@ -7449,9 +7371,14 @@ const LoginPage = () => {
   const { locale } = useAppPreferences();
   const location = useLocation();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  // The landing page hands off `?mode=signup&email=…`; treat it as the initial
+  // form state only, so later edits and tab switches are not clobbered.
+  const [searchParams] = useSearchParams();
+  const [mode, setMode] = useState<"login" | "signup">(
+    () => searchParams.get("mode") === "signup" ? "signup" : "login"
+  );
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => searchParams.get("email")?.trim() ?? "");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
