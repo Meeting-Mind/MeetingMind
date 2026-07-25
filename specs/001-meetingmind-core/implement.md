@@ -2283,3 +2283,12 @@
 - 구현: `ReportConfirmKnowledgeIndexIntegrationTest`를 추가해 `saveReportCandidate` -> `confirmMeetingReport` 애플리케이션 경로로 검증한다. CANDIDATE 상태에서는 색인 작업이 없어야 하고, 확정 후 `REPORT_CONFIRMED` 작업이 정확히 1건 생기며, 그 작업이 space 범위이고 `project_knowledge_id`가 null인 meeting source임을 단정한다. AI provider를 쓰지 않으므로 결정론적이다.
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
+
+## T446 SMK-005 Guest ACL Negative on Real Database
+
+- 변경 파일: `backend/src/test/java/com/meetingmind/demo/domain/GuestSpaceAclNegativeIntegrationTest.java`, `specs/001-meetingmind-core/{operational-smoke-runbook,tasks,implement}.md`.
+- 조사 결과: guest 관련 커버리지는 이미 여러 건 있었다(`guestCanReadOnlyWhenParticipantForThisMeeting`, `meetingGuestDoesNotCreateSpaceAccess`, `meetingGuestCannotUseProjectAiWithoutSpaceMembership`, `confirmRejectsMeetingGuestEvenWhenGuestIsEditor` 등). 그러나 전부 `InMemoryWorkspaceStore`와 정책 객체 단위였다. 즉 실제 `JdbcWorkspaceStore`의 SQL이 guest 음성 경로로 실행된 적이 없고, SQL에서 space 멤버십 조건이 빠져도 기존 테스트는 전부 통과한다. 이것이 `SMK-005`의 실질적 공백이었다.
+- 구현: 실제 PostgreSQL에서 회의 전용 GUEST(Space 멤버가 아니고 회의 참가자로만 등록)를 만들어 다음을 검증한다. 초대되지 않은 같은 Space 회의 상세, Space 회의 목록, Space 상세, Space 멤버 목록, Space knowledge 목록이 모두 `AuthorizationException`으로 거부된다. 추가로 회의 참가자 등록이 Space 멤버십으로 승격되지 않았음을 `findSpaceMembers`로 확인한다.
+- 양성 대조를 함께 둔 이유: GUEST가 자기 회의를 읽을 수 있어야 셋업이 유효하다. 셋업이 잘못돼 모든 접근이 거부되는 상태는 거부 단정만으로는 통과처럼 보이지만 아무것도 증명하지 못한다. 따라서 `meetingDetail(guest, invitedMeeting)`이 성공하는 것을 먼저 단정한다.
+- 범위 한계: 브라우저 기반 수동 확인은 여전히 남는다. 이 테스트가 고정하는 것은 서버 권한 경계이며, UI가 그 경계를 우회하는 경로(예: 클라이언트에만 있는 필터)는 다루지 않는다.
+- 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.GuestSpaceAclNegativeIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 210건/실패 0/skip 3(provider-gated)다.
