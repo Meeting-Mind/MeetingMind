@@ -515,7 +515,7 @@ class FastApiHttpBoundaryTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "app.main.backend_generate_report",
                 return_value={
-                    "summary": "QA 마감일을 확정했습니다.",
+                    "summary": [{"text": "QA 마감일을 확정했습니다.", "sourceIds": ["segment-1"]}],
                     "decisions": [{"title": "QA 마감 확정", "rationale": None, "sourceIds": ["segment-1"]}],
                     "actionItems": [],
                     "markdown": "## 요약\nQA 마감일을 확정했습니다.",
@@ -543,7 +543,10 @@ class FastApiHttpBoundaryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing_payload["code"], "AI_INTERNAL_UNAUTHORIZED")
         self.assertEqual(ok_status, 200)
         backend_report.assert_called_once()
-        self.assertEqual(ok_payload["summary"], "QA 마감일을 확정했습니다.")
+        # summary는 문장 배열이며 문장마다 근거가 붙는다.
+        self.assertEqual(ok_payload["summary"], [{"text": "QA 마감일을 확정했습니다.", "sourceIds": ["segment-1"]}])
+        # markdown은 더 이상 AI가 만들지 않는다. Backend가 조립한다.
+        self.assertNotIn("markdown", ok_payload)
         self.assertEqual(ok_payload["decisions"][0]["sourceIds"], ["segment-1"])
         self.assertEqual(ok_payload["sources"][0]["sourceId"], "segment-1")
         self.assertEqual(ok_payload["model"], "qwen2.5-14b-instruct-awq")
@@ -1350,9 +1353,9 @@ class RagSafetyTest(unittest.TestCase):
         with patch(
             "app.main.call_openai_text",
             return_value=(
-                '{"supported":true,"summary":"요약","decisions":['
+                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
                 '{"title":"권한 필터 적용","sourceIds":["segment-001"]}],'
-                '"actionItems":[],"markdown":"## 요약"}',
+                '"actionItems":[]}',
                 "test-model",
                 None,
             ),
@@ -1371,7 +1374,7 @@ class RagSafetyTest(unittest.TestCase):
             sources=[BackendMeetingAiSource(sourceId="segment-001", type="transcript", meetingId="meeting-001", text="권한 필터를 먼저 적용합니다.")],
         )
         with patch("app.main.call_openai_text", return_value=(
-            '{"supported":true,"summary":"요약","decisions":[{"title":"권한 필터","sourceIds":["segment-001"]}],"actionItems":[],"markdown":"## 요약"}', "test-model", None
+            '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":[{"title":"권한 필터","sourceIds":["segment-001"]}],"actionItems":[]}', "test-model", None
         )) as call_openai_text:
             response = backend_generate_report(payload)
 
@@ -1394,9 +1397,9 @@ class RagSafetyTest(unittest.TestCase):
         with patch(
             "app.main.call_openai_text",
             return_value=(
-                '{"supported":true,"summary":"요약","decisions":['
+                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
                 '{"title":"결정","sourceIds":["segment-000"]}],'
-                '"actionItems":[],"markdown":"## 요약"}',
+                '"actionItems":[]}',
                 "test-model",
                 None,
             ),
@@ -1427,9 +1430,9 @@ class RagSafetyTest(unittest.TestCase):
         with patch(
             "app.main.call_openai_text",
             return_value=(
-                '{"supported":true,"summary":"요약","decisions":['
+                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
                 '{"title":"결정","sourceIds":["segment-012"]}],'
-                '"actionItems":[],"markdown":"## 요약"}',
+                '"actionItems":[]}',
                 "test-model",
                 None,
             ),
@@ -1518,8 +1521,8 @@ class RagSafetyTest(unittest.TestCase):
         with patch(
             "app.main.call_openai_text",
             return_value=(
-                '{"supported":true,"summary":"요약","decisions":['
-                '{"title":"권한 필터","sourceIds":["segment-001"]}],"actionItems":[],"markdown":"## 요약"}',
+                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
+                '{"title":"권한 필터","sourceIds":["segment-001"]}],"actionItems":[]}',
                 "test-model",
                 None,
             ),
@@ -2017,10 +2020,10 @@ class RagSafetyTest(unittest.TestCase):
         ]
 
         report = parse_report_response(
-            '{"supported":true,"summary":"요약","decisions":['
+            '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
             '{"title":"결정","sourceIds":["segment-001","forged-source"]}],'
             '"actionItems":[{"title":"ERD 수정안 문서화","sourceIds":["forged-source"],'
-            '"confirmationState":"confirmed"}],"markdown":"## 요약"}',
+            '"confirmationState":"confirmed"}]}',
             model="test-model",
             sources=sources,
         )
@@ -2039,10 +2042,21 @@ class RagSafetyTest(unittest.TestCase):
         self.assertEqual(tasks.tasks[0].confirmationState, "candidate")
         self.assertEqual(len(tasks.tasks), 1)
 
+        # 근거가 위조된 항목은 버리되 개수를 센다. 조용히 사라지면 사용자가 알 수 없다.
+        partially_forged = parse_report_response(
+            '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":[],'
+            '"actionItems":[{"title":"근거 없음","sourceIds":["forged-source"]}]}',
+            model="test-model",
+            sources=sources,
+        )
+        self.assertFalse(partially_forged.unsupported)
+        self.assertEqual(partially_forged.actionItems, [])
+        self.assertEqual(partially_forged.droppedCount, 1)
+
+        # 요약까지 전부 위조면 회의록이라 부를 수 없다.
         unsupported_report = parse_report_response(
-            '{"supported":true,"summary":"요약","decisions":[],'
-            '"actionItems":[{"title":"근거 없음","sourceIds":["forged-source"]}],'
-            '"markdown":"## 요약"}',
+            '{"supported":true,"summary":[{"text":"요약","sourceIds":["forged-source"]}],"decisions":[],'
+            '"actionItems":[{"title":"근거 없음","sourceIds":["forged-source"]}]}',
             model="test-model",
             sources=sources,
         )
@@ -2386,9 +2400,9 @@ class ProviderSafetyTest(unittest.TestCase):
         with patch(
             "app.main.call_openai_text",
             return_value=(
-                '{"supported":true,"summary":"요약","decisions":['
+                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
                 '{"title":"결정","sourceIds":["segment-001"]}],'
-                '"actionItems":[],"markdown":"## 요약"}',
+                '"actionItems":[]}',
                 "test-model",
                 None,
             ),

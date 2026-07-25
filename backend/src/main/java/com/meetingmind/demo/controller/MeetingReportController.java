@@ -113,10 +113,7 @@ public class MeetingReportController {
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
         MeetingReport report = workspaceDomainService.meetingReportDetail(user.id(), meetingId, reportId);
-        return new ReportDetailResponse(
-                report.id(), report.meetingId(), report.status().name(), report.title(), report.summary(), report.markdown(),
-                report.version(), report.current(), report.createdAt(), report.confirmedAt(), report.sourceIds()
-        );
+        return toDetailResponse(report);
     }
 
     @PatchMapping("/{meetingId}/reports/{reportId}")
@@ -331,6 +328,22 @@ public class MeetingReportController {
         return new ReportListResponse.Report(
                 report.id(), report.meetingId(), report.status().name(), report.title(), report.summary(),
                 report.version(), report.current(), report.createdAt()
+        );
+    }
+
+    private ReportDetailResponse toDetailResponse(MeetingReport report) {
+        return new ReportDetailResponse(
+                report.id(), report.meetingId(), report.status().name(), report.title(), report.summary(), report.markdown(),
+                report.version(), report.current(), report.createdAt(), report.confirmedAt(),
+                report.decisions().stream()
+                        .map(decision -> new ReportDetailResponse.Decision(
+                                decision.id(), decision.title(), decision.content(), decision.sourceIds()))
+                        .toList(),
+                report.actionItems().stream()
+                        .map(item -> new ReportDetailResponse.ActionItem(
+                                item.id(), item.title(), item.assigneeName(), item.dueDate(), item.sourceIds()))
+                        .toList(),
+                report.sourceIds()
         );
     }
 }

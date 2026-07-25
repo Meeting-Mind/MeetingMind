@@ -1,3 +1,4 @@
+import type { ClusterBasis } from "./clustering";
 import { create } from "zustand";
 import type { GraphDisplayConfig, GraphForcesConfig, KnowledgeKind } from "./types";
 
@@ -9,12 +10,17 @@ import type { GraphDisplayConfig, GraphForcesConfig, KnowledgeKind } from "./typ
 interface KnowledgeGraphState {
   hiddenKinds: ReadonlySet<KnowledgeKind>;
   showOrphans: boolean;
+  /** 연결된 노드끼리 덩어리로 모아 보는 상태. */
+  clustered: boolean;
+  clusterBasis: ClusterBasis;
   search: string;
   selectedId: string | null;
   forces: GraphForcesConfig;
   display: GraphDisplayConfig;
   toggleKind: (kind: KnowledgeKind) => void;
   setShowOrphans: (value: boolean) => void;
+  setClustered: (value: boolean) => void;
+  setClusterBasis: (value: ClusterBasis) => void;
   setSearch: (value: string) => void;
   setSelectedId: (id: string | null) => void;
   setForces: (patch: Partial<GraphForcesConfig>) => void;
@@ -37,6 +43,8 @@ export const DEFAULT_DISPLAY: GraphDisplayConfig = {
 export const useKnowledgeGraphStore = create<KnowledgeGraphState>((set) => ({
   hiddenKinds: new Set<KnowledgeKind>(),
   showOrphans: true,
+  clustered: false,
+  clusterBasis: "link",
   search: "",
   selectedId: null,
   forces: DEFAULT_FORCES,
@@ -51,6 +59,8 @@ export const useKnowledgeGraphStore = create<KnowledgeGraphState>((set) => ({
     return { hiddenKinds: next };
   }),
   setShowOrphans: (value) => set({ showOrphans: value }),
+  setClustered: (value) => set({ clustered: value }),
+  setClusterBasis: (value) => set({ clusterBasis: value }),
   setSearch: (value) => set({ search: value }),
   setSelectedId: (id) => set({ selectedId: id }),
   setForces: (patch) => set((state) => ({ forces: { ...state.forces, ...patch } })),

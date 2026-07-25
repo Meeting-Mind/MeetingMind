@@ -609,6 +609,11 @@ export interface AiSource {
   sourceId: string;
   type: AiSourceType;
   title: string;
+  // 서버는 발화자와 시각도 보낸다. 근거를 "누가 언제 말했는지"로 보여주려면 필요하다.
+  speaker?: string | null;
+  time?: string | null;
+  startMs?: number | null;
+  endMs?: number | null;
   text: string;
 }
 
@@ -857,6 +862,9 @@ export interface ReportDetailResponse {
   isCurrent: boolean;
   createdAt: ApiDateTime;
   confirmedAt: ApiDateTime | null;
+  // 저장된 회의록에도 구조화된 결정/할 일이 온다. 마크다운을 파싱하지 않는다.
+  decisions: ReportCandidateDecision[];
+  actionItems: ReportCandidateActionItem[];
   sourceIds: string[];
 }
 

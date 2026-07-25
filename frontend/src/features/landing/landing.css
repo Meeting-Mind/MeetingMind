@@ -1,0 +1,129 @@
+/*
+ * Landing-page-only motion. Scoped under .mm-landing so nothing here can leak
+ * into the application shell, which keeps its own transition rules in index.css.
+ */
+
+@keyframes mm-landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mm-landing-draw {
+  from {
+    stroke-dashoffset: var(--mm-draw-length);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes mm-landing-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  70% {
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes mm-landing-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes mm-landing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+
+/*
+ * The demo window keeps a video aspect ratio, so on wide viewports the mock has
+ * far more room than its content needs. Scale the frame's padding and rhythm
+ * with the viewport (type scales via `lg:` utilities on the elements) and centre
+ * it vertically, so it reads as a product shot rather than a small card
+ * stranded at the top of a large box.
+ */
+.mm-landing .mm-frame {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+@media (min-width: 640px) {
+  .mm-landing .mm-frame {
+    padding: 1.25rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .mm-landing .mm-frame {
+    gap: 1.25rem;
+    padding: 2.5rem 3rem;
+  }
+}
+
+.mm-landing .mm-rise {
+  animation: mm-landing-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mm-landing .mm-pop {
+  animation: mm-landing-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mm-landing .mm-draw {
+  stroke-dasharray: var(--mm-draw-length);
+  animation: mm-landing-draw 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mm-landing .mm-live-dot {
+  animation: mm-landing-pulse 1.6s ease-in-out infinite;
+}
+
+/* The active step's tab underline doubles as the auto-advance timer. */
+.mm-landing .mm-progress {
+  transform-origin: left center;
+  animation: mm-landing-progress linear both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-landing .mm-rise,
+  .mm-landing .mm-pop,
+  .mm-landing .mm-draw,
+  .mm-landing .mm-live-dot,
+  .mm-landing .mm-progress {
+    animation: none;
+  }
+
+  .mm-landing .mm-draw {
+    stroke-dashoffset: 0;
+  }
+
+  .mm-landing .mm-progress {
+    transform: scaleX(1);
+  }
+}

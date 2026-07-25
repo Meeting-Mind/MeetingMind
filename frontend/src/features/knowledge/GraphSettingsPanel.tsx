@@ -113,7 +113,7 @@ export function GraphSettingsPanel({ allNodes, onClose }: GraphSettingsPanelProp
             type="button"
           >
             <span className="h-2 w-2 rounded-full bg-[var(--app-subtle)]" />
-            <span className="text-[var(--app-text)]">고아 노트 표시</span>
+            <span className="text-[var(--app-text)]">단일 노드 표시</span>
             <span className="ml-auto text-[10.5px] font-bold text-[var(--app-subtle)]">{orphanCount}</span>
           </button>
         </div>

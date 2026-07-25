@@ -9,6 +9,9 @@ import {
   type Simulation
 } from "d3-force";
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, shouldPlayIntro, type BurstTarget } from "./introBurst";
+import { depthOpacity, layerZ, linkDepth, perspectiveScale } from "./depth";
+import { CLUSTER_MOTION_MS, clusterCenters, clustersFor, easeInOut, slotOffset, swirlPosition, type ClusterBasis } from "./clustering";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
 
@@ -92,10 +95,20 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const adjacencyRef = useRef(new Map<string, Set<string>>());
     const movedRef = useRef(false);
     const fittedRef = useRef(false);
+    // 진입 모션 상태. 시작 시각이 null이면 모션이 끝났거나 아직 준비되지 않은 것이다.
+    const burstRef = useRef<{ startedAt: number; targets: BurstTarget[] } | null>(null);
+    // 진입 모션은 한 번만. 필터를 바꿀 때마다 다시 틀면 안 된다.
+    const introPlayedRef = useRef(false);
+    // 묶어보기 전환 모션. 소용돌이로 자기 덩어리에 들어간다.
+    const clusterRef = useRef<{ startedAt: number; from: BurstTarget[]; to: BurstTarget[] } | null>(null);
+    const clusteredRef = useRef(false);
+    const clusterBasisRef = useRef<ClusterBasis>("link");
     const insetsRef = useRef({ left: 0, right: 0 });
     insetsRef.current = insets ?? { left: 0, right: 0 };
 
     const forces = useKnowledgeGraphStore((state) => state.forces);
+    const clustered = useKnowledgeGraphStore((state) => state.clustered);
+    const clusterBasis = useKnowledgeGraphStore((state) => state.clusterBasis);
     const selectedId = useKnowledgeGraphStore((state) => state.selectedId);
     const selectedIdRef = useRef<string | null>(selectedId);
     selectedIdRef.current = selectedId;
@@ -133,6 +146,26 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       simulation.nodes(nodes);
       (simulation.force("link") as ForceLink<GraphNodeVM, GraphLinkVM>).links(links);
       applyForces();
+
+      // 진입 모션: 최종 배치를 먼저 계산해 두고 중앙에서 그 자리까지 직접 보간한다.
+      // 시뮬레이션을 중앙에서 그냥 시작하면 힘이 서서히 밀어내 흐물흐물하게 퍼진다.
+      //
+      // **데이터가 처음 들어올 때만** 재생한다. 이 effect는 노드나 링크가 바뀔 때마다
+      // 도는데, 종류 숨기기나 단일 노드 토글 같은 필터도 여기에 걸린다. 그때마다
+      // 모션을 다시 틀면 화면이 매번 중앙으로 빨려 들어갔다 나와서 조작이 깨진다.
+      //
+      // 움직임을 줄이도록 설정한 사용자에게는 모션 없이 최종 배치를 바로 보여준다.
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      if (shouldPlayIntro({ nodeCount: nodes.length, alreadyPlayed: introPlayedRef.current, reduceMotion })) {
+        introPlayedRef.current = true;
+        simulation.alpha(1).stop();
+        // 충분히 수렴할 만큼만 미리 돌린다. 화면에는 그리지 않는다.
+        simulation.tick(220);
+        burstRef.current = { startedAt: performance.now(), targets: captureTargets(nodes) };
+      } else {
+        burstRef.current = null;
+      }
+
       simulation.alpha(0.9).restart();
       return undefined;
     }, [nodes, links]);
@@ -158,6 +191,59 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       applyForces();
       simRef.current?.alpha(0.4).restart();
     }, [forces]);
+
+    /* --- 묶어보기 --- */
+    useEffect(() => {
+      // 기준만 바꿔도 다시 배치해야 한다. 묶인 상태에서 기준을 바꾸면 덩어리가
+      // 달라지는데 좌표가 그대로면 이전 묶음이 그대로 보인다.
+      const basisChanged = clusterBasisRef.current !== clusterBasis;
+      if (clusteredRef.current === clustered && !(clustered && basisChanged)) {
+        return;
+      }
+      clusteredRef.current = clustered;
+      clusterBasisRef.current = clusterBasis;
+      const graphNodes = dataRef.current.nodes;
+      if (graphNodes.length === 0) {
+        return;
+      }
+
+      const from = graphNodes.map((node) => ({ x: node.x ?? 0, y: node.y ?? 0 }));
+      let to: BurstTarget[];
+
+      if (clustered) {
+        const assignment = clustersFor(clusterBasis, graphNodes, dataRef.current.links);
+        const clusterCount = new Set(assignment.values()).size;
+        // 덩어리 수가 늘수록 원을 키운다. 고정 반지름이면 덩어리끼리 겹친다.
+        const centers = clusterCenters(clusterCount, 160 + clusterCount * 34);
+        const sizes = new Map<number, number>();
+        for (const node of graphNodes) {
+          const index = assignment.get(node.id) ?? 0;
+          sizes.set(index, (sizes.get(index) ?? 0) + 1);
+        }
+        const seen = new Map<number, number>();
+        to = graphNodes.map((node) => {
+          const index = assignment.get(node.id) ?? 0;
+          const slot = seen.get(index) ?? 0;
+          seen.set(index, slot + 1);
+          const center = centers[index] ?? { x: 0, y: 0 };
+          const offset = slotOffset(slot, sizes.get(index) ?? 1);
+          return { x: center.x + offset.x, y: center.y + offset.y };
+        });
+      } else {
+        // 풀 때는 시뮬레이션이 스스로 자리를 잡게 둔다. 목표를 따로 계산하면
+        // 힘이 만들 배치와 어긋나 풀자마자 다시 움직인다.
+        // 고정을 풀어야 힘이 다시 자리를 잡는다. 안 풀면 덩어리가 그대로 남는다.
+        for (const node of graphNodes) {
+          node.fx = null;
+          node.fy = null;
+        }
+        clusterRef.current = null;
+        simRef.current?.alpha(0.7).restart();
+        return;
+      }
+
+      clusterRef.current = { startedAt: performance.now(), from, to };
+    }, [clustered, clusterBasis]);
 
     /* --- imperative API --- */
     function fitToView() {
@@ -229,11 +315,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       let best: GraphNodeVM | null = null;
       let bestDistance = Infinity;
       const { nodeScale } = useKnowledgeGraphStore.getState().display;
+      // 그릴 때와 같은 원근을 적용한다. 안 하면 보이는 자리와 눌리는 자리가 달라진다.
       for (const node of dataRef.current.nodes) {
-        const dx = (node.x ?? 0) - worldX;
-        const dy = (node.y ?? 0) - worldY;
+        const depth = perspectiveScale(layerZ(node.kind));
+        const dx = (node.x ?? 0) * depth - worldX;
+        const dy = (node.y ?? 0) * depth - worldY;
         const distance = dx * dx + dy * dy;
-        const hitRadius = (node.radius * nodeScale + 6) / Math.min(k, 1);
+        const hitRadius = (node.radius * nodeScale * depth + 6) / Math.min(k, 1);
         if (distance < hitRadius * hitRadius && distance < bestDistance) {
           best = node;
           bestDistance = distance;
@@ -346,7 +434,75 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         // 데이터가 처음 그려질 때 한 번 화면 맞춤.
         if (!fittedRef.current && dataRef.current.nodes.length > 0) {
           fittedRef.current = true;
-          window.setTimeout(fitToView, 700);
+          // 진입 모션이 끝난 뒤에 맞춘다. 모션 중에 맞추면 중앙에 뭉친 상태를
+          // 기준으로 확대해 버려서 퍼진 다음 화면 밖으로 나간다.
+          window.setTimeout(fitToView, INTRO_BURST_MS + 120);
+        }
+
+        // 진입 모션 중에는 시뮬레이션을 멈추고 좌표를 직접 덮어쓴다. 둘이 동시에
+        // 위치를 건드리면 힘과 보간이 싸워 노드가 떨린다.
+        const burst = burstRef.current;
+        if (burst) {
+          const ratio = (performance.now() - burst.startedAt) / INTRO_BURST_MS;
+          const graphNodes = dataRef.current.nodes;
+          if (ratio >= 1) {
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const target = burst.targets[index];
+              if (target) {
+                graphNodes[index].x = target.x;
+                graphNodes[index].y = target.y;
+              }
+            }
+            burstRef.current = null;
+            // 모션이 끝난 뒤 시뮬레이션이 이어받는다. 알파를 낮게 줘서 자리가 튀지 않게 한다.
+            simRef.current?.alpha(0.12).restart();
+          } else {
+            // 좌표는 원근 이전 값이다. 그리기 단계에서 층 배율이 곱해지므로
+            // 중앙에서 퍼질 때 앞 층은 더 멀리, 뒤 층은 덜 퍼져 깊이가 함께 열린다.
+            simRef.current?.stop();
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const target = burst.targets[index];
+              if (!target) continue;
+              const moved = burstPosition(target, nodeProgress(ratio, index, graphNodes.length));
+              graphNodes[index].x = moved.x;
+              graphNodes[index].y = moved.y;
+              // 보간이 끝난 뒤 잔여 속도로 튀지 않도록 매 프레임 속도를 지운다.
+              graphNodes[index].vx = 0;
+              graphNodes[index].vy = 0;
+            }
+          }
+        }
+
+        // 묶어보기 전환. 진입 모션과 같은 이유로 시뮬레이션을 멈추고 좌표를 덮어쓴다.
+        const cluster = clusterRef.current;
+        if (cluster) {
+          const ratio = (performance.now() - cluster.startedAt) / CLUSTER_MOTION_MS;
+          const graphNodes = dataRef.current.nodes;
+          if (ratio >= 1) {
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const target = cluster.to[index];
+              if (!target) continue;
+              graphNodes[index].x = target.x;
+              graphNodes[index].y = target.y;
+              // 덩어리를 유지하려면 고정해야 한다. 놓으면 힘이 다시 흩어 놓는다.
+              graphNodes[index].fx = target.x;
+              graphNodes[index].fy = target.y;
+            }
+            clusterRef.current = null;
+          } else {
+            simRef.current?.stop();
+            const eased = easeInOut(Math.max(0, ratio));
+            for (let index = 0; index < graphNodes.length; index += 1) {
+              const start = cluster.from[index];
+              const target = cluster.to[index];
+              if (!start || !target) continue;
+              const moved = swirlPosition(start, target, eased);
+              graphNodes[index].x = moved.x;
+              graphNodes[index].y = moved.y;
+              graphNodes[index].vx = 0;
+              graphNodes[index].vy = 0;
+            }
+          }
         }
 
         const { display, search } = useKnowledgeGraphStore.getState();
@@ -383,32 +539,47 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             && anchor != null && (source.id === anchor.id || target.id === anchor.id);
           const dimmed = (neighborhood != null && !hot)
             || (searching && (!matchesQuery(source) || !matchesQuery(target)));
-          context.globalAlpha = hot ? 0.9 : dimmed ? display.linkOpacity * 0.12
-            : display.linkOpacity * (link.explicit ? 1 : 0.55);
+          // 선도 노드와 같은 깊이를 따른다. 노드만 흐려지고 선은 그대로면 같은 관계라도
+          // 노드가 어느 층에 있느냐에 따라 다르게 보인다.
+          const sourceZ = layerZ(source.kind);
+          const targetZ = layerZ(target.kind);
+          const { opacity: linkDepthAlpha, scale: linkDepthScale } = linkDepth(sourceZ, targetZ);
+
+          context.globalAlpha = (hot ? 0.9 : dimmed ? display.linkOpacity * 0.12
+            : display.linkOpacity * (link.explicit ? 1 : 0.55)) * linkDepthAlpha;
           context.strokeStyle = hot ? palette.accent : palette.line;
-          context.lineWidth = (hot ? 1.7 : link.explicit ? 1.1 : 0.8) / k;
+          context.lineWidth = ((hot ? 1.7 : link.explicit ? 1.1 : 0.8) * linkDepthScale) / k;
           if (hot && palette.dark) {
             context.shadowColor = palette.accent;
             context.shadowBlur = 7;
           }
           context.setLineDash(link.explicit ? [] : [4 / k, 4 / k]);
           context.beginPath();
-          context.moveTo(source.x ?? 0, source.y ?? 0);
-          context.lineTo(target.x ?? 0, target.y ?? 0);
+          // 노드와 같은 원근을 적용한다. 안 하면 선이 노드에서 떨어져 그려진다.
+          const sourceDepth = perspectiveScale(sourceZ);
+          const targetDepth = perspectiveScale(targetZ);
+          context.moveTo((source.x ?? 0) * sourceDepth, (source.y ?? 0) * sourceDepth);
+          context.lineTo((target.x ?? 0) * targetDepth, (target.y ?? 0) * targetDepth);
           context.stroke();
           context.shadowBlur = 0;
         }
         context.setLineDash([]);
 
         /* nodes — 소프트 글로우 */
-        for (const node of dataRef.current.nodes) {
-          const radius = node.radius * display.nodeScale;
+        // 뒤 층부터 그린다. 순서가 뒤바뀌면 뒤 노드가 앞 노드를 덮어 깊이가 사라진다.
+        const byDepth = [...dataRef.current.nodes].sort((left, right) => layerZ(left.kind) - layerZ(right.kind));
+
+        for (const node of byDepth) {
+          const z = layerZ(node.kind);
+          const depth = perspectiveScale(z);
+          const radius = node.radius * display.nodeScale * depth;
           const dimmed = isDimmed(node);
           const isAnchor = anchor != null && node.id === anchor.id;
           const color = palette.kind[node.kind];
-          const nodeX = node.x ?? 0;
-          const nodeY = node.y ?? 0;
-          context.globalAlpha = dimmed ? 0.09 : 1;
+          // 원근 투영: 앞 층은 중심에서 멀어지고 뒤 층은 중심으로 모인다.
+          const nodeX = (node.x ?? 0) * depth;
+          const nodeY = (node.y ?? 0) * depth;
+          context.globalAlpha = dimmed ? 0.09 : depthOpacity(z);
           const glowRadius = palette.dark
             ? (isAnchor ? radius * 4 : radius * 2.9)
             : (isAnchor ? radius * 3.2 : radius * 2.3);
@@ -447,8 +618,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           const show = isAnchor || inNeighborhood || (searching && matchesQuery(node))
             || (neighborhood == null && (k >= display.labelThreshold || bigNode));
           if (!show || dimmed) continue;
-          const screenX = (node.x ?? 0) * k + x;
-          const screenY = (node.y ?? 0) * k + y + node.radius * display.nodeScale * k + 12;
+          const labelDepth = perspectiveScale(layerZ(node.kind));
+          const screenX = (node.x ?? 0) * labelDepth * k + x;
+          const screenY = (node.y ?? 0) * labelDepth * k + y + node.radius * display.nodeScale * labelDepth * k + 12;
           if (screenX < -80 || screenX > width + 80 || screenY < -20 || screenY > height + 20) continue;
           let alpha = isAnchor ? 1 : bigNode ? 0.95 : Math.min(1, (k - display.labelThreshold + 0.35) / 0.5);
           if (neighborhood != null || searching) alpha = Math.max(alpha, 0.95);

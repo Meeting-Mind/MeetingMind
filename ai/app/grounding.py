@@ -27,11 +27,29 @@ GROUNDED_ANSWER_SCHEMA = {
     "additionalProperties": False,
 }
 
+# `markdown`은 더 이상 모델이 만들지 않는다. 구조화 데이터를 다시 쓴 것이라 토큰을
+# 두 배로 쓰고 둘이 어긋날 수 있었다. 서버가 구조화 데이터로 조립한다.
+# `summary`는 문장 배열이며 문장마다 근거를 강제한다 — 근거 없는 문장은 지어낸 문장이다.
+# 자세한 근거는 `contracts/report-format.md`에 있다.
 REPORT_SCHEMA = {
     "type": "object",
     "properties": {
         "supported": {"type": "boolean"},
-        "summary": {"type": "string"},
+        "summary": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "sourceIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["text", "sourceIds"],
+                "additionalProperties": False,
+            },
+        },
         "decisions": {
             "type": "array",
             "items": {
@@ -75,9 +93,8 @@ REPORT_SCHEMA = {
                 "additionalProperties": False,
             },
         },
-        "markdown": {"type": "string"},
     },
-    "required": ["supported", "summary", "decisions", "actionItems", "markdown"],
+    "required": ["supported", "summary", "decisions", "actionItems"],
     "additionalProperties": False,
 }
 
