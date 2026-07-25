@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { burstPosition, captureTargets, easeOutBack, nodeProgress } from "./introBurst";
+import { burstPosition, captureTargets, easeOutBack, nodeProgress, shouldPlayIntro } from "./introBurst";
 
 describe("easeOutBack", () => {
   it("시작과 끝을 정확히 맞춘다", () => {
@@ -70,5 +70,28 @@ describe("burstPosition", () => {
 
   it("진행도 1이면 목표와 같다", () => {
     expect(burstPosition({ x: 100, y: -50 }, 1)).toEqual({ x: 100, y: -50 });
+  });
+});
+
+
+describe("shouldPlayIntro", () => {
+  const base = { nodeCount: 5, alreadyPlayed: false, reduceMotion: false };
+
+  it("데이터가 처음 들어오면 재생한다", () => {
+    expect(shouldPlayIntro(base)).toBe(true);
+  });
+
+  it("이미 재생했으면 다시 틀지 않는다", () => {
+    // 필터(종류 숨기기, 단일 노드 토글)도 캔버스를 다시 초기화한다. 그때마다
+    // 모션을 틀면 화면이 중앙으로 빨려 들어갔다 나와서 조작이 깨진다.
+    expect(shouldPlayIntro({ ...base, alreadyPlayed: true })).toBe(false);
+  });
+
+  it("노드가 없으면 재생하지 않는다", () => {
+    expect(shouldPlayIntro({ ...base, nodeCount: 0 })).toBe(false);
+  });
+
+  it("움직임 줄이기를 켰으면 재생하지 않는다", () => {
+    expect(shouldPlayIntro({ ...base, reduceMotion: true })).toBe(false);
   });
 });

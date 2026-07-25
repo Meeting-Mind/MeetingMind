@@ -73,3 +73,25 @@ export function captureTargets<T extends Positioned>(nodes: T[]): BurstTarget[] 
 export function burstPosition(target: BurstTarget, progress: number): BurstTarget {
   return { x: target.x * progress, y: target.y * progress };
 }
+
+
+/**
+ * 진입 모션을 지금 재생해야 하는지.
+ *
+ * 데이터가 처음 들어올 때 한 번만이다. 그래프 캔버스는 노드나 링크가 바뀔 때마다
+ * 다시 초기화되는데, 종류 숨기기나 단일 노드 토글 같은 **필터도 여기에 걸린다.**
+ * 그때마다 모션을 다시 틀면 화면이 매번 중앙으로 빨려 들어갔다 나와서 조작이 깨진다.
+ */
+export function shouldPlayIntro(options: {
+  nodeCount: number;
+  alreadyPlayed: boolean;
+  reduceMotion: boolean;
+}): boolean {
+  if (options.alreadyPlayed) {
+    return false;
+  }
+  if (options.reduceMotion) {
+    return false;
+  }
+  return options.nodeCount > 0;
+}

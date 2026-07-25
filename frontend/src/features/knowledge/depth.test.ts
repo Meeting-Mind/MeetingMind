@@ -50,19 +50,37 @@ describe("perspectiveScale", () => {
   });
 
   it("앞 층은 커지고 뒤 층은 작아진다", () => {
-    expect(perspectiveScale(layerZ("manual"))).toBeLessThan(1);
-    expect(perspectiveScale(layerZ("transcript"))).toBeGreaterThan(1);
+    // 처음 구현이 이 부호를 반대로 두어 공식 지식이 뒤로 갔다. 그때 이 테스트가
+    // 잘못된 동작을 그대로 단정해 통과했다. 방향을 명시적으로 고정한다.
+    expect(perspectiveScale(layerZ("manual"))).toBeGreaterThan(1);
+    expect(perspectiveScale(layerZ("transcript"))).toBeLessThan(1);
+  });
+
+  it("층 순서와 배율 순서가 일치한다", () => {
+    const front = perspectiveScale(layerZ("manual"));
+    const middle = perspectiveScale(layerZ("report"));
+    const back = perspectiveScale(layerZ("transcript"));
+    expect(front).toBeGreaterThan(middle);
+    expect(middle).toBeGreaterThan(back);
+  });
+
+  it("층 차이가 눈에 띌 만큼 벌어진다", () => {
+    // 간격이 좁으면 배율 차이가 0.78 대 1.0 수준이라 사실상 보이지 않는다.
+    const front = perspectiveScale(layerZ("manual"));
+    const back = perspectiveScale(layerZ("transcript"));
+    expect(front - back).toBeGreaterThan(0.5);
   });
 
   it("카메라 뒤로 넘어가도 뒤집히지 않는다", () => {
     // 음수 배율이면 노드가 반대편에 그려진다.
     expect(perspectiveScale(-FOCAL_LENGTH * 2)).toBeGreaterThan(0);
+    expect(perspectiveScale(FOCAL_LENGTH * 2)).toBeGreaterThan(0);
   });
 
   it("배율에 상한과 하한이 있다", () => {
-    // 하한이 없으면 먼 노드가 0으로 수렴해 사라진다.
-    expect(perspectiveScale(100000)).toBeGreaterThanOrEqual(0.3);
-    expect(perspectiveScale(-800)).toBeLessThanOrEqual(1.9);
+    // 하한이 없으면 먼 노드가 0으로 수렴해 사라지고, 상한이 없으면 가까운 노드가 발산한다.
+    expect(perspectiveScale(-100000)).toBeGreaterThanOrEqual(0.3);
+    expect(perspectiveScale(FOCAL_LENGTH)).toBeLessThanOrEqual(1.9);
   });
 });
 

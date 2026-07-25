@@ -395,7 +395,14 @@ class PostgresEmbeddingRepository:
         project_id: str,
         allowed_meeting_ids: list[str],
         *,
-        similarity_threshold: float = 0.78,
+        # 임계값만으로 자르면 그래프가 점 무더기가 된다. 실측에서 이 스페이스의
+        # 가장 관련 높은 쌍이 0.723인데 임계값 0.78이라 연결선이 0개였다.
+        # 문서 집합마다 유사도 분포가 달라 고정 임계값은 항상 이런 위험을 갖는다.
+        similarity_threshold: float = 0.45,
+        # 노드마다 가장 가까운 K개만 잇는다. 임계값을 낮추기만 하면 무관한 문서까지
+        # 이어지는데(실측: '팀 온보딩 안내'와 '베타 출시 기준'이 0.572로 중간 순위였다),
+        # 노드별 상한을 두면 각 노드가 자기 기준으로 가장 가까운 것만 남긴다.
+        neighbors_per_node: int = 3,
         node_limit: int = 80,
         edge_limit: int = 160,
     ) -> tuple[list[KnowledgeGraphNode], list[KnowledgeGraphEdge]]:
@@ -466,16 +473,36 @@ class PostgresEmbeddingRepository:
                 ).fetchall()
                 edge_rows = connection.execute(
                     centroid_cte + """
-                        select left_node.node_id as from_id,
-                               right_node.node_id as to_id,
-                               1 - (left_node.centroid <=> right_node.centroid) as similarity
-                        from centroids left_node
-                        join centroids right_node on left_node.node_id < right_node.node_id
-                        where 1 - (left_node.centroid <=> right_node.centroid) >= %s
+                        , ranked as (
+                            select source_node.node_id as from_id,
+                                   neighbor.node_id as to_id,
+                                   1 - (source_node.centroid <=> neighbor.centroid) as similarity,
+                                   row_number() over (
+                                       partition by source_node.node_id
+                                       order by source_node.centroid <=> neighbor.centroid
+                                   ) as rank
+                            from centroids source_node
+                            join centroids neighbor on neighbor.node_id <> source_node.node_id
+                            where 1 - (source_node.centroid <=> neighbor.centroid) >= %s
+                        )
+                        -- 양쪽에서 각각 뽑히므로 방향을 정규화해 중복을 없앤다.
+                        select least(from_id, to_id) as from_id,
+                               greatest(from_id, to_id) as to_id,
+                               max(similarity) as similarity
+                        from ranked
+                        where rank <= %s
+                        group by least(from_id, to_id), greatest(from_id, to_id)
                         order by similarity desc, from_id, to_id
                         limit %s
                     """,
-                    (project_id, allowed_meeting_ids, node_limit, similarity_threshold, edge_limit),
+                    (
+                        project_id,
+                        allowed_meeting_ids,
+                        node_limit,
+                        similarity_threshold,
+                        neighbors_per_node,
+                        edge_limit,
+                    ),
                 ).fetchall()
         except psycopg.Error as error:
             raise RetrievalUnavailableError("knowledge graph database unavailable") from error

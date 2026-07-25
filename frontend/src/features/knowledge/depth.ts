@@ -28,8 +28,13 @@ export const KNOWLEDGE_LAYER: Record<KnowledgeKind, number> = {
   summary: -1,
 };
 
-/** 층 사이 간격(월드 단위). 겹쳐 보이지 않으면서 화면 밖으로 나가지 않는 값. */
-export const LAYER_GAP = 260;
+/**
+ * 층 사이 간격(월드 단위).
+ *
+ * 260에서는 층 차이가 배율 0.78 대 1.0으로 거의 눈에 띄지 않았다. 실제 데이터에
+ * 등장하는 종류가 4가지뿐이고 그중 셋이 같은 층이라 대비가 더 약했다.
+ */
+export const LAYER_GAP = 300;
 
 /** 카메라와 z=0 평면 사이 거리. 작을수록 원근이 강해진다. */
 export const FOCAL_LENGTH = 900;
@@ -41,13 +46,17 @@ export function layerZ(kind: KnowledgeKind): number {
 /**
  * 원근 배율. 앞의 층은 커지고 뒤의 층은 작아진다.
  *
- * 뒤로 너무 멀어지면 배율이 0에 수렴해 노드가 사라지므로 하한을 둔다.
- * 카메라 뒤로 넘어가는 z는 애초에 만들지 않지만, 들어와도 뒤집히지 않게 막는다.
+ * z가 클수록 사용자 쪽이므로 분모에서 **뺀다**. 더하면 부호가 뒤집혀 공식 지식이
+ * 뒤로 가고 전사가 앞으로 나온다. 처음 구현이 이 상태였고, 테스트가 그 잘못된
+ * 동작을 그대로 단정해 통과하고 있었다.
+ *
+ * 카메라 평면에 너무 가까우면 배율이 발산하므로 상한을 둔다. 뒤로 멀어질 때는
+ * 0으로 수렴해 노드가 사라지므로 하한을 둔다.
  */
 export function perspectiveScale(z: number): number {
-  const denominator = FOCAL_LENGTH + z;
+  const denominator = FOCAL_LENGTH - z;
   if (denominator <= 1) {
-    return 0.3;
+    return 1.9;
   }
   return Math.max(0.3, Math.min(1.9, FOCAL_LENGTH / denominator));
 }

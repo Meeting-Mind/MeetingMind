@@ -9,7 +9,7 @@ import {
   type Simulation
 } from "d3-force";
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
-import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, type BurstTarget } from "./introBurst";
+import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, shouldPlayIntro, type BurstTarget } from "./introBurst";
 import { depthOpacity, layerZ, perspectiveScale } from "./depth";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
@@ -96,6 +96,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const fittedRef = useRef(false);
     // 진입 모션 상태. 시작 시각이 null이면 모션이 끝났거나 아직 준비되지 않은 것이다.
     const burstRef = useRef<{ startedAt: number; targets: BurstTarget[] } | null>(null);
+    // 진입 모션은 한 번만. 필터를 바꿀 때마다 다시 틀면 안 된다.
+    const introPlayedRef = useRef(false);
     const insetsRef = useRef({ left: 0, right: 0 });
     insetsRef.current = insets ?? { left: 0, right: 0 };
 
@@ -140,9 +142,15 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
       // 진입 모션: 최종 배치를 먼저 계산해 두고 중앙에서 그 자리까지 직접 보간한다.
       // 시뮬레이션을 중앙에서 그냥 시작하면 힘이 서서히 밀어내 흐물흐물하게 퍼진다.
+      //
+      // **데이터가 처음 들어올 때만** 재생한다. 이 effect는 노드나 링크가 바뀔 때마다
+      // 도는데, 종류 숨기기나 단일 노드 토글 같은 필터도 여기에 걸린다. 그때마다
+      // 모션을 다시 틀면 화면이 매번 중앙으로 빨려 들어갔다 나와서 조작이 깨진다.
+      //
       // 움직임을 줄이도록 설정한 사용자에게는 모션 없이 최종 배치를 바로 보여준다.
       const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-      if (nodes.length > 0 && !reduceMotion) {
+      if (shouldPlayIntro({ nodeCount: nodes.length, alreadyPlayed: introPlayedRef.current, reduceMotion })) {
+        introPlayedRef.current = true;
         simulation.alpha(1).stop();
         // 충분히 수렴할 만큼만 미리 돌린다. 화면에는 그리지 않는다.
         simulation.tick(220);

@@ -75,7 +75,7 @@ export function NotePreviewPanel({
             </h3>
             <div className="mt-1 text-[11px] font-semibold text-[var(--app-subtle)]">
               연결 {node.connectionCount}
-              {node.orphan ? " · 고아 노트" : ""}
+              {node.orphan ? " · 단일 노드" : ""}
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
