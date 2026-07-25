@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { FOCAL_LENGTH, KNOWLEDGE_LAYER, LAYER_GAP, depthOpacity, layerLabel, layerZ, perspectiveScale } from "./depth";
+import {
+  FOCAL_LENGTH,
+  KNOWLEDGE_LAYER,
+  LAYER_GAP,
+  depthOpacity,
+  layerLabel,
+  layerZ,
+  linkDepth,
+  perspectiveScale,
+} from "./depth";
 import type { KnowledgeKind } from "./types";
 
 const ALL_KINDS: KnowledgeKind[] = [
@@ -105,5 +114,34 @@ describe("layerLabel", () => {
     // 깊이가 무엇을 뜻하는지 말해주지 않으면 장식이 된다.
     const labels = new Set([layerLabel(1), layerLabel(0), layerLabel(-1)]);
     expect(labels.size).toBe(3);
+  });
+});
+
+
+describe("linkDepth", () => {
+  it("앞 층끼리 이은 선은 또렷하다", () => {
+    expect(linkDepth(layerZ("manual"), layerZ("manual")).opacity).toBe(1);
+  });
+
+  it("뒤 층이 섞이면 더 뒤를 따른다", () => {
+    // 선 전체가 가장 먼 끝만큼 물러나야 뒤 층 선이 앞 층 선보다 앞서 보이지 않는다.
+    const crossing = linkDepth(layerZ("manual"), layerZ("transcript"));
+    const backOnly = linkDepth(layerZ("transcript"), layerZ("transcript"));
+    expect(crossing.opacity).toBe(backOnly.opacity);
+  });
+
+  it("굵기는 두 층의 중간이다", () => {
+    // 한쪽 끝만 따르면 층을 가로지르는 선이 한쪽에서 갑자기 굵어진다.
+    const crossing = linkDepth(layerZ("manual"), layerZ("transcript"));
+    const front = linkDepth(layerZ("manual"), layerZ("manual"));
+    const back = linkDepth(layerZ("transcript"), layerZ("transcript"));
+    expect(crossing.scale).toBeLessThan(front.scale);
+    expect(crossing.scale).toBeGreaterThan(back.scale);
+  });
+
+  it("같은 층이면 노드와 같은 배율이다", () => {
+    // 선과 노드가 따로 놀면 선이 노드에서 떨어져 보인다.
+    const z = layerZ("report");
+    expect(linkDepth(z, z).scale).toBeCloseTo(perspectiveScale(z), 10);
   });
 });

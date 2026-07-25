@@ -85,3 +85,21 @@ export function layerLabel(layer: number): string {
   }
   return "회의 결과물";
 }
+
+
+/**
+ * 연결선의 깊이 반영값.
+ *
+ * 선은 두 노드를 잇는다. 노드만 흐려지고 선은 그대로면 같은 관계라도 노드가 어느
+ * 층에 있느냐에 따라 다르게 보인다.
+ *
+ * 흐림은 **더 뒤에 있는 쪽**을 따른다. 선 전체가 가장 먼 끝만큼 물러나야 뒤 층의
+ * 선이 앞 층 선보다 앞서 보이지 않는다. 굵기는 두 층의 평균을 쓴다 — 한쪽 끝만
+ * 따르면 층을 가로지르는 선이 한쪽에서 갑자기 굵어진다.
+ */
+export function linkDepth(sourceZ: number, targetZ: number): { opacity: number; scale: number } {
+  return {
+    opacity: Math.min(depthOpacity(sourceZ), depthOpacity(targetZ)),
+    scale: (perspectiveScale(sourceZ) + perspectiveScale(targetZ)) / 2,
+  };
+}

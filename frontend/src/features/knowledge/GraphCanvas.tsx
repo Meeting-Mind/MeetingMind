@@ -10,7 +10,7 @@ import {
 } from "d3-force";
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { INTRO_BURST_MS, burstPosition, captureTargets, nodeProgress, shouldPlayIntro, type BurstTarget } from "./introBurst";
-import { depthOpacity, layerZ, perspectiveScale } from "./depth";
+import { depthOpacity, layerZ, linkDepth, perspectiveScale } from "./depth";
 import { CLUSTER_MOTION_MS, clusterCenters, clustersFor, easeInOut, slotOffset, swirlPosition, type ClusterBasis } from "./clustering";
 import { useKnowledgeGraphStore } from "./store";
 import { KNOWLEDGE_KIND_COLOR_VARS, type GraphLinkVM, type GraphNodeVM } from "./types";
@@ -539,10 +539,16 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             && anchor != null && (source.id === anchor.id || target.id === anchor.id);
           const dimmed = (neighborhood != null && !hot)
             || (searching && (!matchesQuery(source) || !matchesQuery(target)));
-          context.globalAlpha = hot ? 0.9 : dimmed ? display.linkOpacity * 0.12
-            : display.linkOpacity * (link.explicit ? 1 : 0.55);
+          // 선도 노드와 같은 깊이를 따른다. 노드만 흐려지고 선은 그대로면 같은 관계라도
+          // 노드가 어느 층에 있느냐에 따라 다르게 보인다.
+          const sourceZ = layerZ(source.kind);
+          const targetZ = layerZ(target.kind);
+          const { opacity: linkDepthAlpha, scale: linkDepthScale } = linkDepth(sourceZ, targetZ);
+
+          context.globalAlpha = (hot ? 0.9 : dimmed ? display.linkOpacity * 0.12
+            : display.linkOpacity * (link.explicit ? 1 : 0.55)) * linkDepthAlpha;
           context.strokeStyle = hot ? palette.accent : palette.line;
-          context.lineWidth = (hot ? 1.7 : link.explicit ? 1.1 : 0.8) / k;
+          context.lineWidth = ((hot ? 1.7 : link.explicit ? 1.1 : 0.8) * linkDepthScale) / k;
           if (hot && palette.dark) {
             context.shadowColor = palette.accent;
             context.shadowBlur = 7;
@@ -550,8 +556,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           context.setLineDash(link.explicit ? [] : [4 / k, 4 / k]);
           context.beginPath();
           // 노드와 같은 원근을 적용한다. 안 하면 선이 노드에서 떨어져 그려진다.
-          const sourceDepth = perspectiveScale(layerZ(source.kind));
-          const targetDepth = perspectiveScale(layerZ(target.kind));
+          const sourceDepth = perspectiveScale(sourceZ);
+          const targetDepth = perspectiveScale(targetZ);
           context.moveTo((source.x ?? 0) * sourceDepth, (source.y ?? 0) * sourceDepth);
           context.lineTo((target.x ?? 0) * targetDepth, (target.y ?? 0) * targetDepth);
           context.stroke();
