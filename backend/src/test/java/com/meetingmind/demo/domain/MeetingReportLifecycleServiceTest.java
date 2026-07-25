@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.meetingmind.demo.observability.BackendOperationMetrics;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
@@ -154,7 +156,10 @@ class MeetingReportLifecycleServiceTest {
         SpaceAccessPolicy spaceAccessPolicy = new SpaceAccessPolicy();
         WorkspaceDomainService workspace = new WorkspaceDomainService(store, spaceAccessPolicy, FIXED_CLOCK);
         MeetingReportLifecycleService service = new MeetingReportLifecycleService(
-                authService, workspace, new MeetingAccessPolicy(spaceAccessPolicy)
+                authService,
+                workspace,
+                new MeetingAccessPolicy(spaceAccessPolicy),
+                new BackendOperationMetrics(new SimpleMeterRegistry())
         );
         return new TestContext(store, workspace, service);
     }

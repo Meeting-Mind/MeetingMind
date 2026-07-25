@@ -7,6 +7,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.meetingmind.demo.observability.BackendOperationMetrics;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
@@ -139,7 +141,8 @@ class MeetingLiveKitTokenServiceTest {
                 authService,
                 workspace,
                 new MeetingAccessPolicy(new SpaceAccessPolicy()),
-                liveKit
+                liveKit,
+                new BackendOperationMetrics(new SimpleMeterRegistry())
         );
         return new TestContext(store, workspace, liveKit, service);
     }

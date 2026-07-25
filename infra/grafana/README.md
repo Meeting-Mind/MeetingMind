@@ -10,6 +10,7 @@ Grafana가 기동할 때 datasource와 dashboard를 자동 등록하기 위한 �
 | `provisioning/dashboards/meetingmind.yml` | `dashboards/` 디렉터리의 JSON을 자동 등록 |
 | `dashboards/meetingmind-ai.json` | AI Overview + RAG/Embedding |
 | `dashboards/meetingmind-bff.json` | Downstream guard + 브라우저 트래픽 |
+| `dashboards/meetingmind-stt-live.json` | STT 전사, LiveKit 토큰 발급, 회의록 확정 |
 
 ## 사용
 
@@ -43,6 +44,9 @@ Prometheus 주소는 `PROMETHEUS_URL` 환경변수로 바꾼다. 기본값은 `h
 
 이 상태에서는 dashboard가 쓰는 BFF 지표 이름을 테스트로 고정할 수 없다. 이름이 어긋나면 dashboard는 오류 없이 **빈 패널**이 되므로 조용히 실패한다. 실행 환경의 노출 형식 확인과 이름 고정 테스트는 후속 과제로 남긴다.
 
-## 범위 밖
+**Backend STT/LiveKit (검증 완료)** — `BackendMetricNamesTest`가 Prometheus 노출명을 고정한다. dashboard 쿼리에서 뽑은 이름과 테스트가 고정한 이름을 대조해 누락이 없음을 확인했다.
 
-STT/LiveKit custom metric은 아직 구현되어 있지 않다(`contracts/observability.md`의 Gaps 참고). 없는 지표로 패널을 만들면 빈 화면만 나오므로 이번 dashboard에는 포함하지 않았다.
+- `meetingmind_stt_transcription_start_seconds_{count,sum}{outcome}`
+- `meetingmind_stt_transcription_stop_seconds_{count,sum}{outcome}`
+- `meetingmind_livekit_token_issue_seconds_{count,sum}{outcome}`
+- `meetingmind_report_confirm_seconds_{count,sum}{outcome}`

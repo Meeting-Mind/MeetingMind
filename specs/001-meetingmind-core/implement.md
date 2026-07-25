@@ -2284,6 +2284,17 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T439.4 STT / LiveKit / Report Confirm Custom Metrics
+
+- 변경 파일: `backend/src/main/java/com/meetingmind/demo/observability/BackendOperationMetrics.java`(신규), `ConfiguredTranscriptionGateway.java`, `MeetingLiveKitTokenService.java`, `MeetingReportLifecycleService.java`, `backend/src/test/java/com/meetingmind/demo/BackendMetricNamesTest.java`(신규), 기존 단위 테스트 2건, `infra/grafana/dashboards/meetingmind-stt-live.json`(신규), `contracts/observability.md`.
+- `T439.2`에서 STT/LiveKit 패널을 만들지 못한 이유가 metric 부재였다. 이번에 metric을 먼저 만들고 패널을 붙였다.
+- 계측 위치 선택: STT는 `ConfiguredTranscriptionGateway`에 둔다. in-process와 remote 두 구현이 모두 이 wrapper를 지나므로 `STT_GATEWAY_MODE`를 바꿔도 지표가 끊기지 않는다. 개별 구현체에 넣으면 mode 전환 시 조용히 계측이 사라진다.
+- label 설계: `outcome`(success/failure)만 둔다. meetingId나 userId를 label로 쓰면 시계열이 무한히 늘어나고(cardinality 폭발) `NFR-LOG-01` 식별 정보 비노출 원칙과도 충돌한다.
+- 성공/실패를 모두 기록한다. 실패만 세면 실패율의 분모가 없고 성공만 세면 장애가 보이지 않는다. 예외는 그대로 다시 던져 호출부 동작을 바꾸지 않으며, `recordsFailureOutcomeAndRethrows`가 이를 고정한다.
+- **대시보드와 테스트를 기계적으로 대조했다**: dashboard JSON의 쿼리에서 지표 이름을 뽑고 테스트가 고정한 이름 집합과 비교했다. 첫 대조에서 `_seconds_sum` 2종이 테스트에 없는 것이 드러나 추가했다. 사람이 눈으로 맞추면 이런 누락이 남고, 누락된 이름은 오류가 아니라 **빈 패널**로만 나타난다.
+- 기존 단위 테스트 2건(`MeetingLiveKitTokenServiceTest`, `MeetingReportLifecycleServiceTest`)은 생성자를 직접 호출하므로 `SimpleMeterRegistry` 기반 인스턴스를 주입하도록 함께 고쳤다.
+- 검증: `./scripts/run-db-tests.sh` -> 214건 / 실패 0 / skip 3(provider-gated). 신규 `BackendMetricNamesTest` 2건은 `@AutoConfigureObservability`가 없으면 fallback 텍스트가 반환돼 이름 단정이 무의미해지므로 `T439.3`과 같은 방식으로 붙였다.
+
 ## T439.2 Grafana Provisioning and Dashboards
 
 - 변경 파일: `infra/grafana/**`(신규 5개), `specs/001-meetingmind-core/contracts/observability.md`, `specs/001-meetingmind-core/{tasks,implement}.md`.
