@@ -1079,7 +1079,15 @@ def rag_source_to_ai_source(source: Any, *, relevance_score: float | None = None
 
 
 def format_untrusted_sources(sources: list[AiSource], *, limit: int | None = None) -> str:
-    selected_sources = sources if limit is None else sources[:limit]
+    # AH-009: source가 상한을 넘으면 낮은 relevanceScore부터 버린다. 위치로만 자르면
+    # 호출자가 score 순으로 넘기지 않는 경우(예: Backend가 transcript를 발화 순서로 보낼 때)
+    # 높은 score 근거가 먼저 잘려 나간다. sorted는 stable이므로 score가 같거나 전부 None이면
+    # 기존 순서가 그대로 유지된다. scope는 넓히지 않는다 — 정렬만 하고 source를 추가하지 않는다.
+    if limit is None:
+        selected_sources = sources
+    else:
+        ranked = sorted(sources, key=lambda source: -(source.relevanceScore or 0.0))
+        selected_sources = ranked[:limit]
     return json.dumps(
         [source.model_dump(exclude_none=True) for source in selected_sources],
         ensure_ascii=False,

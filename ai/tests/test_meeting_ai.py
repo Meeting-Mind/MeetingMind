@@ -1407,6 +1407,45 @@ class RagSafetyTest(unittest.TestCase):
         self.assertNotIn("segment-012", user_content)
         self.assertNotIn("14번째 보고서 근거입니다.", user_content)
 
+    def test_report_generation_drops_low_score_sources_first_when_over_limit(self):
+        # AH-009: source가 상한을 넘으면 낮은 score부터 버려야 한다.
+        # 높은 score를 뒤쪽에 배치해 위치 기반 절단과 score 기반 절단을 구분한다.
+        # (Backend는 transcript를 발화 순서로 보내므로 실제로 발생하는 배치다.)
+        sources = [
+            AiSource(
+                sourceId=f"segment-{index:03d}",
+                type="transcript",
+                text=f"{index}번째 보고서 근거입니다.",
+                relevanceScore=0.9 if index >= 12 else 0.2,
+            )
+            for index in range(15)
+        ]
+
+        with patch(
+            "app.main.call_openai_text",
+            return_value=(
+                '{"supported":true,"summary":"요약","decisions":['
+                '{"title":"결정","sourceIds":["segment-012"]}],'
+                '"actionItems":[],"markdown":"## 요약"}',
+                "test-model",
+                None,
+            ),
+        ) as call_openai_text:
+            generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
+
+        user_content = call_openai_text.call_args.kwargs["user_content"]
+        for source_id in ("segment-012", "segment-013", "segment-014"):
+            self.assertIn(source_id, user_content)
+        # scope를 넓히지 않는다: 전달한 source 밖의 ID가 문맥에 들어가지 않는다.
+        self.assertNotIn("segment-015", user_content)
+        # 상한을 실제로 지킨다: 12건만 남으므로 low-score 3건은 빠진다.
+        dropped = [
+            source_id
+            for source_id in (f"segment-{index:03d}" for index in range(12))
+            if source_id not in user_content
+        ]
+        self.assertEqual(len(dropped), 3)
+
     def test_backend_generate_report_marks_sources_as_untrusted_context(self):
         payload = BackendGenerateReportRequest(
             projectId="space-001",

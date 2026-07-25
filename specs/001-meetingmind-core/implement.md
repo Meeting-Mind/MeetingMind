@@ -2284,6 +2284,18 @@
 - 범위 한계: 회의록 본문 생성(AI provider)과 embedding worker가 작업을 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는 단계는 이 테스트 범위 밖이다. 따라서 `SMK-003`의 "실제로 검색된다"까지는 provider 실행이 남는다. 이 테스트가 고정하는 것은 "확정이 색인 작업을 만든다"는 연결이다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.ReportConfirmKnowledgeIndexIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 209건/실패 0/skip 3(provider-gated)다.
 
+## T451 AH-009 — Shrink Order Defect in Report/Task Context
+
+- 변경 파일: `ai/app/main.py`, `ai/tests/test_meeting_ai.py`, `specs/001-meetingmind-core/{test-matrix,tasks,implement}.md`.
+- 발단: `AH-009`를 "자동 검증만 추가하면 되는 공백"으로 보고 접근했으나, 검증을 짜려고 보니 **정책 자체가 리포트 경로에서 성립하지 않았다**.
+- 결함: `format_untrusted_sources(sources, limit=12)`가 `sources[:limit]`로 **위치 기반 절단**을 했다. 검색 경로는 `InMemoryRagRetriever.search`가 `(-score, chunkId)`로 정렬한 뒤 자르므로 문제가 없지만, 리포트 생성과 task 추출은 Backend가 전달한 순서를 그대로 받는다. Backend는 transcript를 발화 순서로 보내므로 score와 위치가 무관하고, 결과적으로 **높은 score 근거가 먼저 잘려 나갔다**.
+- 실증: 15건 중 뒤쪽 3건만 score 0.9, 나머지 12건을 0.2로 두고 호출하니 high-score 3건이 전부 provider 문맥에서 빠지고 low-score 12건이 전부 남았다. 수정 후에는 high-score 3건이 전부 유지되고 low-score 3건이 밀려난다.
+- 기존 테스트가 못 잡은 이유: `test_report_generation_limits_provider_context_to_first_twelve_sources`가 15건의 `relevanceScore`를 **전부 0.9로 동일**하게 두었다. 그래서 "앞 12건이 남는다"는 위치 단정만 하고 있었고 순서 정책은 아무것도 검증하지 않았다. score가 균일하면 위치 절단과 score 절단이 같은 결과를 내므로 결함이 보이지 않는다.
+- 수정: 절단이 일어나는 지점(`limit`이 주어진 경우)에만 `-(relevanceScore or 0.0)`로 정렬한 뒤 자른다. `sorted`는 stable이므로 score가 같거나 전부 `None`이면 기존 순서가 그대로 유지되어 회귀가 없다. 정렬만 하고 source를 추가하지 않으므로 scope는 넓어지지 않는다. `limit`이 없는 호출부(meeting chat, project chat)는 절단 자체가 없어 영향을 받지 않는다.
+- 적용 범위: `limit=12` 호출부는 리포트 생성과 task 추출 두 곳이며 둘 다 같은 결함이었다. 공통 함수에서 고쳐 양쪽이 함께 해결된다.
+- 검증: `cd ai && ./.venv/bin/python -m unittest discover -s tests` -> 205건 실행 / 실패 0 / skip 7. 신규 `test_report_generation_drops_low_score_sources_first_when_over_limit`가 실제로 실행됨을 `-v`로 확인했다. `./.venv/bin/python -m compileall app` 통과.
+- **남은 공백**: `AH-009`의 이름은 token budget이지만 현재 상한은 여전히 **건수**(retrieval `limit`, 문맥 12건)다. token 단위 회계는 구현되어 있지 않다. 긴 transcript segment가 12건만으로 상한을 넘길 수 있으므로 token 기반 budget은 별도 과제로 남긴다. 이번 변경이 고친 것은 "상한을 넘길 때 무엇을 먼저 버리는가"이지 "상한을 token으로 재는가"가 아니다.
+
 ## T450 Audit — `#56` 유입분 검증 커버리지 실측
 
 - 배경: `#56`으로 들어온 `cert-loader`(Go), `ai/envoy`, 각 서비스 `application-mtls.yml`, `infra/aws` Terraform이 한 번도 검증되지 않았다고 보고 있었다. 실측해 보니 **절반은 이미 덮여 있었고, 덮이지 않은 곳은 따로 있었다**.
