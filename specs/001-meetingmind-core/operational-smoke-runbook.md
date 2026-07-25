@@ -41,6 +41,22 @@ cd backend
 ./gradlew test --tests com.meetingmind.demo.domain.ProjectAiServiceTest
 ```
 
+## Local Runtime Baseline
+
+Provider smoke 전에 local runtime 경로가 먼저 안정적으로 떠야 한다.
+
+- Backend: `./scripts/run-backend.sh`
+- BFF legacy: `./scripts/run-bff-legacy.sh`
+- Frontend: `./scripts/run-frontend.sh`
+- AI: `./scripts/run-ai.sh`
+
+주의:
+
+- AI는 system `python3 -m uvicorn`이 아니라 project virtualenv의
+  `ai/.venv/bin/uvicorn`을 우선 사용해야 한다.
+- local stack helper는 smoke 진입 전 포트 점유 상태를 먼저 확인해야 한다.
+- stale listener가 남아 있으면 LiveKit/STT/AI smoke가 false negative로 보일 수 있다.
+
 ## Provider Opt-in Checks
 
 ### STT Provider Smoke

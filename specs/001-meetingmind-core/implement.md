@@ -2182,3 +2182,10 @@
   - `cd bff && ./gradlew test --tests com.meetingmind.bff.BffHealthEndpointTest --tests com.meetingmind.bff.proxy.DownstreamGuardTest`
   - `cd ai && ./.venv/bin/python -m unittest tests.test_meeting_ai`
 - 판단: 이제 남은 큰 검증 공백은 `SMK-002~005` 실행 증적, `AH-009` token budget 자동화, Grafana/STT-LiveKit 관측 보강이다. 문서 기준선과 구현 사이의 드리프트는 이 범위에서 정리됐다.
+
+## V119.3 Local Runtime Smoke Entry Fix
+
+- 변경 파일: `scripts/run-ai.sh`, `scripts/run-local-stack.sh`, `specs/001-meetingmind-core/operational-smoke-runbook.md`, `specs/001-meetingmind-core/implement.md`.
+- 구현: provider smoke 진입 전제였던 local runtime 실행 경로를 정리했다. `scripts/run-ai.sh`는 project virtualenv의 `ai/.venv/bin/uvicorn`을 우선 사용하도록 바꿨고, `scripts/run-local-stack.sh`는 AI까지 같이 올리도록 보완했다.
+- 원인: 기존 AI 실행 스크립트는 system `python3 -m uvicorn`에 의존했다. 이 상태에서는 개발 환경에 따라 AI 서버가 뜨지 않거나, 8000 포트에 남은 stale listener 때문에 smoke가 false negative로 보일 수 있었다.
+- 판단: 이 수정은 `SMK-002~005` 완료가 아니라 smoke 진입 조건 정리다. 남은 것은 실제 provider/browser/manual 증적 채우기다.
