@@ -9,6 +9,7 @@ import com.meetingmind.demo.dto.stt.TranscriptionStartGatewayRequest;
 import com.meetingmind.demo.dto.stt.TranscriptionStartGatewayResponse;
 import com.meetingmind.demo.dto.stt.TranscriptionStatusGatewayResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.demo.config.InternalHttpClientFactory;
 import com.meetingmind.demo.observability.RequestTrace;
 import java.io.IOException;
 import java.net.URI;
@@ -32,27 +33,23 @@ import org.springframework.stereotype.Component;
 public class HttpTranscriptionGateway implements TranscriptionGateway {
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
-    private static final String SERVICE_TOKEN_HEADER = "X-MeetingMind-Service-Token";
-
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String baseUrl;
-    private final String serviceToken;
 
     @Autowired
     public HttpTranscriptionGateway(
             ObjectMapper objectMapper,
-            @Value("${meetingmind.stt.base-url:http://localhost:8083}") String baseUrl,
-            @Value("${meetingmind.stt.service-token:}") String serviceToken
+            InternalHttpClientFactory internalHttpClientFactory,
+            @Value("${meetingmind.stt.base-url:http://localhost:8083}") String baseUrl
     ) {
-        this(HttpClient.newHttpClient(), objectMapper, baseUrl, serviceToken);
+        this(internalHttpClientFactory.newBuilder().build(), objectMapper, baseUrl);
     }
 
-    HttpTranscriptionGateway(HttpClient httpClient, ObjectMapper objectMapper, String baseUrl, String serviceToken) {
+    HttpTranscriptionGateway(HttpClient httpClient, ObjectMapper objectMapper, String baseUrl) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.baseUrl = stripTrailingSlash(baseUrl);
-        this.serviceToken = serviceToken == null ? "" : serviceToken;
     }
 
     @Override
@@ -196,9 +193,6 @@ public class HttpTranscriptionGateway implements TranscriptionGateway {
     }
 
     private void applyHeaders(HttpRequest.Builder builder) {
-        if (!serviceToken.isBlank()) {
-            builder.header(SERVICE_TOKEN_HEADER, serviceToken);
-        }
         builder.header(RequestTrace.HEADER_NAME, RequestTrace.currentOrCreate());
     }
 

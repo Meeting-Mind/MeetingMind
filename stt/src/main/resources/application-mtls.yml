@@ -1,0 +1,23 @@
+server:
+  ssl:
+    enabled: true
+    bundle: meetingmind-internal
+    client-auth: want
+
+management:
+  server:
+    address: 127.0.0.1
+    port: 9083
+    ssl:
+      enabled: false
+
+spring:
+  ssl:
+    bundle:
+      pem:
+        meetingmind-internal:
+          keystore:
+            certificate: file:${MEETINGMIND_TLS_CERTIFICATE:/run/meetingmind/tls/tls.crt}
+            private-key: file:${MEETINGMIND_TLS_PRIVATE_KEY:/run/meetingmind/tls/tls.key}
+          truststore:
+            certificate: file:${MEETINGMIND_TLS_CA:/run/meetingmind/tls/ca.crt}

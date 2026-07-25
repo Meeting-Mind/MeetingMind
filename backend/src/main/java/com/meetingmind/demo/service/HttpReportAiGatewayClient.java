@@ -2,6 +2,7 @@ package com.meetingmind.demo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingmind.demo.config.InternalHttpClientFactory;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayResponse;
 import java.io.IOException;
@@ -27,10 +28,11 @@ public class HttpReportAiGatewayClient implements ReportAiGatewayClient {
     @Autowired
     public HttpReportAiGatewayClient(
             ObjectMapper objectMapper,
+            InternalHttpClientFactory internalHttpClientFactory,
             @Value("${meetingmind.ai.base-url:http://localhost:8000}") String aiBaseUrl,
             @Value("${meetingmind.ai.service-token:}") String serviceToken
     ) {
-        this(HttpClient.newHttpClient(), objectMapper, aiBaseUrl, serviceToken);
+        this(internalHttpClientFactory.newBuilder().build(), objectMapper, aiBaseUrl, serviceToken);
     }
 
     HttpReportAiGatewayClient(

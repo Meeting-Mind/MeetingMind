@@ -77,13 +77,17 @@ final class SttWorkloadIdentityFilter extends OncePerRequestFilter {
             if (names == null) {
                 return Optional.empty();
             }
-            return names.stream()
+            List<String> principals = names.stream()
                     .filter(name -> name.size() >= 2 && Integer.valueOf(6).equals(name.get(0)))
                     .map(name -> name.get(1))
                     .filter(String.class::isInstance)
                     .map(String.class::cast)
                     .filter(name -> name.startsWith("spiffe://"))
-                    .findFirst();
+                    .distinct()
+                    .toList();
+            return principals.size() == 1
+                    ? Optional.of(principals.getFirst())
+                    : Optional.empty();
         } catch (Exception exception) {
             return Optional.empty();
         }

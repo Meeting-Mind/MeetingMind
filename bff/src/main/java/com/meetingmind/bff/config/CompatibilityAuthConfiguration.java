@@ -7,12 +7,14 @@ import com.meetingmind.bff.auth.LegacyBackendAuthClient;
 import com.meetingmind.bff.auth.TargetAuthServiceClient;
 import com.meetingmind.bff.auth.TargetCoreUserProjectionClient;
 import java.net.URI;
+import java.net.http.HttpClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration(proxyBeanMethods = false)
@@ -44,8 +46,9 @@ public class CompatibilityAuthConfiguration {
     @ConditionalOnProperty(name = "meetingmind.bff.auth-provider", havingValue = "auth-service")
     RestClient targetAuthRestClient(
             RestClient.Builder builder,
+            InternalHttpClientFactory internalHttpClientFactory,
             @Value("${meetingmind.bff.target-auth.base-url}") String baseUrl) {
-        return builder.baseUrl(validateBaseUrl(baseUrl).toString()).build();
+        return internalRestClient(builder, internalHttpClientFactory, baseUrl);
     }
 
     @Bean
@@ -67,16 +70,31 @@ public class CompatibilityAuthConfiguration {
     @Bean
     CoreUserProjectionClient coreUserProjectionClient(
             RestClient.Builder builder,
+            InternalHttpClientFactory internalHttpClientFactory,
             @Value("${meetingmind.bff.core-projection.base-url}") String baseUrl,
             @Value("${meetingmind.bff.core-projection.allow-test-principal-header:false}")
                     boolean allowTestPrincipalHeader,
             @Value("${meetingmind.bff.core-projection.test-principal:}") String testPrincipal,
             Environment environment) {
-        RestClient restClient = builder.baseUrl(validateBaseUrl(baseUrl).toString()).build();
+        RestClient restClient = internalRestClient(
+                builder,
+                internalHttpClientFactory,
+                baseUrl);
         return new TargetCoreUserProjectionClient(
                 restClient,
                 localTestHeaderAllowed(allowTestPrincipalHeader, environment),
                 testPrincipal);
+    }
+
+    private RestClient internalRestClient(
+            RestClient.Builder builder,
+            InternalHttpClientFactory internalHttpClientFactory,
+            String baseUrl) {
+        HttpClient httpClient = internalHttpClientFactory.newBuilder().build();
+        return builder
+                .baseUrl(validateBaseUrl(baseUrl).toString())
+                .requestFactory(new JdkClientHttpRequestFactory(httpClient))
+                .build();
     }
 
     private URI validateBaseUrl(String value) {
