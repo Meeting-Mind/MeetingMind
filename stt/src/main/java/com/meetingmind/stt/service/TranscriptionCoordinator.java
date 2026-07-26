@@ -11,8 +11,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -33,6 +33,9 @@ public class TranscriptionCoordinator {
     private final TranscriptSegmentRepository segmentRepository;
     private final Clock clock;
 
+    // 생성자가 둘이면 Spring은 어느 쪽으로 주입할지 알 수 없어 기본 생성자를 찾고,
+    // 없으면 기동에 실패한다. 아래 4-arg 생성자는 Clock을 고정하는 테스트 전용이므로
+    // 주입 대상은 이쪽임을 명시한다.
     @Autowired
     public TranscriptionCoordinator(
             MeetingTranscriptRepository transcriptRepository,
