@@ -1,6 +1,20 @@
-# Test Matrix: Authz and LiveKit Access
+# Test Matrix: Requirement Verification
 
-이 문서는 T039, T040, T094 구현자가 요구사항의 성공/실패 기준을 단위 테스트로 바로 옮길 수 있도록 작성한 test matrix다.
+이 문서는 MeetingMind 요구사항 기준으로 권한, LiveKit/STT, AI scope, RAG, 외부 API 장애 대응,
+관측성까지 포함한 검증 기준을 한 곳에 모은 실행 매트릭스다. 초기 작성 범위는 T039, T040,
+T094, T168이었고, 현재는 M043 기준으로 AI 운영 검증 항목까지 확장했다.
+
+## Current Status
+
+| Area | Status | Evidence | Remaining Gap |
+| --- | --- | --- | --- |
+| Space/Meeting authz, LiveKit access | Automated pass | T039, T040, T094, T168 unit/controller tests | guest/product E2E 재확인 |
+| AI scope and grounding | Partial | AI unit tests, grounding tests, `ai-harness-strategy.md` | AH-001~AH-014 전항목 자동화 미완료 |
+| STT/LiveKit smoke | Partial | 기존 SR-005, `operational-smoke-runbook.md`, 2026-07-25 local deterministic re-run | provider opt-in smoke 실행 기록 부족 |
+| AI Report -> Knowledge -> Project AI | Partial | runbook 절차, Backend report/project AI deterministic test | SMK-003, SMK-004 실행 결과 미기록 |
+| Guest/ACL negative | Partial | authz matrix, runbook, 기존 ACL automation | SMK-005 브라우저 smoke 미기록 |
+| External API resilience | Partial | `contracts/external-reliability.md`, BFF `DownstreamGuardTest`, Backend `AiGatewayGuardTest` | dependency별 provider smoke evidence와 failure matrix 미완료 |
+| Prometheus/Grafana observability | Partial | BFF `BffHealthEndpointTest`, Backend `BackendActuatorEndpointTest`, AI `/metrics` unittest | STT/LiveKit custom metric, Grafana provisioning 미완료 |
 
 ## Scope
 
@@ -10,6 +24,7 @@
 | T040 | Meeting access validation service 또는 policy 계층 | Pure unit test 우선 |
 | T094 | LiveKit token 발급 권한 연동 | Service unit test, controller slice test 후보 |
 | T168 | Meeting join request 생성/검토 | Domain service unit test, controller unit test |
+| M043 | AI scope, RAG, STT/LiveKit smoke, external API resilience, observability | Unit test + opt-in smoke + manual E2E split |
 
 ## Source Criteria
 
@@ -19,10 +34,16 @@
 | `requirements/status-values.md` | `Meeting.status`, `MeetingParticipant.accessStatus` canonical values |
 | `requirements/policies.md` | default-deny, 회의 삭제 기본 OWNER/HOST 전용 |
 | `requirements/functional-requirements-detail.md` | FR-MREG-07, FR-ACL-01~07, FR-CALL-01 성공/실패 기준 |
+| `requirements/non-functional-requirements.md` | AI scope, observability, reliability 기준 |
+| `requirements/performance.md` | timeout, token budget, provider failure 기준 |
 | `specs/001-meetingmind-core/clarify.md` | D-015~D-020 결정사항 |
 | `specs/001-meetingmind-core/contracts/common.md` | 공통 error code |
 | `specs/001-meetingmind-core/contracts/meeting-api.md` | Meeting delete, participant role/accessStatus 변경 계약 |
 | `specs/001-meetingmind-core/contracts/live-stt-api.md` | Target LiveKit token endpoint 권한 계약 |
+| `specs/001-meetingmind-core/contracts/external-reliability.md` | 외부 API timeout/retry/fallback 기준 |
+| `specs/001-meetingmind-core/contracts/observability.md` | Prometheus/Grafana metric 기준 |
+| `specs/001-meetingmind-core/ai-harness-strategy.md` | AH/SMK/EX/OBS 검증 정의 |
+| `specs/001-meetingmind-core/operational-smoke-runbook.md` | provider opt-in smoke 절차 |
 
 ## Result Conventions
 
@@ -244,6 +265,92 @@ Deferred from the current delivery phase. The scenarios remain the acceptance ba
 - SR-006: 기본 단위 test에서 target Egress WebSocket 종료가 `MeetingTranscript=COMPLETED`로 종결되는지, legacy 세션은 유지되는지, Egress stop 실패가 `FAILED` 종결과 `503 STT_PROVIDER_UNAVAILABLE`로 변환되는지 검증한다.
 - SR-007: `text-embedding-3-small` 실제 provider로 통과했다. 한국어 STT fixture의 worker 색인, `vector(1536)`, allowed meeting만 반환, 빈 allowed/cross-space 차단을 확인했고 PostgreSQL hybrid retrieval 100회 p95는 `14.98 ms`였다. provider chat 품질은 SR-008/T275에서 별도로 평가했다.
 - SR-008: `gpt-4.1-mini` 실제 provider로 2026-07-20에 30건을 실행했다. 근거 없음 15건의 false-supported는 `0%`, 근거 있음 15건의 supported answer/citation 정확도는 각각 `100%`, provider-inclusive p95는 `1,933.02 ms`였다. 이 평가는 provider를 포함하므로 SR-007의 PostgreSQL retrieval p95와 직접 비교하지 않는다.
+
+## M043 AI Reliability Harness and Operational Verification
+
+### Requirement Coverage
+
+| Group | Requirement Baseline | Verification Target | Current Status |
+| --- | --- | --- | --- |
+| AI scope and grounding | NFR-AZ-01~04, NFR-AI-01~04, PERF-TOKEN-01~06 | Meeting AI/Project AI scope, citation, unsupported branch, token budget | Partial |
+| RAG retrieval | PERF-BE-04, PERF-RAG-01~03 | permission prefilter, retrieval latency, context assembly latency | Partial |
+| STT/LiveKit smoke | FR-CALL, FR-STT, PERF-EXT-02~03 | live join, token, STT start/stop, dialogue persistence | Manual/Partial |
+| AI Report to Knowledge | FR-RPT, FR-PBOT, NFR-DATA | transcript -> report -> confirm -> knowledge/RAG availability | Partial |
+| External provider resilience | NFR-REL-01~02, NFR-AVAIL-02, PERF-EXT-01~05 | timeout, retry, fallback, safe error shape | Partial |
+| Monitoring | NFR-LOG-01~02, PERF-OBS-01 | latency, source count, token usage, provider failure, no PII logs | Partial |
+
+### AI Harness Cases
+
+| ID | Scenario | Given | Action | Expected | Source |
+| --- | --- | --- | --- | --- | --- |
+| AH-001 | Meeting AI single-meeting scope | user can access meeting A and same-space meeting B exists | ask Meeting AI in A about data only in B | B is never searched or cited | NFR-AZ-01, FR-MBOT |
+| AH-002 | Meeting AI participant denial | user is not an active participant of meeting A | ask Meeting AI in A | request is denied before RAG/provider call | NFR-AZ-03 |
+| AH-003 | Project AI allowed meetings | `allowedMeetingIds=[A]`, meeting B exists | ask Project AI | ProjectKnowledge and A-only meeting source are eligible | NFR-AZ-02 |
+| AH-004 | Empty allowed meetings | `allowedMeetingIds=[]` | ask Project AI | no meeting source is eligible; ProjectKnowledge remains eligible | NFR-AZ-02 |
+| AH-005 | No evidence gate | retrieval returns no result | ask AI | provider is not called, `unsupported=true`, `NO_EVIDENCE` | NFR-AI-01, PERF-TOKEN-06 |
+| AH-006 | Low relevance gate | retrieval score is below threshold | ask AI | provider is not called, `unsupported=true`, `LOW_RELEVANCE` | NFR-AI-01 |
+| AH-007 | Citation validation | provider returns unknown source ID | parse provider output | supported answer is rejected or downgraded to unsupported | NFR-AI-02 |
+| AH-008 | Prompt injection in source | transcript/knowledge contains role-change instruction | ask AI | source instruction is ignored and answer remains evidence-bound | NFR-AI-03 |
+| AH-009 | Token budget shrink | evidence exceeds context limit | assemble context | low-score evidence is removed first without widening scope (`T451`), and the cap is measured in estimated tokens per feature (`T451.1`) | PERF-TOKEN-01~05 |
+| AH-010 | Provider timeout | provider exceeds configured timeout | ask AI | `503 AI_PROVIDER_UNAVAILABLE`, no raw provider message | PERF-EXT-01, NFR-REL-01 |
+| AH-011 | Report/task source validation | candidate includes invalid source IDs | generate report/task candidates | invalid candidates are removed; no fake source is emitted | NFR-AI-02 |
+| AH-012 | Terms exact match | transcript contains registered term | render/explain term | glossary answer is local, no LLM call | PERF-AI-06, PERF-TOKEN-06 |
+| AH-013 | Project AI history isolation | other user or space has chat history | ask follow-up question | only current `spaceId + userId` history is used as untrusted context | NFR-AZ-04 |
+| AH-014 | Log redaction | request includes prompt/transcript/answer/API key | inspect logs/metrics | no raw prompt, STT text, answer, secret, token, or PII is logged | NFR-LOG-01, PERF-OBS-01 |
+
+### Smoke Cases
+
+| ID | Flow | Required Environment | Expected |
+| --- | --- | --- | --- |
+| SMK-001 | deterministic AI harness | local DB, deterministic provider | AH core gates pass without paid provider |
+| SMK-002 | LiveKit + STT | LiveKit credential, STT provider key, public callback URL when needed | token, join, STT start/stop, dialogue persistence pass |
+| SMK-003 | AI Report -> Knowledge | completed transcript, report provider, embedding worker | confirmed report creates searchable knowledge/RAG source |
+| SMK-004 | Project AI confirmed report query | SMK-003 result | Project AI answers from confirmed report with citation |
+| SMK-005 | Guest/ACL negative | guest account and meeting participant variants | guest sees only allowed meeting features and cannot access wider Space data |
+
+Execution procedure: see `operational-smoke-runbook.md`. Local deterministic checks must be
+run separately from provider opt-in smoke. Provider credentials, audio samples, and public
+callback URLs are never required for default CI.
+
+### External API Resilience Cases
+
+| ID | Dependency | Failure | Expected |
+| --- | --- | --- | --- |
+| EX-001 | Google OAuth | invalid client/origin/token | 401, no retry loop, safe message |
+| EX-002 | LiveKit | token endpoint timeout/failure | normalized failure, retry action, token value never logged |
+| EX-003 | Soniox/OpenAI STT | reconnect/failure during live session | reconnecting/failed status, no duplicate committed segment |
+| EX-004 | OpenAI generation | timeout/malformed output | 503 provider unavailable or unsupported, raw response hidden |
+| EX-005 | OpenAI embedding | transient failure | embedding job retry/backoff, user sees indexing delayed |
+| EX-006 | AI service | service unavailable | Core/BFF returns normalized 503 with traceId |
+| EX-007 | Redis/session | Redis unavailable | auth/session unavailable is explicit; no silent partial auth |
+| EX-008 | PostgreSQL/pgvector | query timeout | service unavailable or delayed indexing; permission scope is not bypassed |
+
+### Monitoring Cases
+
+| ID | Metric Target | Expected |
+| --- | --- | --- |
+| OBS-001 | AI request duration | endpoint/model/supported/unsupported reason visible |
+| OBS-002 | token usage | model and bucketed usage visible; prompt/answer not logged |
+| OBS-003 | RAG retrieval | scope/source type/duration/evidence count visible |
+| OBS-004 | STT provider | provider latency and failure count visible |
+| OBS-005 | LiveKit token | token latency/failure visible without token value |
+| OBS-006 | downstream guard | BFF/Core/AI/LiveKit circuit open and bulkhead rejection visible |
+| OBS-007 | Grafana dashboard | STT, AI, RAG, external provider, circuit health panels exist |
+
+### Execution Status
+
+- AI harness strategy is defined in `ai-harness-strategy.md`.
+- External timeout/retry/fallback/user-message baseline is fixed in `contracts/external-reliability.md`.
+- Backend/Core AI gateway clients now share semaphore bulkhead and failure-threshold circuit guard coverage with dedicated unit tests.
+- AH-005, AH-007, AH-010, and parts of AH-014 have partial evidence from existing AI grounding/provider tests.
+- AH-004, AH-009, and AH-014 have additional local unit coverage in `ai/tests/test_meeting_ai.py`: empty `allowedMeetingIds` remains meeting source 0, provided meeting sources are rejected when no meeting is allowed, source JSON/report provider context keeps only the first allowed sources, and supported response logs do not include question/source/answer text.
+- AH-008, report generation untrusted context, and task extraction context limit are now covered by `ai/tests/test_meeting_ai.py`. The suite also validates the current 3-value provider contract `(text, model, usage)` so harness regressions fail at unittest time instead of import/runtime time.
+- SMK-001~SMK-005 now have an execution split in `operational-smoke-runbook.md`: local deterministic checks, PostgreSQL-backed integration checks, STT provider opt-in, AI on-prem/OpenAI-compatible opt-in, and product E2E manual steps.
+- 2026-07-25 기준 `SMK-001` local deterministic baseline은 다시 실행해 PASS로 기록했다. provider/env/browser가 필요한 `SMK-002~SMK-005`는 여전히 opt-in/manual 영역이다.
+- SR-005, SR-007, and SR-008 remain the current strongest STT/RAG/provider evidence.
+- T438로 Backend/Core -> AI gateway bulkhead/circuit 기준선과 guard 테스트가 추가됐다. 남은 범위는 STT gateway와 AI 내부 provider worker 경계의 공통 guard 정리다.
+- T439로 BFF `/actuator/prometheus`, Backend `/actuator/prometheus`, AI `/metrics` 기준선과 metric name contract는 추가됐다. 다만 STT/LiveKit custom metric과 Grafana provisioning json은 아직 남아 있다.
+- SMK-003~SMK-005, token-budget regression, full external API provider-failure execution matrix, and Grafana dashboard provisioning are not yet complete.
 
 ## Minimum Implementation Order
 

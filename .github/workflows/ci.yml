@@ -1,14 +1,17 @@
 name: CI
 
+# 머지 후 push로 CI를 다시 돌리지 않는다. PR에서 이미 같은 커밋을 검증했고,
+# merge commit만 달라진 상태를 전부 재실행하면 실행 시간이 정확히 두 배가 된다.
+# 실측: 1회 실행이 약 19분이고 머지 중복만 11회, 약 205분을 이렇게 썼다.
+#
+# 직접 push는 여전히 검증이 필요하므로 수동 실행(workflow_dispatch)을 남겨 둔다.
+# dev를 보호 규칙으로 PR-only로 두면 직접 push 자체가 막힌다.
 on:
   pull_request:
     branches:
       - dev
       - main
-  push:
-    branches:
-      - dev
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,10 +30,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
@@ -61,10 +64,10 @@ jobs:
         working-directory: bff
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
@@ -74,7 +77,10 @@ jobs:
         env:
           BFF_REDIS_INTEGRATION: "true"
           BFF_REDIS_PORT: "6379"
-        run: ./gradlew clean test bootJar
+        # `clean`이 아니라 `cleanTest`를 쓴다. Gradle은 환경변수를 test 입력으로
+        # 추적하지 않아 BFF_REDIS_INTEGRATION만 바뀌면 UP-TO-DATE로 건너뛴다.
+        # 그 보호는 유지하면서, 전체 재컴파일까지 하지는 않는다.
+        run: ./gradlew cleanTest test bootJar
 
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
@@ -108,10 +114,10 @@ jobs:
         working-directory: auth
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
@@ -125,7 +131,10 @@ jobs:
           AUTH_TEST_MIGRATION_PASSWORD: meetingmind_auth_migrator_ci
           AUTH_TEST_RUNTIME_USER: meetingmind_auth_app
           AUTH_TEST_RUNTIME_PASSWORD: meetingmind_auth_app_ci
-        run: ./gradlew clean test bootJar
+        # `clean`이 아니라 `cleanTest`를 쓴다. Gradle은 환경변수를 test 입력으로
+        # 추적하지 않아 BFF_REDIS_INTEGRATION만 바뀌면 UP-TO-DATE로 건너뛴다.
+        # 그 보호는 유지하면서, 전체 재컴파일까지 하지는 않는다.
+        run: ./gradlew cleanTest test bootJar
 
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
@@ -139,10 +148,10 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: npm
@@ -169,10 +178,10 @@ jobs:
         working-directory: ai
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -196,17 +205,20 @@ jobs:
         working-directory: stt
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Test and package Realtime STT
-        run: ./gradlew clean test bootJar
+        # `clean`이 아니라 `cleanTest`를 쓴다. Gradle은 환경변수를 test 입력으로
+        # 추적하지 않아 BFF_REDIS_INTEGRATION만 바뀌면 UP-TO-DATE로 건너뛴다.
+        # 그 보호는 유지하면서, 전체 재컴파일까지 하지는 않는다.
+        run: ./gradlew cleanTest test bootJar
 
       - name: Verify bootJar
         run: test -n "$(find build/libs -name '*.jar' ! -name '*-plain.jar' -print -quit)"
@@ -217,7 +229,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Verify modules and test
         run: >-
@@ -250,10 +262,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
@@ -289,17 +301,17 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: npm
@@ -308,15 +320,30 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Chromium은 매 실행 새로 내려받으면 1분 가까이 걸린다. Playwright 버전이
+      # 같으면 바이너리도 같으므로 package-lock.json 해시를 key로 캐시한다.
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      # 캐시가 있어도 --with-deps의 OS 패키지는 필요하므로 별도로 설치한다.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Run login and meeting access E2E
         run: npm run test:e2e
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: playwright-report
           path: frontend/playwright-report/
@@ -343,7 +370,7 @@ jobs:
       ai_envoy_digest: ${{ steps.digests.outputs.ai_envoy }}
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Build Backend image
         run: docker build --tag meetingmind-backend:ci backend
@@ -402,6 +429,21 @@ jobs:
           echo "cert_loader=$(docker image inspect meetingmind-cert-loader:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           echo "ai_envoy=$(docker image inspect meetingmind-ai-envoy:ci --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
 
+      # Trivy는 취약점 DB를 매번 새로 내려받는다(수십 MB). 하루 단위로 캐시하면
+      # 스캔 7건의 시작 지연이 사라진다. DB가 하루 지나면 새로 받으므로
+      # 탐지 최신성은 유지된다.
+      - name: Resolve Trivy cache day
+        id: trivy-day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Trivy vulnerability database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ steps.trivy-day.outputs.day }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
       - name: Install checksum-verified Trivy
         env:
           TRIVY_VERSION: 0.72.0
@@ -441,7 +483,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout full history
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 

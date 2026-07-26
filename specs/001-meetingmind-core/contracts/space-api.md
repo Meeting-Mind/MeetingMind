@@ -197,6 +197,97 @@ None.
 
 - `recentReports`는 회의 ACL을 통과한 회의록만 포함한다.
 
+## GET /api/v1/spaces/{spaceId}/ai/usage
+
+Space 단위 AI 사용량과 quota 소진 현황을 조회한다. Overview 카드의 운영 지표용 API다.
+
+### Status
+
+- Target BFF + Core/AI aggregation
+- Frontend type/client placeholder added
+
+### Auth and Permissions
+
+- 인증 필요
+- 해당 Space의 활성 `SpaceMember`
+- meeting guest는 호출할 수 없다.
+
+### Data Scope
+
+- Space scope
+- 현재 사용자가 속한 Space의 집계만 반환한다.
+- prompt, transcript, answer 원문은 집계에 포함하지 않고 token/request count만 반환한다.
+
+### Query
+
+- `window`: optional `day`, `week`, `month`
+- 기본값은 `month`
+
+### Validation
+
+- `spaceId` 존재 및 접근 권한 확인
+- `window`는 허용 enum만 받는다.
+
+### Response
+
+```json
+{
+  "window": "month",
+  "limit": 500000,
+  "totalRequests": 182,
+  "totalInputTokens": 214533,
+  "totalOutputTokens": 84127,
+  "usagePercent": 60,
+  "features": [
+    {
+      "feature": "meeting-ai",
+      "requests": 71,
+      "inputTokens": 80342,
+      "outputTokens": 29401
+    },
+    {
+      "feature": "project-ai",
+      "requests": 89,
+      "inputTokens": 101420,
+      "outputTokens": 41712
+    },
+    {
+      "feature": "report-ai",
+      "requests": 22,
+      "inputTokens": 32771,
+      "outputTokens": 13014
+    }
+  ]
+}
+```
+
+### Errors
+
+- `401 UNAUTHORIZED`: 인증 실패
+- `403 SPACE_ACCESS_DENIED`: Space 접근 권한 없음
+- `404 SPACE_NOT_FOUND`: Space 없음
+- `503 AI_USAGE_UNAVAILABLE`: 집계 소스 또는 provider usage 수집 상태 문제
+
+### Audit
+
+- No audit event.
+
+### Requirement Trace
+
+- NFR-LOG-01~02: 원문 비노출 집계
+- PERF-OBS-01: token usage 관측 가능
+- NFR-COST-01~03: usage/quota 가시화
+
+### Notes
+
+- `limit`이 없으면 `null`을 반환한다.
+- `usagePercent`는 `limit`이 있는 경우에만 계산한다.
+- feature 집계는 `meeting-ai`, `project-ai`, `report-ai`부터 시작하고 후속 feature가 추가될 수 있다.
+- 현재 BFF는 `project-ai`, `meeting-ai`, `report-ai` 요청을 AI 서비스로 직접 프록시하므로 backend 단독 집계는 불가능하다.
+- 운영 구현은 BFF가 AI 응답의 `usage` 메트릭을 수집하고, Core의 usage aggregate store에 기록한 뒤 이 endpoint에서 Space 단위로 조회한다.
+- usage 집계 기록 실패는 원 요청을 실패시키지 않고 observability 이벤트로만 남긴다.
+- prompt/answer raw text는 저장하지 않는다.
+
 ## POST /api/v1/spaces/{spaceId}/ai/chat
 
 Backend가 인증과 Project AI 권한 선필터를 적용한 뒤 AI 서버를 호출한다.

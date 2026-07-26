@@ -1,6 +1,7 @@
 package com.meetingmind.bff.proxy;
 
 import com.meetingmind.bff.auth.DownstreamUnauthorizedException;
+import com.meetingmind.bff.observability.DownstreamGuardMetrics;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,11 +17,18 @@ final class DownstreamGuard {
     private final int failureThreshold;
     private final Duration openDuration;
     private final Clock clock;
+    private final DownstreamGuardMetrics metrics;
     private final AtomicInteger consecutiveFailures = new AtomicInteger();
     private final AtomicReference<Instant> openUntil = new AtomicReference<>();
     private final AtomicBoolean halfOpenProbe = new AtomicBoolean();
 
-    DownstreamGuard(int maxConcurrent, int failureThreshold, Duration openDuration, Clock clock) {
+    DownstreamGuard(
+            int maxConcurrent,
+            int failureThreshold,
+            Duration openDuration,
+            Clock clock,
+            DownstreamGuardMetrics metrics
+    ) {
         if (maxConcurrent <= 0 || failureThreshold <= 0 || openDuration == null || !openDuration.isPositive()) {
             throw new IllegalArgumentException("downstream guard policy must be positive");
         }
@@ -28,6 +36,7 @@ final class DownstreamGuard {
         this.failureThreshold = failureThreshold;
         this.openDuration = openDuration;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     <T> T execute(Supplier<T> operation) {
@@ -36,6 +45,7 @@ final class DownstreamGuard {
             if (probe) {
                 halfOpenProbe.set(false);
             }
+            metrics.recordRejected();
             throw new DownstreamGuardRejectedException();
         }
         try {
@@ -64,9 +74,11 @@ final class DownstreamGuard {
             return false;
         }
         if (clock.instant().isBefore(until)) {
+            metrics.recordRejected();
             throw new DownstreamGuardRejectedException();
         }
         if (!halfOpenProbe.compareAndSet(false, true)) {
+            metrics.recordRejected();
             throw new DownstreamGuardRejectedException();
         }
         return true;
@@ -77,10 +89,12 @@ final class DownstreamGuard {
             consecutiveFailures.set(0);
             openUntil.set(null);
             halfOpenProbe.set(false);
+            metrics.recordCircuitClosed();
             return;
         }
         if (openUntil.get() == null) {
             consecutiveFailures.set(0);
+            metrics.recordCircuitClosed();
         }
     }
 
@@ -89,6 +103,7 @@ final class DownstreamGuard {
         if (probe || failures >= failureThreshold) {
             openUntil.set(clock.instant().plus(openDuration));
             consecutiveFailures.set(0);
+            metrics.recordCircuitOpened();
         }
         halfOpenProbe.set(false);
     }

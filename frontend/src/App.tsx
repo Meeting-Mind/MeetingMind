@@ -1,7 +1,6 @@
 import { RouterProvider, createBrowserRouter, Outlet, NavLink, useNavigate, useParams, useLocation, Link, useOutletContext, Navigate, useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard,
-  FolderKanban,
   Video,
   CheckSquare,
   Library,
@@ -14,8 +13,6 @@ import {
   Play,
   FileText,
   Clock,
-  ChevronRight,
-  ChevronLeft,
   ChevronDown,
   Users,
   Calendar,
@@ -24,19 +21,25 @@ import {
   ShieldAlert,
   LogOut,
   Building,
-  Activity,
   Filter,
   Mic,
   MicOff,
   VideoOff,
   X,
   PanelLeftClose,
-  PanelLeftOpen,
-  GripVertical,
-  Pencil,
-  Languages
+  PanelLeftOpen
 } from "lucide-react";
-import { AnimatedThemeToggler } from "./components/common/AnimatedThemeToggler";
+import { DisplayPreferences } from "./app/DisplayPreferences";
+import {
+  AppPreferencesContext,
+  LOCALE_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  storedLocale,
+  storedTheme,
+  useAppPreferences,
+  type AppLocale,
+  type ThemeMode
+} from "./app/preferences";
 import {
   ConnectionState,
   Room,
@@ -45,7 +48,7 @@ import {
   type Participant,
   type TrackPublication
 } from "livekit-client";
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   bootstrapAuthSession,
   loginWithGoogle,
@@ -58,6 +61,10 @@ import {
   type AuthSession
 } from "./auth/session";
 import { subscribeToSessionInvalid } from "./auth/sessionInvalidation";
+import { KnowledgeGraphPage } from "./features/knowledge";
+import { LandingPage } from "./features/landing";
+import { useMeetingDialogueQuery } from "./features/transcription/hooks";
+import { filterTranscriptEntries } from "./features/transcription/selectors";
 import { AllDeviceLogoutModal } from "./components/AllDeviceLogoutModal";
 import { GoogleCredentialButton } from "./components/GoogleCredentialButton";
 import { MeetingReportPage } from "./pages/MeetingReportPage";
@@ -77,6 +84,7 @@ import {
   resendSpaceInvitation,
   cancelSpaceInvitation,
   fetchSpaceDetail,
+  fetchSpaceAiUsage,
   fetchSpaceMembers,
   fetchSpaces,
   removeSpaceMember,
@@ -95,10 +103,9 @@ import {
   fetchTasks,
   updateTask
 } from "./api/tasks";
-import { createProjectKnowledge, deleteProjectKnowledge, fetchKnowledgeGraph, fetchProjectKnowledge, fetchProjectKnowledgeDetail, restoreProjectKnowledge, updateProjectKnowledge } from "./api/knowledge";
+import { fetchProjectKnowledge } from "./api/knowledge";
 import { fetchCalendarEvents } from "./api/calendar";
 import {
-  fetchMeetingDialogue,
   startMeetingTranscription,
   stopActiveMeetingTranscription,
   stopMeetingTranscription
@@ -111,14 +118,11 @@ import { fetchMeetingLiveKitToken } from "./api/live";
 import type {
   CalendarEvent as ProjectCalendarEvent,
   DomainTerm,
-  ProjectKnowledgeDetailResponse,
-  ProjectKnowledgeType,
   SpaceDetail,
   SpaceSummary,
+  SpaceAiUsageResponse,
   SpaceMembersResponse,
   ProjectKnowledgeItem,
-  KnowledgeGraphResponse,
-  KnowledgeGraphNode,
   MeetingDetailResponse,
   MeetingParticipantSummary,
   SpaceMemberSummary,
@@ -131,18 +135,6 @@ import type {
 
 // --- Components ---
 
-const GlossaryTerm = ({ children, definition }: { children: React.ReactNode, definition: string }) => {
-  return (
-    <span className="relative group inline-block cursor-help font-bold text-foreground border-b border-dashed border-foreground/40 hover:border-foreground transition-colors">
-      {children}
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-foreground text-background text-xs font-normal rounded-lg opacity-0 group-hover:opacity-100 transition-all translate-y-1 group-hover:translate-y-0 pointer-events-none z-50 text-left shadow-xl">
-        <span className="font-bold block mb-1 text-primary-foreground/90 text-[10px] uppercase tracking-wider">Project Term</span>
-        {definition}
-        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-foreground"></span>
-      </span>
-    </span>
-  );
-};
 
 function renderMarkdownInline(value: string, keyPrefix: string) {
   return value.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
@@ -455,18 +447,18 @@ function aiSourceLabel(source: AiSource) {
 
 function aiSourceTone(type: AiSource["type"]) {
   if (type === "projectKnowledge") {
-    return "bg-violet-50 text-violet-700 border-violet-200";
+    return "bg-[var(--app-knowledge-soft)] text-[var(--app-knowledge)] border-[color:color-mix(in_srgb,var(--app-knowledge)_30%,white)]";
   }
   if (type === "report" || type === "meetingSummary") {
-    return "bg-blue-50 text-blue-700 border-blue-200";
+    return "bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border-[color:color-mix(in_srgb,var(--app-accent)_24%,white)]";
   }
   if (type === "decision" || type === "actionItem") {
-    return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    return "bg-[var(--app-ai-soft)] text-[var(--app-ai)] border-[color:color-mix(in_srgb,var(--app-ai)_28%,white)]";
   }
   if (type === "glossary") {
-    return "bg-amber-50 text-amber-700 border-amber-200";
+    return "bg-[var(--app-highlight-soft)] text-[var(--app-highlight)] border-[color:color-mix(in_srgb,var(--app-highlight)_24%,white)]";
   }
-  return "bg-slate-100 text-slate-700 border-slate-200";
+  return "bg-[var(--app-surface-muted)] text-[var(--app-text)] border-[var(--app-line)]";
 }
 
 function unsupportedAiMessage(reason: string | null | undefined, scope: "meeting" | "project") {
@@ -493,63 +485,6 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-
-type ThemeMode = "light" | "dark";
-type AppLocale = "en" | "ko";
-type AppPreferences = {
-  theme: ThemeMode;
-  setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
-  locale: AppLocale;
-  setLocale: React.Dispatch<React.SetStateAction<AppLocale>>;
-};
-
-const AppPreferencesContext = createContext<AppPreferences | null>(null);
-const THEME_STORAGE_KEY = "meetingmind-theme";
-const LOCALE_STORAGE_KEY = "meetingmind-locale";
-
-function storedTheme(): ThemeMode {
-  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
-}
-
-function storedLocale(): AppLocale {
-  return window.localStorage.getItem(LOCALE_STORAGE_KEY) === "ko" ? "ko" : "en";
-}
-
-function useAppPreferences() {
-  const context = useContext(AppPreferencesContext);
-  if (!context) {
-    throw new Error("AppPreferencesContext is not available.");
-  }
-  return context;
-}
-
-function DisplayPreferences({ compact = false }: { compact?: boolean }) {
-  const { locale, setLocale, setTheme, theme } = useAppPreferences();
-  const korean = locale === "ko";
-  const nextThemeLabel = theme === "dark"
-    ? (korean ? "라이트 모드로 전환" : "Switch to light mode")
-    : (korean ? "다크 모드로 전환" : "Switch to dark mode");
-
-  return (
-    <div className={`flex items-center ${compact ? "gap-1" : "gap-2"}`}>
-      <AnimatedThemeToggler
-        dark={theme === "dark"}
-        label={nextThemeLabel}
-        onToggle={() => setTheme((current) => current === "dark" ? "light" : "dark")}
-      />
-      <button
-        aria-label={korean ? "Switch language to English" : "언어를 한국어로 전환"}
-        className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-        onClick={() => setLocale((current) => current === "ko" ? "en" : "ko")}
-        title={korean ? "Switch language to English" : "한국어로 전환"}
-        type="button"
-      >
-        <Languages className="h-3.5 w-3.5" />
-        {korean ? "KO" : "EN"}
-      </button>
-    </div>
-  );
-}
 
 function useAuthState() {
   const context = useContext(AuthContext);
@@ -742,15 +677,25 @@ const AppShell = () => {
   }, []);
 
   const openAi = (scope: "project" | "meeting" = "project", meetingId?: string) => {
-    if (scope === "meeting" && (!meetingId || meetingId !== selectedMeetingId)) {
-      setAiScope("project");
+    const isSameProjectPanel = isAIOpen && scope === "project" && aiScope === "project";
+    const isSameMeetingPanel = isAIOpen && scope === "meeting" && aiScope === "meeting" && !!meetingId && meetingId === selectedMeetingId;
+
+    if (isSameProjectPanel || isSameMeetingPanel) {
+      setIsAIOpen(false);
+      return;
+    }
+
+    if (scope === "meeting") {
+      if (!meetingId) {
+        return;
+      }
+      setSelectedMeetingId(meetingId);
+      setAiScope("meeting");
       setIsAIOpen(true);
       return;
     }
-    setAiScope(scope);
-    if (meetingId) {
-      setSelectedMeetingId(meetingId);
-    }
+
+    setAiScope("project");
     setIsAIOpen(true);
   };
 
@@ -901,10 +846,15 @@ const AppShell = () => {
                   title={korean ? "워크스페이스 전환" : "Switch workspace"}
                   type="button"
                 >
-                <div className="w-6 h-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold shrink-0">{projectInitial}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold truncate leading-none">{projectName}</div>
-                </div>
+                  <ProfileAvatar
+                    alt={projectName}
+                    className="h-7 w-7 shrink-0 rounded-md text-xs font-bold"
+                    initials={projectInitial}
+                    pictureUrl={spaceDetail?.imageUrl}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold truncate leading-none">{projectName}</div>
+                  </div>
                   <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${workspaceMenuOpen ? "rotate-180" : ""}`} />
                 </button>
                 {workspaceMenuOpen ? (
@@ -927,7 +877,12 @@ const AppShell = () => {
                           role="menuitem"
                           type="button"
                         >
-                          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-semibold ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{space.name.charAt(0).toUpperCase() || "P"}</span>
+                          <ProfileAvatar
+                            alt={space.name}
+                            className={`h-7 w-7 shrink-0 rounded text-xs font-semibold ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+                            initials={space.name.charAt(0).toUpperCase() || "P"}
+                            pictureUrl={space.imageUrl}
+                          />
                           <span className="min-w-0 flex-1 truncate font-medium">{space.name}</span>
                           <span className="shrink-0 text-xs text-muted-foreground">{space.role}</span>
                         </button>
@@ -1045,9 +1000,12 @@ const AppShell = () => {
             className={`flex items-center gap-3 p-2 rounded-md hover:bg-muted cursor-pointer transition-colors ${!isSidebarOpen && 'justify-center w-full'}`}
             title="Account Settings"
           >
-            <div className="w-7 h-7 rounded bg-muted-foreground/20 flex items-center justify-center text-xs font-medium shrink-0">
-              {sessionInitials(session)}
-            </div>
+            <ProfileAvatar
+              alt={session?.user.displayName ?? "MeetingMind User"}
+              className="h-7 w-7 shrink-0 rounded-md text-xs font-medium"
+              initials={sessionInitials(session)}
+              pictureUrl={session?.user.pictureUrl}
+            />
             <div className={`flex-1 overflow-hidden transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 hidden'}`}>
               <div className="text-sm font-medium truncate">{session?.user.displayName ?? "MeetingMind User"}</div>
             </div>
@@ -1143,7 +1101,7 @@ const AppShell = () => {
           {isAIOpen && (
             <div
               style={{ width: `min(100vw, ${aiWidth}px)` }}
-              className="border-l border-border bg-card shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)] flex flex-col shrink-0 relative"
+              className="absolute inset-y-0 right-0 z-30 border-l border-border bg-card shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)] flex flex-col"
             >
               {/* Drag Handle */}
               <div
@@ -1240,37 +1198,6 @@ const AppShell = () => {
 
 // --- Pages ---
 
-// 1. Landing Page (/)
-const LandingPage = () => {
-  const navigate = useNavigate();
-  const { locale } = useAppPreferences();
-  const korean = locale === "ko";
-  return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center text-center p-8 relative">
-      <div className="absolute right-6 top-6"><DisplayPreferences /></div>
-      <div className="max-w-3xl space-y-6">
-        <div className="w-16 h-16 bg-foreground text-background rounded-xl flex items-center justify-center mx-auto mb-8">
-          <span className="text-2xl font-bold">M</span>
-        </div>
-        <h1 className="text-5xl font-bold tracking-tight text-foreground">
-          {korean ? <>회의가 끝난 뒤에도,<br />일이 이어지도록.</> : <>Meetings shouldn't be the end.<br />They should be the beginning.</>}
-        </h1>
-        <p className="text-xl text-muted-foreground">
-          {korean ? "MeetingMind는 회의를 전사, 태스크, 프로젝트 지식, AI로 연결합니다." : "MeetingMind seamlessly connects your meetings to transcripts, tasks, knowledge bases, and AI. Experience the continuous collaboration cycle."}
-        </p>
-        <div className="pt-8">
-          <button
-            onClick={() => navigate('/spaces')}
-            className="bg-foreground text-background px-8 py-3 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors inline-flex items-center gap-2"
-          >
-            {korean ? "워크스페이스로 이동" : "Go to Workspaces"} <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // 2. Workspace Home (/spaces)
 const WorkspaceHome = () => {
   const { session, setSession } = useAuthState();
@@ -1283,6 +1210,7 @@ const WorkspaceHome = () => {
   const [spaces, setSpaces] = useState<Array<{
     id: string;
     name: string;
+    imageUrl: string | null;
     role: string;
     meetings: number;
     members: number | null;
@@ -1321,6 +1249,7 @@ const WorkspaceHome = () => {
           return {
             id: space.id,
             name: space.name,
+            imageUrl: space.imageUrl,
             role: space.role,
             meetings: space.meetingCount,
             members: membersResult.status === "fulfilled" ? membersResult.value.members.length : null,
@@ -1412,6 +1341,7 @@ const WorkspaceHome = () => {
         {
           id: created.id,
           name: created.name,
+          imageUrl: null,
           role: created.role,
           meetings: 0,
           members: 1,
@@ -1579,9 +1509,12 @@ const WorkspaceHome = () => {
                 className="bg-card border border-border rounded-lg p-5 hover:border-foreground/30 hover:shadow-sm transition-all cursor-pointer group"
               >
                 <div className="flex items-start justify-between mb-4">
-                  <div className="w-10 h-10 rounded bg-muted flex items-center justify-center text-foreground font-bold group-hover:bg-foreground group-hover:text-background transition-colors">
-                    {space.name.charAt(0)}
-                  </div>
+                  <ProfileAvatar
+                    alt={space.name}
+                    className="h-10 w-10 rounded-md text-sm font-bold shrink-0"
+                    initials={space.name.charAt(0).toUpperCase() || "P"}
+                    pictureUrl={space.imageUrl}
+                  />
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wider">
                     {space.role}
                   </span>
@@ -1683,12 +1616,13 @@ const ProjectHome = () => {
   const { session } = useAuthState();
   const { spaceDetail, spaceLoading, spaceError, reloadSpace } = useOutletContext<ShellOutletContext>();
   const [members, setMembers] = useState<SpaceMembersResponse["members"]>([]);
-  const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
+  const [_knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
   const [instantMeetingPending, setInstantMeetingPending] = useState(false);
   const [instantMeetingError, setInstantMeetingError] = useState<string | null>(null);
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
   const [taskCompletionError, setTaskCompletionError] = useState<string | null>(null);
   const [taskPage, setTaskPage] = useState(0);
+  const [aiUsage, setAiUsage] = useState<SpaceAiUsageResponse | null>(null);
   const korean = locale === "ko";
 
   useEffect(() => {
@@ -1697,6 +1631,7 @@ const ProjectHome = () => {
     if (!session || !spaceId || !spaceDetail) {
       setMembers([]);
       setKnowledgeItems([]);
+      setAiUsage(null);
       return () => {
         active = false;
       };
@@ -1704,15 +1639,18 @@ const ProjectHome = () => {
 
     void Promise.allSettled([
       fetchSpaceMembers(session, spaceId),
-      fetchProjectKnowledge(session, spaceId)
+      fetchProjectKnowledge(session, spaceId),
+      fetchSpaceAiUsage(session, spaceId, "month")
     ]).then((results) => {
       if (!active) {
         return;
       }
 
-      const [membersResult, knowledgeResult] = results;
+      const [membersResult, knowledgeResult, aiUsageResult] = results;
       setMembers(membersResult.status === "fulfilled" ? membersResult.value.members : []);
       setKnowledgeItems(knowledgeResult.status === "fulfilled" ? knowledgeResult.value.items : []);
+      // 사용량 조회가 실패해도 개요 화면 전체를 깨뜨리지 않는다. 카드만 숨긴다.
+      setAiUsage(aiUsageResult.status === "fulfilled" ? aiUsageResult.value : null);
     });
 
     return () => {
@@ -1778,8 +1716,8 @@ const ProjectHome = () => {
     });
   const completedTasks = myTasks.filter((task) => task.status === "DONE").length;
   const visibleTasks = myTasks.slice(taskPage * 5, taskPage * 5 + 5);
-  const knowledgeIndexedCount = knowledgeItems.filter((item) => item.embeddingStatus === "COMPLETED").length;
-  const knowledgeIndexedPercent = knowledgeItems.length > 0 ? Math.round((knowledgeIndexedCount / knowledgeItems.length) * 100) : 0;
+  const confirmedReportsCount = spaceDetail.recentReports.filter((report) => report.status === "CONFIRMED").length;
+  const confirmedReportsProgressPercent = Math.min(100, confirmedReportsCount * 20);
   const meetingProgressPercent = Math.min(100, spaceDetail.upcomingMeetings.length * 20);
   const canManageMeetings = spaceDetail.role === "OWNER" || spaceDetail.role === "ADMIN";
 
@@ -1998,6 +1936,64 @@ const ProjectHome = () => {
               )}
             </div>
           </div>
+
+          {/* AI Usage (T439.1). quota는 표시 전용이며 초과해도 AI 호출을 막지 않는다. */}
+          {aiUsage ? (
+            <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
+              <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+                <h3 className="font-semibold">{korean ? "이번 달 AI 사용량" : "AI Usage This Month"}</h3>
+                <span className="text-xs text-muted-foreground">
+                  {korean ? `요청 ${aiUsage.totalRequests}건` : `${aiUsage.totalRequests} requests`}
+                </span>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-2xl font-semibold tabular-nums">
+                    {(aiUsage.totalInputTokens + aiUsage.totalOutputTokens).toLocaleString()}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {korean ? "총 토큰" : "total tokens"}
+                    {aiUsage.limit !== null ? ` / ${aiUsage.limit.toLocaleString()}` : ""}
+                  </span>
+                </div>
+                {aiUsage.usagePercent !== null ? (
+                  <div className="space-y-1">
+                    <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${aiUsage.usagePercent >= 100 ? "bg-amber-500" : "bg-primary"}`}
+                        style={{ width: `${Math.min(100, aiUsage.usagePercent)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {korean ? `한도의 ${aiUsage.usagePercent}%` : `${aiUsage.usagePercent}% of quota`}
+                      {aiUsage.usagePercent >= 100
+                        ? korean
+                          ? " · 한도를 넘었지만 AI 사용은 계속됩니다"
+                          : " · over quota, AI remains available"
+                        : ""}
+                    </p>
+                  </div>
+                ) : null}
+                {aiUsage.features.filter((feature) => feature.requests > 0).length > 0 ? (
+                  <ul className="space-y-1 pt-1">
+                    {aiUsage.features.filter((feature) => feature.requests > 0).map((feature) => (
+                      <li className="flex items-center justify-between text-xs" key={feature.feature}>
+                        <span className="text-muted-foreground truncate">{feature.feature}</span>
+                        <span className="tabular-nums shrink-0">
+                          {(feature.inputTokens + feature.outputTokens).toLocaleString()}
+                          <span className="text-muted-foreground"> · {feature.requests}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {korean ? "아직 AI 사용 기록이 없습니다." : "No AI usage recorded yet."}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Side Column */}
@@ -2017,11 +2013,11 @@ const ProjectHome = () => {
               </div>
               <div>
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-muted-foreground">{korean ? "지식 색인" : "Knowledge Indexed"}</span>
-                  <span className="font-medium">{knowledgeIndexedPercent}%</span>
+                  <span className="text-muted-foreground">{korean ? "확정 회의록" : "Confirmed Reports"}</span>
+                  <span className="font-medium">{confirmedReportsCount}</span>
                 </div>
                 <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-[color:var(--app-knowledge)] rounded-full" style={{ width: `${knowledgeIndexedPercent}%` }}></div>
+                  <div className="h-full bg-[color:var(--app-accent)] rounded-full" style={{ width: `${confirmedReportsProgressPercent}%` }}></div>
                 </div>
               </div>
               <div>
@@ -2253,6 +2249,21 @@ const MeetingList = () => {
     }
   }
 
+  async function handleCancelMeeting(meeting: MeetingSummary) {
+    if (!session || !canManageMeeting(meeting) || meeting.status !== "SCHEDULED" || deletePendingMeetingId) return;
+    if (!window.confirm(`'${meeting.title}' 회의를 취소하시겠습니까?`)) return;
+    setDeletePendingMeetingId(meeting.id);
+    try {
+      await updateMeeting(session, meeting.id, { status: "CANCELED" });
+      setOpenMeetingMenu(null);
+      await loadMeetings();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error("회의를 취소하지 못했습니다."));
+    } finally {
+      setDeletePendingMeetingId(null);
+    }
+  }
+
   function openEditMeeting(meeting: MeetingSummary) {
     setEditingMeeting(meeting);
     setEditTitle(meeting.title);
@@ -2306,18 +2317,18 @@ const MeetingList = () => {
 
   function meetingStatusStyle(status: string) {
     if (status === "SCHEDULED") {
-      return "bg-blue-50 text-blue-700 border-blue-200";
+      return "bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border-[color:color-mix(in_srgb,var(--app-accent)_24%,white)]";
     }
     if (status === "IN_PROGRESS") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      return "bg-[var(--app-success-soft)] text-[var(--app-success)] border-[color:color-mix(in_srgb,var(--app-success)_28%,white)]";
     }
     if (status === "ENDED") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      return "bg-[var(--app-ai-soft)] text-[var(--app-ai)] border-[color:color-mix(in_srgb,var(--app-ai)_28%,white)]";
     }
     if (status === "CANCELED") {
-      return "bg-slate-100 text-slate-600 border-slate-200";
+      return "bg-[var(--app-danger-soft)] text-[var(--app-danger)] border-[color:color-mix(in_srgb,var(--app-danger)_24%,white)]";
     }
-    return "bg-amber-50 text-amber-700 border-amber-200";
+    return "bg-[var(--app-warning-soft)] text-[var(--app-warning)] border-[color:color-mix(in_srgb,var(--app-warning)_26%,white)]";
   }
 
   function meetingDateTimeLabel(meeting: MeetingSummary) {
@@ -2556,6 +2567,16 @@ const MeetingList = () => {
                         {openMeetingMenu === meeting.id ? (
                           <div className="absolute right-0 top-full z-50 mt-1 w-32 rounded-md border border-border bg-card p-1 text-left shadow-lg">
                             <button className="w-full rounded px-2 py-1.5 text-xs hover:bg-muted" onClick={() => openEditMeeting(meeting)} type="button">Edit</button>
+                            {meeting.status === "SCHEDULED" ? (
+                              <button
+                                className="w-full rounded px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+                                disabled={deletePendingMeetingId === meeting.id}
+                                onClick={() => void handleCancelMeeting(meeting)}
+                                type="button"
+                              >
+                                {deletePendingMeetingId === meeting.id ? "Canceling..." : "Cancel meeting"}
+                              </button>
+                            ) : null}
                             <button className="w-full rounded px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deletePendingMeetingId === meeting.id} onClick={() => void handleDeleteMeeting(meeting)} type="button">{deletePendingMeetingId === meeting.id ? "Deleting..." : "Delete"}</button>
                           </div>
                         ) : null}
@@ -2690,7 +2711,6 @@ const MeetingList = () => {
 // 5. Meeting Context Layout (/spaces/:spaceId/meetings/:meetingId/*)
 const MeetingContextLayout = () => {
   const { spaceId, meetingId } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
   const { session } = useAuthState();
   const { locale } = useAppPreferences();
@@ -2757,18 +2777,18 @@ const MeetingContextLayout = () => {
 
   function meetingStatusStyle(status: string) {
     if (status === "SCHEDULED") {
-      return "bg-blue-50 text-blue-700 border-blue-200";
+      return "bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border-[color:color-mix(in_srgb,var(--app-accent)_24%,white)]";
     }
     if (status === "IN_PROGRESS") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      return "bg-[var(--app-success-soft)] text-[var(--app-success)] border-[color:color-mix(in_srgb,var(--app-success)_28%,white)]";
     }
     if (status === "ENDED") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      return "bg-[var(--app-ai-soft)] text-[var(--app-ai)] border-[color:color-mix(in_srgb,var(--app-ai)_28%,white)]";
     }
     if (status === "CANCELED") {
-      return "bg-slate-100 text-slate-600 border-slate-200";
+      return "bg-[var(--app-danger-soft)] text-[var(--app-danger)] border-[color:color-mix(in_srgb,var(--app-danger)_24%,white)]";
     }
-    return "bg-amber-50 text-amber-700 border-amber-200";
+    return "bg-[var(--app-warning-soft)] text-[var(--app-warning)] border-[color:color-mix(in_srgb,var(--app-warning)_26%,white)]";
   }
 
   function timeRangeLabel() {
@@ -3096,59 +3116,12 @@ const MeetingTranscript = () => {
   const { spaceId = "", meetingId = "" } = useParams();
   const { meetingDetail } = useOutletContext<MeetingOutletContext>();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [dialogueStatus, setDialogueStatus] = useState<"PROCESSING" | "COMPLETED" | "FAILED" | null>(null);
-  const [segments, setSegments] = useState<Array<{
-    segmentId: string;
-    speakerId: string;
-    speakerLabel: string;
-    speakerName: string | null;
-    startMs: number;
-    endMs: number;
-    text: string;
-  }>>([]);
-  const [partials, setPartials] = useState<Array<{
-    speakerLabel: string;
-    speakerName: string | null;
-    text: string;
-  }>>([]);
 
-  const loadTranscript = React.useCallback(async () => {
-    if (!session || !meetingId) {
-      setSegments([]);
-      setPartials([]);
-      setDialogueStatus(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    setError(null);
-    try {
-      const response = await fetchMeetingDialogue(session, meetingId);
-      setDialogueStatus(response.status);
-      setSegments(response.rows);
-      setPartials(response.partials);
-    } catch (cause) {
-      setSegments([]);
-      setPartials([]);
-      setDialogueStatus(null);
-      setError(cause instanceof Error ? cause : new Error("전사를 불러오지 못했습니다."));
-    } finally {
-      setLoading(false);
-    }
-  }, [meetingId, session]);
-
-  useEffect(() => {
-    setLoading(true);
-    void loadTranscript();
-    const intervalId = window.setInterval(() => {
-      void loadTranscript();
-    }, 2500);
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [loadTranscript]);
+  const dialogueQuery = useMeetingDialogueQuery(meetingId, { enabled: Boolean(session) });
+  const loading = dialogueQuery.isLoading;
+  const error = dialogueQuery.error instanceof Error ? dialogueQuery.error : null;
+  const dialogueStatus = dialogueQuery.status;
+  const loadTranscript = dialogueQuery.refetch;
 
   function formatTime(startMs: number) {
     const totalSeconds = Math.max(0, Math.floor(startMs / 1000));
@@ -3170,30 +3143,8 @@ const MeetingTranscript = () => {
     return tones[hash % tones.length];
   }
 
-  const entries = [
-    ...segments.map((segment) => ({
-      key: segment.segmentId,
-      speakerId: segment.speakerId,
-      speakerName: segment.speakerName ?? segment.speakerLabel,
-      startMs: segment.startMs,
-      text: segment.text,
-      isPartial: false
-    })),
-    ...partials.map((partial, index) => ({
-      key: `partial-${partial.speakerLabel}-${index}`,
-      speakerId: partial.speakerLabel,
-      speakerName: partial.speakerName ?? partial.speakerLabel,
-      startMs: 0,
-      text: partial.text,
-      isPartial: true
-    }))
-  ];
-
-  const filtered = entries.filter((entry) =>
-    search === ""
-    || entry.text.toLowerCase().includes(search.toLowerCase())
-    || entry.speakerName.toLowerCase().includes(search.toLowerCase())
-  );
+  const entries = dialogueQuery.entries;
+  const filtered = filterTranscriptEntries(entries, search);
 
   return (
     <div className="space-y-2">
@@ -3256,7 +3207,7 @@ const MeetingTranscript = () => {
         />
       ) : null}
 
-      {!loading && !error && dialogueStatus === "COMPLETED" && filtered.length === 0 && segments.length === 0 && partials.length === 0 ? (
+      {!loading && !error && dialogueStatus === "COMPLETED" && entries.length === 0 ? (
         <EmptyState
           desc="No transcript segments were saved for this meeting."
           icon={<FileText className="w-5 h-5" />}
@@ -3264,7 +3215,7 @@ const MeetingTranscript = () => {
         />
       ) : null}
 
-      {!loading && !error && filtered.length === 0 && (segments.length > 0 || partials.length > 0) ? (
+      {!loading && !error && filtered.length === 0 && entries.length > 0 ? (
         <EmptyState
           desc="Try a different speaker or keyword."
           icon={<Search className="w-5 h-5" />}
@@ -3364,12 +3315,12 @@ const MeetingTaskCandidates = () => {
 
   function statusBadge(status: "CANDIDATE" | "CONFIRMED" | "DISMISSED") {
     if (status === "CONFIRMED") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      return "bg-[var(--app-success-soft)] text-[var(--app-success)] border-[color:color-mix(in_srgb,var(--app-success)_28%,white)]";
     }
     if (status === "DISMISSED") {
-      return "bg-slate-100 text-slate-600 border-slate-200";
+      return "bg-[var(--app-surface-muted)] text-[var(--app-muted)] border-[var(--app-line)]";
     }
-    return "bg-blue-50 text-blue-700 border-blue-200";
+    return "bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border-[color:color-mix(in_srgb,var(--app-accent)_24%,white)]";
   }
 
   function statusLabel(status: "CANDIDATE" | "CONFIRMED" | "DISMISSED") {
@@ -3906,9 +3857,9 @@ const ProjectTasks = () => {
   }
 
   const priorityStyle: Record<TaskCardPriority, string> = {
-    HIGH: "bg-red-50 text-red-600 border-red-200",
-    MEDIUM: "bg-amber-50 text-amber-600 border-amber-200",
-    LOW: "bg-slate-50 text-slate-500 border-slate-200"
+    HIGH: "bg-[var(--app-danger-soft)] text-[var(--app-danger)] border-[color:color-mix(in_srgb,var(--app-danger)_24%,white)]",
+    MEDIUM: "bg-[var(--app-warning-soft)] text-[var(--app-warning)] border-[color:color-mix(in_srgb,var(--app-warning)_26%,white)]",
+    LOW: "bg-[var(--app-surface-muted)] text-[var(--app-muted)] border-[var(--app-line)]"
   };
 
   const memberLookup = new Map(
@@ -3924,10 +3875,10 @@ const ProjectTasks = () => {
 
   const normalizedTasks = tasks.filter((task) => !showOpenOnly || task.status !== "DONE");
   const columns = [
-    { id: "todo", label: "To Do", color: "text-slate-600", dot: "bg-slate-400", status: "TODO" as TaskCardStatus },
-    { id: "inprogress", label: "In Progress", color: "text-blue-600", dot: "bg-blue-500", status: "IN_PROGRESS" as TaskCardStatus },
-    { id: "review", label: "In Review", color: "text-purple-600", dot: "bg-purple-500", status: "IN_REVIEW" as TaskCardStatus },
-    { id: "done", label: "Done", color: "text-emerald-600", dot: "bg-emerald-500", status: "DONE" as TaskCardStatus }
+    { id: "todo", label: "To Do", color: "text-[var(--app-muted)]", dot: "bg-[var(--app-line-strong)]", status: "TODO" as TaskCardStatus },
+    { id: "inprogress", label: "In Progress", color: "text-[var(--app-accent)]", dot: "bg-[var(--app-accent)]", status: "IN_PROGRESS" as TaskCardStatus },
+    { id: "review", label: "In Review", color: "text-[var(--app-ai)]", dot: "bg-[var(--app-ai)]", status: "IN_REVIEW" as TaskCardStatus },
+    { id: "done", label: "Done", color: "text-[var(--app-success)]", dot: "bg-[var(--app-success)]", status: "DONE" as TaskCardStatus }
   ];
 
   const tasksByColumn = columns.map((column) => ({
@@ -4231,1548 +4182,6 @@ const ProjectTasks = () => {
   );
 };
 
-// 7. Knowledge Base — Graph View
-type KnowledgeNodeType = "hub" | ProjectKnowledgeItem["type"] | "glossary" | "action" | "summary" | "transcript";
-type KNode = {
-  id: string;
-  label: string;
-  type: KnowledgeNodeType;
-  x: number;
-  y: number;
-  desc: string;
-  connections: string[];
-  sourceMeetingId: string | null;
-  sourceKind: "hub" | "meeting" | KnowledgeGraphNode["sourceType"] | "glossary";
-  embeddingStatus?: ProjectKnowledgeItem["embeddingStatus"];
-  updatedAt?: string;
-  knowledgeId?: string;
-};
-type KEdge = { from: string; to: string; similarity?: number };
-type KFolder = { id: string; label: string; nodeIds: string[] };
-
-const NODE_STYLE: Record<KnowledgeNodeType, { fill: string; stroke: string; label: string; dot: string }> = {
-  hub: { fill: "var(--app-text-strong)", stroke: "var(--app-text-strong)", label: "Hub", dot: "bg-[var(--app-text-strong)]" },
-  report: { fill: "var(--app-accent)", stroke: "var(--app-accent)", label: "Report", dot: "bg-[var(--app-accent)]" },
-  decision: { fill: "var(--app-ai)", stroke: "var(--app-ai)", label: "Decision", dot: "bg-[var(--app-ai)]" },
-  manual: { fill: "var(--app-success)", stroke: "var(--app-success)", label: "Manual", dot: "bg-[var(--app-success)]" },
-  external: { fill: "var(--app-orange)", stroke: "var(--app-orange)", label: "External", dot: "bg-[var(--app-orange)]" },
-  glossary: { fill: "var(--app-knowledge)", stroke: "var(--app-knowledge)", label: "Glossary", dot: "bg-[var(--app-knowledge)]" },
-  action: { fill: "var(--app-action)", stroke: "var(--app-action)", label: "Action", dot: "bg-[var(--app-action)]" },
-  summary: { fill: "var(--app-knowledge)", stroke: "var(--app-knowledge)", label: "Summary", dot: "bg-[var(--app-knowledge)]" },
-  transcript: { fill: "var(--app-subtle)", stroke: "var(--app-subtle)", label: "Transcript", dot: "bg-[var(--app-subtle)]" }
-};
-
-const KNOWLEDGE_TYPE_LABELS: Record<ProjectKnowledgeItem["type"], string> = {
-  report: "Report",
-  decision: "Decision",
-  manual: "Manual",
-  external: "External"
-};
-
-const KNOWLEDGE_NODE_LABELS: Record<KnowledgeNodeType, string> = {
-  hub: "Hub",
-  report: "Report",
-  decision: "Decision",
-  manual: "Manual",
-  external: "External",
-  glossary: "Glossary",
-  action: "Action",
-  summary: "Summary",
-  transcript: "Transcript"
-};
-
-const KNOWLEDGE_STATUS_LABELS: Record<ProjectKnowledgeItem["embeddingStatus"], string> = {
-  PENDING: "Pending",
-  PROCESSING: "Processing",
-  COMPLETED: "Search Ready",
-  FAILED: "Failed"
-};
-
-const FolderIcon = ({ open }: { open: boolean }) => (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="shrink-0 text-muted-foreground">
-    {open
-      ? <path d="M1 4.5C1 3.67 1.67 3 2.5 3H5.38L6.5 4.5H11.5C12.33 4.5 13 5.17 13 6V10.5C13 11.33 12.33 12 11.5 12H2.5C1.67 12 1 11.33 1 10.5V4.5Z" fill="currentColor" opacity="0.15" stroke="currentColor" strokeWidth="1"/>
-      : <path d="M1 4.5C1 3.67 1.67 3 2.5 3H5.38L6.5 4.5H11.5C12.33 4.5 13 5.17 13 6V10.5C13 11.33 12.33 12 11.5 12H2.5C1.67 12 1 11.33 1 10.5V4.5Z" stroke="currentColor" strokeWidth="1" fill="none"/>
-    }
-  </svg>
-);
-
-const FileIcon = ({ type }: { type: KnowledgeNodeType }) => {
-  const colors: Record<KnowledgeNodeType, string> = {
-    hub: "text-foreground",
-    report: "text-[color:var(--app-accent)]",
-    decision: "text-[color:var(--app-ai)]",
-    manual: "text-[color:var(--app-success)]",
-    external: "text-[color:var(--app-orange)]",
-    glossary: "text-[color:var(--app-knowledge)]",
-    action: "text-[color:var(--app-action)]",
-    summary: "text-[color:var(--app-knowledge)]",
-    transcript: "text-[color:var(--app-muted)]"
-  };
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`shrink-0 ${colors[type]}`}>
-      <rect x="1.5" y="0.5" width="7" height="9" rx="1" stroke="currentColor" strokeWidth="1" fill="currentColor" fillOpacity="0.1"/>
-      <path d="M8.5 0.5L10.5 2.5V10.5C10.5 11.05 10.05 11.5 9.5 11.5H2.5" stroke="currentColor" strokeWidth="1" fill="none"/>
-    </svg>
-  );
-};
-
-function wrapKnowledgeGraphLabel(label: string, maxLength = 18): string[] {
-  if (label.length <= maxLength) return [label];
-  const first = label.slice(0, maxLength - 1);
-  const remainder = label.slice(maxLength - 1);
-  return [`${first}...`, remainder.slice(0, maxLength - 1) + (remainder.length > maxLength - 1 ? "..." : "")];
-}
-
-const KNOWLEDGE_GRAPH_BOUNDS = { minX: 48, maxX: 952, minY: 48, maxY: 652 };
-const KNOWLEDGE_GRAPH_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-
-function stableKnowledgeGraphOffset(id: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < id.length; index += 1) {
-    hash ^= id.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 4294967296;
-}
-
-function clampKnowledgeGraphPosition(x: number, y: number) {
-  return {
-    x: Math.min(KNOWLEDGE_GRAPH_BOUNDS.maxX, Math.max(KNOWLEDGE_GRAPH_BOUNDS.minX, x)),
-    y: Math.min(KNOWLEDGE_GRAPH_BOUNDS.maxY, Math.max(KNOWLEDGE_GRAPH_BOUNDS.minY, y))
-  };
-}
-
-function layoutKnowledgeGraphNodes(nodes: KNode[], grouped?: Map<string, KNode[]>): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>();
-  const hub = nodes.find((node) => node.type === "hub");
-  if (hub) positions.set(hub.id, { x: 500, y: 350 });
-
-  const groups = grouped ? Array.from(grouped.values()).filter((members) => members.length > 0) : [nodes.filter((node) => node.type !== "hub")];
-  const orderedGroups = groups
-    .map((members) => [...members].sort((left, right) => left.id.localeCompare(right.id)))
-    .sort((left, right) => left[0].id.localeCompare(right[0].id));
-  const groupCount = orderedGroups.length;
-
-  orderedGroups.forEach((members, groupIndex) => {
-    const groupAngle = groupIndex * (Math.PI * 2 / Math.max(groupCount, 1)) - Math.PI / 2;
-    const groupRadius = grouped ? Math.min(285, 190 + Math.sqrt(groupCount) * 28) : 0;
-    const center = grouped
-      ? { x: 500 + Math.cos(groupAngle) * groupRadius, y: 350 + Math.sin(groupAngle) * groupRadius * 0.72 }
-      : { x: 500, y: 350 };
-    const ringCapacity = Math.max(1, Math.ceil(Math.sqrt(members.length)));
-    members.forEach((node, index) => {
-      const ring = Math.floor(index / ringCapacity);
-      const indexInRing = index % ringCapacity;
-      const ringCount = Math.min(ringCapacity, members.length - ring * ringCapacity);
-      const angle = indexInRing * (Math.PI * 2 / Math.max(ringCount, 1)) + stableKnowledgeGraphOffset(node.id) * 0.35;
-      const radius = grouped ? 78 + ring * 88 : 125 + Math.sqrt(index + 1) * 70;
-      const position = clampKnowledgeGraphPosition(
-        center.x + Math.cos(grouped ? angle : index * KNOWLEDGE_GRAPH_GOLDEN_ANGLE) * radius,
-        center.y + Math.sin(grouped ? angle : index * KNOWLEDGE_GRAPH_GOLDEN_ANGLE) * radius * 0.72
-      );
-      positions.set(node.id, position);
-    });
-  });
-
-  return positions;
-}
-
-function measureKnowledgeGraphLayout(nodes: KNode[], edges: KEdge[]) {
-  const radiusFor = (node: KNode) => node.type === "hub" ? 32 : 23;
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  let overlapCount = 0;
-  let outOfBoundsCount = 0;
-  for (let index = 0; index < nodes.length; index += 1) {
-    const node = nodes[index];
-    const estimatedLabelWidth = Math.min(180, Math.max(44, node.label.length * 6.2));
-    if (node.x - estimatedLabelWidth / 2 < KNOWLEDGE_GRAPH_BOUNDS.minX || node.x + estimatedLabelWidth / 2 > KNOWLEDGE_GRAPH_BOUNDS.maxX
-      || node.y - radiusFor(node) < KNOWLEDGE_GRAPH_BOUNDS.minY || node.y + radiusFor(node) > KNOWLEDGE_GRAPH_BOUNDS.maxY) {
-      outOfBoundsCount += 1;
-    }
-    for (let otherIndex = index + 1; otherIndex < nodes.length; otherIndex += 1) {
-      const other = nodes[otherIndex];
-      const distance = Math.hypot(node.x - other.x, node.y - other.y);
-      if (distance < radiusFor(node) + radiusFor(other) + 28) overlapCount += 1;
-    }
-  }
-  const lengths = edges.map((edge) => {
-    const from = nodeById.get(edge.from);
-    const to = nodeById.get(edge.to);
-    return from && to ? Math.hypot(from.x - to.x, from.y - to.y) : 0;
-  }).filter((length) => length > 0);
-  return {
-    nodeCount: nodes.length,
-    edgeCount: edges.length,
-    averageEdgeLength: lengths.length ? lengths.reduce((sum, length) => sum + length, 0) / lengths.length : 0,
-    maxEdgeLength: lengths.length ? Math.max(...lengths) : 0,
-    overlapCount,
-    outOfBoundsCount
-  };
-}
-
-function buildKnowledgeNodes(
-  items: ProjectKnowledgeItem[],
-  graph: KnowledgeGraphResponse | null,
-  projectName: string,
-  terms: DomainTerm[]
-): KNode[] {
-  const hubId = "hub";
-  if (graph) {
-    const itemById = new Map(items.map((item) => [item.id, item]));
-    const graphNodes = graph.nodes?.length ? graph.nodes : graph.clusters.flatMap((cluster) => cluster.nodes);
-    const connectedIds = new Map<string, string[]>();
-    graph.edges.forEach((edge) => {
-      connectedIds.set(edge.from, [...(connectedIds.get(edge.from) ?? []), edge.to]);
-      connectedIds.set(edge.to, [...(connectedIds.get(edge.to) ?? []), edge.from]);
-    });
-    const itemNodes = graphNodes.map((node, index) => {
-      const ring = Math.floor(index / 8);
-      const indexInRing = index % 8;
-      const nodesInRing = Math.min(8, graphNodes.length - ring * 8);
-      const angle = (Math.PI * 2 * indexInRing) / Math.max(nodesInRing, 1) - Math.PI / 2;
-      const radius = 180 + ring * 110;
-      const knowledgeId = node.sourceType === "projectKnowledge" ? node.id.replace(/^knowledge:/, "") : undefined;
-      const knowledge = knowledgeId ? itemById.get(knowledgeId) : undefined;
-      const nodeType: KnowledgeNodeType = node.nodeType === "DECISION" ? "decision"
-        : node.nodeType === "ACTION" ? "action"
-          : node.nodeType === "PROJECT_KNOWLEDGE" ? (knowledge?.type ?? "manual")
-            : node.nodeType === "MEETING" ? "summary"
-              : knowledge?.type
-        ?? (node.sourceType === "actionItem" ? "action"
-          : node.sourceType === "decision" ? "decision"
-            : node.sourceType === "glossary" ? "glossary"
-              : node.sourceType === "meetingSummary" ? "summary"
-                : node.sourceType === "transcript" ? "transcript"
-                  : "report");
-      return {
-        id: node.id,
-        label: node.title,
-        type: nodeType,
-        x: 500 + Math.cos(angle) * radius,
-        y: 300 + Math.sin(angle) * radius,
-        desc: knowledge?.contentPreview ?? `${NODE_STYLE[nodeType].label} source indexed for this project.`,
-        connections: connectedIds.get(node.id) ?? [],
-        sourceMeetingId: node.sourceMeetingId,
-        sourceKind: node.sourceType,
-        embeddingStatus: node.embeddingStatus,
-        updatedAt: knowledge?.updatedAt,
-        knowledgeId
-      } satisfies KNode;
-    });
-    const termNodes = terms.map((term, index) => {
-      const angle = (Math.PI * 2 * index) / Math.max(terms.length, 1) - Math.PI / 2;
-      const connections = graphNodes
-        .filter((node) => node.title.toLowerCase().includes(term.term.toLowerCase()))
-        .map((node) => node.id);
-      return {
-        id: `term:${term.id}`,
-        label: term.term,
-        type: "glossary" as const,
-        x: 500 + Math.cos(angle) * 330,
-        y: 300 + Math.sin(angle) * 220,
-        desc: term.definition,
-        connections: connections.length ? connections : [hubId],
-        sourceMeetingId: null,
-        sourceKind: "glossary" as const,
-        updatedAt: term.updatedAt
-      } satisfies KNode;
-    });
-    return [
-      {
-        id: hubId,
-        label: projectName,
-        type: "hub",
-        x: 500,
-        y: 300,
-        desc: `Semantic clusters for ${projectName}.`,
-        connections: [],
-        sourceMeetingId: null,
-        sourceKind: "hub"
-      },
-      ...itemNodes,
-      ...termNodes
-    ];
-  }
-  const itemNodes = items.map((item, index) => {
-    const ring = Math.floor(index / 8);
-    const indexInRing = index % 8;
-    const nodesInRing = Math.min(8, items.length - ring * 8);
-    const angle = (Math.PI * 2 * indexInRing) / Math.max(nodesInRing, 1) - Math.PI / 2;
-    const radius = 180 + ring * 110;
-    return {
-      id: item.id,
-      label: item.title,
-      type: item.type,
-      x: 500 + Math.cos(angle) * radius,
-      y: 300 + Math.sin(angle) * radius,
-      desc: item.contentPreview,
-      connections: [hubId],
-      sourceMeetingId: item.sourceMeetingId,
-      sourceKind: "projectKnowledge",
-      embeddingStatus: item.embeddingStatus,
-      updatedAt: item.updatedAt,
-      knowledgeId: item.id
-    } satisfies KNode;
-  });
-
-  const termNodes = terms.map((term, index) => {
-    const angle = (Math.PI * 2 * index) / Math.max(terms.length, 1) - Math.PI / 2;
-    const connections = itemNodes
-      .filter((node) => `${node.label} ${node.desc}`.toLowerCase().includes(term.term.toLowerCase()))
-      .map((node) => node.id);
-    return {
-      id: `term:${term.id}`,
-      label: term.term,
-      type: "glossary" as const,
-      x: 500 + Math.cos(angle) * 330,
-      y: 300 + Math.sin(angle) * 220,
-      desc: term.definition,
-      connections: connections.length ? connections : [hubId],
-      sourceMeetingId: null,
-      sourceKind: "glossary" as const,
-      updatedAt: term.updatedAt
-    } satisfies KNode;
-  });
-  return [
-    {
-      id: hubId,
-      label: projectName,
-      type: "hub",
-      x: 500,
-      y: 300,
-      desc: `Central project hub for ${projectName}.`,
-      connections: itemNodes.map((node) => node.id),
-      sourceMeetingId: null,
-      sourceKind: "hub"
-    },
-    ...itemNodes,
-    ...termNodes
-  ];
-}
-
-function buildKnowledgeEdges(nodes: KNode[], graph?: KnowledgeGraphResponse | null): KEdge[] {
-  return Array.from(
-    new Set(nodes.flatMap((node) => node.connections.map((connection) => [node.id, connection].sort().join("--"))))
-  ).map((key) => {
-    const [from, to] = key.split("--");
-    const graphEdge = graph?.edges.find((edge) => [edge.from, edge.to].sort().join("--") === key);
-    return { from, to, similarity: graphEdge?.similarity };
-  });
-}
-
-function buildKnowledgeFolders(nodes: KNode[], graph: KnowledgeGraphResponse | null, projectName: string): KFolder[] {
-  if (graph) {
-    return [
-      { id: "f-hub", label: projectName, nodeIds: ["hub"] },
-      ...graph.clusters.map((cluster) => ({
-        id: cluster.id,
-        label: cluster.label,
-        nodeIds: cluster.nodes.map((node) => node.id)
-      }))
-    ].filter((folder) => folder.nodeIds.length > 0);
-  }
-  const itemNodes = nodes.filter((node) => node.type !== "hub");
-  return [
-    { id: "f-hub", label: projectName, nodeIds: ["hub"] },
-    { id: "f-reports", label: "Reports", nodeIds: itemNodes.filter((node) => node.type === "report").map((node) => node.id) },
-    { id: "f-decisions", label: "Decisions", nodeIds: itemNodes.filter((node) => node.type === "decision").map((node) => node.id) },
-    { id: "f-manual", label: "Manual Notes", nodeIds: itemNodes.filter((node) => node.type === "manual").map((node) => node.id) },
-    { id: "f-external", label: "External Sources", nodeIds: itemNodes.filter((node) => node.type === "external").map((node) => node.id) },
-    { id: "f-glossary", label: "Glossary", nodeIds: nodes.filter((node) => node.type === "glossary").map((node) => node.id) }
-  ].filter((folder) => folder.nodeIds.length > 0);
-}
-
-const ProjectKnowledge = () => {
-  const { session } = useAuthState();
-  const { locale } = useAppPreferences();
-  const navigate = useNavigate();
-  const { spaceId = "" } = useParams();
-  const { spaceDetail } = useOutletContext<ShellOutletContext>();
-  const korean = locale === "ko";
-  const graphNodeLabel = (type: KnowledgeNodeType) => {
-    if (!korean) return NODE_STYLE[type].label;
-    return ({ hub: "허브", report: "보고서", decision: "결정", manual: "수동 지식", external: "외부 자료", glossary: "용어", action: "액션", summary: "요약", transcript: "전사" } as const)[type];
-  };
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedDetail, setSelectedDetail] = useState<ProjectKnowledgeDetailResponse | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<Error | null>(null);
-  const [hovered, setHovered] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>([]);
-  const [terms, setTerms] = useState<DomainTerm[]>([]);
-  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphResponse | null>(null);
-  const [graphError, setGraphError] = useState<Error | null>(null);
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [createMode, setCreateMode] = useState(false);
-  const [pendingAction, setPendingAction] = useState<null | "create" | "update" | "archive">(null);
-  const [mutationError, setMutationError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
-  const [undoKnowledge, setUndoKnowledge] = useState<ProjectKnowledgeDetailResponse | null>(null);
-  const [draft, setDraft] = useState<{
-    type: ProjectKnowledgeType;
-    title: string;
-    content: string;
-    sourceMeetingId: string;
-  }>({
-    type: "manual",
-    title: "",
-    content: "",
-    sourceMeetingId: ""
-  });
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
-  const svgRef = useRef<SVGSVGElement>(null);
-  const knowledgeLayoutRef = useRef<HTMLDivElement>(null);
-  const isPanning = useRef(false);
-  const lastMouse = useRef({ x: 0, y: 0 });
-  const [leftPanelWidth, setLeftPanelWidth] = useState(240);
-  const [rightPanelWidth, setRightPanelWidth] = useState(256);
-  const [resizingPane, setResizingPane] = useState<"left" | "right" | null>(null);
-  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [editingKnowledge, setEditingKnowledge] = useState(false);
-  const [clusterMode, setClusterMode] = useState<"type" | "meeting" | "similarity" | "folder" | null>(null);
-  const [folderAssignments, setFolderAssignments] = useState<Record<string, string>>({});
-  const [folderLabels, setFolderLabels] = useState<Record<string, string>>({});
-  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
-  const [draggedListNodeId, setDraggedListNodeId] = useState<string | null>(null);
-  const [dropFolderId, setDropFolderId] = useState<string | null>(null);
-  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
-  const [visibleTypes, setVisibleTypes] = useState<Record<KnowledgeNodeType, boolean>>({
-    hub: true,
-    report: true,
-    decision: true,
-    manual: true,
-    external: true,
-    glossary: true,
-    action: true,
-    summary: true,
-    transcript: true
-  });
-  const projectName = spaceDetail?.name ?? "Project Knowledge";
-  const currentRole = spaceDetail?.role ?? "MEMBER";
-  const canManageKnowledge = currentRole === "OWNER" || currentRole === "ADMIN";
-  const nodes = React.useMemo(() => buildKnowledgeNodes(knowledgeItems, knowledgeGraph, projectName, terms), [knowledgeGraph, knowledgeItems, projectName, terms]);
-  const selected = nodes.find((node) => node.id === selectedId) ?? null;
-  const displayNodes = React.useMemo(() => {
-    let positionedNodes = nodes;
-    const groups: KnowledgeNodeType[] = ["report", "decision", "manual", "external", "glossary"];
-    if (clusterMode) {
-      const grouped = new Map<string, KNode[]>();
-      const nonHubNodes = nodes.filter((node) => node.type !== "hub");
-      if (clusterMode === "type") {
-        groups.forEach((type) => grouped.set(type, nodes.filter((node) => node.type === type)));
-      } else if (clusterMode === "meeting") {
-        nonHubNodes.filter((node) => Boolean(node.sourceMeetingId)).forEach((node) => {
-          const key = node.sourceMeetingId ? `meeting:${node.sourceMeetingId}` : "project";
-          grouped.set(key, [...(grouped.get(key) ?? []), node]);
-        });
-      } else if (clusterMode === "similarity") {
-        const graphClusters = knowledgeGraph?.clusters ?? [];
-        graphClusters.forEach((cluster) => {
-          if (cluster.nodes.length < 2) return;
-          const members = cluster.nodes
-            .map((graphNode) => nodes.find((node) => node.id === graphNode.id))
-            .filter((node): node is KNode => Boolean(node && node.type !== "hub"));
-          if (members.length > 0) grouped.set(`similarity:${cluster.id}`, members);
-        });
-      } else if (clusterMode === "folder") {
-        const sourceFolders = buildKnowledgeFolders(nodes, knowledgeGraph, projectName);
-        nonHubNodes.forEach((node) => {
-          const assignedFolderId = folderAssignments[node.id];
-          const folder = sourceFolders.find((item) =>
-            item.id === assignedFolderId || (!assignedFolderId && item.nodeIds.includes(node.id))
-          );
-          if (!assignedFolderId && !folder) return;
-          const key = `folder:${assignedFolderId ?? folder?.id ?? "unfiled"}`;
-          grouped.set(key, [...(grouped.get(key) ?? []), node]);
-        });
-      }
-      const positions = layoutKnowledgeGraphNodes(nodes, grouped);
-      const groupedNodeIds = new Set(Array.from(grouped.values()).flat().map((node) => node.id));
-      positionedNodes = nodes
-        .filter((node) => node.type === "hub" || groupedNodeIds.has(node.id))
-        .map((node) => ({ ...node, ...(positions.get(node.id) ?? { x: node.x, y: node.y }) }));
-    }
-    if (!clusterMode) {
-      const positions = layoutKnowledgeGraphNodes(nodes);
-      positionedNodes = nodes.map((node) => ({ ...node, ...(positions.get(node.id) ?? { x: node.x, y: node.y }) }));
-    }
-    return positionedNodes;
-  }, [clusterMode, folderAssignments, knowledgeGraph, nodes, projectName]);
-  const edges = React.useMemo(() => buildKnowledgeEdges(nodes, knowledgeGraph), [knowledgeGraph, nodes]);
-  const folders = React.useMemo(() => buildKnowledgeFolders(nodes, knowledgeGraph, projectName), [knowledgeGraph, nodes, projectName]);
-  const displayedFolders = React.useMemo(() => {
-    const knownNodeIds = new Set(nodes.map((node) => node.id));
-    const assigned = new Set<string>();
-    return folders.filter((folder) => folder.id !== "f-hub").map((folder) => {
-      const baseNodeIds = nodes
-        .filter((node) => {
-          const assignedFolderId = folderAssignments[node.id];
-          if (assignedFolderId) return assignedFolderId === folder.id;
-          return folder.nodeIds.includes(node.id);
-        })
-        .map((node) => node.id)
-        .filter((nodeId) => {
-          if (!knownNodeIds.has(nodeId)) return false;
-          assigned.add(nodeId);
-          return true;
-        });
-      return { ...folder, label: folderLabels[folder.id] ?? folder.label, nodeIds: baseNodeIds };
-    });
-  }, [folderAssignments, folderLabels, folders, nodes]);
-  const visibleNodes = React.useMemo(
-    () => displayNodes.filter((node) => visibleTypes[node.type]),
-    [displayNodes, visibleTypes]
-  );
-  const visibleNodeIds = React.useMemo(
-    () => new Set(visibleNodes.map((node) => node.id)),
-    [visibleNodes]
-  );
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    console.debug("[knowledge-graph-layout]", measureKnowledgeGraphLayout(visibleNodes, edges));
-  }, [edges, visibleNodes]);
-  const saving = pendingAction !== null;
-  const isCreating = pendingAction === "create";
-  const isUpdating = pendingAction === "update";
-  const isArchiving = pendingAction === "archive";
-
-  useEffect(() => {
-    if (!resizingPane) {
-      return;
-    }
-
-    const resizePane = (event: PointerEvent) => {
-      const layoutBounds = knowledgeLayoutRef.current?.getBoundingClientRect();
-      if (!layoutBounds) {
-        return;
-      }
-
-      if (resizingPane === "left") {
-        setLeftPanelWidth(Math.min(420, Math.max(200, event.clientX - layoutBounds.left)));
-      } else {
-        setRightPanelWidth(Math.min(420, Math.max(240, layoutBounds.right - event.clientX)));
-      }
-    };
-
-    const stopResize = () => setResizingPane(null);
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", resizePane);
-    window.addEventListener("pointerup", stopResize);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", resizePane);
-      window.removeEventListener("pointerup", stopResize);
-    };
-  }, [resizingPane]);
-
-  const loadKnowledge = React.useCallback(async () => {
-    if (!session || !spaceId) {
-      setKnowledgeItems([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetchProjectKnowledge(session, spaceId);
-      setKnowledgeItems(response.items);
-      setSelectedId((current) => {
-        const knowledgeId = current?.replace(/^knowledge:/, "");
-        return current && response.items.some((item) => item.id === knowledgeId) ? current : null;
-      });
-    } catch (cause) {
-      setKnowledgeItems([]);
-      setError(cause instanceof Error ? cause : new Error("지식 목록을 불러오지 못했습니다."));
-    } finally {
-      setLoading(false);
-    }
-  }, [session, spaceId]);
-
-  const loadKnowledgeGraph = React.useCallback(async () => {
-    if (!session || !spaceId) {
-      setKnowledgeGraph(null);
-      setGraphError(null);
-      return;
-    }
-    setGraphError(null);
-    try {
-      setKnowledgeGraph(await fetchKnowledgeGraph(session, spaceId));
-    } catch (cause) {
-      setKnowledgeGraph(null);
-      setGraphError(cause instanceof Error ? cause : new Error("Knowledge graph unavailable."));
-    }
-  }, [session, spaceId]);
-
-  useEffect(() => {
-    void loadKnowledge();
-  }, [loadKnowledge]);
-
-  useEffect(() => {
-    void loadKnowledgeGraph();
-  }, [loadKnowledgeGraph]);
-
-  useEffect(() => {
-    if (!session || !spaceId) {
-      setTerms([]);
-      return;
-    }
-    void fetchDomainTerms(session, spaceId, { status: "ACTIVE" })
-      .then((response) => setTerms(response.terms))
-      .catch(() => setTerms([]));
-  }, [session, spaceId]);
-
-  useEffect(() => {
-    setOpenFolders(new Set(folders.map((folder) => folder.id)));
-  }, [folders]);
-
-  useEffect(() => {
-    if (!session || !spaceId || !selected?.knowledgeId) {
-      setSelectedDetail(null);
-      setDetailError(null);
-      setDetailLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setDetailLoading(true);
-    setDetailError(null);
-
-    void fetchProjectKnowledgeDetail(session, spaceId, selected.knowledgeId)
-      .then((detail) => {
-        if (!cancelled) {
-          setSelectedDetail(detail);
-          setDraft({
-            type: detail.type,
-            title: detail.title,
-            content: detail.content,
-            sourceMeetingId: detail.sourceMeetingId ?? ""
-          });
-        }
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setSelectedDetail(null);
-          setDetailError(cause instanceof Error ? cause : new Error("지식 상세를 불러오지 못했습니다."));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setDetailLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selected, session, spaceId]);
-
-  async function reloadSelectedDetail() {
-    if (!session || !spaceId || !selected?.knowledgeId) {
-      return;
-    }
-
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const detail = await fetchProjectKnowledgeDetail(session, spaceId, selected.knowledgeId);
-      setSelectedDetail(detail);
-      setDraft({
-        type: detail.type,
-        title: detail.title,
-        content: detail.content,
-        sourceMeetingId: detail.sourceMeetingId ?? ""
-      });
-    } catch (cause) {
-      setSelectedDetail(null);
-      setDetailError(cause instanceof Error ? cause : new Error("지식 상세를 불러오지 못했습니다."));
-    } finally {
-      setDetailLoading(false);
-    }
-  }
-
-  function openCreatePanel() {
-    setCreateMode(true);
-    setRightPanelOpen(true);
-    setSelectedId(null);
-    setSelectedDetail(null);
-    setEditingKnowledge(false);
-    setDetailError(null);
-    setArchiveConfirmOpen(false);
-    setMutationError("");
-    setNotice("");
-    setDraft({
-      type: "manual",
-      title: "",
-      content: "",
-      sourceMeetingId: ""
-    });
-  }
-
-  async function handleCreateKnowledge() {
-    if (!session || !spaceId || !canManageKnowledge || saving) {
-      return;
-    }
-    if (!draft.title.trim() || !draft.content.trim()) {
-      setMutationError("제목과 내용을 모두 입력해 주세요.");
-      return;
-    }
-    setPendingAction("create");
-    setMutationError("");
-    setNotice("");
-    try {
-      const response = await createProjectKnowledge(session, spaceId, {
-        type: draft.type,
-        title: draft.title.trim(),
-        content: draft.content.trim(),
-        sourceMeetingId: draft.sourceMeetingId.trim() || null
-      });
-      await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
-      setSelectedId(`knowledge:${response.id}`);
-      setCreateMode(false);
-      setNotice("지식을 등록했습니다.");
-    } catch (cause) {
-      setMutationError(cause instanceof Error ? cause.message : "지식을 등록하지 못했습니다.");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function handleUpdateKnowledge() {
-    if (!session || !spaceId || !selectedDetail || !canManageKnowledge || saving) {
-      return;
-    }
-    if (!draft.title.trim() || !draft.content.trim()) {
-      setMutationError("제목과 내용을 모두 입력해 주세요.");
-      return;
-    }
-    setPendingAction("update");
-    setMutationError("");
-    setNotice("");
-    try {
-      await updateProjectKnowledge(session, spaceId, selectedDetail.id, {
-        title: draft.title.trim(),
-        content: draft.content.trim()
-      });
-      await Promise.all([loadKnowledge(), loadKnowledgeGraph(), fetchProjectKnowledgeDetail(session, spaceId, selectedDetail.id).then((detail) => {
-        setSelectedDetail(detail);
-        setDraft({
-          type: detail.type,
-          title: detail.title,
-          content: detail.content,
-          sourceMeetingId: detail.sourceMeetingId ?? ""
-        });
-      })]);
-      setNotice("지식을 저장했습니다.");
-    } catch (cause) {
-      setMutationError(cause instanceof Error ? cause.message : "지식을 저장하지 못했습니다.");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function handleArchiveKnowledge() {
-    if (!session || !spaceId || !selectedDetail || !canManageKnowledge || saving) {
-      return;
-    }
-    setPendingAction("archive");
-    setMutationError("");
-    setNotice("");
-    const archived = selectedDetail;
-    try {
-      await deleteProjectKnowledge(session, spaceId, selectedDetail.id);
-      setSelectedId(null);
-      setSelectedDetail(null);
-      setArchiveConfirmOpen(false);
-      setUndoKnowledge(archived);
-      setNotice("지식을 보관했습니다.");
-      try {
-        await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
-      } catch {
-        setNotice("지식을 보관했습니다. 목록 새로고침은 다시 시도해 주세요.");
-      }
-    } catch (cause) {
-      setMutationError(cause instanceof Error ? cause.message : "지식을 보관하지 못했습니다.");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function handleRestoreKnowledge() {
-    if (!session || !spaceId || !undoKnowledge || !canManageKnowledge || saving) return;
-    setPendingAction("archive");
-    setMutationError("");
-    try {
-      await restoreProjectKnowledge(session, spaceId, undoKnowledge.id);
-      setUndoKnowledge(null);
-      setNotice("지식을 복구했습니다.");
-      await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
-    } catch (cause) {
-      setMutationError(cause instanceof Error ? cause.message : "지식을 복구하지 못했습니다.");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  function cancelKnowledgeEdit() {
-    if (selectedDetail) {
-      setDraft({
-        type: selectedDetail.type,
-        title: selectedDetail.title,
-        content: selectedDetail.content,
-        sourceMeetingId: selectedDetail.sourceMeetingId ?? ""
-      });
-    }
-    setMutationError("");
-    setEditingKnowledge(false);
-  }
-
-  const highlightIds = hovered
-    ? new Set([hovered, ...(displayNodes.find((node) => node.id === hovered)?.connections ?? [])])
-    : selected
-    ? new Set([selected.id, ...selected.connections])
-    : null;
-
-  const toggleFolder = (id: string) =>
-    setOpenFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-
-  function toggleNodeType(type: KnowledgeNodeType) {
-    setVisibleTypes((current) => ({ ...current, [type]: !current[type] }));
-  }
-
-  function moveListNode(nodeId: string, folderId: string) {
-    setFolderAssignments((current) => ({ ...current, [nodeId]: folderId }));
-    setDraggedListNodeId(null);
-    setDropFolderId(null);
-  }
-
-  function renameFolder(folderId: string, fallbackLabel: string) {
-    const nextLabel = window.prompt("Folder name", folderLabels[folderId] ?? fallbackLabel)?.trim();
-    if (nextLabel) {
-      setFolderLabels((current) => ({ ...current, [folderId]: nextLabel }));
-    }
-    setRenamingFolderId(null);
-  }
-
-  async function deleteFolder(folder: KFolder) {
-    setFolderMenuId(null);
-    if (folder.id === "f-hub" || !canManageKnowledge) return;
-    const items = folder.nodeIds
-      .map((nodeId) => nodes.find((node) => node.id === nodeId))
-      .filter((node): node is KNode => Boolean(node?.knowledgeId));
-    const message = items.length > 0
-      ? `Delete folder "${folder.label}" and ${items.length} knowledge item(s)? This cannot be undone.`
-      : `Delete folder "${folder.label}"?`;
-    if (!window.confirm(message)) return;
-    if (items.length > 0 && session && spaceId) {
-      setPendingAction("archive");
-      try {
-        await Promise.all(items.map((node) => deleteProjectKnowledge(session, spaceId, node.knowledgeId!)));
-        await Promise.all([loadKnowledge(), loadKnowledgeGraph()]);
-      } catch (cause) {
-        setMutationError(cause instanceof Error ? cause.message : "폴더를 삭제하지 못했습니다.");
-      } finally {
-        setPendingAction(null);
-      }
-    }
-    setFolderAssignments((current) => {
-      const next = { ...current };
-      folder.nodeIds.forEach((nodeId) => delete next[nodeId]);
-      return next;
-    });
-    setFolderLabels((current) => {
-      const next = { ...current };
-      delete next[folder.id];
-      return next;
-    });
-  }
-
-  const matchesSearch = (node: KNode) =>
-    search === ""
-    || [node.label, node.desc, node.sourceKind === "meeting" ? "meeting" : KNOWLEDGE_NODE_LABELS[node.type]].join(" ").toLowerCase().includes(search.toLowerCase());
-
-  const onSvgMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as SVGElement).tagName === "svg" || (e.target as SVGElement).tagName === "rect") {
-      isPanning.current = true;
-      lastMouse.current = { x: e.clientX, y: e.clientY };
-    }
-  };
-  const onSvgMouseMove = (e: React.MouseEvent) => {
-    if (!isPanning.current) return;
-    const dx = e.clientX - lastMouse.current.x;
-    const dy = e.clientY - lastMouse.current.y;
-    lastMouse.current = { x: e.clientX, y: e.clientY };
-    setTransform((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
-  };
-  const onSvgMouseUp = () => { isPanning.current = false; };
-  const onSvgClick = (event: React.MouseEvent<SVGSVGElement>) => {
-    const target = event.target as SVGElement;
-    if (target.tagName === "svg" || target.tagName === "rect") {
-      setSelectedId(null);
-      setRightPanelOpen(false);
-      setCreateMode(false);
-    }
-  };
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setTransform((current) => ({ ...current, scale: Math.min(3, Math.max(0.3, current.scale * delta)) }));
-  };
-
-  function formatUpdatedAt(value?: string) {
-    if (!value) {
-      return "";
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
-    return date.toLocaleDateString(korean ? "ko-KR" : "en-US", { month: "short", day: "numeric", year: "numeric" });
-  }
-
-  if (loading) {
-    return <LoadingState label={korean ? "지식을 불러오는 중..." : "Loading knowledge..."} />;
-  }
-
-  if (error instanceof ApiRequestError && error.status === 403) {
-    return <PermissionDenied type="project" />;
-  }
-
-  if (error instanceof ApiRequestError && error.status === 404) {
-    return (
-      <EmptyState
-        action={(
-          <button
-            className="bg-foreground text-background px-4 py-2 rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors"
-            onClick={() => navigate("/spaces")}
-            type="button"
-          >
-            {korean ? "워크스페이스로" : "Back to workspaces"}
-          </button>
-        )}
-        desc={korean ? "프로젝트를 찾을 수 없거나 더 이상 접근할 수 없습니다." : "The project was not found or you no longer have access."}
-        icon={<Library className="w-5 h-5" />}
-        title={korean ? "지식을 사용할 수 없습니다" : "Knowledge unavailable"}
-      />
-    );
-  }
-
-  if (error) {
-    return <ErrorState desc={error.message} onRetry={() => { void loadKnowledge(); }} title={korean ? "지식을 불러올 수 없습니다" : "Couldn't load knowledge"} />;
-  }
-
-  return (
-    <div ref={knowledgeLayoutRef} className="flex h-full min-w-0 overflow-hidden">
-      {leftPanelOpen ? <div
-        className="shrink-0 border-r border-border bg-card flex flex-col h-full"
-        style={{ width: leftPanelWidth }}
-      >
-        <div className="px-3 py-2.5 border-b border-border flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder={korean ? "노드 검색..." : "Search nodes..."}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto custom-scrollbar py-1.5 px-1">
-          {displayedFolders.map((folder) => {
-            const isOpen = openFolders.has(folder.id);
-            const visibleNodes = folder.nodeIds
-              .map((id) => nodes.find((node) => node.id === id))
-              .filter((node): node is KNode => Boolean(node))
-              .filter(matchesSearch);
-            if (search !== "" && visibleNodes.length === 0) return null;
-            return (
-              <div
-                key={folder.id}
-                className={`mb-0.5 rounded-md transition-colors ${dropFolderId === folder.id ? "bg-primary/10 ring-1 ring-primary/50" : ""}`}
-                onDragEnter={() => { if (draggedListNodeId) setDropFolderId(folder.id); }}
-                onDragOver={(event) => { event.preventDefault(); if (draggedListNodeId) setDropFolderId(folder.id); }}
-                onDrop={() => { if (draggedListNodeId) moveListNode(draggedListNodeId, folder.id); }}
-              >
-                <div className="relative flex items-center gap-1 px-1 py-0.5 rounded-md transition-colors hover:bg-muted/30">
-                  <button onClick={() => toggleFolder(folder.id)} className="flex items-center gap-1.5 flex-1 min-w-0 py-1" type="button">
-                    <svg width="10" height="10" viewBox="0 0 10 10" className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}>
-                      <path d="M3 2L7 5L3 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                    </svg>
-                    <FolderIcon open={isOpen} />
-                    {renamingFolderId === folder.id ? (
-                      <input
-                        autoFocus
-                        className="min-w-0 flex-1 rounded border border-primary/40 bg-background px-1 text-xs font-medium text-foreground focus:outline-none"
-                        defaultValue={folder.label}
-                        onBlur={() => setRenamingFolderId(null)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") renameFolder(folder.id, folder.label);
-                          if (event.key === "Escape") setRenamingFolderId(null);
-                        }}
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                    ) : <span className="text-xs font-medium text-foreground truncate">{folder.label}</span>}
-                    <span className="text-[9px] text-muted-foreground ml-auto shrink-0 pr-1">{folder.nodeIds.length}</span>
-                  </button>
-                  <button
-                    aria-label={korean ? `${folder.label} 폴더 메뉴` : `Rename ${folder.label}`}
-                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    onClick={() => setFolderMenuId((current) => current === folder.id ? null : folder.id)}
-                    type="button"
-                  >
-                    <MoreVertical className="h-3 w-3" />
-                  </button>
-                  {folderMenuId === folder.id ? (
-                    <div className="absolute z-30 mt-8 ml-32 w-32 rounded-md border border-border bg-card p-1 shadow-lg">
-                      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted" onClick={() => { setFolderMenuId(null); setRenamingFolderId(folder.id); }} type="button">{korean ? "이름 바꾸기" : "Rename"}</button>
-                      {folder.id !== "f-hub" ? <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-red-600 hover:bg-red-50" disabled={!canManageKnowledge || saving} onClick={() => void deleteFolder(folder)} type="button">{korean ? "삭제" : "Delete"}</button> : null}
-                    </div>
-                  ) : null}
-                </div>
-
-                {isOpen ? (
-                  <div className="ml-3 border-l border-border pl-2 mt-0.5 space-y-0.5">
-                    {visibleNodes.map((node) => (
-                      <button
-                        key={node.id}
-                        draggable
-                        onDragStart={() => setDraggedListNodeId(node.id)}
-                        onDragEnd={() => setDraggedListNodeId(null)}
-                        onClick={() => { setSelectedId(selected?.id === node.id ? null : node.id); setEditingKnowledge(false); setRightPanelOpen(true); }}
-                        onMouseEnter={() => setHovered(node.id)}
-                        onMouseLeave={() => setHovered(null)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer transition-colors hover:bg-muted/50 ${selected?.id === node.id ? "bg-muted" : ""}`}
-                        type="button"
-                      >
-                        <FileIcon type={node.type} />
-                        <span className={`text-xs truncate flex-1 ${selected?.id === node.id ? "font-semibold text-foreground" : "text-foreground/80"}`}>{node.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-        <div className="p-3 border-t border-border">
-          <button
-            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
-            disabled={!canManageKnowledge}
-            onClick={openCreatePanel}
-            type="button"
-          >
-            <Plus className="w-3.5 h-3.5" /> {korean ? "지식 추가" : "Add Knowledge"}
-          </button>
-          {!canManageKnowledge ? <p className="mt-2 text-[11px] text-muted-foreground">OWNER 또는 ADMIN만 지식을 등록할 수 있습니다.</p> : null}
-          {notice ? (
-            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-emerald-700" role="status">
-              <span>{notice}</span>
-              {undoKnowledge && canManageKnowledge ? (
-                <button
-                  className="shrink-0 rounded border border-emerald-200 px-2 py-1 font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-                  disabled={saving}
-                  onClick={() => void handleRestoreKnowledge()}
-                  type="button"
-                >
-                  {korean ? "되돌리기" : "Undo"}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div> : null}
-
-      <button
-        aria-label={korean ? "지식 목록 너비 조절" : "Resize knowledge list"}
-        className="group relative z-20 -ml-px w-2 shrink-0 cursor-col-resize border-0 bg-transparent p-0 focus:outline-none focus-visible:bg-primary/30"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          setResizingPane("left");
-        }}
-        type="button"
-      >
-        <span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
-      </button>
-
-      <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--app-surface-soft)]" style={{ backgroundImage: "radial-gradient(circle, var(--app-line) 1px, transparent 1px)", backgroundSize: "24px 24px" }}>
-        <button
-          aria-label={leftPanelOpen ? (korean ? "지식 목록 숨기기" : "Hide knowledge list") : (korean ? "지식 목록 보기" : "Show knowledge list")}
-          className="absolute left-3 top-3 z-20 rounded-md border border-border bg-card px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
-          onClick={() => setLeftPanelOpen((current) => !current)}
-          type="button"
-        >
-          {leftPanelOpen ? (korean ? "목록 숨기기" : "Hide list") : (korean ? "목록 보기" : "Show list")}
-        </button>
-        <div className="absolute left-3 top-14 z-10 flex items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5 shadow-sm">
-          <button onClick={() => setTransform((current) => ({ ...current, scale: Math.min(3, current.scale * 1.2) }))} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground text-sm font-bold transition-colors">+</button>
-          <span className="text-xs text-muted-foreground w-10 text-center font-mono">{Math.round(transform.scale * 100)}%</span>
-          <button onClick={() => setTransform((current) => ({ ...current, scale: Math.max(0.3, current.scale * 0.8) }))} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground text-sm font-bold transition-colors">−</button>
-          <div className="w-px h-4 bg-border mx-0.5"></div>
-          <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors">{korean ? "초기화" : "Reset"}</button>
-          <div className="mx-0.5 h-4 w-px bg-border"></div>
-          <select
-            aria-label={korean ? "노드 묶기 기준" : "Cluster nodes by"}
-            className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground focus:outline-none"
-            onChange={(event) => setClusterMode((event.target.value || null) as "type" | "meeting" | "similarity" | "folder" | null)}
-            value={clusterMode ?? ""}
-          >
-            <option value="">{korean ? "자유 배치" : "Free layout"}</option>
-            <option value="type">{korean ? "유형별" : "By type"}</option>
-            <option value="meeting">{korean ? "회의별" : "By meeting"}</option>
-            <option value="similarity">{korean ? "유사도별" : "By similarity"}</option>
-            <option value="folder">{korean ? "폴더별" : "By folder"}</option>
-          </select>
-        </div>
-
-        <div className="absolute top-3 right-3 z-10 bg-card border border-border rounded-lg px-3 py-2 shadow-sm space-y-1.5">
-          {(Object.entries(NODE_STYLE) as [KnowledgeNodeType, typeof NODE_STYLE[KnowledgeNodeType]][]).map(([type, style]) => (
-            <label key={type} className="flex cursor-pointer items-center gap-2 text-[10px] text-muted-foreground">
-              <input checked={visibleTypes[type]} className="h-3 w-3 accent-primary" onChange={() => toggleNodeType(type)} type="checkbox" />
-              <span className={`h-2 w-2 rounded-full ${style.dot}`}></span>
-              <span>{graphNodeLabel(type)}</span>
-            </label>
-          ))}
-          {graphError ? <p className="max-w-40 border-t border-border pt-1.5 text-[10px] leading-relaxed text-amber-700">{korean ? "의미 기반 그래프를 불러올 수 없습니다. 공식 지식은 계속 확인할 수 있습니다." : "Semantic graph is unavailable. Official knowledge is still available."}</p> : null}
-        </div>
-
-        <svg
-          ref={svgRef}
-          className="w-full h-full cursor-grab active:cursor-grabbing select-none"
-          preserveAspectRatio="xMidYMid meet"
-          viewBox="0 0 1000 700"
-          onMouseDown={onSvgMouseDown}
-          onMouseMove={onSvgMouseMove}
-          onMouseUp={onSvgMouseUp}
-          onMouseLeave={onSvgMouseUp}
-          onClick={onSvgClick}
-          onWheel={onWheel}
-        >
-          <rect width="100%" height="100%" fill="transparent" />
-          <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
-            {edges.filter((edge) => visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to)).map((edge) => {
-              const fromNode = displayNodes.find((node) => node.id === edge.from);
-              const toNode = displayNodes.find((node) => node.id === edge.to);
-              if (!fromNode || !toNode) return null;
-              const isHighlighted = highlightIds ? highlightIds.has(edge.from) && highlightIds.has(edge.to) : false;
-              const dimmed = highlightIds && !isHighlighted;
-              return (
-                <line
-                  key={`${edge.from}-${edge.to}`}
-                  x1={fromNode.x}
-                  y1={fromNode.y}
-                  x2={toNode.x}
-                  y2={toNode.y}
-                  stroke={isHighlighted ? "var(--app-text-strong)" : "var(--app-line-strong)"}
-                  strokeWidth={isHighlighted ? 1.5 : 1}
-                  strokeOpacity={dimmed ? 0.15 : 1}
-                  strokeDasharray={isHighlighted ? undefined : "4 3"}
-                  style={{ transition: "all 0.15s" }}
-                />
-              );
-            })}
-
-            {visibleNodes.map((node) => {
-              const style = NODE_STYLE[node.type];
-              const isHub = node.type === "hub";
-              const radius = isHub ? 22 : 14;
-                const isSelected = selected?.id === node.id;
-                const isHovered = hovered === node.id;
-                const dimmed = highlightIds && !highlightIds.has(node.id);
-              return (
-                <g
-                  key={node.id}
-                  transform={`translate(${node.x}, ${node.y})`}
-                  style={{
-                    transform: clusterMode ? `translate(${node.x}px, ${node.y}px)` : undefined,
-                    transformOrigin: `${node.x}px ${node.y}px`,
-                    transformBox: "view-box",
-                    opacity: dimmed ? 0.2 : 1,
-                    filter: isSelected || isHovered ? "drop-shadow(0 5px 6px rgba(15, 23, 42, 0.22))" : "drop-shadow(0 2px 2px rgba(15, 23, 42, 0.12))",
-                    transition: clusterMode ? "transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease, filter 180ms ease" : "opacity 180ms ease, filter 180ms ease"
-                  }}
-                  onClick={() => { setSelectedId(selected?.id === node.id ? null : node.id); setRightPanelOpen(true); }}
-                  onMouseEnter={() => setHovered(node.id)}
-                  onMouseLeave={() => setHovered(null)}
-                  className="knowledge-graph-node cursor-pointer"
-                >
-                  <circle r={radius + 10} fill="transparent" />
-                  {isSelected || isHovered ? <circle r={radius + 6} fill={style.fill} opacity={0.15} /> : null}
-                  <circle
-                    r={radius + (isHovered ? 2 : 0)}
-                    fill={style.fill}
-                    stroke="var(--app-surface)"
-                    strokeWidth={isSelected ? 3 : 2}
-                    style={{ transition: "r 0.15s" }}
-                  />
-                  {isHub ? <text textAnchor="middle" dominantBaseline="central" fill="var(--app-surface)" fontSize={10} fontWeight="700">MM</text> : null}
-                  <text
-                    y={radius + 10}
-                    textAnchor="middle"
-                    fill="var(--app-text-strong)"
-                    fontSize={10}
-                    fontWeight={isSelected ? "700" : "500"}
-                    stroke="var(--app-surface)"
-                    strokeWidth={4}
-                    strokeLinejoin="round"
-                    paintOrder="stroke"
-                    style={{ pointerEvents: "none" }}
-                  >
-                    {wrapKnowledgeGraphLabel(node.label).map((line, index) => (
-                      <tspan key={`${node.id}-label-${index}`} x="0" dy={index === 0 ? 0 : 12}>{line}</tspan>
-                    ))}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
-      </div>
-
-      {rightPanelOpen && (createMode || selected) ? (
-        <button
-          aria-label="Resize knowledge detail panel"
-          className="group relative z-20 -mr-px w-2 shrink-0 cursor-col-resize border-0 bg-transparent p-0 focus:outline-none focus-visible:bg-primary/30"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            setResizingPane("right");
-          }}
-          type="button"
-        >
-          <span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
-        </button>
-      ) : null}
-
-      {createMode ? (
-        <div
-          className="knowledge-detail-panel shrink-0 border-l border-border bg-card flex flex-col h-full"
-          style={{ width: rightPanelWidth }}
-        >
-          <div className="p-4 border-b border-border flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Plus className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">New knowledge</span>
-            </div>
-            <button
-              onClick={() => {
-                setCreateMode(false);
-                setArchiveConfirmOpen(false);
-                setMutationError("");
-                setNotice("");
-              }}
-              className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
-              type="button"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Type</label>
-              <select
-                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
-                disabled={!canManageKnowledge || saving}
-                onChange={(event) => setDraft((current) => ({ ...current, type: event.target.value as ProjectKnowledgeType }))}
-                value={draft.type}
-              >
-                {Object.entries(KNOWLEDGE_TYPE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Title</label>
-              <input
-                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
-                disabled={!canManageKnowledge || saving}
-                onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                value={draft.title}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Content</label>
-              <textarea
-                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none disabled:opacity-60"
-                disabled={!canManageKnowledge || saving}
-                onChange={(event) => setDraft((current) => ({ ...current, content: event.target.value }))}
-                rows={8}
-                value={draft.content}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Source Meeting ID (optional)</label>
-              <input
-                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
-                disabled={!canManageKnowledge || saving}
-                onChange={(event) => setDraft((current) => ({ ...current, sourceMeetingId: event.target.value }))}
-                value={draft.sourceMeetingId}
-              />
-            </div>
-            {mutationError ? <p className="text-xs text-red-600">{mutationError}</p> : null}
-            {!canManageKnowledge ? <p className="text-[11px] text-muted-foreground">Your current role can review knowledge only.</p> : null}
-          </div>
-          <div className="p-4 border-t border-border space-y-2">
-            <button
-              className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
-              disabled={!canManageKnowledge || saving}
-              onClick={() => void handleCreateKnowledge()}
-              type="button"
-            >
-              {isCreating ? "Creating..." : "Create Knowledge"}
-            </button>
-          </div>
-        </div>
-      ) : selected ? (
-        <div
-          className="knowledge-detail-panel shrink-0 border-l border-border bg-card flex flex-col h-full"
-          style={{ width: rightPanelWidth }}
-        >
-          <div className="p-4 border-b border-border flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${NODE_STYLE[selected.type].dot}`}></span>
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground capitalize">
-                {selected.sourceKind === "hub" ? "hub" : selected.sourceKind === "meeting" ? "meeting" : KNOWLEDGE_NODE_LABELS[selected.type]}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              {selected.knowledgeId && canManageKnowledge && !editingKnowledge ? (
-                <button
-                  className="rounded-md px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!selectedDetail || detailLoading}
-                  onClick={() => { setEditingKnowledge(true); setMutationError(""); setNotice(""); }}
-                  type="button"
-                >
-                  Edit
-                </button>
-              ) : null}
-              <button onClick={() => { setSelectedId(null); setEditingKnowledge(false); }} className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors" type="button">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <div>
-              <h3 className="font-semibold text-foreground text-sm leading-snug">{selected.label}</h3>
-            </div>
-            {selected.sourceKind === "hub" ? (
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Semantic clusters use official project knowledge and meetings you can access. Raw transcript chunks are not shown.
-              </p>
-            ) : selected.sourceKind === "meeting" ? (
-              <p className="text-xs text-muted-foreground leading-relaxed">This meeting is connected by semantic similarity. Open the meeting to review its transcript and report.</p>
-            ) : detailLoading ? (
-              <p className="text-xs text-muted-foreground leading-relaxed">Loading detail...</p>
-            ) : detailError ? (
-              <div className="space-y-2">
-                <p className="text-xs text-red-600 leading-relaxed">{detailError.message}</p>
-                <button
-                  className="text-xs font-semibold text-foreground underline underline-offset-2"
-                  onClick={() => { void reloadSelectedDetail(); }}
-                  type="button"
-                >
-                  Try loading again
-                </button>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground leading-relaxed">{selectedDetail?.content ?? selected.desc}</p>
-            )}
-
-            {selected.sourceKind !== "hub" ? (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${NODE_STYLE[selected.type].dot} text-white`}>
-                    {selected.sourceKind === "meeting" ? "Meeting" : KNOWLEDGE_NODE_LABELS[selected.type]}
-                  </span>
-                  {selected.embeddingStatus ? <span className="text-[10px] text-muted-foreground">{KNOWLEDGE_STATUS_LABELS[selected.embeddingStatus]}</span> : null}
-                </div>
-                {selected.updatedAt ? <p className="text-[11px] text-muted-foreground">Updated {formatUpdatedAt(selected.updatedAt)}</p> : null}
-                {selected.sourceMeetingId ? <p className="text-[11px] text-muted-foreground">Source meeting linked</p> : null}
-              </div>
-            ) : null}
-
-            {Boolean(selected.knowledgeId) && selectedDetail && !detailLoading ? (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Title</label>
-                  {editingKnowledge ? (
-                    <input
-                      className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
-                      disabled={!canManageKnowledge || saving}
-                      onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                      value={draft.title}
-                    />
-                  ) : <p className="text-sm font-medium text-foreground">{selectedDetail.title}</p>}
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">Content</label>
-                  {editingKnowledge ? (
-                    <textarea
-                      className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none disabled:opacity-60"
-                      disabled={!canManageKnowledge || saving}
-                      onChange={(event) => setDraft((current) => ({ ...current, content: event.target.value }))}
-                      rows={8}
-                      value={draft.content}
-                    />
-                  ) : <p className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">{selectedDetail.content}</p>}
-                </div>
-                {!canManageKnowledge ? <p className="text-[11px] text-muted-foreground">현재 계정은 지식을 조회만 할 수 있습니다.</p> : null}
-                {mutationError ? <p className="text-xs text-red-600">{mutationError}</p> : null}
-                {notice ? <p className="text-xs text-emerald-700">{notice}</p> : null}
-              </div>
-            ) : null}
-
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Connected to</p>
-              <div className="space-y-1">
-                {selected.connections.map((connectionId) => {
-                  const connectedNode = displayNodes.find((node) => node.id === connectionId);
-                  if (!connectedNode) return null;
-                  return (
-                    <button
-                      key={connectionId}
-                      onClick={() => setSelectedId(connectedNode.id)}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted transition-colors text-left"
-                      type="button"
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${NODE_STYLE[connectedNode.type].dot}`}></span>
-                      <span className="text-xs text-foreground truncate">{connectedNode.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <div className="p-4 border-t border-border">
-            <div className="space-y-2">
-              {selected.knowledgeId ? (
-                <>
-                  {canManageKnowledge ? (editingKnowledge ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="w-full py-2 rounded-md border border-border text-foreground text-xs font-semibold hover:bg-muted transition-colors disabled:opacity-60"
-                        disabled={saving}
-                        onClick={cancelKnowledgeEdit}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
-                        disabled={saving || !selectedDetail}
-                        onClick={() => void handleUpdateKnowledge()}
-                        type="button"
-                      >
-                        {isUpdating ? "Saving..." : "Save Changes"}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
-                      disabled={!selectedDetail}
-                      onClick={() => { setEditingKnowledge(true); setMutationError(""); setNotice(""); }}
-                      type="button"
-                    >
-                      Edit Knowledge
-                    </button>
-                  )) : null}
-                  <button
-                    className="w-full py-2 rounded-md border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 transition-colors disabled:opacity-60"
-                    disabled={!canManageKnowledge || saving || !selectedDetail || editingKnowledge}
-                    onClick={() => setArchiveConfirmOpen(true)}
-                    type="button"
-                  >
-                    {isArchiving ? "Archiving..." : "Archive"}
-                  </button>
-                </>
-              ) : null}
-              <button
-                className="w-full py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors disabled:bg-muted disabled:text-muted-foreground"
-                disabled={!selected.sourceMeetingId}
-                onClick={() => {
-                  if (selected.sourceMeetingId) {
-                    navigate(`/spaces/${spaceId}/meetings/${selected.sourceMeetingId}`);
-                  }
-                }}
-                type="button"
-              >
-                Open Full Page
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {archiveConfirmOpen && selectedDetail ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-          onClick={(event) => {
-            if (event.target === event.currentTarget && !saving) {
-              setArchiveConfirmOpen(false);
-            }
-          }}
-        >
-          <div className="w-full max-w-md rounded-xl border border-border bg-card shadow-2xl">
-            <div className="border-b border-border px-6 py-5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-red-600">Confirm archive</p>
-              <h2 className="mt-1 text-lg font-semibold text-foreground">Archive this knowledge?</h2>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                Archived knowledge is removed from the active list and Project AI search candidates.
-              </p>
-            </div>
-            <div className="px-6 py-4">
-              <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Knowledge</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{selectedDetail.title}</p>
-              </div>
-              {mutationError ? <p className="mt-3 text-xs text-red-600">{mutationError}</p> : null}
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
-              <button
-                className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
-                disabled={saving}
-                onClick={() => setArchiveConfirmOpen(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-                disabled={saving}
-                onClick={() => void handleArchiveKnowledge()}
-                type="button"
-              >
-                {isArchiving ? "Archiving..." : "Archive"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-};
-
 // 8. Members & Roles
 const ProjectMembers = () => {
   const { session } = useAuthState();
@@ -5837,7 +4246,7 @@ const ProjectMembers = () => {
 
   const roleColor: Record<"OWNER" | "ADMIN" | "MEMBER", string> = {
     OWNER: "bg-foreground text-background",
-    ADMIN: "bg-blue-50 text-blue-700 border border-blue-200",
+    ADMIN: "bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border border-[color:color-mix(in_srgb,var(--app-accent)_24%,white)]",
     MEMBER: "bg-muted text-muted-foreground border border-border"
   };
 
@@ -6576,13 +4985,13 @@ const ProjectCalendar = () => {
   const statusStyle: Record<ProjectCalendarEvent["status"], string> = {
     SCHEDULED: "bg-blue-500",
     IN_PROGRESS: "bg-emerald-500",
-    ENDED: "bg-zinc-500",
+    ENDED: "bg-violet-500",
     CANCELED: "bg-rose-500"
   };
   const statusBadge: Record<ProjectCalendarEvent["status"], string> = {
     SCHEDULED: "bg-blue-50 text-blue-700 border-blue-200",
     IN_PROGRESS: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    ENDED: "bg-zinc-100 text-zinc-700 border-zinc-200",
+    ENDED: "bg-violet-50 text-violet-700 border-violet-200",
     CANCELED: "bg-rose-50 text-rose-700 border-rose-200"
   };
 
@@ -7036,9 +5445,7 @@ const LiveMeeting = () => {
   const [connectionStateLabel, setConnectionStateLabel] = useState("Connecting");
   const [participants, setParticipants] = useState<LiveParticipantCard[]>([]);
   const [activeSpeakerSid, setActiveSpeakerSid] = useState<string | null>(null);
-  const [transcriptRows, setTranscriptRows] = useState<LiveTranscriptRow[]>([]);
   const [dictionaryTerms, setDictionaryTerms] = useState<DomainTerm[]>([]);
-  const [livePanel, setLivePanel] = useState<"transcript" | "chat">("transcript");
   const [selectedDictionaryTerm, setSelectedDictionaryTerm] = useState<DomainTerm | null>(null);
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: string; text: string; time: string; local?: boolean }>>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -7161,7 +5568,6 @@ const LiveMeeting = () => {
       setRoomReady(false);
       setRoomError(null);
       setTranscriptError("");
-      setTranscriptRows([]);
       setTranscriptStatus("PENDING");
       setSttState("idle");
       setConnectionStateLabel("Connecting");
@@ -7319,72 +5725,48 @@ const LiveMeeting = () => {
     };
   }, [authSession, currentUserName, meetingError, meetingId, meetingLoading, roomRetrySeed]);
 
+  // 전사 조회는 features/transcription 훅이 담당한다.
+  // MeetingTranscript 화면과 queryKey를 공유하므로 요청이 중복되지 않는다.
+  const dialogueQuery = useMeetingDialogueQuery(meetingId, {
+    enabled: Boolean(authSession) && roomReady && Boolean(meetingDetail)
+  });
+
   useEffect(() => {
-    if (!roomReady || !meetingDetail) {
+    const status = dialogueQuery.status;
+    if (!status) {
       return;
     }
+    setTranscriptStatus(status);
+    if (status === "PROCESSING" || status === "COMPLETED") {
+      setSttState("active");
+    } else if (status === "FAILED") {
+      setSttState("failed");
+    }
+  }, [dialogueQuery.status]);
 
-    let cancelled = false;
-    const pollDialogue = async () => {
-      try {
-        const response = await fetchMeetingDialogue(authSession, meetingId);
-        if (cancelled) {
-          return;
-        }
-        setTranscriptStatus(response.status);
-        if (response.status === "PROCESSING" || response.status === "COMPLETED") {
-          setSttState("active");
-        } else if (response.status === "FAILED") {
-          setSttState("failed");
-        }
-        setTranscriptError((current) => {
-          if (response.status === "FAILED" && current) {
-            return current;
-          }
-          return "";
-        });
-        setTranscriptRows(
-          [
-            ...response.rows
-              .slice()
-              .sort((left, right) => left.startMs - right.startMs)
-              .map((row) => {
-                const speaker = row.speakerName || row.speakerLabel || "Unknown";
-                return {
-                  key: row.segmentId,
-                  speaker,
-                  initials: participantInitials(speaker),
-                  time: formatTranscriptTime(row.startMs),
-                  text: row.text
-                };
-              }),
-            ...response.partials.map((partial, index) => {
-              const speaker = partial.speakerName || partial.speakerLabel || "Unknown";
-              return {
-                key: `partial-${partial.speakerLabel}-${index}`,
-                speaker,
-                initials: participantInitials(speaker),
-                time: "LIVE",
-                text: partial.text
-              };
-            })
-          ]
-        );
-      } catch (cause) {
-        if (cancelled) {
-          return;
-        }
-        setTranscriptError(cause instanceof Error ? cause.message : "실시간 자막을 불러오지 못했습니다.");
-      }
-    };
+  useEffect(() => {
+    if (dialogueQuery.error) {
+      setTranscriptError(
+        dialogueQuery.error instanceof Error
+          ? dialogueQuery.error.message
+          : "실시간 자막을 불러오지 못했습니다."
+      );
+    } else if (dialogueQuery.data && dialogueQuery.data.status !== "FAILED") {
+      setTranscriptError("");
+    }
+  }, [dialogueQuery.data, dialogueQuery.error]);
 
-    void pollDialogue();
-    const intervalId = window.setInterval(pollDialogue, 2500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [authSession, meetingDetail, meetingId, roomReady]);
+  const transcriptRows: LiveTranscriptRow[] = useMemo(
+    () =>
+      dialogueQuery.entries.map((entry) => ({
+        key: entry.key,
+        speaker: entry.speakerName,
+        initials: participantInitials(entry.speakerName),
+        time: entry.isPartial ? "LIVE" : formatTranscriptTime(entry.startMs),
+        text: entry.text
+      })),
+    [dialogueQuery.entries]
+  );
 
   const stageParticipant =
     participants.find((participant) => participant.sid && participant.sid === activeSpeakerSid && participant.cameraPublication?.videoTrack) ??
@@ -8727,7 +7109,6 @@ type ModalType =
 const Modal = ({ type, onClose }: { type: ModalType; onClose: () => void }) => {
   const [value, setValue] = useState("");
   const [role, setRole] = useState("Editor");
-  const [confirmed, setConfirmed] = useState(false);
 
   if (!type) return null;
 
@@ -8990,9 +7371,14 @@ const LoginPage = () => {
   const { locale } = useAppPreferences();
   const location = useLocation();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  // The landing page hands off `?mode=signup&email=…`; treat it as the initial
+  // form state only, so later edits and tab switches are not clobbered.
+  const [searchParams] = useSearchParams();
+  const [mode, setMode] = useState<"login" | "signup">(
+    () => searchParams.get("mode") === "signup" ? "signup" : "login"
+  );
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => searchParams.get("email")?.trim() ?? "");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -9532,15 +7918,6 @@ const PermissionDenied = ({ type = "project" }: { type?: "project" | "meeting" |
   );
 };
 
-const PlaceholderPage = ({ title }: { title: string }) => (
-  <div className="p-8 flex flex-col items-center justify-center h-full text-center">
-    <div className="w-12 h-12 bg-muted rounded flex items-center justify-center mb-4">
-      <Activity className="w-6 h-6 text-muted-foreground" />
-    </div>
-    <h2 className="text-lg font-semibold mb-2">{title}</h2>
-    <p className="text-sm text-muted-foreground max-w-sm">This screen is part of the 21-page architecture but is currently a placeholder awaiting detailed implementation.</p>
-  </div>
-);
 
 // --- Router Setup ---
 // This is the active frontend route source. main.tsx renders App directly.
@@ -9571,7 +7948,7 @@ const router = createBrowserRouter([
         ]
       },
       { path: "tasks", Component: ProjectTasks },
-      { path: "knowledge", Component: ProjectKnowledge },
+      { path: "knowledge", Component: KnowledgeGraphPage },
       { path: "ai", Component: ProjectAIPage },
       { path: "calendar", Component: ProjectCalendar },
       { path: "members", Component: ProjectMembers },

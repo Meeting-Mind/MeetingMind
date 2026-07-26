@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .embedding_provider import EmbeddingProvider, EmbeddingProviderError
-from .observability import elapsed_ms, log_event
+from .observability import elapsed_ms, log_event, record_embedding_queue, record_retrieval
 from .rag import (
     RagBuildRequest,
     RagChunk,
@@ -91,7 +91,13 @@ class EmbeddingJobRepository(Protocol):
     ) -> bool:
         ...
 
-    def record_failure(self, job: EmbeddingJob, failure_code: str, retry_delay_seconds: int | None) -> None:
+    def record_failure(
+        self,
+        job: EmbeddingJob,
+        failure_code: str,
+        retry_delay_seconds: int | None,
+        failure_detail: str | None = None,
+    ) -> None:
         ...
 
     def queue_metrics(self) -> EmbeddingQueueMetrics:
@@ -163,12 +169,18 @@ class PostgresEmbeddingRepository:
                 from embedding_jobs
                 """
             ).fetchone()
-        return EmbeddingQueueMetrics(
+        metrics = EmbeddingQueueMetrics(
             pending_count=int(row["pending_count"]),
             processing_count=int(row["processing_count"]),
             failed_count=int(row["failed_count"]),
             oldest_pending_age_seconds=max(0, int(row["oldest_pending_age_seconds"])),
         )
+        record_embedding_queue(
+            pending_count=metrics.pending_count,
+            processing_count=metrics.processing_count,
+            failed_count=metrics.failed_count,
+        )
+        return metrics
 
     def load_snapshot(self, job: EmbeddingJob) -> EmbeddingSnapshot | None:
         with self._connect(self._dsn, row_factory=dict_row) as connection:
@@ -253,23 +265,33 @@ class PostgresEmbeddingRepository:
                 )
             return True
 
-    def record_failure(self, job: EmbeddingJob, failure_code: str, retry_delay_seconds: int | None) -> None:
+    def record_failure(
+        self,
+        job: EmbeddingJob,
+        failure_code: str,
+        retry_delay_seconds: int | None,
+        failure_detail: str | None = None,
+    ) -> None:
         with self._connect(self._dsn) as connection:
             if retry_delay_seconds is None:
                 connection.execute(
                     """
                     update embedding_jobs
-                    set status = 'FAILED', failure_code = %s, completed_at = now(), lease_expires_at = null
+                    set status = 'FAILED', failure_code = %s, failure_detail = %s,
+                        completed_at = now(), lease_expires_at = null
                     where id = %s and status = 'PROCESSING'
                     """,
-                    (failure_code, job.id),
+                    (failure_code, failure_detail, job.id),
                 )
                 knowledge_status = "FAILED"
             else:
+                # 재시도로 되돌릴 때는 failure_code를 지운다. failure_detail도 함께 지워야
+                # check 제약(detail이 있으면 code도 있어야 함)을 만족한다.
                 connection.execute(
                     """
                     update embedding_jobs
                     set status = 'PENDING', started_at = null, completed_at = null, failure_code = null,
+                        failure_detail = null,
                         next_attempt_at = now() + (%s * interval '1 second'), lease_expires_at = null
                     where id = %s and status = 'PROCESSING'
                     """,
@@ -373,7 +395,14 @@ class PostgresEmbeddingRepository:
         project_id: str,
         allowed_meeting_ids: list[str],
         *,
-        similarity_threshold: float = 0.78,
+        # 임계값만으로 자르면 그래프가 점 무더기가 된다. 실측에서 이 스페이스의
+        # 가장 관련 높은 쌍이 0.723인데 임계값 0.78이라 연결선이 0개였다.
+        # 문서 집합마다 유사도 분포가 달라 고정 임계값은 항상 이런 위험을 갖는다.
+        similarity_threshold: float = 0.45,
+        # 노드마다 가장 가까운 K개만 잇는다. 임계값을 낮추기만 하면 무관한 문서까지
+        # 이어지는데(실측: '팀 온보딩 안내'와 '베타 출시 기준'이 0.572로 중간 순위였다),
+        # 노드별 상한을 두면 각 노드가 자기 기준으로 가장 가까운 것만 남긴다.
+        neighbors_per_node: int = 3,
         node_limit: int = 80,
         edge_limit: int = 160,
     ) -> tuple[list[KnowledgeGraphNode], list[KnowledgeGraphEdge]]:
@@ -444,16 +473,36 @@ class PostgresEmbeddingRepository:
                 ).fetchall()
                 edge_rows = connection.execute(
                     centroid_cte + """
-                        select left_node.node_id as from_id,
-                               right_node.node_id as to_id,
-                               1 - (left_node.centroid <=> right_node.centroid) as similarity
-                        from centroids left_node
-                        join centroids right_node on left_node.node_id < right_node.node_id
-                        where 1 - (left_node.centroid <=> right_node.centroid) >= %s
+                        , ranked as (
+                            select source_node.node_id as from_id,
+                                   neighbor.node_id as to_id,
+                                   1 - (source_node.centroid <=> neighbor.centroid) as similarity,
+                                   row_number() over (
+                                       partition by source_node.node_id
+                                       order by source_node.centroid <=> neighbor.centroid
+                                   ) as rank
+                            from centroids source_node
+                            join centroids neighbor on neighbor.node_id <> source_node.node_id
+                            where 1 - (source_node.centroid <=> neighbor.centroid) >= %s
+                        )
+                        -- 양쪽에서 각각 뽑히므로 방향을 정규화해 중복을 없앤다.
+                        select least(from_id, to_id) as from_id,
+                               greatest(from_id, to_id) as to_id,
+                               max(similarity) as similarity
+                        from ranked
+                        where rank <= %s
+                        group by least(from_id, to_id), greatest(from_id, to_id)
                         order by similarity desc, from_id, to_id
                         limit %s
                     """,
-                    (project_id, allowed_meeting_ids, node_limit, similarity_threshold, edge_limit),
+                    (
+                        project_id,
+                        allowed_meeting_ids,
+                        node_limit,
+                        similarity_threshold,
+                        neighbors_per_node,
+                        edge_limit,
+                    ),
                 ).fetchall()
         except psycopg.Error as error:
             raise RetrievalUnavailableError("knowledge graph database unavailable") from error
@@ -732,11 +781,13 @@ class PostgresRagRetriever:
             results = self._repository.hybrid_search(request, vectors[0])
         except (EmbeddingProviderError, RetrievalUnavailableError) as error:
             self._log_search("ai_retrieval_failed", request, started_at, error_type=type(error).__name__)
+            record_retrieval(request.scope, elapsed_ms(started_at), None, outcome="failed")
             if isinstance(error, RetrievalUnavailableError):
                 raise
             raise RetrievalUnavailableError("query embedding unavailable") from error
         except Exception as error:
             self._log_search("ai_retrieval_failed", request, started_at, error_type=type(error).__name__)
+            record_retrieval(request.scope, elapsed_ms(started_at), None, outcome="failed")
             raise
 
         self._log_search(
@@ -746,6 +797,7 @@ class PostgresRagRetriever:
             result_count=len(results),
             source_type_count=len({result.chunk.sourceType for result in results}),
         )
+        record_retrieval(request.scope, elapsed_ms(started_at), len(results), outcome="completed")
         return results
 
     @staticmethod

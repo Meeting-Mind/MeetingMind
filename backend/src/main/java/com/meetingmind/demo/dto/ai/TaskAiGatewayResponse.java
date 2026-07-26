@@ -6,7 +6,8 @@ public record TaskAiGatewayResponse(
         List<Task> tasks,
         List<Source> sources,
         boolean unsupported,
-        String model
+        String model,
+        AiChatResponse.AiUsageMetrics usage
 ) {
     public TaskAiGatewayResponse {
         tasks = tasks == null ? List.of() : List.copyOf(tasks);

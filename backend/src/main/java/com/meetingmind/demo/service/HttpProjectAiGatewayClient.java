@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,15 +25,26 @@ public class HttpProjectAiGatewayClient implements ProjectAiGatewayClient {
     private final ObjectMapper objectMapper;
     private final URI chatUri;
     private final String serviceToken;
+    private final AiGatewayGuard guard;
 
     @Autowired
     public HttpProjectAiGatewayClient(
             ObjectMapper objectMapper,
             InternalHttpClientFactory internalHttpClientFactory,
             @Value("${meetingmind.ai.base-url:http://localhost:8000}") String aiBaseUrl,
-            @Value("${meetingmind.ai.service-token:}") String serviceToken
+            @Value("${meetingmind.ai.service-token:}") String serviceToken,
+            @Value("${meetingmind.ai.guard.max-concurrent:16}") int maxConcurrent,
+            @Value("${meetingmind.ai.guard.failure-threshold:3}") int failureThreshold,
+            @Value("${meetingmind.ai.guard.open-duration:30s}") Duration openDuration
     ) {
-        this(internalHttpClientFactory.newBuilder().build(), objectMapper, aiBaseUrl, serviceToken);
+this(
+                internalHttpClientFactory.newBuilder().build(),
+                objectMapper,
+                aiBaseUrl,
+                serviceToken,
+                new AiGatewayGuardPolicy(maxConcurrent, failureThreshold, openDuration),
+                Clock.systemUTC()
+        );
     }
 
     HttpProjectAiGatewayClient(
@@ -41,34 +53,52 @@ public class HttpProjectAiGatewayClient implements ProjectAiGatewayClient {
             String aiBaseUrl,
             String serviceToken
     ) {
+        this(httpClient, objectMapper, aiBaseUrl, serviceToken, new AiGatewayGuardPolicy(16, 3, Duration.ofSeconds(30)), Clock.systemUTC());
+    }
+
+    HttpProjectAiGatewayClient(
+            HttpClient httpClient,
+            ObjectMapper objectMapper,
+            String aiBaseUrl,
+            String serviceToken,
+            AiGatewayGuardPolicy guardPolicy,
+            Clock clock
+    ) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.chatUri = URI.create(stripTrailingSlash(aiBaseUrl) + "/api/internal/project-ai/chat");
         this.serviceToken = serviceToken == null ? "" : serviceToken;
+        this.guard = new AiGatewayGuard(guardPolicy, clock);
     }
 
     @Override
     public AiChatResponse chat(ProjectAiGatewayChatRequest request) {
         try {
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(chatUri)
-                    .version(HttpClient.Version.HTTP_1_1)
-                    .timeout(REQUEST_TIMEOUT)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)));
-            AiGatewayRequestHeaders.applyServiceToken(requestBuilder, serviceToken);
-            HttpRequest httpRequest = requestBuilder.build();
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new AiGatewayException("AI provider returned " + response.statusCode());
-            }
-            return objectMapper.readValue(response.body(), AiChatResponse.class);
-        } catch (JsonProcessingException exception) {
-            throw new AiGatewayException("AI request or response JSON is invalid.", exception);
-        } catch (IOException exception) {
-            throw new AiGatewayException("AI provider is unavailable.", exception);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new AiGatewayException("AI provider request was interrupted.", exception);
+            return guard.execute(() -> {
+                try {
+                    HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(chatUri)
+                            .version(HttpClient.Version.HTTP_1_1)
+                            .timeout(REQUEST_TIMEOUT)
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)));
+                    AiGatewayRequestHeaders.applyServiceToken(requestBuilder, serviceToken);
+                    HttpRequest httpRequest = requestBuilder.build();
+                    HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                        throw new AiGatewayException("AI provider returned " + response.statusCode());
+                    }
+                    return objectMapper.readValue(response.body(), AiChatResponse.class);
+                } catch (JsonProcessingException exception) {
+                    throw new AiGatewayException("AI request or response JSON is invalid.", exception);
+                } catch (IOException exception) {
+                    throw new AiGatewayException("AI provider is unavailable.", exception);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AiGatewayException("AI provider request was interrupted.", exception);
+                }
+            });
+        } catch (AiGatewayGuardRejectedException exception) {
+            throw new AiGatewayException("AI provider is temporarily unavailable.", exception);
         }
     }
 

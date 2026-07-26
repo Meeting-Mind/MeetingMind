@@ -8,6 +8,7 @@ import com.meetingmind.demo.domain.MeetingReport;
 import com.meetingmind.demo.domain.MeetingReportStatus;
 import com.meetingmind.demo.domain.TranscriptSegment;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
+import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayResponse;
 import com.meetingmind.demo.dto.ai.ReportCandidateGenerationResponse;
@@ -86,11 +87,12 @@ public class ReportCandidateService {
             ));
         } catch (AiGatewayException exception) {
             throw new AuthorizationException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
+                HttpStatus.SERVICE_UNAVAILABLE,
                     "AI_PROVIDER_UNAVAILABLE",
-                    "AI provider 응답을 받을 수 없습니다."
+                "AI provider 응답을 받을 수 없습니다."
             );
         }
+        recordUsage(user.id(), context, aiResponse);
 
         Set<String> allowedSourceIds = requestSources.stream()
                 .map(ReportAiGatewayRequest.SourceContext::sourceId)
@@ -277,5 +279,44 @@ public class ReportCandidateService {
 
     private String blankToNull(String value) {
         return hasText(value) ? value.trim() : null;
+    }
+
+    private void recordUsage(
+            String actorUserId,
+            WorkspaceDomainService.MeetingAiContext context,
+            ReportAiGatewayResponse response
+    ) {
+        AiChatResponse.AiUsageMetrics usage = response.usage();
+        if (usage == null) {
+            return;
+        }
+        workspaceDomainService.recordAiUsageEvent(
+                actorUserId,
+                context.meeting().spaceId(),
+                context.meeting().id(),
+                "report-ai",
+                usage.provider(),
+                usage.apiStyle(),
+                usage.stream(),
+                usage.inputTokens(),
+                usage.outputTokens(),
+                totalTokens(usage),
+                (long) usage.totalMs()
+        );
+    }
+
+    private Integer totalTokens(AiChatResponse.AiUsageMetrics usage) {
+        Integer inputTokens = usage.inputTokens();
+        Integer outputTokens = usage.outputTokens();
+        if (inputTokens != null && outputTokens != null) {
+            return inputTokens + outputTokens;
+        }
+        if (inputTokens != null && usage.outputTokenEstimate() != null) {
+            return inputTokens + usage.outputTokenEstimate();
+        }
+        if (outputTokens != null) {
+            return outputTokens;
+        }
+        return inputTokens;
     }
 }

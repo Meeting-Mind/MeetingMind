@@ -33,6 +33,7 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     private final Map<String, TaskCandidate> taskCandidatesById = new LinkedHashMap<>();
     private final Map<String, TaskCard> taskCardsById = new LinkedHashMap<>();
     private final Map<String, ProjectKnowledge> projectKnowledgeById = new LinkedHashMap<>();
+    private final Map<String, AiUsageEvent> aiUsageEventsById = new LinkedHashMap<>();
     private final Map<String, EmbeddingChunk> embeddingChunksById = new LinkedHashMap<>();
     private final Map<String, AuditEvent> auditEventsById = new LinkedHashMap<>();
     private final Map<String, MeetingJoinRequest> meetingJoinRequestsById = new LinkedHashMap<>();
@@ -633,6 +634,22 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
                 .stream()
                 .filter(knowledge -> knowledge.spaceId().equals(spaceId))
                 .sorted(java.util.Comparator.comparing(ProjectKnowledge::updatedAt).reversed().thenComparing(ProjectKnowledge::id))
+                .toList();
+    }
+
+    @Override
+    synchronized AiUsageEvent saveAiUsageEvent(AiUsageEvent event) {
+        aiUsageEventsById.put(event.id(), event);
+        return event;
+    }
+
+    @Override
+    synchronized List<AiUsageEvent> findAiUsageEvents(String spaceId, Instant fromInclusive) {
+        return aiUsageEventsById.values()
+                .stream()
+                .filter(event -> event.spaceId().equals(spaceId))
+                .filter(event -> !event.createdAt().isBefore(fromInclusive))
+                .sorted(java.util.Comparator.comparing(AiUsageEvent::createdAt).reversed().thenComparing(AiUsageEvent::id))
                 .toList();
     }
 

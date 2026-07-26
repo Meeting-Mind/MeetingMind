@@ -10,6 +10,10 @@ import com.meetingmind.demo.dto.ai.TermExplanationResponse;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -97,6 +101,54 @@ class HttpMeetingAiGatewayClientTest {
             assertThat(receivedBody.get()).contains("\"meetingId\":\"meeting-1\"");
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void rejectsCallWhileCircuitIsOpen() {
+        HttpMeetingAiGatewayClient client = new HttpMeetingAiGatewayClient(
+                HttpClient.newHttpClient(),
+                new ObjectMapper(),
+                "http://127.0.0.1:65535",
+                "internal-test-token",
+                new AiGatewayGuardPolicy(4, 1, Duration.ofMinutes(1)),
+                FixedClock.at("2026-07-25T00:00:00Z")
+        );
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() ->
+                client.chat(new MeetingAiGatewayChatRequest("space-1", "meeting-1", "질문"))
+        )).isInstanceOf(AiGatewayException.class);
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() ->
+                client.chat(new MeetingAiGatewayChatRequest("space-1", "meeting-1", "질문"))
+        )).isInstanceOf(AiGatewayException.class)
+                .hasMessageContaining("temporarily unavailable");
+    }
+
+    private static final class FixedClock extends Clock {
+        private final Instant instant;
+
+        private FixedClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private static FixedClock at(String instant) {
+            return new FixedClock(Instant.parse(instant));
+        }
+
+        @Override
+        public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
         }
     }
 }

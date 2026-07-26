@@ -1,0 +1,14 @@
+apiVersion: 1
+
+# Grafana가 기동할 때 이 파일을 읽어 datasource를 자동 등록한다.
+# UID `meetingmind-prometheus`는 dashboard JSON이 참조하므로 바꾸지 않는다.
+datasources:
+  - name: Prometheus
+    uid: meetingmind-prometheus
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL:-http://prometheus:9090}
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s

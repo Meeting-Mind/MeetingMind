@@ -54,8 +54,9 @@ class EmbeddingWorker:
                 )
             except Exception as error:
                 failure_code = normalize_failure_code(error)
+                failure_detail = failure_detail_for(error)
                 retry_delay = retry_delay_for(job, error)
-                self._repository.record_failure(job, failure_code, retry_delay)
+                self._repository.record_failure(job, failure_code, retry_delay, failure_detail)
                 log_event(
                     LOGGER,
                     "embedding_job_failed",
@@ -64,6 +65,7 @@ class EmbeddingWorker:
                     generation=job.generation,
                     attemptCount=job.attempt_count,
                     failureCode=failure_code,
+                    failureDetail=failure_detail,
                     willRetry=retry_delay is not None,
                     durationMs=elapsed_ms(started_at),
                 )
@@ -101,6 +103,21 @@ def retry_delay_for(job: EmbeddingJob, error: Exception | None = None) -> int | 
     if isinstance(error, (SourceChangedError, ValueError)) or job.attempt_count >= 4:
         return None
     return RETRY_DELAYS_SECONDS[job.attempt_count - 1]
+
+
+def failure_detail_for(error: Exception) -> str:
+    """예외의 정규화된 타입 이름만 남긴다.
+
+    `INTERNAL_ERROR`는 미분류 예외의 포괄 코드라 그것만으로는 원인을 알 수 없다.
+    타입 이름만 있어도 psycopg 오류와 provider 오류를 즉시 구분할 수 있다.
+
+    예외 **메시지는 저장하지 않는다**. provider 응답 본문이나 DSN(비밀번호 포함)이
+    메시지에 실려 올 수 있어 NFR-LOG-01 원문 비노출 원칙과 충돌한다.
+    """
+    error_type = type(error)
+    module = getattr(error_type, "__module__", "") or ""
+    qualified = f"{module}.{error_type.__qualname__}" if module and module != "builtins" else error_type.__qualname__
+    return qualified[:200]
 
 
 def normalize_failure_code(error: Exception) -> str:

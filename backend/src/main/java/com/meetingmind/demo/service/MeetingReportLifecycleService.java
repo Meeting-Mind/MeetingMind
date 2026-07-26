@@ -6,6 +6,7 @@ import com.meetingmind.demo.authz.MeetingAccessPolicy;
 import com.meetingmind.demo.domain.MeetingReport;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.ConfirmMeetingReportResponse;
+import com.meetingmind.demo.observability.BackendOperationMetrics;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -14,18 +15,25 @@ public class MeetingReportLifecycleService {
     private final AuthService authService;
     private final WorkspaceDomainService workspaceDomainService;
     private final MeetingAccessPolicy meetingAccessPolicy;
+    private final BackendOperationMetrics metrics;
 
     public MeetingReportLifecycleService(
             AuthService authService,
             WorkspaceDomainService workspaceDomainService,
-            MeetingAccessPolicy meetingAccessPolicy
+            MeetingAccessPolicy meetingAccessPolicy,
+            BackendOperationMetrics metrics
     ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
         this.meetingAccessPolicy = meetingAccessPolicy;
+        this.metrics = metrics;
     }
 
     public ConfirmMeetingReportResponse confirm(String authorizationHeader, String meetingId, String reportId) {
+        return metrics.recordReportConfirm(() -> confirmInternal(authorizationHeader, meetingId, reportId));
+    }
+
+    private ConfirmMeetingReportResponse confirmInternal(String authorizationHeader, String meetingId, String reportId) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
         meetingAccessPolicy.requireEditAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
         MeetingReport report = workspaceDomainService.confirmMeetingReport(meetingId, reportId);
