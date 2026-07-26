@@ -1,0 +1,347 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="1620" viewBox="0 0 1520 1620" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">MeetingMind on AWS - ECS Fargate Architecture</title>
+  <desc id="dsc">MeetingMind AWS 아키텍처. 브라우저와 React SPA, AWS Cloud 안의 Edge(계획), VPC 2 AZ 구성(퍼블릭 서브넷의 IGW/ALB/NAT/VPC 엔드포인트, 프라이빗 앱 서브넷의 ECS Fargate BFF·Core·Auth·Realtime STT·AI와 Cloud Map/cert-loader 기반 내부 mTLS, 데이터 서브넷의 RDS PostgreSQL과 ElastiCache Valkey), 플랫폼 공통 서비스(ECR·Secrets Manager·KMS·CloudWatch·IAM), 외부 제공자(LiveKit·Soniox·OpenAI·GitHub Actions).</desc>
+
+  <defs>
+    <style>
+      .t{font-family:Pretendard,"Apple SD Gothic Neo","Noto Sans KR",-apple-system,"Segoe UI",Arial,sans-serif}
+      .h1{font-size:23px;font-weight:700;fill:#16191F}
+      .h2{font-size:12.5px;fill:#5A6B86}
+      .grp{font-size:14px;font-weight:700;fill:#16191F}
+      .band{font-size:13px;font-weight:700;fill:#16191F}
+      .vpc{font-size:13.5px;font-weight:700;fill:#1B660F}
+      .lbl{font-size:12.5px;font-weight:600;fill:#16191F}
+      .sub{font-size:10.5px;fill:#5A6B86}
+      .note{font-size:10.5px;fill:#48607A}
+      .edge{font-size:10.5px;fill:#5A6B86}
+      .num{font-size:12px;font-weight:700;fill:#FFFFFF}
+      .plan{font-size:9.5px;font-weight:700;fill:#8A94A6}
+      .flow{fill:none;stroke:#5A6B86;stroke-width:1.8;marker-end:url(#ar)}
+      .flow2{fill:none;stroke:#5A6B86;stroke-width:1.8;marker-end:url(#ar);marker-start:url(#ar-s)}
+      .data{fill:none;stroke:#7D8998;stroke-width:1.5;stroke-dasharray:6 5;marker-end:url(#ar)}
+      .bus{fill:none;stroke:#7D8998;stroke-width:1.5;stroke-dasharray:6 5}
+      .grpbox{fill:none;stroke:#879196;stroke-width:1.5;stroke-dasharray:7 6}
+    </style>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#5A6B86"/></marker>
+    <marker id="ar-s" markerWidth="9" markerHeight="9" refX="1" refY="4.5" orient="auto"><path d="M9 0 L0 4.5 L9 9 z" fill="#5A6B86"/></marker>
+
+    <g id="ic-user"><circle cx="32" cy="22" r="9" fill="#fff"/><path d="M15 48c0-9.4 7.6-17 17-17s17 7.6 17 17z" fill="#fff"/></g>
+    <g id="ic-react" fill="none" stroke="#61DAFB" stroke-width="2.4">
+      <ellipse cx="32" cy="32" rx="21" ry="8"/><ellipse cx="32" cy="32" rx="21" ry="8" transform="rotate(60 32 32)"/><ellipse cx="32" cy="32" rx="21" ry="8" transform="rotate(120 32 32)"/><circle cx="32" cy="32" r="4.4" fill="#61DAFB" stroke="none"/>
+    </g>
+    <g id="ic-code"><text x="32" y="41" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="21" font-weight="700" fill="#fff">&lt;/&gt;</text></g>
+    <g id="ic-dns" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="32" cy="32" r="17"/><ellipse cx="32" cy="32" rx="7.5" ry="17"/><path d="M15 32h34M18.5 22.5h27M18.5 41.5h27"/></g>
+    <g id="ic-alb"><g fill="#fff"><circle cx="32" cy="14" r="4.6"/><circle cx="14" cy="50" r="4.6"/><circle cx="32" cy="50" r="4.6"/><circle cx="50" cy="50" r="4.6"/></g><path d="M32 19v13M14 45V32h36v13M32 32v13" fill="none" stroke="#fff" stroke-width="2.2"/></g>
+    <g id="ic-igw" fill="none" stroke="#fff" stroke-width="2.3"><rect x="11" y="19" width="42" height="26" rx="4"/><path d="M11 32h42M25 19v26M39 19v26"/></g>
+    <g id="ic-ecs" fill="none" stroke="#fff" stroke-width="2.3"><rect x="13" y="17" width="38" height="30" rx="3"/><path d="M13 26.5h38M26 26.5V47M39 26.5V47"/></g>
+    <g id="ic-db" fill="none" stroke="#fff" stroke-width="2.3"><ellipse cx="32" cy="19" rx="17" ry="6.4"/><path d="M15 19v26c0 3.5 7.6 6.4 17 6.4s17-2.9 17-6.4V19"/><path d="M15 32c0 3.5 7.6 6.4 17 6.4S49 35.5 49 32"/></g>
+    <g id="ic-cache"><g fill="none" stroke="#fff" stroke-width="2.3"><ellipse cx="32" cy="18" rx="17" ry="6.4"/><path d="M15 18v27c0 3.5 7.6 6.4 17 6.4s17-2.9 17-6.4V18"/></g><path d="M35 24l-9 13h6.5l-2.5 10 9.5-13.5H33z" fill="#fff"/></g>
+    <g id="ic-s3" fill="none" stroke="#fff" stroke-width="2.3"><path d="M14 18h36l-4.2 30.6a3 3 0 0 1-3 2.4H21.2a3 3 0 0 1-3-2.4z"/><ellipse cx="32" cy="18" rx="18" ry="5"/></g>
+    <g id="ic-ai"><rect x="17" y="17" width="30" height="30" rx="4" fill="none" stroke="#fff" stroke-width="2.3"/><rect x="26" y="26" width="12" height="12" rx="2" fill="#fff"/><path d="M24 17v-6M32 17v-6M40 17v-6M24 47v6M32 47v6M40 47v6M17 24h-6M17 32h-6M17 40h-6M47 24h6M47 32h6M47 40h6" stroke="#fff" stroke-width="2.1"/></g>
+    <g id="ic-mic"><rect x="25" y="10" width="14" height="24" rx="7" fill="#fff"/><path d="M18 30a14 14 0 0 0 28 0M32 44v9M24 53h16" fill="none" stroke="#fff" stroke-width="2.3"/></g>
+    <g id="ic-map"><g fill="#fff"><circle cx="32" cy="14" r="5"/><circle cx="14" cy="44" r="5"/><circle cx="50" cy="44" r="5"/><circle cx="32" cy="52" r="5"/></g><path d="M32 19 18 40M32 19l14 21M18.5 45.5 27 50M45.5 45.5 37 50" fill="none" stroke="#fff" stroke-width="2"/></g>
+    <g id="ic-cert"><path d="M32 10 50 17v14c0 11-7.6 19.5-18 23-10.4-3.5-18-12-18-23V17z" fill="none" stroke="#fff" stroke-width="2.3"/><path d="M23 32l6.5 7L42 25" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g id="ic-lock"><rect x="16" y="29" width="32" height="23" rx="3.5" fill="#fff"/><path d="M23 29v-6a9 9 0 0 1 18 0v6" fill="none" stroke="#fff" stroke-width="3"/></g>
+    <g id="ic-key"><circle cx="24" cy="28" r="9" fill="none" stroke="#fff" stroke-width="3"/><path d="M30 34l14 14M38 42l-5 5M44 48l-4 4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></g>
+    <g id="ic-iam"><path d="M32 9 51 16v15c0 12-8 21-19 25-11-4-19-13-19-25V16z" fill="none" stroke="#fff" stroke-width="2.3"/><circle cx="32" cy="27" r="6" fill="#fff"/><path d="M21 45c0-6.1 4.9-11 11-11s11 4.9 11 11" fill="#fff"/></g>
+    <g id="ic-ecr" fill="none" stroke="#fff" stroke-width="2.3"><rect x="12" y="22" width="40" height="26" rx="3"/><path d="M12 31h40M32 10v9M27 15l5 5 5-5"/></g>
+    <g id="ic-cw" fill="none" stroke="#fff" stroke-width="2.4"><path d="M12 46h40"/><path d="M14 38l10-12 8 9 8-14 8 9" stroke-linejoin="round"/></g>
+    <g id="ic-nat" fill="none" stroke="#fff" stroke-width="2.4"><path d="M14 24h30M38 18l6 6-6 6M50 40H20m6-6-6 6 6 6" stroke-linejoin="round"/></g>
+    <g id="ic-vpce"><circle cx="32" cy="32" r="8" fill="#fff"/><g fill="none" stroke="#fff" stroke-width="2.3"><path d="M32 24V10M32 40v14M24 32H10M40 32h14"/><circle cx="32" cy="32" r="18" stroke-dasharray="4 4"/></g></g>
+    <g id="ic-cloud" fill="none" stroke="#fff" stroke-width="2.3"><path d="M20 44a10 10 0 0 1 1-20 14 14 0 0 1 26 4 9 9 0 0 1-2 16z"/><path d="M26 36l6-6 6 6M32 30v16"/></g>
+  </defs>
+
+  <rect width="1520" height="1620" fill="#FFFFFF"/>
+
+  <!-- title -->
+  <text class="t h1" x="40" y="44">MeetingMind on AWS · ECS Fargate 아키텍처</text>
+  <text class="t h2" x="40" y="70">Seoul ap-northeast-2 · nonprod-v2 · 단일 리전 / 2 AZ · 브라우저는 액세스 토큰을 보유하지 않는다</text>
+
+  <!-- legend -->
+  <g class="t">
+    <path d="M900 50h28" stroke="#5A6B86" stroke-width="1.8" marker-end="url(#ar)"/><text class="edge" x="936" y="54">요청 흐름</text>
+    <path d="M1060 50h28" stroke="#7D8998" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ar)"/><text class="edge" x="1096" y="54">데이터 접근 · 부가 흐름</text>
+    <rect x="1268" y="42" width="22" height="16" rx="3" fill="#EDF0F3" stroke="#B0B8C4" stroke-width="1.4" stroke-dasharray="4 3"/><text class="edge" x="1298" y="54">현재 Terraform 미배포(계획)</text>
+  </g>
+
+  <!-- ===================== client ===================== -->
+  <g class="t">
+    <rect x="148" y="120" width="64" height="64" rx="10" fill="#232F3E"/><use href="#ic-user" x="148" y="120"/>
+    <circle cx="134" cy="130" r="12" fill="#232F3E"/><text class="num" x="134" y="134" text-anchor="middle">1</text>
+    <text class="lbl" x="228" y="148">인증된 사용자</text>
+    <text class="sub" x="228" y="166">브라우저 · 액세스 토큰 미보유</text>
+  </g>
+  <g class="t">
+    <rect x="40" y="230" width="280" height="330" rx="10" fill="#FFFFFF" stroke="#879196" stroke-width="1.5"/>
+    <text class="grp" x="60" y="262">Web App</text>
+
+    <rect x="148" y="290" width="64" height="64" rx="10" fill="#232F3E"/><use href="#ic-react" x="148" y="290"/>
+    <circle cx="134" cy="300" r="12" fill="#232F3E"/><text class="num" x="134" y="304" text-anchor="middle">2</text>
+    <text class="lbl" x="180" y="376" text-anchor="middle">React SPA (Vite + TS)</text>
+    <text class="sub" x="180" y="392" text-anchor="middle">회의 · 리포트 · 지식 UI</text>
+
+    <rect x="148" y="430" width="64" height="64" rx="10" fill="#E7157B"/><use href="#ic-code" x="148" y="430"/>
+    <circle cx="134" cy="440" r="12" fill="#232F3E"/><text class="num" x="134" y="444" text-anchor="middle">3</text>
+    <text class="lbl" x="180" y="516" text-anchor="middle">MeetingMind Web API</text>
+    <text class="sub" x="180" y="532" text-anchor="middle">same-origin /api · 세션 쿠키 + CSRF</text>
+  </g>
+  <path class="flow2" d="M180 190 V284"/>
+
+  <!-- ===================== AWS Cloud ===================== -->
+  <rect x="360" y="80" width="1130" height="1375" rx="12" fill="none" stroke="#232F3E" stroke-width="1.8"/>
+  <rect x="376" y="94" width="44" height="26" rx="4" fill="#232F3E"/>
+  <text class="t" x="398" y="113" text-anchor="middle" font-size="14" font-weight="700" fill="#FF9900">aws</text>
+  <text class="t grp" x="432" y="114">AWS Cloud</text>
+
+  <!-- 4. Edge (planned) -->
+  <g class="t">
+    <rect x="400" y="140" width="520" height="160" rx="10" class="grpbox"/>
+    <circle cx="422" cy="170" r="12" fill="#8A94A6"/><text class="num" x="422" y="174" text-anchor="middle">4</text>
+    <text class="grp" x="442" y="175" fill="#5A6B86">Edge · 계획(미배포)</text>
+
+    <rect x="438" y="196" width="64" height="64" rx="10" fill="#EDF0F3" stroke="#B0B8C4" stroke-width="1.4" stroke-dasharray="5 4"/>
+    <g opacity=".55"><use href="#ic-dns" x="438" y="196" stroke="#6B7684"/></g>
+    <text class="lbl" x="470" y="280" text-anchor="middle" fill="#5A6B86">Route 53</text>
+    <text class="plan" x="470" y="294" text-anchor="middle">퍼블릭 DNS</text>
+
+    <rect x="598" y="196" width="64" height="64" rx="10" fill="#EDF0F3" stroke="#B0B8C4" stroke-width="1.4" stroke-dasharray="5 4"/>
+    <g opacity=".55"><use href="#ic-cloud" x="598" y="196" stroke="#6B7684"/></g>
+    <text class="lbl" x="630" y="280" text-anchor="middle" fill="#5A6B86">CloudFront</text>
+    <text class="plan" x="630" y="294" text-anchor="middle">TLS · 엣지 캐시</text>
+
+    <rect x="758" y="196" width="64" height="64" rx="10" fill="#EDF0F3" stroke="#B0B8C4" stroke-width="1.4" stroke-dasharray="5 4"/>
+    <g opacity=".55"><use href="#ic-s3" x="758" y="196" stroke="#6B7684"/></g>
+    <text class="lbl" x="790" y="280" text-anchor="middle" fill="#5A6B86">Amazon S3</text>
+    <text class="plan" x="790" y="294" text-anchor="middle">React 정적 번들</text>
+  </g>
+
+  <!-- deployment status -->
+  <g class="t">
+    <rect x="950" y="140" width="520" height="160" rx="10" fill="#F7F9FA" stroke="#B0B8C4" stroke-width="1.4"/>
+    <text class="grp" x="970" y="172">현재 배포 상태 · 게이트</text>
+    <text class="note" x="970" y="200">· ECS 서비스는 enable_runtime_services / enable_mtls_validation_services 로 통제</text>
+    <text class="note" x="970" y="222">· 두 모드는 동시 활성 불가 · 서비스마다 불변 sha256 다이제스트 필수</text>
+    <text class="note" x="970" y="244">· 프라이빗 mTLS 검증 모드에서는 퍼블릭 리스너를 만들지 않는다</text>
+    <text class="note" x="970" y="266">· ALB HTTPS 리스너 비활성 · 운영자 CIDR 제한 HTTP 스모크 리스너만 조건부 생성</text>
+    <text class="note" x="970" y="288">· Route 53 / CloudFront / 정적 S3 버킷은 Terraform에 아직 없다</text>
+  </g>
+
+  <!-- ===================== VPC ===================== -->
+  <rect x="400" y="330" width="1070" height="925" rx="10" fill="none" stroke="#1B660F" stroke-width="1.8"/>
+  <text class="t vpc" x="420" y="360">MeetingMind VPC · 2 AZ (ap-northeast-2a / 2c) · Amazon ECS 클러스터(Fargate) · 서비스별 태스크 롤 / 보안 그룹 / 로그 그룹 · VPC Flow Logs</text>
+
+  <!-- 5. public subnet -->
+  <g class="t">
+    <rect x="420" y="380" width="1030" height="170" rx="8" class="grpbox"/>
+    <circle cx="442" cy="406" r="12" fill="#232F3E"/><text class="num" x="442" y="410" text-anchor="middle">5</text>
+    <text class="band" x="462" y="411">퍼블릭 서브넷 (2 AZ)</text>
+
+    <rect x="488" y="428" width="64" height="64" rx="10" fill="#8C4FFF"/><use href="#ic-alb" x="488" y="428"/>
+    <text class="lbl" x="520" y="512" text-anchor="middle">Public ALB</text>
+    <text class="sub" x="520" y="527" text-anchor="middle">/api/* → BFF</text>
+    <text class="sub" x="520" y="541" text-anchor="middle">/ws/egress-audio/* → STT</text>
+
+    <rect x="728" y="428" width="64" height="64" rx="10" fill="#8C4FFF"/><use href="#ic-igw" x="728" y="428"/>
+    <text class="lbl" x="760" y="512" text-anchor="middle">Internet Gateway</text>
+    <text class="sub" x="760" y="528" text-anchor="middle">퍼블릭 라우트</text>
+
+    <rect x="968" y="428" width="64" height="64" rx="10" fill="#8C4FFF"/><use href="#ic-nat" x="968" y="428"/>
+    <text class="lbl" x="1000" y="512" text-anchor="middle">NAT Gateway</text>
+    <text class="sub" x="1000" y="528" text-anchor="middle">프라이빗 아웃바운드</text>
+
+    <rect x="1168" y="428" width="64" height="64" rx="10" fill="#8C4FFF"/><use href="#ic-vpce" x="1168" y="428"/>
+    <text class="lbl" x="1200" y="512" text-anchor="middle">VPC Endpoints</text>
+    <text class="sub" x="1200" y="528" text-anchor="middle">S3 게이트웨이 · ECR/Logs/Secrets 인터페이스</text>
+  </g>
+
+  <!-- private app subnet -->
+  <rect x="420" y="570" width="1030" height="515" rx="8" class="grpbox"/>
+  <text class="t band" x="462" y="601">프라이빗 앱 서브넷 (2 AZ)</text>
+  <circle cx="442" cy="596" r="12" fill="#232F3E"/><text class="t num" x="442" y="600" text-anchor="middle">6</text>
+
+  <!-- 6. Session -->
+  <g class="t">
+    <rect x="440" y="615" width="310" height="215" rx="8" class="grpbox"/>
+    <circle cx="462" cy="642" r="12" fill="#232F3E"/><text class="num" x="462" y="646" text-anchor="middle">7</text>
+    <text class="grp" x="482" y="647">Session</text>
+    <rect x="563" y="661" width="64" height="64" rx="10" fill="#ED7100"/><use href="#ic-ecs" x="563" y="661"/>
+    <text class="lbl" x="595" y="749" text-anchor="middle">Web BFF · ECS Fargate</text>
+    <text class="sub" x="595" y="765" text-anchor="middle">:8081 · Spring Session</text>
+    <text class="note" x="465" y="789">· opaque 세션 쿠키 + CSRF</text>
+    <text class="note" x="465" y="806">· 허용 목록 경로만 프록시</text>
+    <text class="note" x="465" y="823">· Token Vault (KMS 봉투 암호화)</text>
+  </g>
+
+  <!-- 7. Meetings -->
+  <g class="t">
+    <rect x="780" y="615" width="310" height="215" rx="8" class="grpbox"/>
+    <circle cx="802" cy="642" r="12" fill="#232F3E"/><text class="num" x="802" y="646" text-anchor="middle">8</text>
+    <text class="grp" x="822" y="647">Meetings &amp; Knowledge</text>
+    <rect x="903" y="661" width="64" height="64" rx="10" fill="#ED7100"/><use href="#ic-ecs" x="903" y="661"/>
+    <text class="lbl" x="935" y="749" text-anchor="middle">Core Service · ECS</text>
+    <text class="sub" x="935" y="765" text-anchor="middle">:8080 · Space · Meeting</text>
+    <text class="note" x="805" y="789">· Meeting/Space ACL 평가 후 하위 호출</text>
+    <text class="note" x="805" y="806">· 리포트 · 지식 파이프라인</text>
+    <text class="note" x="805" y="823">· AI / STT / LiveKit 오케스트레이션</text>
+  </g>
+
+  <!-- 8. Identity -->
+  <g class="t">
+    <rect x="1120" y="615" width="310" height="215" rx="8" class="grpbox"/>
+    <circle cx="1142" cy="642" r="12" fill="#232F3E"/><text class="num" x="1142" y="646" text-anchor="middle">9</text>
+    <text class="grp" x="1162" y="647">Identity</text>
+    <rect x="1243" y="661" width="64" height="64" rx="10" fill="#ED7100"/><use href="#ic-ecs" x="1243" y="661"/>
+    <text class="lbl" x="1275" y="749" text-anchor="middle">Auth Service · ECS</text>
+    <text class="sub" x="1275" y="765" text-anchor="middle">:8082 · JWT · JWKS</text>
+    <text class="note" x="1145" y="789">· 로컬 / Google 로그인</text>
+    <text class="note" x="1145" y="806">· refresh 회전 · revoke-all</text>
+    <text class="note" x="1145" y="823">· KMS RS256 서명 · 내부 JWKS</text>
+  </g>
+
+  <!-- 9. Realtime STT -->
+  <g class="t">
+    <rect x="440" y="850" width="310" height="215" rx="8" class="grpbox"/>
+    <circle cx="462" cy="877" r="12" fill="#232F3E"/><text class="num" x="462" y="881" text-anchor="middle">10</text>
+    <text class="grp" x="482" y="882">Realtime STT</text>
+    <rect x="563" y="896" width="64" height="64" rx="10" fill="#ED7100"/><use href="#ic-mic" x="563" y="896"/>
+    <text class="lbl" x="595" y="984" text-anchor="middle">Realtime STT · ECS</text>
+    <text class="sub" x="595" y="1000" text-anchor="middle">:8083 · Egress PCM</text>
+    <text class="note" x="465" y="1024">· LiveKit Egress WebSocket 수신</text>
+    <text class="note" x="465" y="1041">· 일회성 WS 토큰 HMAC 검증</text>
+    <text class="note" x="465" y="1058">· Soniox 실시간 → OpenAI 폴백</text>
+  </g>
+
+  <!-- 10. AI -->
+  <g class="t">
+    <rect x="780" y="850" width="310" height="215" rx="8" class="grpbox"/>
+    <circle cx="802" cy="877" r="12" fill="#232F3E"/><text class="num" x="802" y="881" text-anchor="middle">11</text>
+    <text class="grp" x="822" y="882">AI</text>
+    <rect x="903" y="896" width="64" height="64" rx="10" fill="#01A88D"/><use href="#ic-ai" x="903" y="896"/>
+    <text class="lbl" x="935" y="984" text-anchor="middle">AI Service · ECS</text>
+    <text class="sub" x="935" y="1000" text-anchor="middle">:8000 · FastAPI</text>
+    <text class="note" x="805" y="1024">· Envoy 사이드카가 SPIFFE ID 검증</text>
+    <text class="note" x="805" y="1041">· 앱은 127.0.0.1:8001 에만 바인딩</text>
+    <text class="note" x="805" y="1058">· pgvector 임베딩 · RAG 검색</text>
+  </g>
+
+  <!-- 11. internal mTLS -->
+  <g class="t">
+    <rect x="1120" y="850" width="310" height="215" rx="8" class="grpbox"/>
+    <circle cx="1142" cy="877" r="12" fill="#232F3E"/><text class="num" x="1142" y="881" text-anchor="middle">12</text>
+    <text class="grp" x="1162" y="882">내부 mTLS · 디스커버리</text>
+    <rect x="1188" y="896" width="64" height="64" rx="10" fill="#8C4FFF"/><use href="#ic-map" x="1188" y="896"/>
+    <text class="lbl" x="1220" y="984" text-anchor="middle">AWS Cloud Map</text>
+    <text class="sub" x="1220" y="1000" text-anchor="middle">meetingmind.internal</text>
+    <rect x="1298" y="896" width="64" height="64" rx="10" fill="#DD344C"/><use href="#ic-cert" x="1298" y="896"/>
+    <text class="lbl" x="1330" y="984" text-anchor="middle">cert-loader</text>
+    <text class="sub" x="1330" y="1000" text-anchor="middle">TLS 번들 주입</text>
+    <text class="note" x="1145" y="1030">· 서비스별 SPIFFE ID · EKU 고정 검증</text>
+    <text class="note" x="1145" y="1047">· Secrets Manager 번들 · KMS 복호화</text>
+  </g>
+
+  <!-- 12. data subnet -->
+  <g class="t">
+    <rect x="420" y="1105" width="1030" height="130" rx="8" class="grpbox"/>
+    <circle cx="442" cy="1131" r="12" fill="#232F3E"/><text class="num" x="442" y="1135" text-anchor="middle">13</text>
+    <text class="band" x="462" y="1136">데이터 서브넷 (2 AZ) · 인터넷 라우트 없음 · KMS 저장 암호화 · Core/Auth/STT/AI 는 단일 RDS 인스턴스를 계정·스키마로 분리해 공유</text>
+
+    <rect x="668" y="1146" width="64" height="64" rx="10" fill="#C925D1"/><use href="#ic-cache" x="668" y="1146"/>
+    <text class="lbl" x="748" y="1172">ElastiCache Valkey</text>
+    <text class="sub" x="748" y="1190">BFF 세션 + 토큰 볼트 · 전용 ACL 사용자</text>
+
+    <rect x="1118" y="1146" width="64" height="64" rx="10" fill="#C925D1"/><use href="#ic-db" x="1118" y="1146"/>
+    <text class="lbl" x="1198" y="1172">Amazon RDS for PostgreSQL</text>
+    <text class="sub" x="1198" y="1190">meetingmind · _auth · _stt · pgvector · DB 계정 분리</text>
+  </g>
+
+  <!-- 13. platform -->
+  <g class="t">
+    <rect x="400" y="1285" width="1070" height="140" rx="10" class="grpbox"/>
+    <circle cx="422" cy="1311" r="12" fill="#232F3E"/><text class="num" x="422" y="1315" text-anchor="middle">14</text>
+    <text class="grp" x="442" y="1316">플랫폼 · 운영 공통 (리전 서비스)</text>
+
+    <rect x="513" y="1330" width="56" height="56" rx="9" fill="#ED7100"/><g transform="translate(513,1330) scale(0.875)"><use href="#ic-ecr"/></g>
+    <text class="lbl" x="541" y="1404" text-anchor="middle">Amazon ECR</text>
+    <text class="sub" x="541" y="1419" text-anchor="middle">불변 sha256 다이제스트</text>
+
+    <rect x="715" y="1330" width="56" height="56" rx="9" fill="#DD344C"/><g transform="translate(715,1330) scale(0.875)"><use href="#ic-lock"/></g>
+    <text class="lbl" x="743" y="1404" text-anchor="middle">Secrets Manager</text>
+    <text class="sub" x="743" y="1419" text-anchor="middle">서비스별 최소 권한</text>
+
+    <rect x="917" y="1330" width="56" height="56" rx="9" fill="#DD344C"/><g transform="translate(917,1330) scale(0.875)"><use href="#ic-key"/></g>
+    <text class="lbl" x="945" y="1404" text-anchor="middle">AWS KMS</text>
+    <text class="sub" x="945" y="1419" text-anchor="middle">볼트 · JWT 서명 · 저장 암호화</text>
+
+    <rect x="1119" y="1330" width="56" height="56" rx="9" fill="#E7157B"/><g transform="translate(1119,1330) scale(0.875)"><use href="#ic-cw"/></g>
+    <text class="lbl" x="1147" y="1404" text-anchor="middle">CloudWatch + SNS</text>
+    <text class="sub" x="1147" y="1419" text-anchor="middle">로그 · 알람 · 대시보드</text>
+
+    <rect x="1321" y="1330" width="56" height="56" rx="9" fill="#DD344C"/><g transform="translate(1321,1330) scale(0.875)"><use href="#ic-iam"/></g>
+    <text class="lbl" x="1349" y="1404" text-anchor="middle">AWS IAM</text>
+    <text class="sub" x="1349" y="1419" text-anchor="middle">태스크 롤 · GitHub OIDC</text>
+  </g>
+
+  <!-- ===================== flows ===================== -->
+  <path class="flow2" d="M320 460 H482"/>
+  <text class="t edge" x="392" y="452" text-anchor="middle">HTTPS</text>
+
+  <path class="flow" d="M488 476 H430 V693 H557"/>
+  <text class="t edge" x="470" y="686">세션 쿠키</text>
+  <path class="flow" d="M488 444 H412 V928 H557"/>
+  <text class="t edge" x="452" y="921">Egress 오디오</text>
+
+  <path class="flow" d="M627 685 H897"/>
+  <text class="t edge" x="762" y="677" text-anchor="middle">내부 API 프록시</text>
+
+  <path class="flow" d="M627 665 V606 H1275 V655"/>
+  <text class="t edge" x="951" y="600" text-anchor="middle">토큰 발급 · 회전 · 폐기</text>
+
+  <path class="flow" d="M967 677 H1237"/>
+  <text class="t edge" x="1102" y="669" text-anchor="middle">JWKS 검증</text>
+
+  <path class="flow" d="M967 701 H1075 V928 H973"/>
+  <text class="t edge" x="1070" y="842" text-anchor="end">AI 호출</text>
+
+  <path class="flow" d="M903 713 H765 V928 H633"/>
+  <text class="t edge" x="700" y="842" text-anchor="middle">STT 세션 제어</text>
+
+  <!-- data access -->
+  <path class="data" d="M563 709 H455 V1170 H662"/>
+  <path class="bus" d="M627 944 H720 V1095"/>
+  <path class="bus" d="M903 944 H775 V1095"/>
+  <path class="bus" d="M967 721 H1105 V1095"/>
+  <path class="bus" d="M1307 709 H1400 V1095"/>
+  <path class="bus" d="M720 1095 H1400"/>
+  <path class="data" d="M1150 1095 V1140"/>
+
+  <!-- ===================== external ===================== -->
+  <g class="t">
+    <rect x="40" y="1485" width="1450" height="90" rx="10" class="grpbox"/>
+    <circle cx="62" cy="1514" r="12" fill="#232F3E"/><text class="num" x="62" y="1518" text-anchor="middle">15</text>
+    <text class="grp" x="82" y="1519">외부 제공자</text>
+
+    <rect x="280" y="1500" width="200" height="48" rx="8" fill="#F4F6F8" stroke="#879196" stroke-width="1.4"/>
+    <text class="lbl" x="380" y="1520" text-anchor="middle">LiveKit Cloud</text>
+    <text class="sub" x="380" y="1536" text-anchor="middle">WebRTC 미디어 · Egress</text>
+
+    <rect x="500" y="1500" width="180" height="48" rx="8" fill="#F4F6F8" stroke="#879196" stroke-width="1.4"/>
+    <text class="lbl" x="590" y="1520" text-anchor="middle">Soniox</text>
+    <text class="sub" x="590" y="1536" text-anchor="middle">실시간 전사</text>
+
+    <rect x="700" y="1500" width="200" height="48" rx="8" fill="#F4F6F8" stroke="#879196" stroke-width="1.4"/>
+    <text class="lbl" x="800" y="1520" text-anchor="middle">OpenAI</text>
+    <text class="sub" x="800" y="1536" text-anchor="middle">LLM · 임베딩 · STT 폴백</text>
+
+    <rect x="920" y="1500" width="240" height="48" rx="8" fill="#F4F6F8" stroke="#879196" stroke-width="1.4"/>
+    <text class="lbl" x="1040" y="1520" text-anchor="middle">GitHub Actions · OIDC</text>
+    <text class="sub" x="1040" y="1536" text-anchor="middle">이미지 빌드 · 스캔 · 배포</text>
+  </g>
+
+  <path class="data" d="M380 1455 V1494"/><text class="t edge" x="386" y="1477">미디어 · Egress</text>
+  <path class="data" d="M590 1455 V1494"/><text class="t edge" x="596" y="1477">전사</text>
+  <path class="data" d="M800 1455 V1494"/><text class="t edge" x="806" y="1477">추론 · 임베딩</text>
+  <path class="data" d="M1040 1500 V1461"/><text class="t edge" x="1046" y="1477">ECR / ECS 배포</text>
+
+  <path class="data" d="M148 322 H14 V1524 H274"/>
+  <text class="t edge" transform="rotate(-90 34 950)" x="34" y="950" text-anchor="middle">브라우저 ↔ LiveKit WebRTC 미디어 (AWS 우회)</text>
+</svg>

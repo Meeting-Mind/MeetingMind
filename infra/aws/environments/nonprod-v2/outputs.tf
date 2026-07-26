@@ -79,6 +79,30 @@ output "runtime_enabled_services" {
   value = local.runtime_enabled_services
 }
 
+output "deployment_smoke_enabled" {
+  value = var.enable_deployment_smoke
+}
+
+output "frontend_bucket_id" {
+  value = try(module.frontend_edge[0].bucket_id, null)
+}
+
+output "frontend_distribution_id" {
+  value = try(module.frontend_edge[0].distribution_id, null)
+}
+
+output "frontend_distribution_domain_name" {
+  value = try(module.frontend_edge[0].distribution_domain_name, null)
+}
+
+output "service_target_group_attachment_counts" {
+  value = { for service, target_groups in local.service_target_groups : service => length(target_groups) }
+}
+
+output "stt_public_smoke_route_enabled" {
+  value = var.enable_http_smoke_listener && var.release_gates_acknowledged
+}
+
 output "mtls_validation_services_enabled" {
   value = var.enable_mtls_validation_services
 }

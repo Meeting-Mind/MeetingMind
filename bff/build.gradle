@@ -32,6 +32,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'io.micrometer:micrometer-registry-prometheus'
     implementation 'org.springframework.session:spring-session-data-redis'
+    implementation 'software.amazon.awssdk:auth'
+    implementation 'software.amazon.awssdk:http-auth-aws'
     implementation 'software.amazon.awssdk:kms'
     implementation 'software.amazon.awssdk:url-connection-client'
 

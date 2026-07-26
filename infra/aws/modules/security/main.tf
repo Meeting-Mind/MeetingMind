@@ -6,6 +6,15 @@ terraform {
   }
 }
 
+data "aws_ec2_managed_prefix_list" "cloudfront_origin_facing" {
+  count = var.enable_cloudfront_origin_ingress ? 1 : 0
+  name  = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+data "aws_ec2_managed_prefix_list" "s3" {
+  name = "com.amazonaws.${var.aws_region}.s3"
+}
+
 locals {
   service_ports = {
     bff          = 8081
@@ -135,6 +144,17 @@ resource "aws_vpc_security_group_ingress_rule" "alb_http" {
   security_group_id = aws_security_group.alb.id
   description       = "Temporary HTTP smoke access"
   cidr_ipv4         = each.value
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_http_from_cloudfront" {
+  count = var.enable_cloudfront_origin_ingress ? 1 : 0
+
+  security_group_id = aws_security_group.alb.id
+  description       = "CloudFront origin-facing HTTP to ALB"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin_facing[0].id
   from_port         = 80
   to_port           = 80
   ip_protocol       = "tcp"
@@ -292,6 +312,15 @@ resource "aws_vpc_security_group_egress_rule" "cache" {
   from_port                    = 6379
   to_port                      = 6379
   ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "bff_to_s3" {
+  security_group_id = aws_security_group.service["bff"].id
+  description       = "BFF ECR image layers through the regional S3 gateway endpoint"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.s3.id
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
 }
 
 resource "aws_vpc_security_group_egress_rule" "endpoints" {

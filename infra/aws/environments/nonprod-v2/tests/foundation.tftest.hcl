@@ -77,6 +77,41 @@ override_data {
   }
 }
 
+override_data {
+  target = module.security.data.aws_ec2_managed_prefix_list.cloudfront_origin_facing
+  values = {
+    id = "pl-cloudfront-origin"
+  }
+}
+
+override_data {
+  target = module.security.data.aws_ec2_managed_prefix_list.s3
+  values = {
+    id = "pl-regional-s3"
+  }
+}
+
+override_data {
+  target = module.frontend_edge.data.aws_caller_identity.current
+  values = {
+    account_id = "123456789012"
+  }
+}
+
+override_data {
+  target = module.frontend_edge.data.aws_partition.current
+  values = {
+    partition = "aws"
+  }
+}
+
+override_data {
+  target = module.frontend_edge.data.aws_iam_policy_document.frontend
+  values = {
+    json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+  }
+}
+
 run "foundation_plan" {
   command = plan
 
@@ -170,6 +205,130 @@ run "targeted_public_smoke_requires_release_acknowledgement" {
   }
 
   expect_failures = [terraform_data.release_gate]
+}
+
+run "deployment_smoke_requires_matching_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id = "123456789012"
+    enable_deployment_smoke = true
+  }
+
+  plan_options {
+    target = [terraform_data.deployment_smoke_gate]
+  }
+
+  expect_failures = [terraform_data.deployment_smoke_gate]
+}
+
+run "deployment_smoke_acknowledgement_cannot_be_stale" {
+  command = plan
+
+  variables {
+    expected_aws_account_id             = "123456789012"
+    deployment_smoke_gates_acknowledged = true
+  }
+
+  plan_options {
+    target = [terraform_data.deployment_smoke_gate]
+  }
+
+  expect_failures = [terraform_data.deployment_smoke_gate]
+}
+
+run "deployment_smoke_rejects_operator_cidr" {
+  command = plan
+
+  variables {
+    expected_aws_account_id             = "123456789012"
+    enable_deployment_smoke             = true
+    deployment_smoke_gates_acknowledged = true
+    enable_runtime_services             = true
+    runtime_enabled_services            = ["bff", "auth", "core", "ai", "realtime-stt"]
+    runtime_gates_acknowledged          = true
+    internal_mtls_runtime_verified      = true
+    enable_http_smoke_listener          = true
+    allowed_ingress_cidrs               = ["203.0.113.10/32"]
+  }
+
+  plan_options {
+    target = [terraform_data.deployment_smoke_gate]
+  }
+
+  expect_failures = [terraform_data.deployment_smoke_gate]
+}
+
+run "deployment_smoke_plan" {
+  command = plan
+
+  variables {
+    expected_aws_account_id             = "123456789012"
+    enable_deployment_smoke             = true
+    deployment_smoke_gates_acknowledged = true
+    enable_runtime_services             = true
+    runtime_enabled_services            = ["bff", "auth", "core", "ai", "realtime-stt"]
+    runtime_gates_acknowledged          = true
+    internal_mtls_runtime_verified      = true
+    enable_http_smoke_listener          = true
+    cert_loader_image_digest            = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ai_envoy_image_digest               = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    service_image_digests = {
+      bff          = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      auth         = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      core         = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ai           = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      realtime-stt = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+
+  assert {
+    condition     = output.deployment_smoke_enabled && !var.release_gates_acknowledged && !var.enable_autoscaling
+    error_message = "Deployment smoke must not claim the full release or autoscaling gates."
+  }
+
+  assert {
+    condition     = output.service_target_group_attachment_counts["bff"] == 1
+    error_message = "Deployment smoke must attach only the BFF service to the ALB target group."
+  }
+
+  assert {
+    condition     = output.service_target_group_attachment_counts["realtime-stt"] == 0
+    error_message = "Deployment smoke must not expose the Realtime STT websocket target."
+  }
+
+  assert {
+    condition     = !output.stt_public_smoke_route_enabled
+    error_message = "Deployment smoke must keep the public STT listener rule disabled."
+  }
+}
+
+run "targeted_deployment_smoke_cloudfront_plan" {
+  command = plan
+
+  variables {
+    expected_aws_account_id             = "123456789012"
+    enable_deployment_smoke             = true
+    deployment_smoke_gates_acknowledged = true
+    enable_runtime_services             = true
+    runtime_enabled_services            = ["bff", "auth", "core", "ai", "realtime-stt"]
+    runtime_gates_acknowledged          = true
+    internal_mtls_runtime_verified      = true
+    enable_http_smoke_listener          = true
+    cert_loader_image_digest            = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ai_envoy_image_digest               = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    service_image_digests = {
+      bff          = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      auth         = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      core         = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ai           = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      realtime-stt = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+
+  plan_options {
+    target = [module.frontend_edge[0].aws_cloudfront_distribution.frontend]
+  }
 }
 
 run "autoscaling_requires_release_acknowledgement" {

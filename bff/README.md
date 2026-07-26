@@ -16,6 +16,14 @@ BFF_TOKEN_VAULT_LOCAL_KEY_BASE64="$(openssl rand -base64 32)" ./gradlew bootRun
 
 Readiness에는 Redis 연결 상태가 포함되며 liveness에는 포함되지 않는다. Redis 장애 시 새 BFF 인증 세션을 신뢰하거나 로컬 메모리로 우회하지 않는다.
 
+AWS ElastiCache IAM 환경은 `BFF_REDIS_IAM_AUTH_ENABLED=true`,
+`BFF_REDIS_IAM_CACHE_NAME`, `BFF_REDIS_AWS_REGION`과 기존 Redis host/port/username을
+함께 설정하고 Redis TLS를 활성화한다. 장기 password는 허용하지 않는다. Lettuce는 새 연결과
+재연결 때마다 ECS Task Role로 15분 SigV4 credential을 새로 생성하며 token이나 연결 URL을
+로그에 남기지 않는다. ElastiCache에서는 `SPRING_SESSION_REDIS_CONFIGURE_ACTION=none`으로
+managed service가 금지하는 `CONFIG` 명령을 실행하지 않는다. 로컬/CI에서는 IAM mode가
+기본적으로 꺼져 있다.
+
 rollout 중 신규 release를 drain할 때는 `BFF_ACCEPT_BROWSER_TRAFFIC=false`를 적용한다. 이 값은 rollout readiness만 `DOWN`으로 만들고 liveness는 유지한다. Frontend를 direct Backend로 되돌리거나 Browser token을 다시 발급하지 않으며, ingress traffic은 같은 cookie/Redis/Token Vault 계약의 안정 BFF release로 복원한다.
 
 BFF는 `meetingmind.bff.browser.requests`, `meetingmind.bff.refresh`, `meetingmind.bff.session.invalid` Micrometer metric을 등록한다. label에는 URL path variable, 사용자/session ID와 token을 넣지 않는다. 운영 exporter와 dashboard 연결은 T045 범위이며 단계별 traffic/guardrail/rollback 절차는 `../specs/002-bff-auth-msa/rollout-runbook.md`를 따른다.
