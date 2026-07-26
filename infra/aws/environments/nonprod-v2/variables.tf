@@ -52,7 +52,7 @@ variable "enable_http_smoke_listener" {
 }
 
 variable "enable_runtime_services" {
-  description = "Global ECS runtime kill switch. Keep false until images, secret versions, DB bootstrap, Valkey IAM client, and T047 prerequisites are ready."
+  description = "Global ECS runtime kill switch. Keep false until private runtime images, secret versions, DB bootstrap, and T047 prerequisites are ready."
   type        = bool
   default     = false
 }
@@ -72,7 +72,13 @@ variable "runtime_enabled_services" {
 }
 
 variable "runtime_gates_acknowledged" {
-  description = "Explicit acknowledgement that all runtime gates in README.md are complete."
+  description = "Explicit acknowledgement that the private runtime promotion gates in README.md are complete. This does not authorize BFF, public listeners, or autoscaling."
+  type        = bool
+  default     = false
+}
+
+variable "release_gates_acknowledged" {
+  description = "Explicit acknowledgement that Q-013, BFF Valkey IAM, T047-E, T048, and T049 release gates are complete before BFF, public listeners, or autoscaling are enabled."
   type        = bool
   default     = false
 }

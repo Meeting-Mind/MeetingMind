@@ -35,6 +35,7 @@ enable_http_smoke_listener      = false
 enable_runtime_services         = false
 runtime_enabled_services        = []
 runtime_gates_acknowledged      = false
+release_gates_acknowledged      = false
 internal_mtls_material_ready    = false
 internal_mtls_runtime_verified  = false
 enable_mtls_validation_services = false
@@ -134,18 +135,29 @@ service_image_digests = {
 }
 ```
 
-## 7. Runtime gate
+## 7. Private runtime promotion과 release gate
 
+Private runtime promotion은 public traffic 없이 Auth/AI/Realtime STT/Core를 실행하는 경계다.
 다음 항목을 모두 완료하기 전에는 `enable_runtime_services=false`를 유지한다.
 
-- Q-013 SLO/RTO/RPO와 autoscaling 값 승인
 - Cloud Map 주소와 mTLS/SPIFFE certificate delivery 구현
 - 필수 secret version 입력
 - database/bootstrap migration 완료
 - 5개 application과 cert-loader/Envoy를 포함한 7개 ECR image digest·scan 통과
-- BFF가 Valkey IAM의 15분 token 갱신과 12시간 connection 재인증을 지원하고 TLS 연결 테스트 통과
 - Auth signing key-ring JSON의 5분 선게시/active 시각 검증
 - 내부 서비스 주소와 workload identity negative test 통과
+
+`release_gates_acknowledged=false`인 동안 Terraform은 BFF, public listener와 autoscaling을
+모두 거부한다. 다음 항목은 private runtime promotion과 분리된 BFF/public release gate다.
+
+- Q-013 SLO/RTO/RPO와 autoscaling 값 승인
+- BFF가 Valkey IAM의 15분 token 갱신과 12시간 connection 재인증을 지원하고 TLS 연결 테스트 통과
+- T047-E least-privilege runtime 검증
+- T048 정상 ECS service와 T049 관측/autoscaling 완료 기준
+
+ALB와 ECS service/autoscaling module은 release gate에 명시적으로 의존한다. 따라서 복구 목적의
+targeted plan에서도 gate를 먼저 평가한다. `-target`은 예외적인 복구에만 사용하고 최종 반영은
+항상 전체 plan을 다시 검토한다.
 
 mTLS gate는 순환 의존성을 없애기 위해 두 단계로 분리되어 있다.
 
@@ -167,12 +179,13 @@ validation mode는 BFF를 허용하지 않고, HTTP smoke listener와 동시에 
 enable_runtime_services         = true
 runtime_enabled_services        = ["auth"]
 runtime_gates_acknowledged      = true
+release_gates_acknowledged      = false
 internal_mtls_runtime_verified  = true
 enable_mtls_validation_services = false
 mtls_validation_services        = []
 ```
 
-`runtime_enabled_services`는 Auth→AI/STT→Core→BFF 순서의 staged allowlist다. 각 단계의 runtime 검증이 끝날 때만 다음 서비스를 추가한다. `internal_mtls_runtime_verified`는 T047-D/T048-V의 인증서·principal 증거가 생기기 전에는 `false`로 유지한다. `runtime_gates_acknowledged`는 기술적 검증을 대신하지 않는 명시적 안전장치다. 상세 전환 계획은 `../../nonprod-v2/mtls-implementation-plan.md`를 따른다.
+`runtime_enabled_services`는 Auth→AI/STT→Core 순서의 private staged allowlist다. 각 단계의 runtime 검증이 끝날 때만 다음 서비스를 추가한다. BFF는 `release_gates_acknowledged=true` 전에는 allowlist에 추가할 수 없다. `internal_mtls_runtime_verified`는 T047-D/T048-V의 인증서·principal 증거가 생기기 전에는 `false`로 유지한다. `runtime_gates_acknowledged`는 private promotion 확인이고, `release_gates_acknowledged`는 Q-013/BFF Valkey IAM/T047-E/T048/T049 완료 확인이다. 둘 다 기술적 검증을 대신하지 않는다. 상세 전환 계획은 `../../nonprod-v2/mtls-implementation-plan.md`를 따른다.
 
 validation 또는 runtime mode가 켜지면 모든 task definition에 cert-loader init container, task-scoped `meetingmind-tls` volume과 application read-only mount가 추가된다. loader는 task role로 자기 서비스의 TLS bundle secret만 읽고, 검증 실패 시 `SUCCESS` dependency가 application 시작을 차단한다.
 

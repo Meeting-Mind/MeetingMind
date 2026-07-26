@@ -306,6 +306,6 @@ locals {
       bff          = [module.alb.target_group_arns["bff"]]
       realtime-stt = [module.alb.target_group_arns["realtime-stt"]]
     } :
-    service => target_groups if !var.enable_mtls_validation_services
+    service => target_groups if var.enable_http_smoke_listener && !var.enable_mtls_validation_services
   }
 }

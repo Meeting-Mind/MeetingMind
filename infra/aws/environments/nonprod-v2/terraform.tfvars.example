@@ -4,10 +4,11 @@ expected_aws_account_id = "123456789012"
 allowed_ingress_cidrs     = []
 enable_http_smoke_listener = false
 
-# Keep these false until every runtime gate in README.md is complete.
+# Private runtime promotion and BFF/public release are separate gates.
 enable_runtime_services    = false
 runtime_enabled_services   = []
 runtime_gates_acknowledged = false
+release_gates_acknowledged = false
 enable_autoscaling         = false
 
 # T047-B~D mTLS gates. Material evidence unlocks only the private validation

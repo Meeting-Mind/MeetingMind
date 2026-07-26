@@ -277,8 +277,9 @@ flowchart LR
 11. Auth/Core/STT의 mTLS profile은 main TLS port와 분리된 loopback-only HTTP management port를 사용한다. Core health는 Actuator liveness와 DB 포함 readiness를 분리하고 ECS container health는 liveness만 사용해 DB 장애 시 task 재시작 대신 readiness에서 traffic 수용을 중지한다.
 12. TLS secret은 서비스별 단일 JSON version에 certificate/private key/CA bundle을 함께 저장한다. loader는 ECS task role로 자신의 exact ARN만 읽고 chain, key match, validity, URI/DNS SAN과 EKU를 검증한 뒤 task-scoped volume에 원자적으로 기록한다.
 13. AI Envoy는 `0.0.0.0:8000`, Uvicorn은 `127.0.0.1:8001`만 사용한다. ECS target에서는 `AI_INTERNAL_SERVICE_TOKEN`과 Core shared-token header를 제거하되 local/on-prem compatibility mode는 별도 경계로 유지할 수 있다.
-14. 실제 runtime 검증 전 service 기동을 막는 순환을 제거하기 위해 certificate/image/local handshake 준비 gate와 AWS runtime verified gate를 분리한다. private validation mode는 public BFF/ALB traffic 없이 Auth→AI/STT→Core만 시작하며, 정상 staged runtime은 positive/negative/rotation evidence 이후에만 연다.
-15. 상세 identity, bundle schema, 구현 순서와 검증 행렬은 `infra/aws/nonprod-v2/mtls-implementation-plan.md`를 기준으로 한다.
+14. 실제 runtime 검증 전 service 기동을 막는 순환을 제거하기 위해 certificate/image/local handshake 준비 gate와 AWS runtime verified gate를 분리한다. private validation mode는 public BFF/ALB traffic 없이 Auth→AI/STT→Core만 시작하며, private runtime promotion은 positive/negative/rotation evidence 이후에만 연다.
+15. D-033에 따라 private mTLS runtime promotion과 BFF/public release를 분리한다. Q-013, BFF Valkey IAM token 갱신·connection 재인증·TLS preflight, T047-E, T048와 T049는 Auth/AI/STT/Core의 public-traffic 없는 promotion을 막지 않지만 BFF, public listener와 autoscaling은 계속 차단한다.
+16. 상세 identity, bundle schema, 구현 순서와 검증 행렬은 `infra/aws/nonprod-v2/mtls-implementation-plan.md`를 기준으로 한다.
 
 ## Test Plan
 
