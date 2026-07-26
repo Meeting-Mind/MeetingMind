@@ -274,6 +274,7 @@ locals {
         STT_SERVER_PORT                             = "8083"
         STT_DATASOURCE_URL                          = "jdbc:postgresql://${module.data.rds_address}:${module.data.rds_port}/meetingmind_stt"
         STT_DATASOURCE_USERNAME                     = "meetingmind_stt_app"
+        SPRING_FLYWAY_ENABLED                       = "false"
         STT_PROVIDER                                = "soniox-realtime"
         STT_FALLBACK_PROVIDER                       = "openai-realtime"
         STT_DEBUG_AUDIO_DUMP                        = "false"
