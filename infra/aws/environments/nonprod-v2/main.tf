@@ -4,7 +4,7 @@ resource "terraform_data" "runtime_gate" {
   lifecycle {
     precondition {
       condition     = var.runtime_gates_acknowledged
-      error_message = "Set runtime_gates_acknowledged=true only after completing every runtime gate in README.md."
+      error_message = "Set runtime_gates_acknowledged=true only after completing the private runtime promotion gates in README.md."
     }
 
     precondition {
@@ -38,6 +38,19 @@ resource "terraform_data" "runtime_gate" {
         lookup(var.service_desired_counts, service, 0) >= 1
       ])
       error_message = "Every runtime-enabled service must have desired count of at least one."
+    }
+  }
+}
+
+resource "terraform_data" "release_gate" {
+  lifecycle {
+    precondition {
+      condition = var.release_gates_acknowledged || (
+        !contains(var.runtime_enabled_services, "bff") &&
+        !var.enable_http_smoke_listener &&
+        !var.enable_autoscaling
+      )
+      error_message = "BFF, public listeners, and autoscaling remain blocked until release_gates_acknowledged=true after Q-013, BFF Valkey IAM, T047-E, T048, and T049 are complete."
     }
   }
 }
@@ -245,7 +258,10 @@ module "alb" {
   security_group_id          = module.security.alb_security_group_id
   enable_http_smoke_listener = var.enable_http_smoke_listener
 
-  depends_on = [terraform_data.smoke_gate]
+  depends_on = [
+    terraform_data.release_gate,
+    terraform_data.smoke_gate,
+  ]
 }
 
 module "observability" {
@@ -325,6 +341,7 @@ module "service" {
 
   depends_on = [
     module.vpc_endpoints,
+    terraform_data.release_gate,
     terraform_data.runtime_gate,
     terraform_data.runtime_selection_gate,
     terraform_data.mtls_mode_exclusion_gate,

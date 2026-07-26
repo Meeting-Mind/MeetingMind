@@ -636,3 +636,40 @@ Runtime matrix의 모든 거부 결과는 기대한 TLS, network, loader 또는 
 | 2026-07-26T04:57:37Z | Old-CA BFF→new-only Auth | `960f1be2-1660-4cc2-b96c-eff6a51d3831` | `51c5e4ff7b11c63c574c8c2651f458da94fdba661d60547ec9f14b527cc84927` | `bff-verifier:1` | rejected | — | connected |
 
 최종 AWSCURRENT는 BFF `efecc327…`, Auth `a1752c07…`, AI `b318aaff…`, Realtime STT `fc0f9bf9…`, Core `1f5bb168…`이며 모두 새 CA 단독 trust다. 각 secret의 AWSPREVIOUS는 2단계 overlap bundle이라 reverse overlap rollback 시작점으로 보존했다. Terraform refresh plan은 `No changes`이고 `internal_mtls_runtime_verified`는 별도 승인 전까지 기본값 `false`를 유지한다.
+
+## T048-P Private mTLS Runtime Promotion
+
+- D-033에 따라 T047-D/T048-V의 완료 evidence를 private mTLS runtime promotion 근거로 승인했다. Q-013, BFF Valkey IAM token 갱신·재연결·TLS preflight, T047-E, T048/T049는 BFF/public release gate로 유지한다.
+- Terraform에 `release_gates_acknowledged`를 분리해 값이 `false`인 동안 BFF runtime, public listener와 autoscaling을 차단했다. ALB target group attachment도 public listener가 활성화될 때만 ECS service에 연결되므로 private promotion은 ALB 결합을 만들지 않는다.
+- gitignored 환경 설정은 validation mode를 종료하고 Auth/AI/Realtime STT/Core runtime을 활성화했으며 `runtime_gates_acknowledged=true`, `internal_mtls_runtime_verified=true`, `release_gates_acknowledged=false`로 전환했다. BFF는 runtime selection에 포함하지 않았다.
+- clean tfvars 임시 복사본의 Terraform regression은 20/20 통과했고 `terraform validate`와 `terraform fmt -check -recursive infra/aws`도 통과했다. 기존 Cloud Map `failure_threshold` deprecation warning만 남는다.
+- 실제 AWS plan은 `terraform_data` validation gate 제거와 runtime/release gate 생성뿐인 `2 add, 0 change, 1 destroy`였다. 저장된 plan을 그대로 apply했으며 ECS, ALB, autoscaling, task definition, secret과 CA material 변경은 0건이다.
+- apply 후 Auth `4`, AI `3`, Realtime STT `6`, Core `4`는 모두 desired/running `1/1`, application `HEALTHY`, rollout `COMPLETED`, `assignPublicIp=DISABLED`, load balancer attachment 0개를 유지했다. 모든 cert-loader는 exit 0이다.
+- 실행 중 task는 네 service task뿐이고 BFF ECS service는 0개다. ALB listener와 MeetingMind ECS autoscaling target도 각각 0개다. 새 verifier를 실행하지 않았으며, workload/task/secret이 바뀌지 않았으므로 승인 근거인 최종 T047-D/T048-V TLS/HTTP/network evidence가 그대로 연속된다.
+- 2026-07-26T08:58:10Z 최종 refresh plan은 `No changes`다. 기존 CA, AWSPREVIOUS, secret versions와 task definition revisions는 모두 보존했다.
+
+### Promotion evidence
+
+| UTC 시각 | Service | Secret version ID | Leaf fingerprint SHA-256 | Task definition revision | TLS 결과 | HTTP 결과 | Network 결과 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-26T08:58:10Z | Auth | `a1752c07-208c-4aed-b00f-762985478e8e` | `9f21f9c77f7cfe7b3d670e89c4533c16e064a08151b93ccad914700c4ff0e397` | `auth:4` | prior accepted; unchanged | health accepted | private connected; public disabled |
+| 2026-07-26T08:58:10Z | AI | `b318aaff-adb1-4e3a-8921-a7346c24b2c3` | `19de37ecf5a6cd2bf82f051b58d308035d72a5da3486f9eb623663ab75c73e58` | `ai:3` | prior accepted; unchanged | health accepted | private connected; public disabled |
+| 2026-07-26T08:58:10Z | Realtime STT | `fc0f9bf9-24b6-4cf7-b09e-c7130f955456` | `a257dcfaa7750bcdb2671cc5dc271f5c5ed5e612766a826085ccc2a46bf03011` | `realtime-stt:6` | prior accepted; unchanged | health accepted | private connected; public disabled |
+| 2026-07-26T08:58:10Z | Core | `1f5bb168-e1c5-4fea-99f5-ae5ddb5815d8` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core:4` | prior accepted; unchanged | Core→Auth/AI/STT prior 200; unchanged | private connected; public disabled |
+
+## T048-P Targeted Release Gate Hardening
+
+- 최종 source review에서 standalone `terraform_data.release_gate`가 ALB/ECS service dependency
+  graph에 연결되지 않아 targeted plan/apply가 gate를 graph 밖으로 제외할 수 있음을 발견했다.
+- `module.alb`와 `module.service`가 release gate에 명시적으로 의존하도록 수정했다. public listener는
+  ALB dependency로, BFF와 module 내부 autoscaling target은 ECS service dependency로 보호한다.
+  private Auth/AI/Realtime STT/Core runtime은 release acknowledgement 없이 계속 허용한다.
+- clean tfvars 임시 복사본의 Terraform test는 24/24 통과했다. 추가 회귀는 targeted public ALB,
+  BFF runtime과 autoscaling이 release acknowledgement 없이 실패하고 targeted private Auth runtime은
+  성공하는지 검증한다.
+- `terraform fmt -check -recursive infra/aws`, `terraform validate`와 `git diff --check`가 통과했다.
+  기존 Cloud Map `failure_threshold` deprecation warning만 남는다.
+- `meetingmind-nonprod` profile의 `terraform plan -lock=false -detailed-exitcode`는 실제 remote state와
+  AWS refresh 뒤 `No changes`로 종료했다.
+- 이 hardening은 Terraform dependency graph와 source test만 변경한다. AWS mutation, staging, commit,
+  push와 PR 생성은 수행하지 않았다.

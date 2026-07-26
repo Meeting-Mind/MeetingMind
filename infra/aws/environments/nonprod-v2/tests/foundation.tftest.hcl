@@ -138,9 +138,49 @@ run "public_smoke_requires_restricted_cidr" {
     expected_aws_account_id    = "123456789012"
     enable_http_smoke_listener = true
     allowed_ingress_cidrs      = []
+    release_gates_acknowledged = true
   }
 
   expect_failures = [terraform_data.smoke_gate]
+}
+
+run "public_smoke_requires_release_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id    = "123456789012"
+    enable_http_smoke_listener = true
+    allowed_ingress_cidrs      = ["203.0.113.10/32"]
+  }
+
+  expect_failures = [terraform_data.release_gate]
+}
+
+run "targeted_public_smoke_requires_release_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id    = "123456789012"
+    enable_http_smoke_listener = true
+    allowed_ingress_cidrs      = ["203.0.113.10/32"]
+  }
+
+  plan_options {
+    target = [module.alb.aws_lb_listener.http_smoke[0]]
+  }
+
+  expect_failures = [terraform_data.release_gate]
+}
+
+run "autoscaling_requires_release_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id = "123456789012"
+    enable_autoscaling      = true
+  }
+
+  expect_failures = [terraform_data.release_gate]
 }
 
 run "runtime_requires_acknowledgement" {
@@ -198,7 +238,112 @@ run "staged_auth_runtime_plan" {
 
   assert {
     condition     = output.runtime_enabled_services == toset(["auth"])
-    error_message = "Only explicitly allowlisted services may be runtime enabled."
+    error_message = "A verified private Auth runtime must not require the BFF/public release acknowledgement."
+  }
+}
+
+run "targeted_private_auth_runtime_plan" {
+  command = plan
+
+  variables {
+    expected_aws_account_id        = "123456789012"
+    enable_runtime_services        = true
+    runtime_enabled_services       = ["auth"]
+    runtime_gates_acknowledged     = true
+    internal_mtls_runtime_verified = true
+    cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    service_image_digests = {
+      auth = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  plan_options {
+    target = [module.service["auth"].aws_ecs_service.this[0]]
+  }
+}
+
+run "bff_runtime_requires_release_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id        = "123456789012"
+    enable_runtime_services        = true
+    runtime_enabled_services       = ["bff"]
+    runtime_gates_acknowledged     = true
+    internal_mtls_runtime_verified = true
+    cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    service_image_digests = {
+      bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  expect_failures = [terraform_data.release_gate]
+}
+
+run "targeted_bff_runtime_requires_release_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id        = "123456789012"
+    enable_runtime_services        = true
+    runtime_enabled_services       = ["bff"]
+    runtime_gates_acknowledged     = true
+    internal_mtls_runtime_verified = true
+    cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    service_image_digests = {
+      bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  plan_options {
+    target = [module.service["bff"].aws_ecs_service.this[0]]
+  }
+
+  expect_failures = [terraform_data.release_gate]
+}
+
+run "targeted_autoscaling_requires_release_acknowledgement" {
+  command = plan
+
+  variables {
+    expected_aws_account_id        = "123456789012"
+    enable_runtime_services        = true
+    runtime_enabled_services       = ["auth"]
+    runtime_gates_acknowledged     = true
+    internal_mtls_runtime_verified = true
+    cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    enable_autoscaling             = true
+    service_image_digests = {
+      auth = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  plan_options {
+    target = [module.service["auth"].aws_appautoscaling_target.this[0]]
+  }
+
+  expect_failures = [terraform_data.release_gate]
+}
+
+run "release_acknowledgement_allows_bff_runtime_plan" {
+  command = plan
+
+  variables {
+    expected_aws_account_id        = "123456789012"
+    enable_runtime_services        = true
+    runtime_enabled_services       = ["bff"]
+    runtime_gates_acknowledged     = true
+    release_gates_acknowledged     = true
+    internal_mtls_runtime_verified = true
+    cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    service_image_digests = {
+      bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  assert {
+    condition     = output.runtime_enabled_services == toset(["bff"])
+    error_message = "An explicit full release acknowledgement must unlock the BFF runtime plan."
   }
 }
 
@@ -277,6 +422,7 @@ run "validation_rejects_public_smoke_listener" {
     internal_mtls_material_ready    = true
     cert_loader_image_digest        = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     enable_http_smoke_listener      = true
+    release_gates_acknowledged      = true
     allowed_ingress_cidrs           = ["203.0.113.10/32"]
     service_image_digests = {
       auth = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

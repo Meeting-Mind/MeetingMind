@@ -194,11 +194,12 @@ Envoy image는 검토한 ARM64 upstream version과 digest를 전용 V2 ECR repos
 | Gate | 의미 | 허용 범위 |
 | --- | --- | --- |
 | `internal_mtls_material_ready` | image scan, secret current version, loader/Envoy config와 local handshake 완료 | private mTLS validation deployment |
-| `internal_mtls_runtime_verified` | AWS positive/negative matrix와 rotation/rollback evidence 완료 | 정상 staged runtime과 최종 acknowledgement |
+| `internal_mtls_runtime_verified` | AWS positive/negative matrix와 rotation/rollback evidence 완료 | Auth/AI/Realtime STT/Core private runtime promotion |
+| `release_gates_acknowledged` | Q-013, BFF Valkey IAM, T047-E, T048와 T049 release evidence 완료 | BFF, public listener와 autoscaling |
 
 별도 `enable_mtls_validation_services=false`를 기본값으로 둔다. 이 mode는 exact allowlist의 private service만 만들고 BFF browser traffic과 ALB listener를 활성화하지 않는다. validation mode와 정상 runtime mode를 동시에 켤 수 없게 validation을 추가한다.
 
-검증 순서는 Auth → AI/Realtime STT → Core다. Core까지 띄운 뒤 실제 caller/callee 검증을 수행하고, 성공해야 `internal_mtls_runtime_verified=true`와 기존 `runtime_gates_acknowledged=true`를 사용할 수 있다. BFF는 최종 staged runtime에서 마지막으로 추가한다.
+검증 순서는 Auth → AI/Realtime STT → Core다. Core까지 띄운 뒤 실제 caller/callee 검증을 수행하고, 성공해야 `internal_mtls_runtime_verified=true`와 private promotion용 `runtime_gates_acknowledged=true`를 사용할 수 있다. BFF는 Q-013, Valkey IAM preflight, T047-E/T048/T049를 완료해 `release_gates_acknowledged=true`가 된 뒤 마지막으로 추가한다.
 
 `enable_runtime_services`, `runtime_gates_acknowledged`, `internal_mtls_runtime_verified`의 기본값은 계속 `false`다.
 
@@ -218,7 +219,8 @@ Envoy image는 검토한 ARM64 upstream version과 digest를 전용 V2 ECR repos
 | 9 | Private validation deployment | validation gate, ECS | Auth→AI/STT→Core private service와 loader/Envoy health 정상 |
 | 10 | Rotation drill | pending/current stages, ECS force deployment | leaf 교체, rollback, CA overlap 3단계 drill 통과 |
 | 11 | Runtime security evidence | verifier task/runbook | positive와 모든 negative matrix, cross-secret IAM denial, logs redaction 통과 |
-| 12 | Runtime enable | staged allowlist | runtime verified/acknowledged 후 Auth→AI/STT→Core→BFF 순차 활성화 |
+| 12 | Private runtime promotion | staged allowlist | runtime verified/acknowledged 후 Auth→AI/STT→Core 활성화, BFF/public/autoscaling 비활성 유지 |
+| 13 | BFF/public release | release gate | Q-013, BFF Valkey IAM, T047-E/T048/T049 완료 뒤 BFF를 마지막으로 활성화 |
 
 Phase 0~7은 AWS resource mutation 없이 수행할 수 있다. Phase 8 이후 secret write, apply, ECS update와 force deployment는 별도 사용자 승인 뒤 실행한다.
 
