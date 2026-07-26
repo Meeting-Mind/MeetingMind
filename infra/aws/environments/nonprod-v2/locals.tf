@@ -189,12 +189,14 @@ locals {
       cpu    = 512
       memory = 1024
       environment = {
-        SPRING_PROFILES_ACTIVE = local.internal_mtls_enabled ? "nonprod,mtls" : "nonprod"
-        AUTH_SERVER_PORT       = "8082"
-        AUTH_DB_URL            = "jdbc:postgresql://${module.data.rds_address}:${module.data.rds_port}/meetingmind_auth"
-        AUTH_DB_MIGRATION_USER = "meetingmind_auth_migrator"
-        AUTH_SIGNING_PROVIDER  = "aws-kms"
-        AUTH_SIGNING_ISSUER    = "https://auth.meetingmind.internal"
+        SPRING_PROFILES_ACTIVE      = local.internal_mtls_enabled ? "nonprod,mtls" : "nonprod"
+        AUTH_SERVER_PORT            = "8082"
+        AUTH_DB_URL                 = "jdbc:postgresql://${module.data.rds_address}:${module.data.rds_port}/meetingmind_auth"
+        AUTH_DB_MIGRATION_USER      = "meetingmind_auth_migrator"
+        AUTH_SIGNING_PROVIDER       = "aws-kms"
+        AUTH_SIGNING_ISSUER         = "https://auth.meetingmind.internal"
+        AUTH_BFF_SPIFFE_PRINCIPALS  = local.tls_service_contracts.bff.spiffe_id
+        AUTH_JWKS_SPIFFE_PRINCIPALS = join(",", [local.tls_service_contracts.bff.spiffe_id, local.tls_service_contracts.core.spiffe_id])
       }
       secrets = {
         AUTH_DB_RUNTIME_PASSWORD   = module.secrets.secret_arns["auth/db-runtime-password"]
@@ -212,16 +214,17 @@ locals {
       cpu    = 1024
       memory = 2048
       environment = {
-        SPRING_PROFILES_ACTIVE           = local.internal_mtls_enabled ? "db,mtls" : "db"
-        SPRING_DATASOURCE_URL            = "jdbc:postgresql://${module.data.rds_address}:${module.data.rds_port}/meetingmind"
-        SPRING_DATASOURCE_USERNAME       = "meetingmind_core_app"
-        SPRING_FLYWAY_ENABLED            = "false"
-        MEETINGMIND_AUTH_VALIDATION_MODE = "TARGET_ONLY"
-        MEETINGMIND_AUTH_TARGET_ISSUER   = "https://auth.meetingmind.internal"
-        MEETINGMIND_AUTH_JWKS_URI        = "${var.internal_service_base_urls.auth}/.well-known/jwks.json"
-        MEETINGMIND_AI_BASE_URL          = var.internal_service_base_urls.ai
-        STT_GATEWAY_MODE                 = "remote"
-        MEETINGMIND_STT_BASE_URL         = var.internal_service_base_urls.stt
+        SPRING_PROFILES_ACTIVE              = local.internal_mtls_enabled ? "db,mtls" : "db"
+        SPRING_DATASOURCE_URL               = "jdbc:postgresql://${module.data.rds_address}:${module.data.rds_port}/meetingmind"
+        SPRING_DATASOURCE_USERNAME          = "meetingmind_core_app"
+        SPRING_FLYWAY_ENABLED               = "false"
+        MEETINGMIND_AUTH_VALIDATION_MODE    = "TARGET_ONLY"
+        MEETINGMIND_AUTH_TARGET_ISSUER      = "https://auth.meetingmind.internal"
+        MEETINGMIND_AUTH_JWKS_URI           = "${var.internal_service_base_urls.auth}/.well-known/jwks.json"
+        MEETINGMIND_AI_BASE_URL             = var.internal_service_base_urls.ai
+        MEETINGMIND_CORE_ALLOWED_PRINCIPALS = local.tls_service_contracts.bff.spiffe_id
+        STT_GATEWAY_MODE                    = "remote"
+        MEETINGMIND_STT_BASE_URL            = var.internal_service_base_urls.stt
       }
       secrets = {
         SPRING_DATASOURCE_PASSWORD = module.secrets.secret_arns["core/db-runtime-password"]
@@ -278,6 +281,7 @@ locals {
         STT_PROVIDER                                = "soniox-realtime"
         STT_FALLBACK_PROVIDER                       = "openai-realtime"
         STT_DEBUG_AUDIO_DUMP                        = "false"
+        MEETINGMIND_STT_ALLOWED_PRINCIPALS          = local.tls_service_contracts.core.spiffe_id
         MEETINGMIND_STT_ALLOW_TEST_PRINCIPAL_HEADER = "false"
       }
       secrets = {

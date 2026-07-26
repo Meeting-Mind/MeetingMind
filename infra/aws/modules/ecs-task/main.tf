@@ -167,6 +167,7 @@ resource "aws_ecs_task_definition" "this" {
   family                   = var.family
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
+  skip_destroy             = true
   cpu                      = var.cpu
   memory                   = var.memory
   execution_role_arn       = var.execution_role_arn

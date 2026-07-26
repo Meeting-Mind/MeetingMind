@@ -178,6 +178,15 @@ resource "aws_vpc_security_group_ingress_rule" "auth_from_bff" {
   ip_protocol                  = "tcp"
 }
 
+resource "aws_vpc_security_group_ingress_rule" "auth_from_core" {
+  security_group_id            = aws_security_group.service["auth"].id
+  description                  = "Core to Auth JWKS"
+  referenced_security_group_id = aws_security_group.service["core"].id
+  from_port                    = local.service_ports.auth
+  to_port                      = local.service_ports.auth
+  ip_protocol                  = "tcp"
+}
+
 resource "aws_vpc_security_group_ingress_rule" "core_from_bff" {
   security_group_id            = aws_security_group.service["core"].id
   description                  = "BFF to Core"

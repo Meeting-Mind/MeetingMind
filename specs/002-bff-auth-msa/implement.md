@@ -476,8 +476,8 @@ Refresh rotation은 기존 V1의 `usedAt/replacementId` check, replacement FK와
 | Image vulnerability scan | Pass | Trivy `--ignore-unfixed --scanners vuln --severity HIGH,CRITICAL` finding 0 |
 | Source secret scan | Pass | `gitleaks dir --no-banner --redact`를 `cert-loader`, `scripts/pki/nonprod`, `infra/aws/nonprod-v2`에 개별 실행; 모두 no leaks |
 | `git diff --check` | Pass | whitespace 오류 없음 |
-| Rotation/rollback/CA overlap drill | Not run | 완료 기준 evidence는 실제 AWS `AWSPENDING`/`AWSCURRENT`/ECS force deployment가 필요하며 T048-V private validation과 Phase 8 사용자 승인 뒤 runbook대로 수집한다 |
-| Terraform/AWS 변경 | Not run | 이번 슬라이스는 runbook/도구/계약 문서만 변경했고 Terraform source와 AWS 리소스는 수정하지 않음 |
+| Rotation/rollback/CA overlap drill | Pass | 2026-07-26 Core leaf canary/승격/rollback과 독립 CA의 old+new trust→new leaf→old trust 제거를 실제 AWS에서 완료했다. 상세 evidence는 아래 실행 섹션에 기록했다. |
+| Terraform/AWS 정합성 | Pass | 5개 secret의 3단계 version 승격과 4개 validation service force deployment 뒤 Terraform refresh plan `No changes` |
 
 ## T047-C2 AI Envoy mTLS 경계와 ECS Shared Token 제거
 
@@ -511,6 +511,128 @@ Refresh rotation은 기존 V1의 `usedAt/replacementId` check, replacement FK와
 - 삭제 16건은 모두 기록된 결정과 일치한다: 공용 execution role→서비스별 분리(T047-A) 3건, `core/ai-internal-token`(T047-C2)·`core/stt-internal-token`(T047-C1) secret 2건(7일 recovery window), 광범위 egress→최소권한 교체 6건, task definition 신규 revision 교체 5건. 실행 중 ECS 서비스는 0개로 중단 영향 없음.
 - 추가분에는 TLS bundle secret 5개+cross-service read deny policy, task-role `read-own-tls-bundle` 정책, `cert-loader`/`ai-envoy` ECR, Cloud Map namespace/서비스, mTLS gate가 포함된다.
 - Apply 후 drift 2종을 소스에서 수정해 plan을 `No changes`로 수렴시켰다: Cloud Map의 빈 `health_check_custom_config {}`는 API에 저장되지 않아 영구 replace를 만들므로 `failure_threshold = 1`로 고정(빈 서비스 4개 1회 교체), default NACL은 `subnet_ids` 미선언으로 영구 diff가 생겨 public/private/data subnet을 명시했다. 수정 후 mock tests 16/16 재통과.
-- 다음 순서: 7개 이미지 ECR push(digest 기록), `/Users/sjs/CA` offline CA 생성과 5개 bundle `AWSCURRENT` 입력(Phase 8), validation mode 활성화(T048-V).
+- 다음 순서: 7개 이미지 ECR push(digest 기록), 저장소 밖 offline CA 생성과 5개 bundle `AWSCURRENT` 입력(Phase 8), validation mode 활성화(T048-V).
+
+## Phase 8 Material Setup (이미지·CA·TLS Bundle)
+
+- PR #55로 mTLS 구현 전체를 `dev`에 병합했고, 병합 commit `3845b4a` 기준으로 7개 ARM64 이미지를 ECR에 push했다. digest는 환경 `terraform.tfvars`(비추적)에 기록: bff `ec6ae964…`, auth `46a7323b…`, core `f24890bd…`, ai `7019cebc…`, realtime-stt `27d51e9e…`, cert-loader `95a22eaf…`, ai-envoy `21dc26fa…`. `--provenance=false`로 단일 manifest digest를 사용했다.
+- 사용자가 지정한 저장소 밖 암호화 경계(0700)에서 offline NonProd root/intermediate CA를 초기화하고 5개 서비스 leaf(만료 2026-10-23, rotation 미해당)를 발급했다. 실제 경로·passphrase·PEM은 저장소에 기록하지 않는다. leaf fingerprint 앞 16자: ai `69a097e74f8228ce`, auth `7923d9dce659da4a`, bff `51c5e4ff7b11c63c`, core `5a2ffa7bb7822ee6`, stt `b7d89c550555d6a7`.
+- 5개 TLS bundle JSON을 `AWSCURRENT`로 입력했다(version: bff `8c1e1b36…`, auth `37360d8f…`, core `1cc1f54f…`, ai `3fd48bf0…`, stt `297e9ece…`). 입력 직후 운영자 admin role의 `GetSecretValue`가 resource policy **explicit deny**로 거부됨을 확인해 cross-principal read 차단 evidence를 확보했다.
+- `internal_mtls_material_ready`의 근거가 모두 충족됐다: bundle `AWSCURRENT` 5개, 7개 digest·scan, loader/Envoy config, 로컬 mTLS handshake matrix. 다음은 validation mode 활성화다.
 
 다음 경계는 T048-V다. material gate 충족 뒤 public traffic 없이 Auth→AI/STT→Core private validation service를 시작하고 loader/Envoy/application health와 Cloud Map 등록을 확인한다.
+
+## T048-V Private Validation과 T047-D Runtime Matrix
+
+- Core DB bootstrap 기준 이후 추가된 V20~V23을 별도 migrator 경계에서 forward-only 적용했다. Flyway history는 target 23까지 성공했고 `spaces.image_url`이 생성됐으며 runtime role의 schema DDL 권한은 계속 비활성이다.
+- provider crash 뒤 Terraform state에서 누락된 기존 Core ECS service만 import했다. import 직후 남은 in-place 차이를 적용하고 Core를 재배포했으며 최종 refresh plan은 `No changes`다.
+- 최초 Core caller 검증에서 Core→Auth가 network timeout, Core→STT가 principal 403으로 실패했다. source SG egress에는 Core→Auth가 있었지만 Auth ingress가 BFF만 허용했고, Java 서비스의 기본 SPIFFE namespace가 validation 계약과 달랐다. Auth의 Core JWKS ingress와 Auth/Core/STT의 exact `ns/nonprod-v2` principal을 Terraform에 명시했다.
+- task definition 교체 전 `skip_destroy=true`를 먼저 state에 반영했다. Auth/Core/STT 신규 revision 배포 뒤 이전 revision 3/3/5가 모두 `ACTIVE`임을 확인했고, 최종 revision 4/4/6은 loader exit 0과 application `HEALTHY`로 안정화됐다.
+- validation 서비스는 모두 private subnet, `assignPublicIp=DISABLED`, load balancer 연결 0개이며 BFF public service는 시작하지 않았다. `internal_mtls_runtime_verified`는 계속 `false`다.
+
+### T048-V evidence
+
+| UTC 시각 | Service | Secret version ID | Leaf fingerprint SHA-256 | Task definition revision | TLS 결과 | HTTP 결과 | Network 결과 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-26T03:15:26Z | Auth | `37360d8f-d992-4719-9a22-756bac7ba184` | `7923d9dce659da4ad95e4d2d273361ba1db699a1925a25d636340273ef2b24cc` | `auth:4` | loader accepted | health accepted | private connected |
+| 2026-07-26T03:15:26Z | Core | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core:4` | loader accepted | health accepted | private connected |
+| 2026-07-26T03:15:26Z | AI | `3fd48bf0-f1e9-4735-a846-19fb45c699c7` | `69a097e74f8228ce8fc6447a1711d56dc1d8ababaebbd246f94c9d8e5c84ce94` | `ai:3` | loader/Envoy accepted | health accepted | private connected |
+| 2026-07-26T03:15:26Z | Realtime STT | `297e9ece-346a-48fd-8652-497ef121326c` | `b7d89c550555d6a7ccf978034181556029c1b55a10dfa9dbc774471649aae036` | `realtime-stt:6` | loader accepted | health accepted | private connected |
+| 2026-07-26T02:54:17Z | Core→Auth JWKS | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T02:54:17Z | Core→AI Envoy | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T02:54:17Z | Core→Realtime STT | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+
+### T047-D negative evidence
+
+| UTC 시각 | Service | Secret version ID | Leaf fingerprint SHA-256 | Task definition revision | TLS 결과 | HTTP 결과 | Network 결과 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-26T02:57:45Z | No client certificate→AI | — | — | `core-verifier:1` | rejected | — | connected |
+| 2026-07-26T02:57:43Z | Wrong server CA→AI | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | rejected | — | connected |
+| 2026-07-26T02:57:46Z | Hostname mismatch→AI | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | rejected | — | connected |
+| 2026-07-26T02:57:43Z | Spoofed XFCC without certificate→AI | — | — | `core-verifier:1` | rejected | — | connected |
+| 2026-07-26T02:57:45Z | Direct Uvicorn `8001` | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | not reached | — | timeout |
+| 2026-07-26T02:57:46Z | Wrong source SG→AI | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | not reached | — | timeout |
+| 2026-07-26T02:57:43Z | Wrong SPIFFE BFF→AI | `8c1e1b36-74b5-470d-a573-84bc255c416f` | `51c5e4ff7b11c63c574c8c2651f458da94fdba661d60547ec9f14b527cc84927` | `bff-verifier:1` | rejected | — | connected |
+| 2026-07-26T03:04:29Z | BFF role→Core TLS secret | — | — | `bff-verifier:1` | not reached | — | secret fetch denied |
+| 2026-07-26T03:02:50Z | Invalid Core AWSPENDING | `a11f6489-0176-4799-8d2b-c0d40b8a2012` | `4fb1214264af09c256a6c2f648bb321dc19e7af675d8a3a9c3d60c84f74ded1b` | `core:4` | loader rejected | — | secret fetched; app not started |
+| 2026-07-26T03:12:00Z | Multiple SPIFFE URI source matrix | — | — | — | PKI/filter rejected | 401 | not applicable |
+| 2026-07-26T03:15:26Z | Public bypass topology | — | — | `auth:4/core:4/ai:3/stt:6` | not reached | no public route | public IP/LB absent |
+
+Runtime matrix의 모든 거부 결과는 기대한 TLS, network, loader 또는 secret fetch 경계와 일치했다. 다만 `tasks.md`의 T047-D는 T047-B4를 dependency로 가지므로 CA overlap drill 전까지 formal checkbox를 열어 둔다.
+
+## T047-B4 Core Leaf Rotation과 Rollback Drill
+
+- 보호된 offline 경계의 기존 intermediate CA로 새 Core leaf를 발급하고 exact service/SPIFFE/DNS/EKU bundle 검증을 통과했다. 실제 CA private key를 새로 만들지 않았다.
+- metadata가 불일치하는 AWSPENDING canary는 `bundle_invalid`로 종료되고 application은 시작하지 않았다. 검증된 AWSPENDING canary는 loader exit 0과 application health를 통과했다.
+- 새 version을 AWSCURRENT로 승격해 Core revision 4를 force deployment했고 새 leaf로 Auth JWKS, AI Envoy, Realtime STT가 모두 200이었다. 이어 이전 version을 AWSCURRENT로 되돌려 force deployment했으며 원래 fingerprint와 Core→AI 200으로 복구를 확인했다.
+- 이 시점에는 root/intermediate 계층이 하나뿐이고 실제 CA private key 신규 생성 승인이 없어 runbook 6장을 보류했다. 이후 사용자가 독립된 두 번째 NonProd CA 생성과 5개 서비스의 3단계 rotation을 명시 승인했으며, 아래 CA overlap evidence로 T047-B4 dependency를 닫았다.
+
+### Rotation evidence
+
+| UTC 시각 | Service | Secret version ID | Leaf fingerprint SHA-256 | Task definition revision | TLS 결과 | HTTP 결과 | Network 결과 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-26T03:05:00Z | Core AWSPENDING canary | `79bffb2d-af29-470f-b4b7-d75da69d5678` | `4fb1214264af09c256a6c2f648bb321dc19e7af675d8a3a9c3d60c84f74ded1b` | `core:4` | loader accepted | health accepted | private connected |
+| 2026-07-26T03:07:00Z | Core AWSCURRENT deployment | `79bffb2d-af29-470f-b4b7-d75da69d5678` | `4fb1214264af09c256a6c2f648bb321dc19e7af675d8a3a9c3d60c84f74ded1b` | `core:4` | loader accepted | health accepted | private connected |
+| 2026-07-26T03:09:01Z | Rotated Core→Auth | `79bffb2d-af29-470f-b4b7-d75da69d5678` | `4fb1214264af09c256a6c2f648bb321dc19e7af675d8a3a9c3d60c84f74ded1b` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T03:08:58Z | Rotated Core→AI | `79bffb2d-af29-470f-b4b7-d75da69d5678` | `4fb1214264af09c256a6c2f648bb321dc19e7af675d8a3a9c3d60c84f74ded1b` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T03:09:05Z | Rotated Core→Realtime STT | `79bffb2d-af29-470f-b4b7-d75da69d5678` | `4fb1214264af09c256a6c2f648bb321dc19e7af675d8a3a9c3d60c84f74ded1b` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T03:15:26Z | Core rollback | `1cc1f54f-2c20-4f66-9fbb-403db43c12d0` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core:4` | loader accepted | Core→AI 200 | connected |
+
+### 이번 세션 검증
+
+- Core migration runner: V20~V23 적용 및 target 23 확인, build success.
+- Terraform: format, validate, clean mock test 16/16, Core service import 후 최종 refresh plan `No changes`.
+- ECS: Auth/Core/AI/STT desired/running 1/1, rollout `COMPLETED`, application `HEALTHY`, cert-loader exit 0.
+- PKI source matrix: `python3 scripts/pki/nonprod/test_pki.py` 11/11; wrong/multiple SPIFFE와 CA overlap pair 검증 포함.
+- Core principal filter: `./gradlew test --tests com.meetingmind.demo.auth.CoreWorkloadIdentityFilterTest`, build success.
+- 현재 shell에는 Go toolchain이 없어 cert-loader Go suite는 재실행하지 못했다. 기존 T047-B4 고정 builder 검증 결과는 유지되며 이번 runtime에서는 invalid bundle이 loader에서 실제 거부됐다.
+
+## T047-B4 CA Overlap 3단계 Drill
+
+- 사용자 승인에 따라 보호된 offline 경계에 독립된 두 번째 root/intermediate CA와 별도 random passphrase 파일을 생성했다. CA directory는 `0700`, passphrase는 `0600`이며 값은 출력하지 않았다. 기존 CA, 기존 leaf, secret version과 task definition revision은 삭제하지 않았다.
+- 1단계는 기존 leaf/key를 유지하고 trust만 old+new 두 쌍으로 확장했다. Auth → AI/Realtime STT → Core → BFF 순서로 AWSPENDING canary, AWSCURRENT 승격과 배포를 수행했으며 기존 fingerprint와 모든 caller/callee 200이 유지됐다.
+- 2단계는 새 CA leaf와 overlap trust를 Auth → AI/Realtime STT → Core → BFF 순서로 배포했다. old-CA Core→new-CA Auth/AI/STT와 new-CA Core→new-CA Auth/AI/STT가 모두 200이어서 전환 중 양방향 호환을 확인했다.
+- 3단계는 새 CA leaf를 유지하고 old trust를 제거했다. Auth/AI/Realtime STT → Core → BFF 순서로 new-CA-only bundle을 배포했고 최종 Core→Auth/AI/STT와 BFF→Auth가 모두 200이었다.
+- 보존된 1단계 old-CA Core/BFF leaf를 AWSPENDING에 잠시 연결해 새 trust-only AI/Auth로 호출했으며 두 요청 모두 TLS에서 거부됐다. 검증 직후 임시 AWSPENDING labels를 제거했고 모든 secret은 AWSCURRENT+AWSPREVIOUS만 갖는다.
+- validation mode는 BFF ECS service를 의도적으로 시작하지 않으므로 BFF task role, BFF cert-loader와 BFF certificate를 그대로 사용하는 standalone verifier로 매 단계 canary와 BFF→Auth 200을 확인했다. Auth/Core/AI/STT services는 모든 단계에서 desired/running 1/1, application `HEALTHY`, rollout `COMPLETED`였다.
+
+### CA overlap deployment evidence
+
+| UTC 시각 | Service | Secret version ID | Leaf fingerprint SHA-256 | Task definition revision | TLS 결과 | HTTP 결과 | Network 결과 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-26T04:08:06Z | Stage 1 Auth | `37c2e72c-dd0b-4838-a721-55e1fd732899` | `7923d9dce659da4ad95e4d2d273361ba1db699a1925a25d636340273ef2b24cc` | `auth:4` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:13:10Z | Stage 1 AI | `246e862f-c7a4-4edb-bbca-4f70bdbb8e8a` | `69a097e74f8228ce8fc6447a1711d56dc1d8ababaebbd246f94c9d8e5c84ce94` | `ai:3` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:13:00Z | Stage 1 Realtime STT | `51e2c546-c2c1-4744-8397-9e019c67f528` | `b7d89c550555d6a7ccf978034181556029c1b55a10dfa9dbc774471649aae036` | `realtime-stt:6` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:18:01Z | Stage 1 Core | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core:4` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:19:53Z | Stage 1 BFF | `960f1be2-1660-4cc2-b96c-eff6a51d3831` | `51c5e4ff7b11c63c574c8c2651f458da94fdba661d60547ec9f14b527cc84927` | `bff-verifier:1` | canary/current accepted | 200 | connected |
+| 2026-07-26T04:26:41Z | Stage 2 Auth | `7deefcc0-90b9-40a1-b7ce-993950c250e1` | `9f21f9c77f7cfe7b3d670e89c4533c16e064a08151b93ccad914700c4ff0e397` | `auth:4` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:32:43Z | Stage 2 AI | `4e568cc4-96fa-464c-addd-d00307ed3b06` | `19de37ecf5a6cd2bf82f051b58d308035d72a5da3486f9eb623663ab75c73e58` | `ai:3` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:32:33Z | Stage 2 Realtime STT | `2eacb9f2-eeb9-40f3-83c6-2ec6d438ebed` | `a257dcfaa7750bcdb2671cc5dc271f5c5ed5e612766a826085ccc2a46bf03011` | `realtime-stt:6` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:38:31Z | Stage 2 Core | `fb2c1b85-adad-4d39-9255-9e3e4514e4c0` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core:4` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:41:49Z | Stage 2 BFF | `16ca44e5-5527-4c80-9832-30b52200edc0` | `4d53106466ba4ed93240382c65a5692a93643ee0f05c52c830fd67346767d6d6` | `bff-verifier:1` | canary/current accepted | 200 | connected |
+| 2026-07-26T04:47:28Z | Stage 3 Auth | `a1752c07-208c-4aed-b00f-762985478e8e` | `9f21f9c77f7cfe7b3d670e89c4533c16e064a08151b93ccad914700c4ff0e397` | `auth:4` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:46:35Z | Stage 3 AI | `b318aaff-adb1-4e3a-8921-a7346c24b2c3` | `19de37ecf5a6cd2bf82f051b58d308035d72a5da3486f9eb623663ab75c73e58` | `ai:3` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:46:35Z | Stage 3 Realtime STT | `fc0f9bf9-24b6-4cf7-b09e-c7130f955456` | `a257dcfaa7750bcdb2671cc5dc271f5c5ed5e612766a826085ccc2a46bf03011` | `realtime-stt:6` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:52:17Z | Stage 3 Core | `1f5bb168-e1c5-4fea-99f5-ae5ddb5815d8` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core:4` | canary/current accepted | health accepted | private connected |
+| 2026-07-26T04:54:24Z | Stage 3 BFF | `efecc327-3076-437f-8bda-34a04e60774b` | `4d53106466ba4ed93240382c65a5692a93643ee0f05c52c830fd67346767d6d6` | `bff-verifier:1` | canary/current accepted | 200 | connected |
+
+### CA overlap communication evidence
+
+| UTC 시각 | Service | Secret version ID | Leaf fingerprint SHA-256 | Task definition revision | TLS 결과 | HTTP 결과 | Network 결과 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-26T04:20:53Z | Stage 1 Core→Auth | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:20:57Z | Stage 1 Core→AI | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:20:55Z | Stage 1 Core→STT | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:27:42Z | Stage 2 old-CA Core→new-CA Auth | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:33:42Z | Stage 2 old-CA Core→new-CA AI | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:33:47Z | Stage 2 old-CA Core→new-CA STT | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:39:33Z | Stage 2 new-CA Core→new-CA Auth | `fb2c1b85-adad-4d39-9255-9e3e4514e4c0` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:39:25Z | Stage 2 new-CA Core→new-CA AI | `fb2c1b85-adad-4d39-9255-9e3e4514e4c0` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:39:28Z | Stage 2 new-CA Core→new-CA STT | `fb2c1b85-adad-4d39-9255-9e3e4514e4c0` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:55:42Z | Stage 3 Core→Auth | `1f5bb168-e1c5-4fea-99f5-ae5ddb5815d8` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:55:48Z | Stage 3 Core→AI | `1f5bb168-e1c5-4fea-99f5-ae5ddb5815d8` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:55:56Z | Stage 3 Core→STT | `1f5bb168-e1c5-4fea-99f5-ae5ddb5815d8` | `49c20c70a20b68d011f602420c9948235d8e5111b854bd80aaa52f312713da82` | `core-verifier:1` | accepted | 200 | connected |
+| 2026-07-26T04:57:41Z | Old-CA Core→new-only AI | `caf300ec-820d-4b5a-b20a-49690bab95cb` | `5a2ffa7bb7822ee613cb6411a273dd2341118c8b3036bbb3834fed535d3eb2e0` | `core-verifier:1` | rejected | — | connected |
+| 2026-07-26T04:57:37Z | Old-CA BFF→new-only Auth | `960f1be2-1660-4cc2-b96c-eff6a51d3831` | `51c5e4ff7b11c63c574c8c2651f458da94fdba661d60547ec9f14b527cc84927` | `bff-verifier:1` | rejected | — | connected |
+
+최종 AWSCURRENT는 BFF `efecc327…`, Auth `a1752c07…`, AI `b318aaff…`, Realtime STT `fc0f9bf9…`, Core `1f5bb168…`이며 모두 새 CA 단독 trust다. 각 secret의 AWSPREVIOUS는 2단계 overlap bundle이라 reverse overlap rollback 시작점으로 보존했다. Terraform refresh plan은 `No changes`이고 `internal_mtls_runtime_verified`는 별도 승인 전까지 기본값 `false`를 유지한다.
