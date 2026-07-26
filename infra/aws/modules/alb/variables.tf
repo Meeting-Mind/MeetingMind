@@ -18,3 +18,9 @@ variable "enable_http_smoke_listener" {
   type    = bool
   default = false
 }
+
+variable "enable_stt_smoke_route" {
+  description = "Enables the public STT websocket rule only after the full release gate."
+  type        = bool
+  default     = false
+}

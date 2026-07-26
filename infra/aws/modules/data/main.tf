@@ -101,9 +101,11 @@ resource "aws_elasticache_subnet_group" "this" {
 }
 
 resource "aws_elasticache_user" "bff" {
-  user_id       = "${var.name_prefix}-bff"
-  user_name     = "${var.name_prefix}-bff"
-  access_string = "on ~meetingmind:bff:* +@all -@dangerous"
+  user_id   = "${var.name_prefix}-bff"
+  user_name = "${var.name_prefix}-bff"
+  # Spring Boot's Redis readiness indicator uses INFO. Re-add only that
+  # read-only command after excluding the broader dangerous command category.
+  access_string = "on ~meetingmind:bff:* +@all -@dangerous +info"
   engine        = "valkey"
 
   authentication_mode {

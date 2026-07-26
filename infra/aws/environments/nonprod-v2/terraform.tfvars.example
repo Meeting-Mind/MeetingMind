@@ -11,6 +11,11 @@ runtime_gates_acknowledged = false
 release_gates_acknowledged = false
 enable_autoscaling         = false
 
+# Bounded D-034 deployment smoke. Both values move together and never replace
+# the full release acknowledgement.
+enable_deployment_smoke             = false
+deployment_smoke_gates_acknowledged = false
+
 # T047-B~D mTLS gates. Material evidence unlocks only the private validation
 # mode; the normal runtime gate additionally needs AWS runtime-verified evidence.
 internal_mtls_material_ready    = false

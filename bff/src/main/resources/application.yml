@@ -43,6 +43,11 @@ meetingmind:
       remember-absolute: 14d
     rollout:
       accept-browser-traffic: ${BFF_ACCEPT_BROWSER_TRAFFIC:true}
+    redis:
+      iam-auth:
+        enabled: ${BFF_REDIS_IAM_AUTH_ENABLED:false}
+        cache-name: ${BFF_REDIS_IAM_CACHE_NAME:}
+        region: ${BFF_REDIS_AWS_REGION:${AWS_REGION:}}
     token-vault:
       key-provider: ${BFF_TOKEN_VAULT_KEY_PROVIDER:kms}
       namespace: ${BFF_TOKEN_VAULT_NAMESPACE:meetingmind:bff:token-vault}

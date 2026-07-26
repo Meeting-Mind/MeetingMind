@@ -83,6 +83,18 @@ variable "release_gates_acknowledged" {
   default     = false
 }
 
+variable "enable_deployment_smoke" {
+  description = "Temporarily enables the NonProd browser smoke path without claiming the full BFF/public release gates are complete."
+  type        = bool
+  default     = false
+}
+
+variable "deployment_smoke_gates_acknowledged" {
+  description = "Acknowledges only the bounded BFF one-task, Valkey IAM/TLS, CloudFront-default-domain deployment smoke contract."
+  type        = bool
+  default     = false
+}
+
 variable "internal_mtls_material_ready" {
   description = "Explicit T047-B evidence: TLS bundle versions, scanned image digests, loader/Envoy config, and the local mTLS handshake matrix are complete."
   type        = bool

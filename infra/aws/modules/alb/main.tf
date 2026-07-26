@@ -114,7 +114,7 @@ resource "aws_lb_listener_rule" "bff" {
 }
 
 resource "aws_lb_listener_rule" "stt" {
-  count = var.enable_http_smoke_listener ? 1 : 0
+  count = var.enable_http_smoke_listener && var.enable_stt_smoke_route ? 1 : 0
 
   listener_arn = aws_lb_listener.http_smoke[0].arn
   priority     = 90

@@ -159,24 +159,28 @@ locals {
       cpu    = 512
       memory = 1024
       environment = {
-        SPRING_PROFILES_ACTIVE               = local.internal_mtls_enabled ? "nonprod,mtls" : "nonprod"
-        BFF_SERVER_PORT                      = "8081"
-        BFF_REDIS_HOST                       = module.data.valkey_primary_endpoint
-        BFF_REDIS_PORT                       = tostring(module.data.valkey_port)
-        SPRING_DATA_REDIS_SSL_ENABLED        = "true"
-        SPRING_DATA_REDIS_USERNAME           = module.data.valkey_bff_username
-        BFF_AUTH_PROVIDER                    = "auth-service"
-        BFF_AUTH_ISSUER                      = "https://auth.meetingmind.internal"
-        BFF_AUTH_SERVICE_BASE_URL            = var.internal_service_base_urls.auth
-        BFF_CORE_BASE_URL                    = var.internal_service_base_urls.core
-        BFF_AI_BASE_URL                      = var.internal_service_base_urls.core
-        BFF_LIVEKIT_BASE_URL                 = var.internal_service_base_urls.core
-        BFF_TOKEN_VAULT_KEY_PROVIDER         = "kms"
-        BFF_TOKEN_VAULT_KMS_KEY_ID           = module.kms.application_key_arn
-        BFF_SESSION_COOKIE_SECURE            = "true"
-        BFF_ACCEPT_BROWSER_TRAFFIC           = "true"
-        BFF_AUTH_ALLOW_TEST_PRINCIPAL_HEADER = "false"
-        BFF_CORE_ALLOW_TEST_PRINCIPAL_HEADER = "false"
+        SPRING_PROFILES_ACTIVE                = local.internal_mtls_enabled ? "nonprod,mtls" : "nonprod"
+        BFF_SERVER_PORT                       = "8081"
+        BFF_REDIS_HOST                        = module.data.valkey_primary_endpoint
+        BFF_REDIS_PORT                        = tostring(module.data.valkey_port)
+        BFF_REDIS_IAM_AUTH_ENABLED            = "true"
+        BFF_REDIS_AWS_REGION                  = var.aws_region
+        BFF_REDIS_IAM_CACHE_NAME              = module.data.valkey_replication_group_id
+        SPRING_DATA_REDIS_SSL_ENABLED         = "true"
+        SPRING_DATA_REDIS_USERNAME            = module.data.valkey_bff_username
+        SPRING_SESSION_REDIS_CONFIGURE_ACTION = "none"
+        BFF_AUTH_PROVIDER                     = "auth-service"
+        BFF_AUTH_ISSUER                       = "https://auth.meetingmind.internal"
+        BFF_AUTH_SERVICE_BASE_URL             = var.internal_service_base_urls.auth
+        BFF_CORE_BASE_URL                     = var.internal_service_base_urls.core
+        BFF_AI_BASE_URL                       = var.internal_service_base_urls.core
+        BFF_LIVEKIT_BASE_URL                  = var.internal_service_base_urls.core
+        BFF_TOKEN_VAULT_KEY_PROVIDER          = "kms"
+        BFF_TOKEN_VAULT_KMS_KEY_ID            = module.kms.application_key_arn
+        BFF_SESSION_COOKIE_SECURE             = "true"
+        BFF_ACCEPT_BROWSER_TRAFFIC            = "true"
+        BFF_AUTH_ALLOW_TEST_PRINCIPAL_HEADER  = "false"
+        BFF_CORE_ALLOW_TEST_PRINCIPAL_HEADER  = "false"
       }
       secrets = {}
       health_check = [
@@ -302,10 +306,15 @@ locals {
   }
 
   service_target_groups = {
-    for service, target_groups in {
-      bff          = [module.alb.target_group_arns["bff"]]
-      realtime-stt = [module.alb.target_group_arns["realtime-stt"]]
-    } :
-    service => target_groups if var.enable_http_smoke_listener && !var.enable_mtls_validation_services
+    bff = (
+      var.enable_http_smoke_listener && !var.enable_mtls_validation_services
+      ? tolist([module.alb.target_group_arns["bff"]])
+      : tolist([])
+    )
+    realtime-stt = (
+      var.enable_http_smoke_listener && var.release_gates_acknowledged && !var.enable_mtls_validation_services
+      ? tolist([module.alb.target_group_arns["realtime-stt"]])
+      : tolist([])
+    )
   }
 }

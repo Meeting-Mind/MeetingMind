@@ -673,3 +673,45 @@ Runtime matrix의 모든 거부 결과는 기대한 TLS, network, loader 또는 
   AWS refresh 뒤 `No changes`로 종료했다.
 - 이 hardening은 Terraform dependency graph와 source test만 변경한다. AWS mutation, staging, commit,
   push와 PR 생성은 수행하지 않았다.
+
+## T048-S1/T048-S2/T059-S1/T059-S2 NonProd Deployment Smoke
+
+- PR #69 병합본을 기준으로 `codex/nonprod-v2-smoke-deploy` 브랜치를 만들고 세 작업 흐름을
+  병렬 수행했다. `bff_smoke`는 Valkey IAM/TLS credential 경계, `frontend_edge_smoke`는
+  private S3/OAC와 CloudFront, root integration은 release gate와 분리된 smoke gate·ALB/SG/ECS
+  wiring을 담당했다. 사용자 소유 architecture 문서 변경은 건드리거나 포함하지 않았다.
+- BFF는 ElastiCache IAM SigV4 token을 connection마다 새로 생성하는 Lettuce credential provider를
+  사용한다. TLS, IAM 사용자·replication group·region을 fail-closed 검증하고 장기 Redis password와
+  URL credential은 거부한다. BFF 97 tests가 통과했고 새 credential/만료·재요청 동작을 단위 검증했다.
+- 기본 false인 `enable_deployment_smoke`와 별도 acknowledgement를 추가했다. smoke 상태는
+  `release_gates_acknowledged=false`, autoscaling off, 모든 5개 runtime selected, BFF desired 1,
+  operator CIDR 없음, CloudFront origin-facing prefix list 전용 ALB ingress만 허용한다. targeted plan도
+  deployment/release gate를 우회하지 못하도록 ALB와 ECS service dependency graph에 연결했다.
+- 프론트 edge는 public access가 차단된 S3, BucketOwnerEnforced, SSE-S3, CloudFront OAC, SPA rewrite,
+  `/assets/*` cache와 cache-disabled `/api/*` ALB origin으로 구성했다. frontend source는 이미 상대
+  `/api`와 same-origin을 사용해 변경하지 않았다. frontend 98 tests와 production build가 통과했다.
+- 첫 apply에서 두 실제 통합 문제가 발견됐다. BFF task가 ECR layer용 S3 egress 없이 시작하지
+  못해 AWS S3 managed prefix list의 TCP 443만 추가했고, Spring Session의 `CONFIG` 호출은
+  `SPRING_SESSION_REDIS_CONFIGURE_ACTION=none`으로 비활성화했다. Spring Redis readiness의 읽기 전용
+  `INFO`만 Valkey ACL에 명시적으로 재허용했다. 수동 긴급 반영한 S3 rule은 즉시 Terraform state로
+  import했고 Valkey ACL도 동일 source로 수렴시켰다.
+- CloudFront 최초 생성은 잘못된 managed cache policy ID로 실패했다. AWS managed policy 목록을
+  조회해 실제 `Managed-CachingDisabled` ID로 수정한 뒤 부분 생성 리소스를 재사용했다. 실패한
+  create waiter가 남긴 BFF ECS service taint는 해제해 서비스를 삭제·재생성하지 않았고, recovery
+  plan은 CloudFront/S3 정책 생성, BFF task revision 추가, 기존 BFF service in-place update만 수행했다.
+- CloudFront 기본 도메인의 기본 인증서는 minimum protocol policy를 선택할 수 없고 AWS API가
+  `TLSv1`로 고정 보고한다. D-034 smoke 예외를 2026-08-09까지 명시했으며 정식 T059에서는 custom
+  domain+ACM과 `TLSv1.2_2021`, WAF, dedicated frontend CMK가 필요하다.
+- 최종 AWS 상태는 Auth/AI/Realtime STT/Core/BFF 모두 desired/running `1/1`, rollout `COMPLETED`,
+  `assignPublicIp=DISABLED`다. Auth/AI/STT/Core의 load balancer attachment는 0, BFF만 1이며 autoscaling
+  target은 0이다. BFF cert-loader는 exit 0이고 target은 `healthy`다. 기존 CA, AWSPREVIOUS, secret
+  versions와 이전 task revisions는 삭제하지 않았다.
+- CloudFront 기본 HTTPS domain은 `Deployed`, S3 public access block 네 항목은 모두 true다. HTTPS
+  root와 static asset, CSRF/session endpoint가 200이고 세션 cookie 식별자가 재요청에서 유지됐다.
+  존재하지 않는 smoke 계정 login은 BFF→Auth mTLS 경로에서 예상 401을 반환했다. CloudFront 외부의
+  ALB 직접 요청은 연결 timeout으로 차단됐다.
+- 최종 검증은 Terraform fmt/validate, clean mock test 29/29, Trivy frontend/security/alb HIGH/CRITICAL
+  0건, BFF image HIGH/CRITICAL 0건, `git diff --check`와 실제 AWS refresh plan `No changes`다. 기존
+  Cloud Map `failure_threshold` deprecation warning만 남는다.
+- 이 결과는 빠른 NonProd 배포 smoke만 완료한다. 정식 T048/T049/T059, Q-013, T047-E,
+  autoscaling/SLO·부하·장애/rollback drill, custom domain/ACM/WAF와 Production 전환은 계속 open이다.

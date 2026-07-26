@@ -224,6 +224,20 @@ flowchart LR
 | Auth Service | 사용자 | Codex | User/AuthIdentity/AuthSession 추출, JWT/JWKS/refresh/revoke outbox | future `auth/**` | T030, BFF compatibility |
 | Platform | 사용자 | Codex | ECS Fargate, ALB, Cloud Map, direct mTLS, ECR, IAM, Security Group, CloudWatch, Valkey/RDS/KMS | `infra/aws/**`, Dockerfiles | Q-013, Q-024, service images |
 
+### 2026-07-26 NonProd deployment smoke 병렬 실행
+
+- Team Members: 사용자 1명(범위 승인), integration owner 1명
+- Agents: 동시 실행 3개(root integration owner + BFF agent + Frontend/Edge agent)
+- 목표: 운영 전환을 주장하지 않고 CloudFront 기본 HTTPS 주소에서 Browser→BFF→private service 경로가 동작하는지만 가장 빠르게 확인한다.
+
+| Workstream | Owner | Agent | Scope | Expected Files | Dependencies |
+| --- | --- | --- | --- | --- | --- |
+| A BFF smoke runtime | Integration | `bff_smoke` | Valkey IAM auth token, TLS, reconnect 시 신규 credential과 BFF regression | `bff/**` | 기존 Valkey IAM user/output, mTLS runtime |
+| B Frontend/Edge smoke | Frontend/Platform | `frontend_edge_smoke` | production build, private S3+OAC CloudFront module, SPA fallback와 `/api/*` origin | `frontend/**`, 새 `infra/aws/modules/frontend-edge/**` | 기존 ALB output, BFF target group |
+| C Platform integration | Integration | root Codex | 별도 smoke gate, environment root wiring/tests, AWS plan/apply, asset upload, browser E2E와 evidence | `infra/aws/environments/nonprod-v2/**`, 필요 시 기존 ALB/security module, `specs/002-bff-auth-msa/{clarify,plan,tasks,implement}.md` | A/B 결과 통합 |
+
+충돌 경계는 A가 `bff/**`, B가 `frontend/**`와 신규 edge module만 소유하고, C가 기존 Terraform environment/module과 shared specs를 단독 소유하는 것으로 고정한다. 통합 순서는 A/B source 검증 → C Terraform 통합 검증 → no-delete plan 검토 → apply → 정적 asset upload/invalidation → AWS와 Browser smoke다. release gate, autoscaling, custom domain과 운영 SLO 항목은 변경하지 않는다.
+
 ## Conflict Boundaries
 
 - Single-owner files:

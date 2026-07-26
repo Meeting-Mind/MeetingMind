@@ -46,11 +46,39 @@ resource "terraform_data" "release_gate" {
   lifecycle {
     precondition {
       condition = var.release_gates_acknowledged || (
-        !contains(var.runtime_enabled_services, "bff") &&
-        !var.enable_http_smoke_listener &&
+        !var.enable_autoscaling && (
+          (
+            !contains(var.runtime_enabled_services, "bff") &&
+            !var.enable_http_smoke_listener
+            ) || (
+            var.enable_deployment_smoke &&
+            var.deployment_smoke_gates_acknowledged
+          )
+        )
+      )
+      error_message = "BFF/public listeners require either the full release acknowledgement or the bounded deployment smoke gate; autoscaling always requires the full release acknowledgement."
+    }
+  }
+}
+
+resource "terraform_data" "deployment_smoke_gate" {
+  lifecycle {
+    precondition {
+      condition     = var.enable_deployment_smoke == var.deployment_smoke_gates_acknowledged
+      error_message = "enable_deployment_smoke and deployment_smoke_gates_acknowledged must be enabled or disabled together."
+    }
+
+    precondition {
+      condition = !var.enable_deployment_smoke || (
+        !var.release_gates_acknowledged &&
+        var.enable_runtime_services &&
+        var.runtime_enabled_services == local.services &&
+        lookup(var.service_desired_counts, "bff", 0) == 1 &&
+        var.enable_http_smoke_listener &&
+        length(var.allowed_ingress_cidrs) == 0 &&
         !var.enable_autoscaling
       )
-      error_message = "BFF, public listeners, and autoscaling remain blocked until release_gates_acknowledged=true after Q-013, BFF Valkey IAM, T047-E, T048, and T049 are complete."
+      error_message = "Deployment smoke requires release=false, all five runtime services with BFF desired=1, the HTTP origin listener, CloudFront-only ingress, and autoscaling=false."
     }
   }
 }
@@ -127,8 +155,11 @@ resource "terraform_data" "smoke_gate" {
 
   lifecycle {
     precondition {
-      condition     = length(var.allowed_ingress_cidrs) > 0 && alltrue([for cidr in var.allowed_ingress_cidrs : cidr != "0.0.0.0/0"])
-      error_message = "The HTTP smoke listener requires at least one restricted operator CIDR and forbids 0.0.0.0/0."
+      condition = (
+        var.enable_deployment_smoke ||
+        (length(var.allowed_ingress_cidrs) > 0 && alltrue([for cidr in var.allowed_ingress_cidrs : cidr != "0.0.0.0/0"]))
+      )
+      error_message = "The HTTP smoke listener requires the CloudFront deployment smoke mode or at least one restricted operator CIDR; 0.0.0.0/0 is forbidden."
     }
   }
 }
@@ -163,11 +194,13 @@ module "service_discovery" {
 module "security" {
   source = "../../modules/security"
 
-  name_prefix                = local.name_prefix
-  vpc_id                     = module.network.vpc_id
-  allowed_ingress_cidrs      = var.allowed_ingress_cidrs
-  enable_http_smoke_listener = var.enable_http_smoke_listener
-  enable_https_listener      = false
+  name_prefix                      = local.name_prefix
+  aws_region                       = var.aws_region
+  vpc_id                           = module.network.vpc_id
+  allowed_ingress_cidrs            = var.allowed_ingress_cidrs
+  enable_http_smoke_listener       = var.enable_http_smoke_listener
+  enable_cloudfront_origin_ingress = var.enable_deployment_smoke
+  enable_https_listener            = false
 }
 
 module "vpc_endpoints" {
@@ -257,10 +290,29 @@ module "alb" {
   public_subnet_ids          = module.network.public_subnet_ids
   security_group_id          = module.security.alb_security_group_id
   enable_http_smoke_listener = var.enable_http_smoke_listener
+  enable_stt_smoke_route     = var.release_gates_acknowledged
 
   depends_on = [
+    terraform_data.deployment_smoke_gate,
     terraform_data.release_gate,
     terraform_data.smoke_gate,
+  ]
+}
+
+module "frontend_edge" {
+  count  = var.enable_deployment_smoke ? 1 : 0
+  source = "../../modules/frontend-edge"
+
+  name_prefix   = local.name_prefix
+  alb_dns_name  = module.alb.dns_name
+  alb_origin_id = "${local.name_prefix}-bff-alb"
+  tags          = local.common_tags
+
+  depends_on = [
+    terraform_data.deployment_smoke_gate,
+    terraform_data.release_gate,
+    terraform_data.smoke_gate,
+    module.alb,
   ]
 }
 
@@ -341,6 +393,7 @@ module "service" {
 
   depends_on = [
     module.vpc_endpoints,
+    terraform_data.deployment_smoke_gate,
     terraform_data.release_gate,
     terraform_data.runtime_gate,
     terraform_data.runtime_selection_gate,
