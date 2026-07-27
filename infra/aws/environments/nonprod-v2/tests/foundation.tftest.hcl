@@ -160,9 +160,9 @@ run "foundation_plan" {
   assert {
     condition = alltrue([
       for service, container_names in output.task_definition_container_names :
-      container_names == [service]
+      join(",", container_names) == (service == "ai" ? "ai,ai-worker" : service)
     ])
-    error_message = "Foundation task definitions must not wire the cert-loader before an mTLS mode is enabled."
+    error_message = "Foundation task definitions must omit mTLS sidecars and run the AI embedding worker beside the API."
   }
 }
 
@@ -271,8 +271,14 @@ run "deployment_smoke_plan" {
     runtime_gates_acknowledged          = true
     internal_mtls_runtime_verified      = true
     enable_http_smoke_listener          = true
-    cert_loader_image_digest            = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-    ai_envoy_image_digest               = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    auth_google_client_ids              = ["1234567890-test.apps.googleusercontent.com"]
+    stt_public_ws_base_url              = "https://app.example.com"
+    frontend_custom_domain = {
+      name                = "app.example.com"
+      acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/11111111-1111-1111-1111-111111111111"
+    }
+    cert_loader_image_digest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ai_envoy_image_digest    = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     service_image_digests = {
       bff          = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
       auth         = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -289,17 +295,65 @@ run "deployment_smoke_plan" {
 
   assert {
     condition     = output.service_target_group_attachment_counts["bff"] == 1
-    error_message = "Deployment smoke must attach only the BFF service to the ALB target group."
+    error_message = "Deployment smoke must keep the BFF service attached to its ALB target group."
   }
 
   assert {
-    condition     = output.service_target_group_attachment_counts["realtime-stt"] == 0
-    error_message = "Deployment smoke must not expose the Realtime STT websocket target."
+    condition     = output.service_target_group_attachment_counts["realtime-stt"] == 1
+    error_message = "Deployment smoke must attach Realtime STT to its token-protected WebSocket target group."
   }
 
   assert {
-    condition     = !output.stt_public_smoke_route_enabled
-    error_message = "Deployment smoke must keep the public STT listener rule disabled."
+    condition     = output.stt_public_smoke_route_enabled
+    error_message = "Deployment smoke must enable the token-protected STT WebSocket listener rule."
+  }
+
+  assert {
+    condition = (
+      output.stt_public_ws_base_url == "https://app.example.com" &&
+      local.service_definitions.realtime-stt.environment.PUBLIC_WS_BASE_URL == "https://app.example.com" &&
+      local.service_definitions.realtime-stt.environment.MANAGEMENT_SERVER_ADDRESS == "0.0.0.0"
+    )
+    error_message = "Realtime STT must receive the public WebSocket origin and expose readiness only to the ALB security group."
+  }
+
+  assert {
+    condition = (
+      output.stt_target_configuration.protocol == "HTTPS" &&
+      output.stt_target_configuration.port == 8083 &&
+      output.stt_target_configuration.health_check_protocol == "HTTP" &&
+      output.stt_target_configuration.health_check_port == "9083"
+    )
+    error_message = "The STT target must use HTTPS for WebSocket traffic and the dedicated HTTP readiness port."
+  }
+
+  assert {
+    condition = (
+      module.frontend_edge[0].stt_websocket_behavior.path_pattern == "/ws/egress-audio/*" &&
+      module.frontend_edge[0].stt_websocket_behavior.target_origin_id == "meetingmind-nonprod-v2-bff-alb" &&
+      module.frontend_edge[0].stt_websocket_behavior.viewer_protocol_policy == "https-only" &&
+      !module.frontend_edge[0].stt_websocket_behavior.compress
+    )
+    error_message = "CloudFront must forward uncached HTTPS WebSocket handshakes to the ALB origin."
+  }
+
+  assert {
+    condition     = module.frontend_edge[0].custom_domain_configuration.name == "app.example.com"
+    error_message = "Deployment smoke must configure the custom CloudFront alias."
+  }
+
+  assert {
+    condition     = local.service_definitions.auth.environment.AUTH_GOOGLE_CLIENT_IDS == "1234567890-test.apps.googleusercontent.com"
+    error_message = "The Auth task must receive the Google OAuth audience allowlist."
+  }
+
+  assert {
+    condition = (
+      module.frontend_edge[0].custom_domain_configuration.acm_certificate_arn == "arn:aws:acm:us-east-1:123456789012:certificate/11111111-1111-1111-1111-111111111111" &&
+      module.frontend_edge[0].custom_domain_configuration.minimum_protocol_version == "TLSv1.2_2021" &&
+      module.frontend_edge[0].custom_domain_configuration.ssl_support_method == "sni-only"
+    )
+    error_message = "Deployment smoke must use the configured ACM certificate with the approved CloudFront TLS policy."
   }
 }
 
@@ -315,8 +369,14 @@ run "targeted_deployment_smoke_cloudfront_plan" {
     runtime_gates_acknowledged          = true
     internal_mtls_runtime_verified      = true
     enable_http_smoke_listener          = true
-    cert_loader_image_digest            = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-    ai_envoy_image_digest               = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    auth_google_client_ids              = ["1234567890-test.apps.googleusercontent.com"]
+    stt_public_ws_base_url              = "https://app.example.com"
+    frontend_custom_domain = {
+      name                = "app.example.com"
+      acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/11111111-1111-1111-1111-111111111111"
+    }
+    cert_loader_image_digest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ai_envoy_image_digest    = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     service_image_digests = {
       bff          = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
       auth         = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -430,6 +490,7 @@ run "bff_runtime_requires_release_acknowledgement" {
     runtime_enabled_services       = ["bff"]
     runtime_gates_acknowledged     = true
     internal_mtls_runtime_verified = true
+    auth_google_client_ids         = ["1234567890-test.apps.googleusercontent.com"]
     cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     service_image_digests = {
       bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -448,6 +509,7 @@ run "targeted_bff_runtime_requires_release_acknowledgement" {
     runtime_enabled_services       = ["bff"]
     runtime_gates_acknowledged     = true
     internal_mtls_runtime_verified = true
+    auth_google_client_ids         = ["1234567890-test.apps.googleusercontent.com"]
     cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     service_image_digests = {
       bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -494,6 +556,7 @@ run "release_acknowledgement_allows_bff_runtime_plan" {
     runtime_gates_acknowledged     = true
     release_gates_acknowledged     = true
     internal_mtls_runtime_verified = true
+    auth_google_client_ids         = ["1234567890-test.apps.googleusercontent.com"]
     cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     service_image_digests = {
       bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -504,6 +567,25 @@ run "release_acknowledgement_allows_bff_runtime_plan" {
     condition     = output.runtime_enabled_services == toset(["bff"])
     error_message = "An explicit full release acknowledgement must unlock the BFF runtime plan."
   }
+}
+
+run "bff_runtime_requires_google_client_ids" {
+  command = plan
+
+  variables {
+    expected_aws_account_id        = "123456789012"
+    enable_runtime_services        = true
+    runtime_enabled_services       = ["bff"]
+    runtime_gates_acknowledged     = true
+    release_gates_acknowledged     = true
+    internal_mtls_runtime_verified = true
+    cert_loader_image_digest       = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    service_image_digests = {
+      bff = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  expect_failures = [terraform_data.runtime_gate]
 }
 
 run "runtime_requires_verified_mtls_evidence" {
@@ -687,10 +769,10 @@ run "private_validation_plan" {
       for service, container_names in output.task_definition_container_names :
       join(",", container_names) == (
         service == "ai"
-        ? "cert-loader,envoy,ai"
+        ? "cert-loader,envoy,ai,ai-worker"
         : "cert-loader,${service}"
       )
     ])
-    error_message = "mTLS-enabled task definitions must wire cert-loader first and the AI Envoy sidecar before the application."
+    error_message = "mTLS-enabled task definitions must wire cert-loader first, the AI Envoy sidecar, and the AI embedding worker."
   }
 }

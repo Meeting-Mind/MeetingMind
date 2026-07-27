@@ -23,9 +23,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -1649,6 +1652,31 @@ public class WorkspaceDomainService {
     }
 
     @Transactional
+    public MeetingTranscript resumeMeetingTranscript(String actorUserId, String meetingId, String provider) {
+        requireTranscriptManagement(actorUserId, meetingId);
+        store.lockMeeting(meetingId);
+        Meeting meeting = requireMeeting(meetingId);
+        MeetingTranscript existing = store.findMeetingTranscript(meetingId).orElse(null);
+        Instant now = Instant.now(clock);
+        MeetingTranscript transcript = store.saveMeetingTranscript(new MeetingTranscript(
+                meetingId,
+                TranscriptStatus.PROCESSING,
+                provider,
+                "ko-KR",
+                existing == null ? now : existing.startedAt(),
+                null,
+                null,
+                retentionUntil(meeting, now),
+                existing != null && existing.legalHold(),
+                existing == null ? null : existing.purgedAt(),
+                existing == null ? now : existing.createdAt(),
+                now
+        ));
+        addAudit("MEETING_TRANSCRIPTION_RESUMED", actorUserId, null, meetingId, null, provider);
+        return transcript;
+    }
+
+    @Transactional
     public TranscriptSegment appendTranscriptSegment(
             String meetingId,
             String speakerLabel,
@@ -1723,6 +1751,182 @@ public class WorkspaceDomainService {
                 transcript.createdAt(),
                 now
         ));
+    }
+
+    @Transactional
+    public MeetingTranscript projectRemoteMeetingTranscript(
+            String actorUserId,
+            String meetingId,
+            TranscriptStatus remoteStatus,
+            List<RemoteTranscriptSegment> remoteSegments
+    ) {
+        requireTranscriptManagement(actorUserId, meetingId);
+        store.lockMeeting(meetingId);
+        requireMeeting(meetingId);
+        MeetingTranscript current = store.findMeetingTranscript(meetingId)
+                .orElseThrow(() -> new AuthorizationException(
+                        HttpStatus.NOT_FOUND,
+                        "TRANSCRIPT_NOT_FOUND",
+                        "전사를 찾을 수 없습니다."
+                ));
+        if (remoteStatus == null) {
+            throw invalidRequest("STT 전사 상태는 필수입니다.");
+        }
+
+        RemoteTranscriptProjection projection = remoteTranscriptProjection(meetingId, remoteSegments);
+        boolean contentChanged = !sameTranscriptProjection(
+                store.findMeetingSpeakers(meetingId),
+                store.findTranscriptSegments(meetingId),
+                projection
+        );
+        if (contentChanged) {
+            store.replaceTranscriptProjection(meetingId, projection.speakers(), projection.segments());
+            if (current.status() == TranscriptStatus.COMPLETED && remoteStatus == TranscriptStatus.COMPLETED) {
+                store.enqueueMeetingEmbeddingJob(meetingId, "FULL_REINDEX");
+            }
+        }
+
+        if (!contentChanged && current.status() == remoteStatus) {
+            return current;
+        }
+        Instant now = Instant.now(clock);
+        MeetingTranscript projected = new MeetingTranscript(
+                meetingId,
+                remoteStatus,
+                current.provider(),
+                current.language(),
+                current.startedAt() == null ? now : current.startedAt(),
+                remoteStatus == TranscriptStatus.COMPLETED || remoteStatus == TranscriptStatus.FAILED
+                        ? current.completedAt() == null ? now : current.completedAt()
+                        : null,
+                remoteStatus == TranscriptStatus.FAILED ? "STT provider 오류" : null,
+                current.retentionUntil(),
+                current.legalHold(),
+                current.purgedAt(),
+                current.createdAt(),
+                now
+        );
+        return store.saveMeetingTranscript(projected);
+    }
+
+    private RemoteTranscriptProjection remoteTranscriptProjection(
+            String meetingId,
+            List<RemoteTranscriptSegment> remoteSegments
+    ) {
+        List<RemoteTranscriptSegment> snapshot = remoteSegments == null ? List.of() : List.copyOf(remoteSegments);
+        Map<String, MeetingSpeaker> speakersById = new LinkedHashMap<>();
+        Map<String, String> speakerIdByLabel = new LinkedHashMap<>();
+        Map<String, Boolean> segmentIds = new LinkedHashMap<>();
+        List<TranscriptSegment> segments = new java.util.ArrayList<>(snapshot.size());
+        Instant now = Instant.now(clock);
+        for (int sequence = 0; sequence < snapshot.size(); sequence++) {
+            RemoteTranscriptSegment remote = snapshot.get(sequence);
+            if (remote == null) {
+                throw invalidRequest("STT segment는 비어 있을 수 없습니다.");
+            }
+            String segmentId = requiredRemoteValue(remote.id(), 64, "STT segment ID");
+            String speakerId = requiredRemoteValue(remote.speakerId(), 64, "STT speaker ID");
+            String speakerLabel = requiredRemoteValue(remote.speakerLabel(), 80, "STT speaker label");
+            String speakerName = optionalRemoteValue(remote.speakerName(), 100, "STT speaker name");
+            String text = requiredRemoteValue(remote.text(), Integer.MAX_VALUE, "STT segment text");
+            if (segmentIds.putIfAbsent(segmentId, Boolean.TRUE) != null) {
+                throw invalidRequest("STT segment ID가 중복되었습니다.");
+            }
+            if (remote.startMs() < 0
+                    || remote.endMs() < remote.startMs()
+                    || remote.startMs() > Integer.MAX_VALUE
+                    || remote.endMs() > Integer.MAX_VALUE) {
+                throw invalidRequest("STT 전사 시간 범위가 올바르지 않습니다.");
+            }
+            String existingSpeakerId = speakerIdByLabel.putIfAbsent(speakerLabel, speakerId);
+            if (existingSpeakerId != null && !existingSpeakerId.equals(speakerId)) {
+                throw invalidRequest("같은 STT speaker label에 여러 speaker ID가 지정되었습니다.");
+            }
+            MeetingSpeaker speaker = new MeetingSpeaker(speakerId, meetingId, speakerLabel, speakerName, now);
+            MeetingSpeaker existingSpeaker = speakersById.putIfAbsent(speakerId, speaker);
+            if (existingSpeaker != null
+                    && (!existingSpeaker.label().equals(speakerLabel)
+                    || !Objects.equals(existingSpeaker.displayName(), speakerName))) {
+                throw invalidRequest("같은 STT speaker ID의 정보가 일치하지 않습니다.");
+            }
+            segments.add(new TranscriptSegment(
+                    segmentId,
+                    meetingId,
+                    speakerId,
+                    speakerLabel,
+                    speakerName,
+                    Math.toIntExact(remote.startMs()),
+                    Math.toIntExact(remote.endMs()),
+                    text,
+                    "stt-remote",
+                    sequence
+            ));
+        }
+        return new RemoteTranscriptProjection(List.copyOf(speakersById.values()), List.copyOf(segments));
+    }
+
+    private String requiredRemoteValue(String value, int maxLength, String field) {
+        if (value == null || value.isBlank()) {
+            throw invalidRequest(field + "는 비어 있을 수 없습니다.");
+        }
+        String normalized = value.trim();
+        if (normalized.length() > maxLength) {
+            throw invalidRequest(field + " 길이가 허용 범위를 초과했습니다.");
+        }
+        return normalized;
+    }
+
+    private String optionalRemoteValue(String value, int maxLength, String field) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        if (normalized.length() > maxLength) {
+            throw invalidRequest(field + " 길이가 허용 범위를 초과했습니다.");
+        }
+        return normalized;
+    }
+
+    private boolean sameTranscriptProjection(
+            List<MeetingSpeaker> currentSpeakers,
+            List<TranscriptSegment> currentSegments,
+            RemoteTranscriptProjection projection
+    ) {
+        if (currentSpeakers.size() != projection.speakers().size()
+                || currentSegments.size() != projection.segments().size()) {
+            return false;
+        }
+        Map<String, MeetingSpeaker> speakersById = new LinkedHashMap<>();
+        currentSpeakers.forEach(speaker -> speakersById.put(speaker.id(), speaker));
+        for (MeetingSpeaker expected : projection.speakers()) {
+            MeetingSpeaker actual = speakersById.get(expected.id());
+            if (actual == null
+                    || !actual.meetingId().equals(expected.meetingId())
+                    || !actual.label().equals(expected.label())
+                    || !Objects.equals(actual.displayName(), expected.displayName())) {
+                return false;
+            }
+        }
+        for (int index = 0; index < currentSegments.size(); index++) {
+            TranscriptSegment actual = currentSegments.get(index);
+            TranscriptSegment expected = projection.segments().get(index);
+            if (!actual.id().equals(expected.id())
+                    || !actual.meetingId().equals(expected.meetingId())
+                    || !actual.speakerId().equals(expected.speakerId())
+                    || !actual.speakerLabel().equals(expected.speakerLabel())
+                    || !Objects.equals(actual.speakerName(), expected.speakerName())
+                    || actual.startMs() != expected.startMs()
+                    || actual.endMs() != expected.endMs()
+                    || !actual.text().equals(expected.text())
+                    || !actual.source().equals(expected.source())
+                    || actual.sequence() != expected.sequence()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public MeetingTranscriptView meetingTranscript(String actorUserId, String meetingId) {
@@ -2345,6 +2549,23 @@ public class WorkspaceDomainService {
         public MeetingTranscriptView {
             segments = segments == null ? List.of() : List.copyOf(segments);
         }
+    }
+
+    public record RemoteTranscriptSegment(
+            String id,
+            String speakerId,
+            String speakerLabel,
+            String speakerName,
+            long startMs,
+            long endMs,
+            String text
+    ) {
+    }
+
+    private record RemoteTranscriptProjection(
+            List<MeetingSpeaker> speakers,
+            List<TranscriptSegment> segments
+    ) {
     }
 
     public record TaskCandidateContext(

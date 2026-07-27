@@ -336,6 +336,10 @@ public class JpaWorkspacePersistence {
                 .getResultList().stream().map(JpaWorkspacePersistence::toTranscriptSegment).toList();
     }
 
+    public void clear() {
+        entityManager.clear();
+    }
+
     public MeetingReport saveMeetingReport(MeetingReport report) {
         boolean created = entityManager.find(MeetingReport.class, report.id()) == null;
         MeetingReport entity = entityManager.merge(report);

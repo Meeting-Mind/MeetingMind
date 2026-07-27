@@ -86,7 +86,7 @@ public class ProxyRouteRegistry {
             route(HttpMethod.GET, KNOWLEDGE_ITEM, DownstreamService.CORE),
             route(HttpMethod.PATCH, KNOWLEDGE_ITEM, DownstreamService.CORE),
             route(HttpMethod.DELETE, KNOWLEDGE_ITEM, DownstreamService.CORE),
-            route(HttpMethod.POST, SPACE + "/ai/chat", DownstreamService.AI),
+            route(HttpMethod.POST, SPACE + "/ai/chat", DownstreamService.AI, DownstreamService.CORE.audience()),
             route(HttpMethod.GET, SPACE + "/ai/history", DownstreamService.CORE),
             route(HttpMethod.GET, "/api/v1/dashboard", DownstreamService.CORE),
             route(HttpMethod.GET, "/api/v1/calendar/events", DownstreamService.CORE),
@@ -115,14 +115,30 @@ public class ProxyRouteRegistry {
             route(HttpMethod.POST, REPORT + "/confirm", DownstreamService.CORE),
             route(HttpMethod.POST, REPORT + "/restore", DownstreamService.CORE),
             route(HttpMethod.GET, REPORT + "/download", DownstreamService.CORE),
-            route(HttpMethod.POST, MEETING + "/ai/chat", DownstreamService.AI),
-            route(HttpMethod.POST, MEETING + "/reports/generate", DownstreamService.AI),
-            route(HttpMethod.POST, REPORT + "/ai-edits", DownstreamService.AI),
-            route(HttpMethod.POST, MEETING + "/task-candidates/generate", DownstreamService.AI),
-            route(HttpMethod.POST, MEETING + "/livekit-token", DownstreamService.LIVEKIT),
-            route(HttpMethod.POST, MEETING + "/transcription/start", DownstreamService.LIVEKIT),
-            route(HttpMethod.POST, MEETING + "/transcription/stop", DownstreamService.LIVEKIT),
-            route(HttpMethod.POST, MEETING + "/transcription/" + UUID + "/stop", DownstreamService.LIVEKIT));
+            route(HttpMethod.POST, MEETING + "/ai/chat", DownstreamService.AI, DownstreamService.CORE.audience()),
+            route(HttpMethod.POST, MEETING + "/reports/generate", DownstreamService.AI, DownstreamService.CORE.audience()),
+            route(HttpMethod.POST, REPORT + "/ai-edits", DownstreamService.AI, DownstreamService.CORE.audience()),
+            route(HttpMethod.POST, MEETING + "/task-candidates/generate", DownstreamService.AI, DownstreamService.CORE.audience()),
+            route(
+                    HttpMethod.POST,
+                    MEETING + "/livekit-token",
+                    DownstreamService.LIVEKIT,
+                    DownstreamService.CORE.audience()),
+            route(
+                    HttpMethod.POST,
+                    MEETING + "/transcription/start",
+                    DownstreamService.LIVEKIT,
+                    DownstreamService.CORE.audience()),
+            route(
+                    HttpMethod.POST,
+                    MEETING + "/transcription/stop",
+                    DownstreamService.LIVEKIT,
+                    DownstreamService.CORE.audience()),
+            route(
+                    HttpMethod.POST,
+                    MEETING + "/transcription/" + UUID + "/stop",
+                    DownstreamService.LIVEKIT,
+                    DownstreamService.CORE.audience()));
 
     public Optional<ProxyRoute> resolve(HttpMethod method, String path) {
         if (method == null || !validPath(path)) {
@@ -142,6 +158,14 @@ public class ProxyRouteRegistry {
     }
 
     private static ProxyRoute route(HttpMethod method, String regex, DownstreamService service) {
-        return new ProxyRoute(method, Pattern.compile("^" + regex + "$"), service);
+        return route(method, regex, service, service.audience());
+    }
+
+    private static ProxyRoute route(
+            HttpMethod method,
+            String regex,
+            DownstreamService service,
+            String audience) {
+        return new ProxyRoute(method, Pattern.compile("^" + regex + "$"), service, audience);
     }
 }

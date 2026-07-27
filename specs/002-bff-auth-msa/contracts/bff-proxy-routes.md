@@ -25,6 +25,18 @@
 
 Query parameter는 허용된 route의 현재 Backend 계약에만 전달하며 목적지 선택에 사용하지 않는다.
 
+Phase 1의 LiveKit 논리 route는 LiveKit 전용 timeout, bulkhead, circuit과 오류 코드를 유지하지만 실제
+HTTP 목적지와 ACL 소유자는 Core다. 따라서 이 route들은 Core가 검증하는 `meetingmind-core` access
+JWT를 전달한다. `meetingmind-livekit` access JWT는 별도 LiveKit Resource Service가 해당 route와
+audience 검증을 소유하도록 전환된 뒤에만 사용한다. 논리 장애 격리 정책을 JWT audience로 해석하지
+않는다.
+
+같은 원칙을 Meeting/Project AI 논리 route에도 적용한다. 현재 Browser-facing AI endpoint와 권한
+선필터는 Core가 소유하고 Core가 내부 mTLS로 AI Service를 호출하므로 BFF→Core hop은
+`meetingmind-core` access JWT를 사용한다. `meetingmind-ai` access JWT는 AI Service가 public resource
+endpoint와 사용자 권한 검증을 직접 소유하게 된 이후에만 사용한다. AI route의 timeout, bulkhead,
+circuit과 `AI_PROVIDER_UNAVAILABLE` 정규화는 계속 BFF의 AI 논리 정책을 사용한다.
+
 ## Header and Response Rules
 
 - Request allowlist: `Content-Type`, `Accept`, BFF가 생성한 `Authorization`.

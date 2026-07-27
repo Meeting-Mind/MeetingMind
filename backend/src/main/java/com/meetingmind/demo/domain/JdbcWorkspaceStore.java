@@ -735,6 +735,61 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
+    void replaceTranscriptProjection(
+            String meetingId,
+            List<MeetingSpeaker> speakers,
+            List<TranscriptSegment> segments
+    ) {
+        jdbc.update(
+                """
+                delete from chunk_source_segments
+                where segment_id in (select id from transcript_segments where meeting_id = ?)
+                """,
+                meetingId
+        );
+        jdbc.update("delete from transcript_segments where meeting_id = ?", meetingId);
+        jdbc.update("delete from meeting_speakers where meeting_id = ?", meetingId);
+        for (MeetingSpeaker speaker : speakers) {
+            jdbc.update(
+                    """
+                    insert into meeting_speakers (id, meeting_id, label, display_name, created_at)
+                    values (?, ?, ?, ?, ?)
+                    """,
+                    speaker.id(), speaker.meetingId(), speaker.label(), speaker.displayName(),
+                    timestamp(speaker.createdAt())
+            );
+        }
+        for (TranscriptSegment segment : segments) {
+            jdbc.update(
+                    """
+                    insert into transcript_segments (
+                        id, meeting_id, speaker_id, speaker_label, speaker_name,
+                        sequence, start_ms, end_ms, text, source
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    segment.id(), segment.meetingId(), segment.speakerId(), segment.speakerLabel(),
+                    segment.speakerName(), segment.sequence(), segment.startMs(), segment.endMs(),
+                    segment.text(), segment.source()
+            );
+        }
+    }
+
+    @Override
+    void enqueueMeetingEmbeddingJob(String meetingId, String reason) {
+        jdbc.queryForObject(
+                """
+                select enqueue_embedding_job(
+                    (select space_id from meetings where id = ?), null, ?, ?
+                )
+                """,
+                String.class,
+                meetingId,
+                meetingId,
+                reason
+        );
+    }
+
+    @Override
     MeetingReport saveMeetingReport(MeetingReport report) {
         jdbc.update(
                 """

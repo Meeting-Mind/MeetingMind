@@ -111,6 +111,72 @@ class BffProxyControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void usesCoreAudienceWithLiveKitResiliencePolicyForCoreOwnedLiveKitRoute() throws Exception {
+        String meetingId = "meeting-" + java.util.UUID.randomUUID();
+        doAnswer(invocation -> {
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
+                    return call.execute("Bearer core-access");
+                })
+                .when(tokenManager)
+                .execute(any(), anyString(), any(AuthorizedDownstreamCall.class));
+        when(downstreamClient.execute(eq(DownstreamService.LIVEKIT), any(), eq("Bearer core-access")))
+                .thenReturn(new ProxyResponse(
+                        HttpStatus.OK,
+                        MediaType.APPLICATION_JSON,
+                        "no-store",
+                        null,
+                        "{\"participantToken\":\"livekit-token\"}".getBytes(StandardCharsets.UTF_8)));
+
+        mvc.perform(post("/api/v1/meetings/" + meetingId + "/livekit-token"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"participantToken\":\"livekit-token\"}"));
+
+        verify(tokenManager).execute(
+                any(),
+                eq("meetingmind-core"),
+                any(AuthorizedDownstreamCall.class));
+        verify(downstreamClient).execute(
+                eq(DownstreamService.LIVEKIT),
+                any(),
+                eq("Bearer core-access"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void usesCoreAudienceWithAiResiliencePolicyForCoreOwnedAiRoute() throws Exception {
+        String meetingId = "meeting-" + java.util.UUID.randomUUID();
+        doAnswer(invocation -> {
+                    AuthorizedDownstreamCall<ProxyResponse> call = invocation.getArgument(2);
+                    return call.execute("Bearer core-access");
+                })
+                .when(tokenManager)
+                .execute(any(), anyString(), any(AuthorizedDownstreamCall.class));
+        when(downstreamClient.execute(eq(DownstreamService.AI), any(), eq("Bearer core-access")))
+                .thenReturn(new ProxyResponse(
+                        HttpStatus.OK,
+                        MediaType.APPLICATION_JSON,
+                        "no-store",
+                        null,
+                        "{\"answer\":\"ok\"}".getBytes(StandardCharsets.UTF_8)));
+
+        mvc.perform(post("/api/v1/meetings/" + meetingId + "/ai/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"status\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"answer\":\"ok\"}"));
+
+        verify(tokenManager).execute(
+                any(),
+                eq("meetingmind-core"),
+                any(AuthorizedDownstreamCall.class));
+        verify(downstreamClient).execute(
+                eq(DownstreamService.AI),
+                any(),
+                eq("Bearer core-access"));
+    }
+
+    @Test
     void rejectsUnknownUrlAndMethodBeforeTokenOrDownstreamUse() throws Exception {
         mvc.perform(post("/api/v1/auth/refresh").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isNotFound())

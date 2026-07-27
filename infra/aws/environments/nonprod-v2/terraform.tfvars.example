@@ -16,6 +16,18 @@ enable_autoscaling         = false
 enable_deployment_smoke             = false
 deployment_smoke_gates_acknowledged = false
 
+# Optional existing viewer domain. The ACM certificate must be in us-east-1;
+# DNS and certificate issuance/validation stay outside this Terraform root.
+frontend_custom_domain = null
+
+# Public OAuth client IDs are not secrets. Configure every browser client ID
+# whose Google credential audience the Auth Service may accept.
+auth_google_client_ids = []
+
+# Required when the deployment smoke includes Realtime STT. LiveKit Egress connects
+# to this same-origin, token-protected WebSocket endpoint through CloudFront.
+stt_public_ws_base_url = null
+
 # T047-B~D mTLS gates. Material evidence unlocks only the private validation
 # mode; the normal runtime gate additionally needs AWS runtime-verified evidence.
 internal_mtls_material_ready    = false

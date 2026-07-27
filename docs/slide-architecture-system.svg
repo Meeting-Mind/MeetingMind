@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" font-family="Pretendard Variable, Apple SD Gothic Neo, Noto Sans KR, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .title  { font-size: 40px; font-weight: 700; fill: #16202B; }
+      .sub    { font-size: 19px; fill: #7A8794; }
+      .grp    { font-size: 24px; font-weight: 700; fill: #232F3E; }
+      .grpsub { font-size: 15px; fill: #98A3AE; }
+      .lbl    { font-size: 17px; font-weight: 600; fill: #232F3E; text-anchor: middle; }
+      .lbl2   { font-size: 14px; fill: #7A8794; text-anchor: middle; }
+      .chip   { font-size: 16px; font-weight: 600; fill: #3A4750; text-anchor: middle; }
+      .edge   { fill: none; stroke: #8894A0; stroke-width: 2.6; marker-end: url(#arw); }
+      .edged  { fill: none; stroke: #B7C0C9; stroke-width: 2.6; stroke-dasharray: 7 6; marker-end: url(#arwl); }
+    </style>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8894A0"/>
+    </marker>
+    <marker id="arwl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#B7C0C9"/>
+    </marker>
+
+    <symbol id="g-users" viewBox="0 0 64 64">
+      <g fill="none" stroke="#232F3E" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="24" cy="20" r="9"/><path d="M8 48c0-9 7-14 16-14s16 5 16 14"/>
+        <circle cx="46" cy="23" r="7"/><path d="M40 48c1-8 6-12 12-12s12 4 12 12"/>
+      </g>
+    </symbol>
+    <symbol id="t-spa" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#2563EB"/>
+      <g fill="none" stroke="#fff" stroke-width="3.4" stroke-linejoin="round"><rect x="12" y="15" width="40" height="34" rx="4"/><path d="M12 25h40"/></g>
+      <g fill="#fff"><circle cx="19" cy="20" r="2.2"/><circle cx="26" cy="20" r="2.2"/><circle cx="33" cy="20" r="2.2"/></g></symbol>
+    <symbol id="t-cf" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2"><circle cx="32" cy="32" r="17"/><ellipse cx="32" cy="32" rx="8" ry="17"/><path d="M16 26h32M16 38h32"/></g></symbol>
+    <symbol id="t-s3" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1B9E4B"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><path d="M17 17h30l-4 32H21z"/><ellipse cx="32" cy="17" rx="15" ry="5"/></g></symbol>
+    <symbol id="t-alb" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"><path d="M32 16v10M16 34h32M16 34v6M32 34v6M48 34v6"/></g>
+      <g fill="#fff"><rect x="26" y="10" width="12" height="9" rx="2"/><rect x="10" y="40" width="12" height="9" rx="2"/><rect x="26" y="40" width="12" height="9" rx="2"/><rect x="42" y="40" width="12" height="9" rx="2"/></g></symbol>
+    <symbol id="t-bff" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.4" stroke-linejoin="round"><rect x="13" y="16" width="38" height="32" rx="4"/><path d="M13 26h38M32 26v22"/></g></symbol>
+    <symbol id="t-svc" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><path d="M14 24l18-9 18 9v16l-18 9-18-9z"/><path d="M14 24l18 9 18-9M32 33v16"/></g></symbol>
+    <symbol id="t-stt" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round"><path d="M13 32h3M23 20v24M32 14v36M41 22v20M51 29v6"/></g></symbol>
+    <symbol id="t-ai" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#01A88D"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="18" y="18" width="28" height="28" rx="6"/><circle cx="32" cy="32" r="6"/><path d="M32 8v10M32 46v10M8 32h10M46 32h10M14 14l7 7M43 43l7 7M50 14l-7 7M21 43l-7 7"/></g></symbol>
+    <symbol id="t-rds" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#C925D1"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2"><ellipse cx="32" cy="18" rx="16" ry="6"/><path d="M16 18v28c0 3.3 7.2 6 16 6s16-2.7 16-6V18"/><path d="M16 32c0 3.3 7.2 6 16 6s16-2.7 16-6"/></g></symbol>
+    <symbol id="t-cache" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#C925D1"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="18" y="18" width="28" height="28" rx="4"/><rect x="27" y="27" width="10" height="10" rx="2"/><path d="M24 18v-7M32 18v-7M40 18v-7M24 46v7M32 46v7M40 46v7M18 24h-7M18 32h-7M18 40h-7M46 24h7M46 32h7M46 40h7"/></g></symbol>
+    <symbol id="t-ecr" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="14" y="22" width="36" height="28" rx="3"/><path d="M14 32h36M32 22v28"/><path d="M32 8v10m0 0l-5-5m5 5l5-5"/></g></symbol>
+    <symbol id="t-sec" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="16" y="29" width="32" height="22" rx="4"/><path d="M23 29v-7a9 9 0 0 1 18 0v7"/><circle cx="32" cy="40" r="3.5"/></g></symbol>
+    <symbol id="t-kms" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"><circle cx="24" cy="26" r="10"/><path d="M31 33l16 16M41 43l5-5M46 48l5-5"/></g></symbol>
+    <symbol id="t-cw" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#E7157B"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 46h38M13 46V16"/><path d="M18 38l9-11 8 7 11-15"/></g></symbol>
+    <symbol id="t-ext" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#4B5B6B"/>
+      <path d="M20 44a10 10 0 0 1 0-20 13 13 0 0 1 25 3 9 9 0 0 1-2 17z" fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"/></symbol>
+  </defs>
+
+  <rect width="1920" height="1080" fill="#FFFFFF"/>
+
+  <text class="title" x="60" y="76">MeetingMind 시스템 아키텍처</text>
+  <text class="sub"   x="60" y="112">브라우저 → BFF 세션 경계 → 내부 서비스 → 데이터</text>
+
+  <!-- ===== 1. 클라이언트 · 엣지 ===== -->
+  <rect x="60" y="150" width="1300" height="130" rx="16" fill="#F7F9FB" stroke="#D3DAE2" stroke-width="1.6"/>
+  <text class="grp" x="92" y="222">클라이언트 · 엣지</text>
+  <g transform="translate(348,172)"><use href="#g-users" width="64" height="64"/><text class="lbl" x="32" y="90">사용자</text></g>
+  <g transform="translate(588,172)"><use href="#t-spa" width="64" height="64"/><text class="lbl" x="32" y="90">React SPA</text></g>
+  <g transform="translate(828,172)"><use href="#t-cf" width="64" height="64"/><text class="lbl" x="32" y="90">CloudFront</text></g>
+  <g transform="translate(1068,172)"><use href="#t-s3" width="64" height="64"/><text class="lbl" x="32" y="90">S3 정적 번들</text></g>
+  <path class="edge" d="M420 204 H 580"/>
+  <path class="edge" d="M660 204 H 820"/>
+  <path class="edge" d="M900 204 H 1060"/>
+
+  <!-- ===== 2. 퍼블릭 진입 ===== -->
+  <rect x="60" y="320" width="1300" height="130" rx="16" fill="#F5F1FF" stroke="#B9A0FF" stroke-width="1.6"/>
+  <text class="grp" x="92" y="392">퍼블릭 진입</text>
+  <g transform="translate(418,342)"><use href="#t-alb" width="64" height="64"/><text class="lbl" x="32" y="90">Application Load Balancer</text></g>
+  <rect x="640" y="363" width="300" height="46" rx="10" fill="#E7DFFC"/>
+  <text class="chip" x="790" y="392">/api/*  →  Web BFF</text>
+  <rect x="970" y="363" width="360" height="46" rx="10" fill="#E7DFFC"/>
+  <text class="chip" x="1150" y="392">/ws/egress-audio/*  →  Realtime STT</text>
+
+  <!-- ===== 3. 세션 경계 ===== -->
+  <rect x="60" y="490" width="1300" height="130" rx="16" fill="#FFF6EE" stroke="#F5B37A" stroke-width="1.6"/>
+  <text class="grp" x="92" y="562">세션 경계</text>
+  <g transform="translate(418,512)"><use href="#t-bff" width="64" height="64"/><text class="lbl" x="32" y="90">Web BFF</text></g>
+  <rect x="640" y="533" width="230" height="46" rx="10" fill="#FBE4CE"/>
+  <text class="chip" x="755" y="562">세션 쿠키</text>
+  <rect x="900" y="533" width="160" height="46" rx="10" fill="#FBE4CE"/>
+  <text class="chip" x="980" y="562">CSRF</text>
+  <rect x="1090" y="533" width="240" height="46" rx="10" fill="#FBE4CE"/>
+  <text class="chip" x="1210" y="562">Token Vault</text>
+
+  <!-- ===== 4. 내부 서비스 ===== -->
+  <rect x="60" y="660" width="1300" height="160" rx="16" fill="#FFF6EE" stroke="#F5B37A" stroke-width="1.6"/>
+  <text class="grp"    x="92" y="732">내부 서비스</text>
+  <text class="grpsub" x="92" y="758">내부 mTLS</text>
+  <g transform="translate(428,682)"><use href="#t-svc" width="64" height="64"/><text class="lbl" x="32" y="90">Core</text><text class="lbl2" x="32" y="112">:8080</text></g>
+  <g transform="translate(668,682)"><use href="#t-svc" width="64" height="64"/><text class="lbl" x="32" y="90">Auth</text><text class="lbl2" x="32" y="112">:8082</text></g>
+  <g transform="translate(908,682)"><use href="#t-stt" width="64" height="64"/><text class="lbl" x="32" y="90">Realtime STT</text><text class="lbl2" x="32" y="112">:8083</text></g>
+  <g transform="translate(1148,682)"><use href="#t-ai" width="64" height="64"/><text class="lbl" x="32" y="90">AI</text><text class="lbl2" x="32" y="112">:8000</text></g>
+
+  <!-- ===== 5. 데이터 ===== -->
+  <rect x="60" y="860" width="1300" height="130" rx="16" fill="#FCF1FE" stroke="#E39AE8" stroke-width="1.6"/>
+  <text class="grp" x="92" y="932">데이터</text>
+  <g transform="translate(428,882)"><use href="#t-rds" width="64" height="64"/><text class="lbl" x="32" y="90">PostgreSQL</text></g>
+  <g transform="translate(308,882)"><use href="#t-cache" width="64" height="64"/><text class="lbl" x="32" y="90">Valkey</text></g>
+
+  <!-- 계층 연결 -->
+  <path class="edge" d="M860 280 V 300 H 450 V 320"/>
+  <path class="edge" d="M450 450 V 490"/>
+  <path class="edge" d="M450 620 V 660"/>
+  <path class="edge" d="M460 820 V 860"/>
+  <path class="edge" d="M418 544 H 340 V 876"/>
+
+  <!-- ===== 우측: 플랫폼 ===== -->
+  <rect x="1400" y="150" width="460" height="340" rx="16" fill="#F7F9FB" stroke="#D3DAE2" stroke-width="1.6"/>
+  <text class="grp" x="1432" y="192">플랫폼</text>
+  <g transform="translate(1490,212)"><use href="#t-ecr" width="56" height="56"/><text class="lbl" x="28" y="80">ECR</text></g>
+  <g transform="translate(1710,212)"><use href="#t-sec" width="56" height="56"/><text class="lbl" x="28" y="80">Secrets Manager</text></g>
+  <g transform="translate(1490,342)"><use href="#t-kms" width="56" height="56"/><text class="lbl" x="28" y="80">KMS</text></g>
+  <g transform="translate(1710,342)"><use href="#t-cw" width="56" height="56"/><text class="lbl" x="28" y="80">CloudWatch</text></g>
+
+  <!-- ===== 우측: 외부 제공자 ===== -->
+  <rect x="1400" y="540" width="460" height="340" rx="16" fill="#F7F9FB" stroke="#D3DAE2" stroke-width="1.6"/>
+  <text class="grp" x="1432" y="582">외부 제공자</text>
+  <g transform="translate(1490,602)"><use href="#t-ext" width="56" height="56"/><text class="lbl" x="28" y="80">LiveKit</text></g>
+  <g transform="translate(1710,602)"><use href="#t-ext" width="56" height="56"/><text class="lbl" x="28" y="80">Soniox</text></g>
+  <g transform="translate(1600,732)"><use href="#t-ext" width="56" height="56"/><text class="lbl" x="28" y="80">OpenAI</text></g>
+
+  <path class="edged" d="M1400 640 H 940 V 676"/>
+  <path class="edged" d="M1400 714 H 1216"/>
+</svg>

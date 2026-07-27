@@ -552,6 +552,23 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
                 .toList();
     }
 
+    @Override
+    synchronized void replaceTranscriptProjection(
+            String meetingId,
+            List<MeetingSpeaker> speakers,
+            List<TranscriptSegment> segments
+    ) {
+        transcriptSegmentsById.values().removeIf(segment -> segment.meetingId().equals(meetingId));
+        meetingSpeakersById.values().removeIf(speaker -> speaker.meetingId().equals(meetingId));
+        speakers.forEach(speaker -> meetingSpeakersById.put(speaker.id(), speaker));
+        segments.forEach(segment -> transcriptSegmentsById.put(segment.id(), segment));
+    }
+
+    @Override
+    void enqueueMeetingEmbeddingJob(String meetingId, String reason) {
+        // Embedding jobs are persisted only by the PostgreSQL store.
+    }
+
     synchronized MeetingReport saveMeetingReport(MeetingReport report) {
         meetingReportsById.put(report.id(), report);
         return report;

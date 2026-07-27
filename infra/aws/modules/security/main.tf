@@ -189,6 +189,15 @@ resource "aws_vpc_security_group_ingress_rule" "stt_from_alb" {
   ip_protocol                  = "tcp"
 }
 
+resource "aws_vpc_security_group_ingress_rule" "stt_health_from_alb" {
+  security_group_id            = aws_security_group.service["realtime-stt"].id
+  description                  = "ALB to Realtime STT readiness"
+  referenced_security_group_id = aws_security_group.alb.id
+  from_port                    = 9083
+  to_port                      = 9083
+  ip_protocol                  = "tcp"
+}
+
 resource "aws_vpc_security_group_ingress_rule" "auth_from_bff" {
   security_group_id            = aws_security_group.service["auth"].id
   description                  = "BFF to Auth"
@@ -280,6 +289,15 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_stt" {
   referenced_security_group_id = aws_security_group.service["realtime-stt"].id
   from_port                    = local.service_ports.realtime-stt
   to_port                      = local.service_ports.realtime-stt
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_to_stt_health" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "ALB to Realtime STT readiness"
+  referenced_security_group_id = aws_security_group.service["realtime-stt"].id
+  from_port                    = 9083
+  to_port                      = 9083
   ip_protocol                  = "tcp"
 }
 

@@ -59,6 +59,17 @@ variable "container_command" {
   default     = []
 }
 
+variable "background_workers" {
+  description = "Additional essential containers that reuse the application image, environment and secrets with a dedicated command."
+  type        = map(list(string))
+  default     = {}
+
+  validation {
+    condition     = alltrue([for command in values(var.background_workers) : length(command) > 0])
+    error_message = "Every background worker must define a non-empty command."
+  }
+}
+
 variable "envoy_sidecar" {
   description = "mTLS termination sidecar that takes over the task port. Requires tls_bundle for the shared TLS volume."
   type = object({

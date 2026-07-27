@@ -58,17 +58,24 @@ public class SttSessionRegistry {
         this.transcriptAssembler = transcriptAssembler;
     }
 
-    public String createMeetingSession(String meetingId, String roomName, String trackId, String requestId) {
+    public String createMeetingSession(
+            String meetingId,
+            String roomName,
+            String trackId,
+            String requestId,
+            String participantDisplayName
+    ) {
         String sessionId = UUID.randomUUID().toString();
         List<RawTranscriptEvent> rawEvents = Collections.synchronizedList(new ArrayList<>());
         Instant startedAt = Instant.now();
-        String speakerLabel = "stt-" + sessionId;
+        String speakerLabel = participantDisplayName.trim();
+        int segmentOffsetMs = transcriptionCoordinator.nextSegmentOffsetMs(meetingId);
 
         Consumer<TranscriptEvent> onTranscriptEvent = event -> {
             if (event == null || event.type() == TranscriptEventType.ERROR) {
                 return;
             }
-            onTranscriptEvent(event, rawEvents, meetingId, speakerLabel, startedAt);
+            onTranscriptEvent(event, rawEvents, meetingId, speakerLabel, startedAt, segmentOffsetMs);
         };
         Consumer<Throwable> onError = ignored -> handleProviderError(sessionId);
 
@@ -88,7 +95,8 @@ public class SttSessionRegistry {
                 new AtomicReference<>(),
                 new AtomicReference<>(trackId),
                 new AtomicReference<>(false),
-                new AtomicReference<>(false)
+                new AtomicReference<>(false),
+                segmentOffsetMs
         ));
         sessionRepository.save(new TranscriptionSession(
                 sessionId, meetingId, roomName, trackId, null,
@@ -100,16 +108,18 @@ public class SttSessionRegistry {
             AssembledTranscriptSegment finalSegment,
             String meetingId,
             String speakerLabel,
-            Instant startedAt
+            Instant startedAt,
+            int segmentOffsetMs
     ) {
         String text = TranscriptTextSanitizer.sanitize(finalSegment.text());
         if (text.isBlank()) {
             return;
         }
-        int startMs = (int) Math.max(0, finalSegment.startedAtMs());
-        int endMs = (int) Math.max(startMs, finalSegment.endedAtMs());
-        if (endMs == 0) {
-            endMs = Math.max(startMs, (int) java.time.Duration.between(startedAt, Instant.now()).toMillis());
+        int startMs = segmentOffsetMs + (int) Math.max(0, finalSegment.startedAtMs());
+        int endMs = segmentOffsetMs + (int) Math.max(finalSegment.startedAtMs(), finalSegment.endedAtMs());
+        if (endMs == segmentOffsetMs) {
+            endMs = Math.max(startMs, segmentOffsetMs
+                    + (int) java.time.Duration.between(startedAt, Instant.now()).toMillis());
         }
         transcriptionCoordinator.appendSegment(meetingId, speakerLabel, speakerLabel, startMs, endMs, text);
     }
@@ -119,7 +129,8 @@ public class SttSessionRegistry {
             List<RawTranscriptEvent> rawEvents,
             String meetingId,
             String speakerLabel,
-            Instant startedAt
+            Instant startedAt,
+            int segmentOffsetMs
     ) {
         String debugText = TranscriptTextSanitizer.sanitize(event.text());
         if (!debugText.isBlank()) {
@@ -127,14 +138,15 @@ public class SttSessionRegistry {
                     event.providerEventId() + "-" + event.sequence(),
                     speakerLabel,
                     event.isFinal(),
-                    (int) Math.max(0, event.startedAtMs()),
-                    (int) Math.max(event.startedAtMs(), event.endedAtMs() == null ? event.startedAtMs() : event.endedAtMs()),
+                    segmentOffsetMs + (int) Math.max(0, event.startedAtMs()),
+                    segmentOffsetMs + (int) Math.max(
+                            event.startedAtMs(), event.endedAtMs() == null ? event.startedAtMs() : event.endedAtMs()),
                     debugText
             ));
         }
         TranscriptChange change = transcriptAssembler.accept(event);
         for (AssembledTranscriptSegment finalSegment : change.finalized()) {
-            persistFinal(finalSegment, meetingId, speakerLabel, startedAt);
+            persistFinal(finalSegment, meetingId, speakerLabel, startedAt, segmentOffsetMs);
         }
     }
 
@@ -277,7 +289,13 @@ public class SttSessionRegistry {
         if (state != null) {
             state.client().close();
             for (AssembledTranscriptSegment finalSegment : transcriptAssembler.flush(sessionId)) {
-                persistFinal(finalSegment, state.meetingId(), state.speakerLabel(), Instant.now());
+                persistFinal(
+                        finalSegment,
+                        state.meetingId(),
+                        state.speakerLabel(),
+                        Instant.now(),
+                        state.segmentOffsetMs()
+                );
             }
             if (!state.failed().get()) {
                 transcriptionCoordinator.completeTranscript(state.meetingId());
@@ -357,7 +375,8 @@ public class SttSessionRegistry {
             AtomicReference<String> egressId,
             AtomicReference<String> trackId,
             AtomicReference<Boolean> stopping,
-            AtomicReference<Boolean> failed
+            AtomicReference<Boolean> failed,
+            int segmentOffsetMs
     ) {
     }
 

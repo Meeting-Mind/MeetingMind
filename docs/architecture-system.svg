@@ -1,0 +1,285 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="1235" viewBox="0 0 1520 1235" font-family="Pretendard Variable, Apple SD Gothic Neo, Noto Sans KR, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .title  { font-size: 27px; font-weight: 700; fill: #16202B; }
+      .sub    { font-size: 13.5px; fill: #6B7885; }
+      .grp    { font-size: 15px;   font-weight: 700; fill: #232F3E; }
+      .grpsub { font-size: 11.5px; fill: #8A96A3; }
+      .lbl    { font-size: 12.5px; font-weight: 600; fill: #232F3E; text-anchor: middle; }
+      .lbl2   { font-size: 11px;   fill: #6B7885; text-anchor: middle; }
+      .note   { font-size: 12px;   fill: #4A5765; }
+      .notem  { font-size: 11.5px; fill: #7A8794; }
+      .edgelbl{ font-size: 11px;   font-weight: 600; fill: #46535F; }
+      .pill   { font-size: 11px;   font-weight: 600; fill: #3A4750; }
+      .edge   { fill: none; stroke: #6B7885; stroke-width: 2; marker-end: url(#arw); }
+      .line   { fill: none; stroke: #6B7885; stroke-width: 2; }
+      .edged  { fill: none; stroke: #A9B3BE; stroke-width: 2; stroke-dasharray: 5 4; marker-end: url(#arwl); }
+    </style>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6B7885"/>
+    </marker>
+    <marker id="arwl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#A9B3BE"/>
+    </marker>
+
+    <!-- plain glyphs -->
+    <symbol id="g-users" viewBox="0 0 64 64">
+      <g fill="none" stroke="#232F3E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="24" cy="20" r="9"/><path d="M8 48c0-9 7-14 16-14s16 5 16 14"/>
+        <circle cx="46" cy="23" r="7"/><path d="M40 48c1-8 6-12 12-12s12 4 12 12"/>
+      </g>
+    </symbol>
+
+    <!-- networking (#8C4FFF) -->
+    <symbol id="t-cf" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3"><circle cx="32" cy="32" r="17"/><ellipse cx="32" cy="32" rx="8" ry="17"/><path d="M16 26h32M16 38h32"/></g></symbol>
+    <symbol id="t-alb" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M32 16v10M16 34h32M16 34v6M32 34v6M48 34v6"/></g>
+      <g fill="#fff"><rect x="26" y="10" width="12" height="9" rx="2"/><rect x="10" y="40" width="12" height="9" rx="2"/><rect x="26" y="40" width="12" height="9" rx="2"/><rect x="42" y="40" width="12" height="9" rx="2"/></g></symbol>
+    <symbol id="t-map" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><path d="M32 52c9-12 14-19 14-25a14 14 0 1 0-28 0c0 6 5 13 14 25z"/><circle cx="32" cy="26" r="5"/></g></symbol>
+    <symbol id="t-r53" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#8C4FFF"/>
+      <path d="M32 10l18 6v14c0 12-8 20-18 24-10-4-18-12-18-24V16z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+      <text x="32" y="39" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">53</text></symbol>
+
+    <!-- compute / container (#ED7100) -->
+    <symbol id="t-svc" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><path d="M14 24l18-9 18 9v16l-18 9-18-9z"/><path d="M14 24l18 9 18-9M32 33v16"/></g></symbol>
+    <symbol id="t-bff" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><rect x="13" y="16" width="38" height="32" rx="4"/><path d="M13 26h38M32 26v22"/></g></symbol>
+    <symbol id="t-stt" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M12 32h4M22 20v24M32 14v36M42 22v20M52 30h0M52 28v8"/></g></symbol>
+    <symbol id="t-ecr" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><rect x="14" y="22" width="36" height="28" rx="3"/><path d="M14 32h36M32 22v28"/><path d="M32 8v10m0 0l-5-5m5 5l5-5"/></g></symbol>
+
+    <!-- ML (#01A88D) -->
+    <symbol id="t-ai" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#01A88D"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><rect x="18" y="18" width="28" height="28" rx="6"/><circle cx="32" cy="32" r="6"/><path d="M32 8v10M32 46v10M8 32h10M46 32h10M14 14l7 7M43 43l7 7M50 14l-7 7M21 43l-7 7"/></g></symbol>
+
+    <!-- database (#C925D1) -->
+    <symbol id="t-rds" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#C925D1"/>
+      <g fill="none" stroke="#fff" stroke-width="3"><ellipse cx="32" cy="18" rx="16" ry="6"/><path d="M16 18v28c0 3.3 7.2 6 16 6s16-2.7 16-6V18"/><path d="M16 32c0 3.3 7.2 6 16 6s16-2.7 16-6"/></g></symbol>
+    <symbol id="t-cache" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#C925D1"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><rect x="18" y="18" width="28" height="28" rx="4"/><rect x="27" y="27" width="10" height="10" rx="2"/><path d="M24 18v-7M32 18v-7M40 18v-7M24 46v7M32 46v7M40 46v7M18 24h-7M18 32h-7M18 40h-7M46 24h7M46 32h7M46 40h7"/></g></symbol>
+
+    <!-- security (#DD344C) -->
+    <symbol id="t-kms" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="26" r="10"/><path d="M31 33l16 16M41 43l5-5M46 48l5-5"/></g></symbol>
+    <symbol id="t-sec" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><rect x="16" y="29" width="32" height="22" rx="4"/><path d="M23 29v-7a9 9 0 0 1 18 0v7"/><circle cx="32" cy="40" r="3.5"/></g></symbol>
+    <symbol id="t-iam" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><path d="M32 10l18 7v14c0 12-8 20-18 23-10-3-18-11-18-23V17z"/><circle cx="32" cy="28" r="5"/><path d="M22 44c2-6 6-9 10-9s8 3 10 9"/></g></symbol>
+
+    <!-- management (#E7157B) -->
+    <symbol id="t-cw" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#E7157B"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M13 46h38M13 46V16"/><path d="M18 38l9-11 8 7 11-15"/></g></symbol>
+
+    <!-- external (#4B5B6B) -->
+    <symbol id="t-ext" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#4B5B6B"/>
+      <path d="M20 44a10 10 0 0 1 0-20 13 13 0 0 1 25 3 9 9 0 0 1-2 17z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></symbol>
+    <symbol id="t-gh" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#232F3E"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><circle cx="32" cy="32" r="18"/><path d="M22 32l7 7 13-14"/></g></symbol>
+
+    <symbol id="t-spa" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#2563EB"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><rect x="12" y="15" width="40" height="34" rx="4"/><path d="M12 25h40"/></g>
+      <g fill="#fff"><circle cx="19" cy="20" r="2"/><circle cx="26" cy="20" r="2"/><circle cx="33" cy="20" r="2"/></g></symbol>
+    <symbol id="t-s3" viewBox="0 0 64 64"><rect width="64" height="64" rx="11" fill="#1B9E4B"/>
+      <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"><path d="M17 17h30l-4 32H21z"/><ellipse cx="32" cy="17" rx="15" ry="5"/></g></symbol>
+  </defs>
+
+  <rect width="1520" height="1235" fill="#FFFFFF"/>
+
+  <text class="title" x="40" y="46">MeetingMind 시스템 아키텍처</text>
+  <text class="sub"   x="40" y="70">브라우저는 액세스 토큰을 보유하지 않는다. same-origin `/api` → BFF opaque 세션 쿠키 + CSRF → 내부 서비스(mTLS) → 데이터 계층</text>
+
+  <!-- ======================= 사용자 ======================= -->
+  <g transform="translate(158,96)">
+    <use href="#g-users" width="60" height="60"/>
+    <text class="lbl" x="30" y="76">인증된 사용자</text>
+    <text class="lbl2" x="30" y="92">브라우저 전용 · 토큰 미보유</text>
+  </g>
+
+  <!-- ======================= A. 클라이언트 & 엣지 ======================= -->
+  <rect x="40" y="205" width="1000" height="160" rx="14" fill="#F7F9FB" stroke="#8C4FFF" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text class="grp"    x="62" y="232">1. 클라이언트 &amp; 엣지</text>
+  <text class="grpsub" x="235" y="232">CloudFront 단일 오리진 경계 — 정적 번들과 /api 를 같은 도메인으로 묶는다</text>
+
+  <g transform="translate(102,248)">
+    <use href="#t-spa" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">React SPA</text>
+    <text class="lbl2" x="28" y="92">Vite + TypeScript</text>
+  </g>
+  <g transform="translate(322,248)">
+    <use href="#t-cf" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Amazon CloudFront</text>
+    <text class="lbl2" x="28" y="92">SPA rewrite function</text>
+  </g>
+  <g transform="translate(542,248)">
+    <use href="#t-s3" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">S3 정적 번들</text>
+    <text class="lbl2" x="28" y="92">OAC 전용 · 퍼블릭 차단</text>
+  </g>
+  <g transform="translate(762,248)">
+    <use href="#t-r53" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Route 53 / ACM</text>
+    <text class="lbl2" x="28" y="92">커스텀 도메인 선택</text>
+  </g>
+  <g fill="#5A6B7B">
+    <rect x="862" y="256" width="160" height="24" rx="6" fill="#EFF3F7"/>
+    <text class="pill" x="874" y="272">default → S3 (OAC)</text>
+    <rect x="862" y="288" width="160" height="24" rx="6" fill="#EFF3F7"/>
+    <text class="pill" x="874" y="304">/assets/* → S3</text>
+    <rect x="862" y="320" width="160" height="24" rx="6" fill="#EDE7FE"/>
+    <text class="pill" x="874" y="336">/api/* → ALB 오리진</text>
+  </g>
+
+  <path class="edge" d="M188 196 V 205"/>
+  <path class="edge" d="M186 276 H 314"/>
+  <path class="edge" d="M406 276 H 534"/>
+
+  <!-- ======================= B. 퍼블릭 진입 ======================= -->
+  <rect x="40" y="405" width="1000" height="140" rx="14" fill="#F7F9FB" stroke="#8C4FFF" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text class="grp"    x="62" y="432">2. 퍼블릭 진입 (VPC 경계)</text>
+  <text class="grpsub" x="270" y="432">ALB 가 VPC 로 들어오는 유일한 경로다</text>
+
+  <g transform="translate(102,446)">
+    <use href="#t-alb" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Application Load Balancer</text>
+  </g>
+  <g>
+    <rect x="240" y="452" width="230" height="30" rx="7" fill="#EDE7FE"/>
+    <text class="pill" x="256" y="472">/api/*  →  BFF 타깃 그룹</text>
+    <rect x="240" y="490" width="270" height="30" rx="7" fill="#EDE7FE"/>
+    <text class="pill" x="256" y="510">/ws/egress-audio/*  →  Realtime STT</text>
+    <text class="notem" x="540" y="472">HTTPS 리스너는 게이트로 관리하고, HTTP 스모크 리스너는</text>
+    <text class="notem" x="540" y="490">운영자 CIDR 로만 조건부 개방한다 (0.0.0.0/0 금지).</text>
+    <text class="notem" x="540" y="512">보안 그룹은 서비스마다 분리되어 ALB → 해당 포트만 허용한다.</text>
+  </g>
+  <path class="edge" d="M130 365 V 400 h -0 V 405"/>
+  <text class="edgelbl" x="140" y="390">HTTPS</text>
+
+  <!-- ======================= C. 세션 계층 ======================= -->
+  <rect x="40" y="585" width="1000" height="150" rx="14" fill="#FFF8F2" stroke="#ED7100" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text class="grp"    x="62" y="612">3. 세션 계층 — Web BFF</text>
+  <text class="grpsub" x="290" y="612">브라우저와 내부 서비스 사이의 유일한 신뢰 경계</text>
+
+  <g transform="translate(102,628)">
+    <use href="#t-bff" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Web BFF</text>
+    <text class="lbl2" x="28" y="92">Spring Boot · :8081</text>
+  </g>
+  <g>
+    <rect x="240" y="634" width="180" height="30" rx="7" fill="#FDEBDD"/><text class="pill" x="256" y="654">opaque 세션 쿠키</text>
+    <rect x="432" y="634" width="180" height="30" rx="7" fill="#FDEBDD"/><text class="pill" x="448" y="654">CSRF double submit</text>
+    <rect x="624" y="634" width="200" height="30" rx="7" fill="#FDEBDD"/><text class="pill" x="640" y="654">허용 목록 프록시</text>
+    <rect x="240" y="672" width="180" height="30" rx="7" fill="#FDEBDD"/><text class="pill" x="256" y="692">Token Vault (KMS 봉투)</text>
+    <rect x="432" y="672" width="180" height="30" rx="7" fill="#FDEBDD"/><text class="pill" x="448" y="692">자동 refresh 회전</text>
+    <text class="notem" x="640" y="692">액세스 토큰은 서버 측에만 존재한다.</text>
+  </g>
+  <path class="edge" d="M130 545 V 585"/>
+
+  <!-- ======================= D. 내부 서비스 ======================= -->
+  <rect x="40" y="775" width="1000" height="255" rx="14" fill="#FFF8F2" stroke="#ED7100" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text class="grp"    x="62" y="802">4. 내부 서비스 — ECS 프라이빗 · mTLS · Cloud Map</text>
+  <text class="grpsub" x="500" y="802">meetingmind.internal 로만 서로를 찾는다</text>
+
+  <g transform="translate(102,886)">
+    <use href="#t-svc" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Core Service</text>
+    <text class="lbl2" x="28" y="92">Spring · :8080</text>
+    <text class="lbl2" x="28" y="108">회의 · Space ACL</text>
+    <text class="lbl2" x="28" y="124">리포트 · 지식 오케스트레이션</text>
+  </g>
+  <g transform="translate(342,886)">
+    <use href="#t-svc" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Auth Service</text>
+    <text class="lbl2" x="28" y="92">Spring · :8082</text>
+    <text class="lbl2" x="28" y="108">로컬/Google 로그인</text>
+    <text class="lbl2" x="28" y="124">KMS RS256 · 내부 JWKS</text>
+  </g>
+  <g transform="translate(582,886)">
+    <use href="#t-stt" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">Realtime STT</text>
+    <text class="lbl2" x="28" y="92">:8083 · WebSocket</text>
+    <text class="lbl2" x="28" y="108">일회성 HMAC 토큰 검증</text>
+    <text class="lbl2" x="28" y="124">soniox → openai 폴백</text>
+  </g>
+  <g transform="translate(822,886)">
+    <use href="#t-ai" width="56" height="56"/>
+    <text class="lbl"  x="28" y="76">AI Service</text>
+    <text class="lbl2" x="28" y="92">FastAPI · :8000</text>
+    <text class="lbl2" x="28" y="108">요약 · RAG</text>
+    <text class="lbl2" x="28" y="124">Envoy 사이드카 (SPIFFE)</text>
+  </g>
+
+  <path class="edge" d="M130 735 V 775"/>
+  <path class="edge" d="M186 914 H 334"/>
+  <text class="edgelbl" x="206" y="908">JWKS 검증</text>
+  <path class="edge" d="M146 886 V 838 H 850 V 878"/>
+  <text class="edgelbl" x="700" y="832">요약 · RAG 호출 (mTLS)</text>
+  <path class="edge" d="M132 886 V 856 H 610 V 878"/>
+  <text class="edgelbl" x="420" y="850">전사 세션 조회 · Egress 오케스트레이션</text>
+
+  <!-- ======================= E. 데이터 ======================= -->
+  <rect x="40" y="1070" width="1000" height="125" rx="14" fill="#FDF3FE" stroke="#C925D1" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text class="grp"    x="62" y="1096">5. 데이터 계층 — 인터넷 라우트 없음 · KMS 저장 암호화</text>
+
+  <g transform="translate(62,1112)"><use href="#t-rds" width="48" height="48"/></g>
+  <g transform="translate(500,1112)"><use href="#t-cache" width="48" height="48"/></g>
+  <text class="note"  x="124" y="1132">RDS PostgreSQL — meetingmind (Core + pgvector)</text>
+  <text class="notem" x="124" y="1152">meetingmind_auth · meetingmind_stt · 서비스별 DB 계정</text>
+  <text class="note"  x="562" y="1132">ElastiCache Valkey — BFF 전용 ACL 사용자</text>
+  <text class="notem" x="562" y="1152">세션 · 암호화된 Token Vault</text>
+  <text class="notem" x="880" y="1132">Core 는 ECS 경계에서</text>
+  <text class="notem" x="880" y="1152">Flyway 를 비활성화한다.</text>
+
+  <path class="line" d="M130 1030 V 1052 M370 1030 V 1052 M610 1030 V 1052 M610 1052 H 86"/>
+  <path class="edge" d="M86 1052 V 1064"/>
+  <path class="line" d="M102 656 H 22 V 1178 H 524"/>
+  <path class="edge" d="M524 1178 V 1162"/>
+  <text class="edgelbl" x="180" y="1172">BFF 세션 · Token Vault 쓰기</text>
+
+  <!-- ======================= 사이드바: 플랫폼 ======================= -->
+  <rect x="1070" y="205" width="410" height="380" rx="14" fill="#F7F9FB" stroke="#C6CFD8" stroke-width="1.6"/>
+  <text class="grp"    x="1092" y="232">플랫폼 · 운영 공통</text>
+  <text class="grpsub" x="1092" y="250">모든 계층이 공유하는 횡단 관심사</text>
+
+  <g transform="translate(1112,266)"><use href="#t-ecr" width="52" height="52"/><text class="lbl" x="26" y="70">Amazon ECR</text><text class="lbl2" x="26" y="86">불변 sha256 다이제스트</text></g>
+  <g transform="translate(1312,266)"><use href="#t-sec" width="52" height="52"/><text class="lbl" x="26" y="70">Secrets Manager</text><text class="lbl2" x="26" y="86">태스크 롤 최소 권한</text></g>
+  <g transform="translate(1112,376)"><use href="#t-kms" width="52" height="52"/><text class="lbl" x="26" y="70">AWS KMS</text><text class="lbl2" x="26" y="86">볼트 · JWT 서명 · 저장</text></g>
+  <g transform="translate(1312,376)"><use href="#t-map" width="52" height="52"/><text class="lbl" x="26" y="70">Cloud Map</text><text class="lbl2" x="26" y="86">meetingmind.internal</text></g>
+  <g transform="translate(1112,486)"><use href="#t-cw" width="52" height="52"/><text class="lbl" x="26" y="70">CloudWatch · SNS</text><text class="lbl2" x="26" y="86">로그 · 알람 · 대시보드</text></g>
+  <g transform="translate(1312,486)"><use href="#t-iam" width="52" height="52"/><text class="lbl" x="26" y="70">IAM</text><text class="lbl2" x="26" y="86">태스크 롤 · GitHub OIDC</text></g>
+
+  <!-- ======================= 사이드바: 외부 ======================= -->
+  <rect x="1070" y="620" width="410" height="370" rx="14" fill="#F7F9FB" stroke="#C6CFD8" stroke-width="1.6"/>
+  <text class="grp"    x="1092" y="647">외부 제공자</text>
+  <text class="grpsub" x="1092" y="665">NAT Gateway 를 통한 아웃바운드</text>
+
+  <g transform="translate(1112,682)"><use href="#t-ext" width="52" height="52"/><text class="lbl" x="26" y="70">LiveKit Cloud</text><text class="lbl2" x="26" y="86">WebRTC · Egress</text></g>
+  <g transform="translate(1312,682)"><use href="#t-ext" width="52" height="52"/><text class="lbl" x="26" y="70">Soniox</text><text class="lbl2" x="26" y="86">실시간 전사 기본</text></g>
+  <g transform="translate(1112,792)"><use href="#t-ext" width="52" height="52"/><text class="lbl" x="26" y="70">OpenAI</text><text class="lbl2" x="26" y="86">LLM · 임베딩 · STT 폴백</text></g>
+  <g transform="translate(1312,792)"><use href="#t-gh" width="52" height="52"/><text class="lbl" x="26" y="70">GitHub Actions</text><text class="lbl2" x="26" y="86">OIDC 빌드 · 배포</text></g>
+
+  <text class="notem" x="1092" y="912">브라우저의 WebRTC 미디어는 AWS 를 거치지 않고</text>
+  <text class="notem" x="1092" y="930">LiveKit Cloud 로 직접 흐른다. LiveKit Egress 만</text>
+  <text class="notem" x="1092" y="948">ALB 의 /ws/egress-audio/* 로 되돌아온다.</text>
+
+  <path class="edged" d="M1070 726 C 960 760, 780 860, 648 906"/>
+  <path class="edged" d="M1070 836 C 1000 862, 940 898, 886 912"/>
+  <path class="edged" d="M272 122 C 700 88, 1240 88, 1502 132 V 662 H 1486"/>
+  <text class="edgelbl" x="700" y="88">WebRTC 미디어 — AWS 미경유, LiveKit Cloud 직결</text>
+
+  <!-- 범례 -->
+  <g transform="translate(1070,1070)">
+    <rect width="410" height="125" rx="14" fill="#FFFFFF" stroke="#E1E7ED" stroke-width="1.4"/>
+    <text class="grp" x="22" y="28">범례</text>
+    <rect x="22" y="42" width="18" height="12" rx="3" fill="#8C4FFF"/><text class="notem" x="48" y="52">네트워킹</text>
+    <rect x="130" y="42" width="18" height="12" rx="3" fill="#ED7100"/><text class="notem" x="156" y="52">컴퓨트 · 컨테이너</text>
+    <rect x="280" y="42" width="18" height="12" rx="3" fill="#C925D1"/><text class="notem" x="306" y="52">데이터베이스</text>
+    <rect x="22" y="68" width="18" height="12" rx="3" fill="#DD344C"/><text class="notem" x="48" y="78">보안 · 자격</text>
+    <rect x="130" y="68" width="18" height="12" rx="3" fill="#E7157B"/><text class="notem" x="156" y="78">관리 · 관측</text>
+    <rect x="280" y="68" width="18" height="12" rx="3" fill="#01A88D"/><text class="notem" x="306" y="78">ML · AI</text>
+    <path d="M22 94 h 40" stroke="#A9B3BE" stroke-width="2" stroke-dasharray="5 4"/><text class="notem" x="70" y="98">외부 경로 · AWS 미경유 트래픽</text>
+  </g>
+</svg>

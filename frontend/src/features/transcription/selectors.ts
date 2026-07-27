@@ -5,6 +5,16 @@ function normalizeForCompare(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+const INTERNAL_STT_SPEAKER_PATTERN = /^stt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function visibleSpeakerName(speakerName: string | null, speakerLabel: string): string {
+  const name = speakerName?.trim();
+  if (name && !INTERNAL_STT_SPEAKER_PATTERN.test(name)) {
+    return name;
+  }
+  return INTERNAL_STT_SPEAKER_PATTERN.test(speakerLabel) ? "참여자" : speakerLabel;
+}
+
 /**
  * rows(확정) + partials(임시)를 화면용 엔트리로 합친다.
  *
@@ -30,7 +40,7 @@ export function buildTranscriptEntries(dialogue: MeetingDialogueResponse | undef
   const entries: TranscriptEntry[] = rows.map((row) => ({
     key: row.segmentId,
     speakerId: row.speakerId,
-    speakerName: row.speakerName ?? row.speakerLabel,
+    speakerName: visibleSpeakerName(row.speakerName, row.speakerLabel),
     startMs: row.startMs,
     text: row.text,
     isPartial: false
@@ -53,7 +63,7 @@ export function buildTranscriptEntries(dialogue: MeetingDialogueResponse | undef
     entries.push({
       key: `partial:${partial.speakerLabel}`,
       speakerId: partial.speakerLabel,
-      speakerName: partial.speakerName ?? partial.speakerLabel,
+      speakerName: visibleSpeakerName(partial.speakerName, partial.speakerLabel),
       startMs: Number.MAX_SAFE_INTEGER,
       text: partial.text,
       isPartial: true

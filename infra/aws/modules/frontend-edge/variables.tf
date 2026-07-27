@@ -28,6 +28,26 @@ variable "alb_origin_id" {
   }
 }
 
+variable "custom_domain" {
+  description = "Optional custom viewer domain and existing us-east-1 ACM certificate used by CloudFront."
+  type = object({
+    name                = string
+    acm_certificate_arn = string
+  })
+  default = null
+
+  validation {
+    condition = var.custom_domain == null || (
+      try(var.custom_domain.name, "") == lower(try(var.custom_domain.name, "")) &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", try(var.custom_domain.name, ""))) &&
+      strcontains(try(var.custom_domain.name, ""), ".") &&
+      !strcontains(try(var.custom_domain.name, ""), "..") &&
+      can(regex("^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]{36}$", try(var.custom_domain.acm_certificate_arn, "")))
+    )
+    error_message = "custom_domain must contain a lowercase DNS name and a us-east-1 ACM certificate ARN."
+  }
+}
+
 variable "tags" {
   description = "Tags applied to taggable frontend edge resources."
   type        = map(string)

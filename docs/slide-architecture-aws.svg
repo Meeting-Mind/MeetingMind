@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" font-family="Pretendard Variable, Apple SD Gothic Neo, Noto Sans KR, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .title  { font-size: 40px; font-weight: 700; fill: #16202B; }
+      .sub    { font-size: 19px; fill: #7A8794; }
+      .hRegion{ font-size: 22px; font-weight: 700; fill: #1E6FBF; }
+      .hEdge  { font-size: 20px; font-weight: 700; fill: #6B32D6; }
+      .hVpc   { font-size: 22px; font-weight: 700; fill: #147A3A; }
+      .hAz    { font-size: 19px; font-weight: 700; fill: #1E6FBF; text-anchor: middle; }
+      .hBox   { font-size: 20px; font-weight: 700; fill: #33424F; }
+      .tier   { font-size: 19px; font-weight: 700; fill: #33424F; text-anchor: end; }
+      .tier2  { font-size: 14px; fill: #93A0AC; text-anchor: end; }
+      .lbl    { font-size: 16px; font-weight: 600; fill: #232F3E; text-anchor: middle; }
+      .lblE   { font-size: 16px; font-weight: 600; fill: #232F3E; text-anchor: end; }
+      .chip   { font-size: 17px; font-weight: 600; fill: #3A4750; text-anchor: middle; }
+      .edge   { fill: none; stroke: #6E7C8A; stroke-width: 3; marker-end: url(#arw); }
+      .edged  { fill: none; stroke: #AAB4BE; stroke-width: 3; stroke-dasharray: 8 7; marker-end: url(#arwl); }
+    </style>
+    <marker id="arw" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6E7C8A"/>
+    </marker>
+    <marker id="arwl" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#AAB4BE"/>
+    </marker>
+
+    <symbol id="g-users" viewBox="0 0 64 64">
+      <g fill="none" stroke="#232F3E" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="24" cy="20" r="9"/><path d="M8 48c0-9 7-14 16-14s16 5 16 14"/>
+        <circle cx="46" cy="23" r="7"/><path d="M40 48c1-8 6-12 12-12s12 4 12 12"/>
+      </g>
+    </symbol>
+    <symbol id="b-region" viewBox="0 0 64 64"><rect x="2" y="2" width="60" height="60" rx="10" fill="none" stroke="#1E6FBF" stroke-width="4"/>
+      <path d="M22 16v34M22 18h24l-6 8 6 8H22" fill="none" stroke="#1E6FBF" stroke-width="4" stroke-linejoin="round"/></symbol>
+    <symbol id="b-vpc" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="#147A3A"/>
+      <g fill="none" stroke="#fff" stroke-width="3.6" stroke-linejoin="round"><path d="M32 12l17 10v20L32 52 15 42V22z"/><path d="M15 22l17 10 17-10M32 32v20"/></g></symbol>
+
+    <symbol id="t-cf" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2"><circle cx="32" cy="32" r="17"/><ellipse cx="32" cy="32" rx="8" ry="17"/><path d="M16 26h32M16 38h32"/></g></symbol>
+    <symbol id="t-s3" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1B9E4B"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><path d="M17 17h30l-4 32H21z"/><ellipse cx="32" cy="17" rx="15" ry="5"/></g></symbol>
+    <symbol id="t-r53" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <path d="M32 10l18 6v14c0 12-8 20-18 24-10-4-18-12-18-24V16z" fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"/>
+      <text x="32" y="39" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">53</text></symbol>
+    <symbol id="t-igw" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <path d="M16 50V30a16 16 0 0 1 32 0v20" fill="none" stroke="#fff" stroke-width="3.8" stroke-linecap="round"/></symbol>
+    <symbol id="t-nat" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 24h34M40 16l8 8-8 8M50 42H16M24 34l-8 8 8 8"/></g></symbol>
+    <symbol id="t-vpce" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="15"/><path d="M32 17v13M23 32h18M32 34v13"/></g></symbol>
+    <symbol id="t-alb" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#8C4FFF"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"><path d="M32 16v10M16 34h32M16 34v6M32 34v6M48 34v6"/></g>
+      <g fill="#fff"><rect x="26" y="10" width="12" height="9" rx="2"/><rect x="10" y="40" width="12" height="9" rx="2"/><rect x="26" y="40" width="12" height="9" rx="2"/><rect x="42" y="40" width="12" height="9" rx="2"/></g></symbol>
+    <symbol id="t-task" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.6" stroke-linejoin="round"><rect x="13" y="17" width="38" height="30" rx="4"/><path d="M13 27h38M32 27v20"/></g></symbol>
+    <symbol id="t-stt" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round"><path d="M13 32h3M23 20v24M32 14v36M41 22v20M51 29v6"/></g></symbol>
+    <symbol id="t-ai" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#01A88D"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="18" y="18" width="28" height="28" rx="6"/><circle cx="32" cy="32" r="6"/><path d="M32 8v10M32 46v10M8 32h10M46 32h10M14 14l7 7M43 43l7 7M50 14l-7 7M21 43l-7 7"/></g></symbol>
+    <symbol id="t-ecr" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#ED7100"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="14" y="22" width="36" height="28" rx="3"/><path d="M14 32h36M32 22v28"/><path d="M32 8v10m0 0l-5-5m5 5l5-5"/></g></symbol>
+    <symbol id="t-rds" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#C925D1"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2"><ellipse cx="32" cy="18" rx="16" ry="6"/><path d="M16 18v28c0 3.3 7.2 6 16 6s16-2.7 16-6V18"/><path d="M16 32c0 3.3 7.2 6 16 6s16-2.7 16-6"/></g></symbol>
+    <symbol id="t-cache" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#C925D1"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="18" y="18" width="28" height="28" rx="4"/><rect x="27" y="27" width="10" height="10" rx="2"/><path d="M24 18v-7M32 18v-7M40 18v-7M24 46v7M32 46v7M40 46v7M18 24h-7M18 32h-7M18 40h-7M46 24h7M46 32h7M46 40h7"/></g></symbol>
+    <symbol id="t-sec" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><rect x="16" y="29" width="32" height="22" rx="4"/><path d="M23 29v-7a9 9 0 0 1 18 0v7"/><circle cx="32" cy="40" r="3.5"/></g></symbol>
+    <symbol id="t-kms" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"><circle cx="24" cy="26" r="10"/><path d="M31 33l16 16M41 43l5-5M46 48l5-5"/></g></symbol>
+    <symbol id="t-iam" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#DD344C"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><path d="M32 10l18 7v14c0 12-8 20-18 23-10-3-18-11-18-23V17z"/><circle cx="32" cy="28" r="5"/><path d="M22 44c2-6 6-9 10-9s8 3 10 9"/></g></symbol>
+    <symbol id="t-cw" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#E7157B"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 46h38M13 46V16"/><path d="M18 38l9-11 8 7 11-15"/></g></symbol>
+    <symbol id="t-gh" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#232F3E"/>
+      <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"><circle cx="32" cy="32" r="18"/><path d="M22 32l7 7 13-14"/></g></symbol>
+  </defs>
+
+  <rect width="1920" height="1080" fill="#FFFFFF"/>
+
+  <text class="title" x="48" y="76">MeetingMind AWS 배포 아키텍처</text>
+  <text class="sub"   x="48" y="112">2 AZ · 퍼블릭 / 프라이빗 앱 / 데이터 3계층 서브넷 · ECS Fargate</text>
+
+  <!-- ================= AWS Region ================= -->
+  <rect x="48" y="140" width="1824" height="910" rx="18" fill="#FAFCFE"/>
+  <path d="M48 158a18 18 0 0 1 18-18h1788a18 18 0 0 1 18 18v28H48z" fill="#E4EFFA"/>
+  <rect x="48" y="140" width="1824" height="910" rx="18" fill="none" stroke="#1E6FBF" stroke-width="2.4" stroke-dasharray="12 7"/>
+  <use href="#b-region" x="76" y="150" width="26" height="26"/>
+  <text class="hRegion" x="114" y="173">AWS Region</text>
+
+  <!-- ================= 엣지 ================= -->
+  <rect x="76" y="210" width="1780" height="152" rx="14" fill="#F7F3FF"/>
+  <path d="M76 224a14 14 0 0 1 14-14h1752a14 14 0 0 1 14 14v26H76z" fill="#E9DEFF"/>
+  <rect x="76" y="210" width="1780" height="152" rx="14" fill="none" stroke="#8C4FFF" stroke-width="2"/>
+  <text class="hEdge" x="100" y="239">엣지 · 정적 호스팅</text>
+
+  <g transform="translate(176,282)"><use href="#g-users" width="56" height="56"/><text class="lbl" x="28" y="-14">사용자</text></g>
+  <g transform="translate(376,282)"><use href="#t-r53" width="56" height="56"/><text class="lbl" x="28" y="-14">Route 53</text></g>
+  <g transform="translate(576,282)"><use href="#t-cf" width="56" height="56"/><text class="lbl" x="28" y="-14">CloudFront</text></g>
+  <g transform="translate(776,282)"><use href="#t-s3" width="56" height="56"/><text class="lbl" x="28" y="-14">S3 정적 번들</text></g>
+  <path class="edge" d="M240 310 H 368"/>
+  <path class="edge" d="M440 310 H 568"/>
+  <path class="edge" d="M640 310 H 768"/>
+
+  <rect x="1020" y="286" width="330" height="48" rx="11" fill="#E0D3FF"/>
+  <text class="chip" x="1185" y="317">/api/*  →  ALB</text>
+  <rect x="1400" y="286" width="330" height="48" rx="11" fill="#E0D3FF"/>
+  <text class="chip" x="1565" y="317">그 외  →  S3</text>
+
+  <!-- ================= VPC ================= -->
+  <rect x="76" y="392" width="1214" height="646" rx="14" fill="#F1FAF5"/>
+  <path d="M76 406a14 14 0 0 1 14-14h1186a14 14 0 0 1 14 14v26H76z" fill="#D7F0E1"/>
+  <rect x="76" y="392" width="1214" height="646" rx="14" fill="none" stroke="#147A3A" stroke-width="2.4"/>
+  <use href="#b-vpc" x="96" y="398" width="26" height="26"/>
+  <text class="hVpc" x="134" y="421">VPC</text>
+
+  <g transform="translate(416,444)"><use href="#t-igw" width="48" height="48"/></g>
+  <text class="lblE" x="402" y="474">Internet Gateway</text>
+  <g transform="translate(1180,444)"><use href="#t-vpce" width="48" height="48"/></g>
+  <text class="lblE" x="1160" y="474">VPC 엔드포인트</text>
+
+  <!-- 계층(행) 라벨 -->
+  <text class="tier"  x="252" y="628">퍼블릭 서브넷</text>
+  <text class="tier"  x="252" y="778">프라이빗 앱 서브넷</text>
+  <text class="tier2" x="252" y="800">ECS Fargate</text>
+  <text class="tier"  x="252" y="944">데이터 서브넷</text>
+
+  <!-- AZ-a -->
+  <rect x="272" y="520" width="474" height="496" rx="12" fill="#FFFFFF"/>
+  <path d="M272 532a12 12 0 0 1 12-12h450a12 12 0 0 1 12 12v24H272z" fill="#E4EEFA"/>
+  <rect x="272" y="520" width="474" height="496" rx="12" fill="none" stroke="#1E6FBF" stroke-width="1.8" stroke-dasharray="9 6"/>
+  <text class="hAz" x="509" y="546">가용 영역 A</text>
+
+  <!-- AZ-b -->
+  <rect x="786" y="520" width="474" height="496" rx="12" fill="#FFFFFF"/>
+  <path d="M786 532a12 12 0 0 1 12-12h450a12 12 0 0 1 12 12v24H786z" fill="#E4EEFA"/>
+  <rect x="786" y="520" width="474" height="496" rx="12" fill="none" stroke="#1E6FBF" stroke-width="1.8" stroke-dasharray="9 6"/>
+  <text class="hAz" x="1023" y="546">가용 영역 B</text>
+
+  <!-- 퍼블릭 계층 -->
+  <rect x="290" y="566" width="438" height="114" rx="10" fill="#E2F4E9"/>
+  <rect x="290" y="566" width="8" height="114" rx="4" fill="#1B9E4B"/>
+  <rect x="290" y="566" width="438" height="114" rx="10" fill="none" stroke="#7CC79A" stroke-width="1.6"/>
+  <g transform="translate(416,584)"><use href="#t-nat" width="48" height="48"/><text class="lbl" x="24" y="74">NAT Gateway</text></g>
+  <g transform="translate(580,584)"><use href="#t-alb" width="48" height="48"/><text class="lbl" x="24" y="74">ALB</text></g>
+
+  <rect x="804" y="566" width="438" height="114" rx="10" fill="#E2F4E9"/>
+  <rect x="804" y="566" width="8" height="114" rx="4" fill="#1B9E4B"/>
+  <rect x="804" y="566" width="438" height="114" rx="10" fill="none" stroke="#7CC79A" stroke-width="1.6"/>
+  <g transform="translate(1094,584)"><use href="#t-alb" width="48" height="48"/><text class="lbl" x="24" y="74">ALB</text></g>
+
+  <!-- 프라이빗 앱 계층 -->
+  <rect x="290" y="710" width="438" height="148" rx="10" fill="#E4EEFB"/>
+  <rect x="290" y="710" width="8" height="148" rx="4" fill="#2B7FD6"/>
+  <rect x="290" y="710" width="438" height="148" rx="10" fill="none" stroke="#8FB8E4" stroke-width="1.6"/>
+  <g transform="translate(312,744)"><use href="#t-task" width="46" height="46"/><text class="lbl" x="23" y="72">BFF</text></g>
+  <g transform="translate(401,744)"><use href="#t-task" width="46" height="46"/><text class="lbl" x="23" y="72">Core</text></g>
+  <g transform="translate(491,744)"><use href="#t-task" width="46" height="46"/><text class="lbl" x="23" y="72">Auth</text></g>
+  <g transform="translate(581,744)"><use href="#t-stt"  width="46" height="46"/><text class="lbl" x="23" y="72">STT</text></g>
+  <g transform="translate(670,744)"><use href="#t-ai"   width="46" height="46"/><text class="lbl" x="23" y="72">AI</text></g>
+
+  <rect x="804" y="710" width="438" height="148" rx="10" fill="#E4EEFB"/>
+  <rect x="804" y="710" width="8" height="148" rx="4" fill="#2B7FD6"/>
+  <rect x="804" y="710" width="438" height="148" rx="10" fill="none" stroke="#8FB8E4" stroke-width="1.6"/>
+  <g transform="translate(826,744)" opacity="0.4"><use href="#t-task" width="46" height="46"/><text class="lbl" x="23" y="72">BFF</text></g>
+  <g transform="translate(915,744)" opacity="0.4"><use href="#t-task" width="46" height="46"/><text class="lbl" x="23" y="72">Core</text></g>
+  <g transform="translate(1005,744)" opacity="0.4"><use href="#t-task" width="46" height="46"/><text class="lbl" x="23" y="72">Auth</text></g>
+  <g transform="translate(1095,744)" opacity="0.4"><use href="#t-stt"  width="46" height="46"/><text class="lbl" x="23" y="72">STT</text></g>
+  <g transform="translate(1184,744)" opacity="0.4"><use href="#t-ai"   width="46" height="46"/><text class="lbl" x="23" y="72">AI</text></g>
+
+  <!-- 데이터 계층 -->
+  <rect x="290" y="888" width="438" height="100" rx="10" fill="#F7E7FB"/>
+  <rect x="290" y="888" width="8" height="100" rx="4" fill="#C925D1"/>
+  <rect x="290" y="888" width="438" height="100" rx="10" fill="none" stroke="#E0A0E6" stroke-width="1.6"/>
+  <g transform="translate(358,906)"><use href="#t-rds" width="44" height="44"/><text class="lbl" x="22" y="68">PostgreSQL</text></g>
+  <g transform="translate(582,906)"><use href="#t-cache" width="44" height="44"/><text class="lbl" x="22" y="68">Valkey</text></g>
+
+  <rect x="804" y="888" width="438" height="100" rx="10" fill="#F7E7FB"/>
+  <rect x="804" y="888" width="8" height="100" rx="4" fill="#C925D1"/>
+  <rect x="804" y="888" width="438" height="100" rx="10" fill="none" stroke="#E0A0E6" stroke-width="1.6"/>
+  <g transform="translate(872,906)"><use href="#t-cache" width="44" height="44"/><text class="lbl" x="22" y="68">Valkey 레플리카</text></g>
+
+  <!-- ================= 우측: 리전 서비스 ================= -->
+  <rect x="1330" y="392" width="526" height="300" rx="14" fill="#F8FAFC"/>
+  <path d="M1330 406a14 14 0 0 1 14-14h498a14 14 0 0 1 14 14v26h-526z" fill="#EBEFF4"/>
+  <rect x="1330" y="392" width="526" height="300" rx="14" fill="none" stroke="#C3CCD6" stroke-width="2"/>
+  <text class="hBox" x="1356" y="421">리전 서비스</text>
+  <g transform="translate(1418,452)"><use href="#t-ecr" width="56" height="56"/><text class="lbl" x="28" y="82">ECR</text></g>
+  <g transform="translate(1658,452)"><use href="#t-sec" width="56" height="56"/><text class="lbl" x="28" y="82">Secrets Manager</text></g>
+  <g transform="translate(1418,570)"><use href="#t-kms" width="56" height="56"/><text class="lbl" x="28" y="82">KMS</text></g>
+  <g transform="translate(1658,570)"><use href="#t-cw" width="56" height="56"/><text class="lbl" x="28" y="82">CloudWatch</text></g>
+
+  <!-- ================= 우측: 배포 ================= -->
+  <rect x="1330" y="724" width="526" height="314" rx="14" fill="#F8FAFC"/>
+  <path d="M1330 738a14 14 0 0 1 14-14h498a14 14 0 0 1 14 14v26h-526z" fill="#EBEFF4"/>
+  <rect x="1330" y="724" width="526" height="314" rx="14" fill="none" stroke="#C3CCD6" stroke-width="2"/>
+  <text class="hBox" x="1356" y="753">배포</text>
+  <g transform="translate(1418,856)"><use href="#t-gh" width="56" height="56"/><text class="lbl" x="28" y="82">GitHub Actions</text></g>
+  <g transform="translate(1658,856)"><use href="#t-iam" width="56" height="56"/><text class="lbl" x="28" y="82">IAM (OIDC)</text></g>
+
+  <!-- ================= 화살표 ================= -->
+  <!-- CloudFront → ALB -->
+  <path class="edge" d="M604 338 V 578"/>
+  <!-- ALB → 프라이빗 앱 -->
+  <path class="edge" d="M604 680 V 738"/>
+  <!-- 프라이빗 앱 → 데이터 -->
+  <path class="edge" d="M380 858 V 900"/>
+  <path class="edge" d="M604 858 V 900"/>
+  <!-- 아웃바운드: 프라이빗 앱 → NAT → IGW -->
+  <path class="edge" d="M330 710 V 608 H 410"/>
+  <path class="edge" d="M440 580 V 498"/>
+  <!-- VPC 엔드포인트 → 리전 서비스 -->
+  <path class="edge" d="M1228 468 H 1324"/>
+  <!-- 배포 → 리전 서비스 -->
+  <path class="edged" d="M1446 724 V 698"/>
+</svg>

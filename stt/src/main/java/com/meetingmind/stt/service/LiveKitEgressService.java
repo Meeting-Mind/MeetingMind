@@ -3,6 +3,7 @@ package com.meetingmind.stt.service;
 import com.meetingmind.stt.config.DotenvConfig;
 import io.livekit.server.EgressServiceClient;
 import java.io.IOException;
+import java.util.Locale;
 import livekit.LivekitEgress;
 import okhttp3.ResponseBody;
 import org.slf4j.Logger;
@@ -24,7 +25,36 @@ public class LiveKitEgressService {
     }
 
     public void stopEgress(String egressId) {
-        execute(client().stopEgress(egressId), "LiveKit Egress 중지에 실패했습니다.");
+        String errorMessage = "LiveKit Egress 중지에 실패했습니다.";
+        try {
+            Response<LivekitEgress.EgressInfo> response = client().stopEgress(egressId).execute();
+            if (response.isSuccessful() && response.body() != null) {
+                return;
+            }
+            String detail = responseErrorDetail(response.errorBody());
+            if (isTerminalStopConflict(response.code(), detail)) {
+                log.info("LiveKit Egress가 이미 terminal 상태라 stop을 멱등 완료로 처리합니다. egressId={}", egressId);
+                return;
+            }
+            log.warn("{} responseCode={} responseBody={}", errorMessage, response.code(), detail);
+            throw new IllegalStateException(errorMessage + " (HTTP " + response.code() + ", " + detail + ")");
+        } catch (IOException exception) {
+            log.warn("{} ioError={}", errorMessage, exception.getMessage(), exception);
+            throw new IllegalStateException(errorMessage, exception);
+        }
+    }
+
+    static boolean isTerminalStopConflict(int responseCode, String responseBody) {
+        if (responseCode != 412 || responseBody == null) {
+            return false;
+        }
+        String normalized = responseBody.toUpperCase(Locale.ROOT);
+        if (!normalized.contains("FAILED_PRECONDITION")) {
+            return false;
+        }
+        return normalized.contains("EGRESS_FAILED")
+                || normalized.contains("EGRESS_COMPLETE")
+                || normalized.contains("EGRESS_ABORTED");
     }
 
     private EgressServiceClient client() {

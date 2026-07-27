@@ -64,6 +64,19 @@ class MigrationIntegrationTest {
 
         List<String> expectedVersions = migrationVersionsOnClasspath();
 
+        try (var connection = DriverManager.getConnection(url, user, password);
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    do $$
+                    begin
+                        if not exists (select 1 from pg_roles where rolname = 'meetingmind_core_app') then
+                            create role meetingmind_core_app nologin;
+                        end if;
+                    end
+                    $$
+                    """);
+        }
+
         var v10Result = Flyway.configure()
                 .dataSource(url, user, password)
                 .locations("classpath:db/migration")
@@ -135,6 +148,21 @@ class MigrationIntegrationTest {
             assertThat(versions).containsExactlyElementsOf(expectedVersions);
 
             try (var statement = connection.createStatement()) {
+                try (var rows = statement.executeQuery("""
+                        select
+                            has_table_privilege('meetingmind_core_app', 'ai_usage_events', 'SELECT'),
+                            has_table_privilege('meetingmind_core_app', 'ai_usage_events', 'INSERT'),
+                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'SELECT'),
+                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'DELETE'),
+                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'INSERT')
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getBoolean(1)).isTrue();
+                    assertThat(rows.getBoolean(2)).isTrue();
+                    assertThat(rows.getBoolean(3)).isTrue();
+                    assertThat(rows.getBoolean(4)).isTrue();
+                    assertThat(rows.getBoolean(5)).isFalse();
+                }
                 try (var rows = statement.executeQuery("""
                         select auth_user_id
                         from users

@@ -3,10 +3,14 @@ package com.meetingmind.bff.proxy;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpMethod;
 
-public record ProxyRoute(HttpMethod method, Pattern pathPattern, DownstreamService service) {
+public record ProxyRoute(
+        HttpMethod method,
+        Pattern pathPattern,
+        DownstreamService service,
+        String audience) {
 
     public ProxyRoute {
-        if (method == null || pathPattern == null || service == null) {
+        if (method == null || pathPattern == null || service == null || audience == null || audience.isBlank()) {
             throw new IllegalArgumentException("proxy route fields are required");
         }
     }

@@ -16,28 +16,31 @@ class ProxyRouteRegistryTest {
 
     @Test
     void classifiesCoreAiAndLiveKitRoutes() {
-        assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces").orElseThrow().service())
-                .isEqualTo(DownstreamService.CORE);
+        ProxyRoute coreRoute = registry.resolve(HttpMethod.GET, "/api/v1/spaces").orElseThrow();
+        assertThat(coreRoute.service()).isEqualTo(DownstreamService.CORE);
+        assertThat(coreRoute.audience()).isEqualTo("meetingmind-core");
         assertThat(registry.resolve(HttpMethod.GET, "/api/v1/meetings").orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
-        assertThat(registry.resolve(
-                                HttpMethod.POST,
-                                "/api/v1/meetings/" + meetingId + "/ai/chat")
-                        .orElseThrow()
-                        .service())
-                .isEqualTo(DownstreamService.AI);
-        assertThat(registry.resolve(
-                                HttpMethod.POST,
-                                "/api/v1/meetings/" + meetingId + "/livekit-token")
-                        .orElseThrow()
-                        .service())
-                .isEqualTo(DownstreamService.LIVEKIT);
-        assertThat(registry.resolve(
-                                HttpMethod.POST,
-                                "/api/v1/meetings/" + meetingId + "/transcription/stop")
-                        .orElseThrow()
-                        .service())
-                .isEqualTo(DownstreamService.LIVEKIT);
+        ProxyRoute aiRoute = registry.resolve(
+                        HttpMethod.POST,
+                        "/api/v1/meetings/" + meetingId + "/ai/chat")
+                .orElseThrow();
+        assertThat(aiRoute.service()).isEqualTo(DownstreamService.AI);
+        assertThat(aiRoute.audience()).isEqualTo("meetingmind-core");
+
+        ProxyRoute liveKitRoute = registry.resolve(
+                        HttpMethod.POST,
+                        "/api/v1/meetings/" + meetingId + "/livekit-token")
+                .orElseThrow();
+        assertThat(liveKitRoute.service()).isEqualTo(DownstreamService.LIVEKIT);
+        assertThat(liveKitRoute.audience()).isEqualTo("meetingmind-core");
+
+        ProxyRoute transcriptionRoute = registry.resolve(
+                        HttpMethod.POST,
+                        "/api/v1/meetings/" + meetingId + "/transcription/stop")
+                .orElseThrow();
+        assertThat(transcriptionRoute.service()).isEqualTo(DownstreamService.LIVEKIT);
+        assertThat(transcriptionRoute.audience()).isEqualTo("meetingmind-core");
     }
 
     @Test

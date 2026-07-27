@@ -1,9 +1,12 @@
 package com.meetingmind.demo.gateway;
 
 import com.meetingmind.demo.dto.MeetingDialogueResponse;
+import com.meetingmind.demo.dto.stt.MeetingTranscriptGatewayResponse;
+import com.meetingmind.demo.dto.stt.TranscriptionStatusGatewayResponse;
 import com.meetingmind.demo.observability.BackendOperationMetrics;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
@@ -58,5 +61,15 @@ class ConfiguredTranscriptionGateway implements TranscriptionGateway {
     @Override
     public List<MeetingDialogueResponse.Partial> partials(String meetingId) {
         return delegate.partials(meetingId);
+    }
+
+    @Override
+    public Optional<MeetingTranscriptGatewayResponse> transcript(String meetingId) {
+        return delegate.transcript(meetingId);
+    }
+
+    @Override
+    public Optional<TranscriptionStatusGatewayResponse> status(String meetingId) {
+        return delegate.status(meetingId);
     }
 }

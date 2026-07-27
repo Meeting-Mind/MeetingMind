@@ -449,6 +449,7 @@ erDiagram
 - `MEETING_SPEAKER(meetingId, label)`은 unique다.
 - `MEETING_TRANSCRIPT.meetingId`는 PK/FK이며 회의당 최대 하나다.
 - `MEETING_TRANSCRIPT.status`는 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` 중 하나다.
+- 분리 배포의 STT DB가 transcript authoritative source이며 Core의 `MEETING_SPEAKER`/`TRANSCRIPT_SEGMENT`는 downstream derived projection이다. `source=stt-remote`인 projection은 STT speaker/segment ID를 보존하지만 STT DB로의 물리 FK나 cross-DB relation은 만들지 않는다.
 - `MEETING.retentionPolicy`는 `DAYS_7`, `DAYS_30`, `PERMANENT` 중 하나이고 기본값은 `DAYS_30`이다.
 - 기간 보존 transcript는 `retentionUntil`을 가지며 `legalHold=true`이면 정리 대상에서 제외한다.
 - `TRANSCRIPT_SEGMENT(meetingId, sequence)`은 unique다.

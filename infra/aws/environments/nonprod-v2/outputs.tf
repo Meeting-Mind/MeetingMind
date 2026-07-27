@@ -100,7 +100,15 @@ output "service_target_group_attachment_counts" {
 }
 
 output "stt_public_smoke_route_enabled" {
-  value = var.enable_http_smoke_listener && var.release_gates_acknowledged
+  value = var.enable_http_smoke_listener && (var.enable_deployment_smoke || var.release_gates_acknowledged)
+}
+
+output "stt_public_ws_base_url" {
+  value = var.stt_public_ws_base_url
+}
+
+output "stt_target_configuration" {
+  value = module.alb.stt_target_configuration
 }
 
 output "mtls_validation_services_enabled" {
