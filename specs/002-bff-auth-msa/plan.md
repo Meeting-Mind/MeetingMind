@@ -434,6 +434,14 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 3. provider가 인식 가설을 prefix가 다른 문장으로 수정하더라도 `LIVE` row가 증식하지 않아야 하며, final은 기존 멱등 키와 fingerprint로 한 번만 확정한다.
 4. 검증은 수정 partial 회귀, Realtime STT 전체 test, immutable image scan/배포, 실제 긴 발화의 `LIVE`→final 전이로 수행한다.
 
+#### T059-S10 Terminal Egress Stop and Projection Recovery Boundary
+
+1. LiveKit stop의 412는 응답이 `FAILED_PRECONDITION`이면서 egress 상태가 `FAILED`, `COMPLETE`, `ABORTED`인 경우에만 이미 종료된 멱등 성공으로 분류한다. 다른 412와 provider 5xx는 기존 실패 매핑을 유지한다.
+2. durable STT session이 이미 `FAILED`인 재시도는 저장 transcript가 `PROCESSING`이면 완료 상태로 조정하고, Core stop 흐름이 authoritative snapshot pull과 원자 projection을 계속할 수 있게 한다.
+3. Core runtime role에는 V27로 `chunk_source_segments`의 projection 교체에 필요한 `SELECT, DELETE`를 부여한다. 이미 적용된 migration은 체크섬을 바꾸지 않고, 운영 bootstrap에서 남은 `INSERT, UPDATE`는 append-only V28에서 회수한다.
+4. 기존 실패 데이터 복구는 active/stopping session이 없는 대상만 STT 원본 ID·sequence·시간·text와 exact 대사한 뒤 transaction으로 교체하고 embedding job을 생성한다.
+5. 검증은 Core/STT 전체 test, 실제 PostgreSQL V1→V28 role privilege test, immutable ARM64 image scan, V27/V28 선적용, 제한된 Terraform rollout, 데이터 exact audit와 vector chunk 생성으로 수행한다.
+
 ### Phase 5 — Domain Extraction
 
 - 기존 Core를 즉시 모두 쪼개지 않고 장애·부하·변경 경계가 확인된 Realtime/STT, Meeting, Workspace 순서 후보로 추출한다.

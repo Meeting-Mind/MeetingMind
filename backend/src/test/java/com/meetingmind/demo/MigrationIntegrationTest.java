@@ -123,6 +123,10 @@ class MigrationIntegrationTest {
                     insert into embedding_jobs (id, space_id, meeting_id, generation)
                     values ('migration-job', 'migration-space', 'migration-meeting', 1)
                     """);
+            // 운영 bootstrap에서 남을 수 있는 과도한 기존 권한도 후속 migration이 회수해야 한다.
+            statement.executeUpdate("""
+                    grant insert, update on table chunk_source_segments to meetingmind_core_app
+                    """);
         }
 
         var workspaceResult = Flyway.configure()
@@ -154,7 +158,8 @@ class MigrationIntegrationTest {
                             has_table_privilege('meetingmind_core_app', 'ai_usage_events', 'INSERT'),
                             has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'SELECT'),
                             has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'DELETE'),
-                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'INSERT')
+                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'INSERT'),
+                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'UPDATE')
                         """)) {
                     assertThat(rows.next()).isTrue();
                     assertThat(rows.getBoolean(1)).isTrue();
@@ -162,6 +167,7 @@ class MigrationIntegrationTest {
                     assertThat(rows.getBoolean(3)).isTrue();
                     assertThat(rows.getBoolean(4)).isTrue();
                     assertThat(rows.getBoolean(5)).isFalse();
+                    assertThat(rows.getBoolean(6)).isFalse();
                 }
                 try (var rows = statement.executeQuery("""
                         select auth_user_id
