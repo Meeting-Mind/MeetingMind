@@ -249,6 +249,17 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 
 Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개를 시간순으로 반환하고, 다음 AI 요청에는 최근 10개만 비신뢰 대화 문맥으로 전달한다. 이력은 RAG source나 citation이 아니므로 현재 요청의 권한 scope와 source allowlist를 대체할 수 없다.
 
+### MeetingAiMessage
+
+- `id`
+- `meetingId`
+- `userId`: 대화를 생성한 인증 사용자
+- `role`: USER, ASSISTANT
+- `content`
+- `createdAt`
+
+Meeting AI 이력은 `(meetingId, userId)`로 격리한다. 다음 AI 요청에는 최근 10개만 시간순으로 전달한다. 이력은 후속 질문의 생략된 대상을 복원하기 위한 비신뢰 검색 문맥이며 RAG source나 citation이 아니다. Core는 현재 요청마다 회의 접근 권한을 먼저 확인하고, AI 검색 SQL은 이력 내용과 무관하게 동일한 단일 `meetingId` scope를 강제한다.
+
 ### DomainTerm
 
 - `id`
@@ -423,6 +434,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 
 - Backend가 권한을 평가하고 AI는 전달받은 검색 범위를 SQL에서 강제한다. AI는 SpaceRole 또는 MeetingParticipant를 재평가하지 않는다.
 - vector cosine 후보와 `pg_trgm` 후보는 각각 원점수를 보존하고 RRF로 순위를 결합한다.
+- 후속 질문은 원문 질문과 최근 대화를 결합한 문맥화 질문을 각각 검색하고, 두 결과를 rank fusion한 뒤 의도별 source type 우선순위를 적용한다. 대화 이력은 검색어 해석에만 사용하고 근거로 반환하지 않는다.
 - 관련도 threshold는 embedding model별 설정으로 관리하고 한국어 근거 있음/없음 평가 질의 30-50건으로 보정한다.
 - 근거 0건 또는 관련도 미달이면 LLM을 호출하지 않고 `unsupported=true`를 반환한다.
 - supported 답변은 검색 결과에 존재하는 `sourceIds`를 최소 1개 포함해야 한다. public `sources`에는 실제 인용된 source만 반환한다.

@@ -878,3 +878,25 @@ git diff --check
 - Alpine으로 해결할 수 없고 Debian 유지가 필수라면 즉시 구현을 중단한다.
   Bookworm security update가 나오기 전에는 CRITICAL/HIGH 0을 만들 수 없으므로
   vulnerability exception 또는 다른 minimal runtime 선택을 사용자 결정으로 올린다.
+
+## M153 Contextual RAG Answer Quality
+
+- 목표: Meeting/Project AI가 생략된 후속 질문과 질문 의도에 맞는 근거를 더 잘 회수하되 권한 선필터, 단일 회의/허용 회의 scope, citation 검증을 약화하지 않는다.
+- Core는 Meeting AI 대화를 `(meetingId, userId)`로 저장하고 최근 10개를 AI internal request에 전달한다. Project AI의 기존 `(spaceId, userId)` 이력도 같은 문맥화 검색에 사용한다.
+- AI는 원문 질문을 항상 보존하고, 이력이 있으면서 질문에 지시어나 생략 표현이 있으면 최근 사용자 질문과 결합한 contextual query를 추가한다. 두 query의 PostgreSQL hybrid 결과를 rank fusion하므로 잘못된 문맥화가 원문 검색을 제거하지 않는다.
+- 검색 intent는 summary, decision, action, general로 제한한다. intent는 검색 scope를 넓히지 않고 동일 scope 안에서 source type 우선순위와 후보 수만 조정한다.
+- 1차 구현은 기존 embedding provider와 PostgreSQL hybrid search를 재사용한다. 새 reranker 의존성이나 별도 LLM rewrite 호출은 추가하지 않는다.
+- 고정 relevance threshold는 이번 변경에서 낮추지 않는다. 먼저 contextual retrieval 회귀와 운영 `unsupportedReason` 분포를 확보한 뒤 model/scope별 calibration을 후속 결정한다.
+- transcript chunk 재설계와 전체 reindex는 이번 1차 구현에서 제외한다. contextual retrieval 평가에서 Recall 부족이 확인될 때 별도 shared data task로 수행한다.
+- 통합 순서: contract/data 문서 -> Core history persistence/request -> AI query planning/fusion -> Backend/AI 테스트 -> 전체 회귀 -> 운영 smoke.
+
+## M154 Grounded Summary-only Report Generation
+
+- 목표: 검증 가능한 요약이 있으면 명시적 decision/action item이 없는 토론·브리핑 회의도 회의록 candidate로 저장한다.
+- AI 내부 응답은 `schemaVersion: 2`, 근거가 붙은 `summary[]`, 선택적 `decisions[]`/`actionItems[]`, `droppedCount`, `unsupportedReason`을 사용하고 Markdown을 반환하지 않는다.
+- Core는 모든 항목의 source ID를 자신이 AI에 전달한 단일 meeting source와 다시 대조한다. 유효하지 않은 decision/action item은 해당 항목만 제외하고, 유효한 summary가 모두 사라진 경우에만 `UNVERIFIED_OUTPUT`으로 실패한다.
+- Core는 검증된 구조화 데이터로 summary 문자열과 Markdown을 결정적으로 조립한다. decision/action item이 없으면 해당 Markdown 절을 생략한다.
+- 공개 응답은 `unsupportedReason`과 `droppedCount`를 Frontend까지 전달하며, `unsupported=false + candidate=null`은 빈 상태가 아니라 계약 오류로 처리한다.
+- rolling deployment는 신규/구형 응답을 모두 읽는 Core를 먼저 배포하고, `schemaVersion: 2` AI를 배포한 뒤 한 release 후 v1 호환 어댑터를 제거한다. AI만 먼저 배포하지 않는다.
+- DB 컬럼이나 관계는 바뀌지 않는다. 기존 `meeting_reports.summary`, `markdown`, `source_ids`에 신규 후보부터 새 형식을 저장하므로 `data-model.md`와 ERD 변경은 없다.
+- 통합 순서: 계약 문서 -> AI schema version -> Core DTO/호환 어댑터/검증/Markdown -> Frontend 사유 표시 -> 세 영역 회귀 테스트.

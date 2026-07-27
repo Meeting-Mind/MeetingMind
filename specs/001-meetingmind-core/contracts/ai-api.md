@@ -9,7 +9,7 @@ AI API는 현재 FastAPI 서버에 prototype 구현이 있다. Target architectu
 | Status | Current Prototype, Backend-to-AI Internal |
 | Owner | AI, Backend |
 | Related requirements | FR-MBOT-01, FR-MBOT-02, FR-MBOT-03, FR-MBOT-04, FR-PBOT-01, FR-PBOT-02, FR-PBOT-03, FR-PBOT-04, FR-PBOT-05, FR-RPT-01, FR-RPT-02, FR-TASK-01, FR-TERM-01, FR-TERM-02, FR-TERM-03, FR-TERM-04, NFR-AI-01, NFR-AI-02, NFR-AZ-01, NFR-AZ-02, NFR-AZ-04, NFR-COST-01 |
-| Related data model | TranscriptSegment, MeetingReport, ProjectKnowledge, ProjectAiMessage, EmbeddingChunk, SourceReference, TaskCandidate |
+| Related data model | TranscriptSegment, MeetingReport, ProjectKnowledge, ProjectAiMessage, MeetingAiMessage, EmbeddingChunk, SourceReference, TaskCandidate |
 
 ## Common AI Rules
 
@@ -420,13 +420,19 @@ Backend가 인증과 단일 회의 검색 범위를 확정한 뒤 호출하는 i
 {
   "projectId": "space-001",
   "meetingId": "meeting-001",
-  "question": "김진수가 맡은 후속 작업이 뭐야?"
+  "question": "그래서 누가 맡기로 했어?",
+  "history": [
+    {"role": "USER", "content": "ERD 수정안에 대해 무엇을 논의했어?"},
+    {"role": "ASSISTANT", "content": "ERD 수정과 문서화 필요성을 논의했습니다."}
+  ]
 }
 ```
 
 ### Validation
 
 - `projectId`, `meetingId`, `question`: required, blank 금지
+- `history`: optional, 최대 10개. Backend가 `(meetingId, userId)`로 격리해 저장한 최근 대화만 전달한다.
+- `history`는 후속 질문을 검색 가능한 문장으로 문맥화하는 비신뢰 입력이며 사실 근거나 citation으로 사용할 수 없다.
 - AI는 active chunk와 `COMPLETED` EmbeddingJob만 검색한다.
 - legacy `sources[]`는 전환 호환 기간에만 허용하고, 값이 있으면 모든 source의 project/meeting allowlist를 검증한다.
 
@@ -471,6 +477,9 @@ Backend가 인증과 단일 회의 검색 범위를 확정한 뒤 호출하는 i
 ### Notes
 
 - 검색 결과가 없으면 LLM을 호출하지 않고 `unsupported: true`를 반환한다.
+- AI는 원문 질문과 최근 이력으로 문맥화한 질문을 각각 검색하고 결과를 합친다. 문맥화 결과가 원문 검색을 대체하지 않는다.
+- 질문 의도에 따라 `meetingSummary`/`report`, `decision`, `actionItem`, `transcript`의 우선순위를 조정하되 단일 `meetingId` SQL scope는 유지한다.
+- 검색 후보는 최종 LLM context보다 넓게 수집한 뒤 source 중복과 의도별 우선순위를 적용해 최종 근거를 선택한다.
 
 ## POST /api/project-ai/chat
 
@@ -699,10 +708,15 @@ Target Backend-to-AI:
 
 ```json
 {
-  "summary": "회의 요약",
+  "schemaVersion": 2,
+  "summary": [
+    {
+      "text": "권한 분리와 ERD 수정이 논의되었습니다.",
+      "sourceIds": ["segment-001"]
+    }
+  ],
   "decisions": [],
   "actionItems": [],
-  "markdown": "## 요약\n회의 요약",
   "sources": [
     {
       "sourceId": "segment-001",
@@ -711,7 +725,9 @@ Target Backend-to-AI:
       "text": "회의 요약 근거"
     }
   ],
+  "droppedCount": 0,
   "unsupported": false,
+  "unsupportedReason": null,
   "model": "gpt-4.1-mini"
 }
 ```
@@ -736,6 +752,8 @@ Target Backend-to-AI:
 ### Notes
 
 - 공식 저장/확정은 `meeting-api.md`의 report endpoint가 담당한다.
+- 검증 가능한 요약 문장이 하나 이상이면 결정사항과 실행 항목이 비어 있어도 지원되는 결과다.
+- AI service는 구조화 데이터만 반환하며 Markdown은 Backend가 검증된 구조화 데이터로 조립한다.
 - 기존 Frontend/AI prototype 호환용 endpoint다. Target Frontend는 직접 호출하지 않는다.
 
 ## POST /api/internal/meeting-ai/generate-report
@@ -789,8 +807,10 @@ Backend가 권한 검증과 단일 회의 source 선필터를 완료한 뒤 호�
 
 ### Response
 
-- 기존 `POST /api/meeting-ai/generate-report`의 `GenerateReportResponse`와 같다.
+- 기존 `POST /api/meeting-ai/generate-report`의 `schemaVersion: 2` `GenerateReportResponse`와 같다.
 - source가 없으면 LLM을 호출하지 않고 `unsupported=true`, `model=context-only`를 반환한다.
+- `unsupported=true`이면 `unsupportedReason`을 반환한다. `summary`가 모두 citation 검증에서 제외되면 `UNVERIFIED_OUTPUT`이다.
+- `droppedCount`는 AI service 검증에서 제외한 요약/결정/실행 항목 수다.
 
 ### Errors
 

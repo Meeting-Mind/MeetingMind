@@ -21,6 +21,7 @@ erDiagram
   USER ||--o{ MEETING_MESSAGE : writes
   USER ||--o{ MEETING_ATTACHMENT : uploads
   USER ||--o{ PROJECT_AI_MESSAGE : owns
+  USER ||--o{ MEETING_AI_MESSAGE : owns
 
   SPACE ||--o{ SPACE_MEMBER : has
   SPACE ||--o{ MEETING : owns
@@ -44,6 +45,7 @@ erDiagram
   MEETING ||--o{ MEETING_ATTACHMENT : stores
   MEETING ||--o{ MEETING_ROOM : opens
   MEETING ||--o{ EMBEDDING_CHUNK : indexes
+  MEETING ||--o{ MEETING_AI_MESSAGE : contains
 
   MEETING_SPEAKER ||--o{ TRANSCRIPT_SEGMENT : speaks
   MEETING_MESSAGE ||--o{ MEETING_ATTACHMENT : publishes
@@ -320,6 +322,15 @@ erDiagram
     datetime createdAt
   }
 
+  MEETING_AI_MESSAGE {
+    string id PK
+    string meetingId FK
+    string userId FK
+    string role
+    string content
+    datetime createdAt
+  }
+
   DOMAIN_TERM {
     string id PK
     string spaceId FK
@@ -493,6 +504,7 @@ erDiagram
 - ProjectKnowledge 수정 시 기존 chunk는 유지하고 `embeddingStatus=PENDING`으로 표시한 뒤 비동기 재색인 완료 시 새 chunk로 교체한다.
 - `PROJECT_KNOWLEDGE(spaceId, type, updatedAt)` index를 둔다.
 - `PROJECT_AI_MESSAGE`는 `(spaceId, userId, createdAt)` index를 두며, 조회와 AI 문맥은 항상 같은 인증 사용자와 Space로 제한한다.
+- `MEETING_AI_MESSAGE`는 `(meetingId, userId, createdAt)` index를 두며, 현재 요청의 Meeting ACL 확인 뒤 같은 사용자와 회의의 최근 10개만 검색 문맥으로 전달한다. 이 행은 RAG source나 citation이 아니다.
 - `DOMAIN_TERM(spaceId, term)`은 active term 기준 unique다.
 - `DOMAIN_TERM.status`는 `ACTIVE`, `ARCHIVED` 중 하나다.
 - `EMBEDDING_CHUNK(spaceId, scope, sourceType, sourceId)` index를 둔다.

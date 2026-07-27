@@ -1242,7 +1242,7 @@ None. 출력 형식은 우선 `markdown`으로 고정한다.
     "id": "report-001",
     "meetingId": "meeting-001",
     "status": "CANDIDATE",
-    "title": "Sprint Planning #12 회의록",
+    "title": "Sprint Planning #12",
     "summary": "권한 분리와 ERD 수정이 논의되었습니다.",
     "markdown": "## 요약\n권한 분리와 ERD 수정이 논의되었습니다.",
     "decisions": [],
@@ -1255,11 +1255,13 @@ None. 출력 형식은 우선 `markdown`으로 고정한다.
   },
   "sources": [],
   "unsupported": false,
+  "unsupportedReason": null,
+  "droppedCount": 0,
   "model": "gpt-4.1-mini"
 }
 ```
 
-근거가 없으면 `candidate=null`, `unsupported=true`, `model=context-only`로 반환한다.
+근거가 없으면 `candidate=null`, `unsupported=true`, `unsupportedReason=NO_EVIDENCE`, `droppedCount=0`, `model=context-only`로 반환한다.
 
 ### Errors
 
@@ -1280,6 +1282,9 @@ None. 출력 형식은 우선 `markdown`으로 고정한다.
 ### Notes
 
 - candidate는 `MeetingReport.CANDIDATE`로 임시 저장하지만 공식 report나 Project AI source로 취급하지 않는다.
+- 검증 가능한 요약 문장이 하나 이상이면 decision/action item이 비어 있어도 candidate를 저장한다.
+- Backend는 AI가 반환한 citation을 요청에 실제로 포함했던 source ID로 다시 검증하고 Markdown을 서버에서 조립한다.
+- `unsupported=false`인데 `candidate=null`인 응답은 정상 빈 상태가 아니라 계약 오류다.
 - 기존 AI prototype endpoint는 Frontend에서 직접 호출하지 않는다.
 
 ## POST /api/v1/meetings/{meetingId}/reports/{reportId}/ai-edits

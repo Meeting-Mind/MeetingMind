@@ -55,10 +55,12 @@ class ReportCandidateServiceTest {
         assertThat(response.unsupported()).isFalse();
         assertThat(response.candidate()).isNotNull();
         assertThat(response.candidate().status()).isEqualTo("CANDIDATE");
+        assertThat(response.candidate().title()).isEqualTo("Sprint Planning");
         assertThat(response.candidate().createdBy()).isEqualTo(owner.id());
         assertThat(response.candidate().sourceIds()).containsExactly(segment.id());
         assertThat(response.candidate().decisions().getFirst().sourceIds()).containsExactly(segment.id());
-        assertThat(response.candidate().actionItems().getFirst().sourceIds()).isEmpty();
+        assertThat(response.candidate().actionItems()).isEmpty();
+        assertThat(response.droppedCount()).isEqualTo(1);
         assertThat(context.gateway.captured.meetingId()).isEqualTo(meeting.meeting().id());
         assertThat(context.gateway.captured.sources())
                 .allSatisfy(source -> assertThat(source.meetingId()).isEqualTo(meeting.meeting().id()));
@@ -68,7 +70,12 @@ class ReportCandidateServiceTest {
                     assertThat(report.status()).isEqualTo(MeetingReportStatus.CANDIDATE);
                     assertThat(report.version()).isEqualTo(1);
                     assertThat(report.current()).isFalse();
-                    assertThat(report.markdown()).startsWith("## 요약");
+                    assertThat(report.markdown())
+                            .startsWith("# Sprint Planning")
+                            .contains("2026-07-13 10:00–11:00 · 참석 1명")
+                            .contains("## 요약", "## 결정", "## 근거")
+                            .doesNotContain("## 다음 할 일")
+                            .contains("[1] 김진수 00:00:01-00:00:05 — 권한 필터를 먼저 적용합니다.");
                 });
         assertThat(context.store.findAiUsageEvents(space.space().id(), FIXED_CLOCK.instant().minusSeconds(60)))
                 .singleElement()
@@ -78,6 +85,94 @@ class ReportCandidateServiceTest {
                     assertThat(event.outputTokens()).isEqualTo(84);
                     assertThat(event.totalTokens()).isEqualTo(304);
                 });
+    }
+
+    @Test
+    void generateStoresSummaryOnlyCandidateWithoutInventingDecisionsOrActions() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "정책 토론", SCHEDULED_AT, List.of()
+        );
+        MeetingSpeaker speaker = context.store.addMeetingSpeaker(
+                meeting.meeting().id(), "S1", "김진수", FIXED_CLOCK.instant()
+        );
+        TranscriptSegment segment = context.store.addTranscriptSegment(
+                meeting.meeting().id(), speaker.id(), speaker.label(), speaker.displayName(),
+                1_000, 5_000, "부동산 정책과 대출 문제를 논의했습니다.", "STT", 1
+        );
+        context.gateway.response = new ReportAiGatewayResponse(
+                2,
+                List.of(new ReportAiGatewayResponse.SummarySentence(
+                        "부동산 정책과 대출 문제를 논의했습니다.", List.of(segment.id())
+                )),
+                List.of(),
+                List.of(),
+                List.of(),
+                0,
+                false,
+                null,
+                "test-model",
+                null
+        );
+
+        ReportCandidateGenerationResponse response = context.service.generate(
+                "Bearer access-token", meeting.meeting().id()
+        );
+
+        assertThat(response.unsupported()).isFalse();
+        assertThat(response.candidate()).isNotNull();
+        assertThat(response.candidate().summary()).isEqualTo("부동산 정책과 대출 문제를 논의했습니다.");
+        assertThat(response.candidate().decisions()).isEmpty();
+        assertThat(response.candidate().actionItems()).isEmpty();
+        assertThat(response.candidate().markdown())
+                .contains("## 요약", "## 근거")
+                .doesNotContain("## 결정", "## 다음 할 일");
+    }
+
+    @Test
+    void generateNumbersEvidenceBySummaryThenDecisionCitationOrder() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "근거 순서 회의", SCHEDULED_AT, List.of()
+        );
+        MeetingSpeaker speaker = context.store.addMeetingSpeaker(
+                meeting.meeting().id(), "S1", "김진수", FIXED_CLOCK.instant()
+        );
+        TranscriptSegment first = context.store.addTranscriptSegment(
+                meeting.meeting().id(), speaker.id(), speaker.label(), speaker.displayName(),
+                1_000, 2_000, "첫 번째 발언입니다.", "STT", 1
+        );
+        TranscriptSegment second = context.store.addTranscriptSegment(
+                meeting.meeting().id(), speaker.id(), speaker.label(), speaker.displayName(),
+                3_000, 4_000, "두 번째 발언입니다.", "STT", 2
+        );
+        context.gateway.response = new ReportAiGatewayResponse(
+                2,
+                List.of(new ReportAiGatewayResponse.SummarySentence("두 번째 발언을 요약했습니다.", List.of(second.id()))),
+                List.of(new ReportAiGatewayResponse.Decision("첫 번째 발언을 결정했습니다.", null, List.of(first.id()))),
+                List.of(),
+                List.of(),
+                0,
+                false,
+                null,
+                "test-model",
+                null
+        );
+
+        ReportCandidateGenerationResponse response = context.service.generate(
+                "Bearer access-token", meeting.meeting().id()
+        );
+
+        assertThat(response.candidate().sourceIds()).containsExactly(second.id(), first.id());
+        String markdown = response.candidate().markdown();
+        assertThat(markdown).contains("두 번째 발언을 요약했습니다.[1]");
+        assertThat(markdown).contains("1. 첫 번째 발언을 결정했습니다. [2]");
+        assertThat(markdown.indexOf("[1] 김진수 00:00:03-00:00:04"))
+                .isLessThan(markdown.indexOf("[2] 김진수 00:00:01-00:00:02"));
     }
 
     @Test
@@ -111,8 +206,77 @@ class ReportCandidateServiceTest {
 
         assertThat(response.unsupported()).isTrue();
         assertThat(response.candidate()).isNull();
+        assertThat(response.unsupportedReason()).isEqualTo("NO_EVIDENCE");
         assertThat(context.store.findMeetingReports(meeting.meeting().id())).isEmpty();
         assertThat(context.gateway.captured).isNull();
+    }
+
+    @Test
+    void generateRejectsSummaryWhenEveryCitationIsOutsideBackendSources() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "정책 토론", SCHEDULED_AT, List.of()
+        );
+        MeetingSpeaker speaker = context.store.addMeetingSpeaker(
+                meeting.meeting().id(), "S1", "김진수", FIXED_CLOCK.instant()
+        );
+        context.store.addTranscriptSegment(
+                meeting.meeting().id(), speaker.id(), speaker.label(), speaker.displayName(),
+                1_000, 5_000, "회의 내용입니다.", "STT", 1
+        );
+        context.gateway.response = new ReportAiGatewayResponse(
+                2,
+                List.of(new ReportAiGatewayResponse.SummarySentence("근거 없는 요약", List.of("forged"))),
+                List.of(),
+                List.of(),
+                List.of(),
+                0,
+                false,
+                null,
+                "test-model",
+                null
+        );
+
+        ReportCandidateGenerationResponse response = context.service.generate(
+                "Bearer access-token", meeting.meeting().id()
+        );
+
+        assertThat(response.unsupported()).isTrue();
+        assertThat(response.unsupportedReason()).isEqualTo("UNVERIFIED_OUTPUT");
+        assertThat(response.droppedCount()).isEqualTo(1);
+        assertThat(context.store.findMeetingReports(meeting.meeting().id())).isEmpty();
+    }
+
+    @Test
+    void generatePropagatesAiUnsupportedReasonWithoutStoringCandidate() {
+        TestContext context = newContext("user-owner");
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "짧은 회의", SCHEDULED_AT, List.of()
+        );
+        MeetingSpeaker speaker = context.store.addMeetingSpeaker(
+                meeting.meeting().id(), "S1", "김진수", FIXED_CLOCK.instant()
+        );
+        context.store.addTranscriptSegment(
+                meeting.meeting().id(), speaker.id(), speaker.label(), speaker.displayName(),
+                1_000, 2_000, "안녕하세요.", "STT", 1
+        );
+        context.gateway.response = new ReportAiGatewayResponse(
+                2, List.of(), List.of(), List.of(), List.of(), 0,
+                true, "LOW_RELEVANCE", "test-model", null
+        );
+
+        ReportCandidateGenerationResponse response = context.service.generate(
+                "Bearer access-token", meeting.meeting().id()
+        );
+
+        assertThat(response.unsupported()).isTrue();
+        assertThat(response.unsupportedReason()).isEqualTo("LOW_RELEVANCE");
+        assertThat(response.model()).isEqualTo("test-model");
+        assertThat(context.store.findMeetingReports(meeting.meeting().id())).isEmpty();
     }
 
     @Test
@@ -168,19 +332,23 @@ class ReportCandidateServiceTest {
 
     private static ReportAiGatewayResponse supportedResponse(String sourceId) {
         return new ReportAiGatewayResponse(
-                "권한 필터를 먼저 적용하기로 했습니다.",
+                2,
+                List.of(new ReportAiGatewayResponse.SummarySentence(
+                        "권한 필터를 먼저 적용하기로 했습니다.", List.of(sourceId)
+                )),
                 List.of(new ReportAiGatewayResponse.Decision(
                         "권한 필터 선적용", "AI 호출 전에 권한을 확인합니다.", List.of(sourceId, "forged")
                 )),
                 List.of(new ReportAiGatewayResponse.ActionItem(
                         "권한 테스트 추가", "김진수", null, List.of("forged"), "candidate"
                 )),
-                "## 요약\n권한 필터를 먼저 적용하기로 했습니다.",
                 List.of(new ReportAiGatewayResponse.Source(
                         sourceId, "transcript", "Sprint Planning", "김진수", "00:00:01-00:00:05",
                         1_000, 5_000, "권한 필터를 먼저 적용합니다."
                 )),
+                0,
                 false,
+                null,
                 "test-model",
                 new AiChatResponse.AiUsageMetrics("openai", "responses", false, 1_420, 220, 84, null)
         );

@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
@@ -10,6 +11,7 @@ from app.main import (
     BackendExplainTermRequest,
     BackendGenerateReportRequest,
     BackendMeetingAiChatRequest,
+    BackendMeetingAiHistoryTurn,
     BackendMeetingAiSource,
     BackendProjectAiChatRequest,
     BackendProjectAiHistoryTurn,
@@ -47,9 +49,13 @@ from app.main import (
     http_exception_handler,
     meeting_ai_chat,
     meeting_chat,
+    merge_retrieved_sources,
     parse_report_response,
     parse_task_candidates_response,
     require_internal_caller,
+    retrieval_intent,
+    retrieval_queries,
+    retrieval_source_types,
     search_postgres_sources,
     validation_exception_handler,
 )
@@ -514,23 +520,11 @@ class FastApiHttpBoundaryTest(unittest.IsolatedAsyncioTestCase):
             )
             with patch(
                 "app.main.backend_generate_report",
-                return_value={
-                    "summary": [{"text": "QA 마감일을 확정했습니다.", "sourceIds": ["segment-1"]}],
-                    "decisions": [{"title": "QA 마감 확정", "rationale": None, "sourceIds": ["segment-1"]}],
-                    "actionItems": [],
-                    "markdown": "## 요약\nQA 마감일을 확정했습니다.",
-                    "sources": [
-                        {
-                            "sourceId": "segment-1",
-                            "type": "transcript",
-                            "title": "온프레 회의",
-                            "text": "QA 마감일을 확정했다.",
-                        }
-                    ],
-                    "unsupported": False,
-                    "unsupportedReason": None,
-                    "model": "qwen2.5-14b-instruct-awq",
-                },
+                return_value=json.loads(
+                    (Path(__file__).resolve().parents[2]
+                     / "specs/001-meetingmind-core/contracts/fixtures/report-ai-success-v2.json")
+                    .read_text(encoding="utf-8")
+                ),
             ) as backend_report:
                 ok_status, headers, ok_payload = await asgi_json_request(
                     "POST",
@@ -543,6 +537,7 @@ class FastApiHttpBoundaryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing_payload["code"], "AI_INTERNAL_UNAUTHORIZED")
         self.assertEqual(ok_status, 200)
         backend_report.assert_called_once()
+        self.assertEqual(ok_payload["schemaVersion"], 2)
         # summary는 문장 배열이며 문장마다 근거가 붙는다.
         self.assertEqual(ok_payload["summary"], [{"text": "QA 마감일을 확정했습니다.", "sourceIds": ["segment-1"]}])
         # markdown은 더 이상 AI가 만들지 않는다. Backend가 조립한다.
@@ -899,6 +894,75 @@ class RagMappingTest(unittest.TestCase):
 
 
 class RagSafetyTest(unittest.TestCase):
+    def test_contextual_retrieval_keeps_raw_question_and_adds_recent_history(self):
+        history = [
+            BackendMeetingAiHistoryTurn(role="USER", content="민주당과 오세훈 후보의 정책 차이는?"),
+            BackendMeetingAiHistoryTurn(role="ASSISTANT", content="부동산 정책과 대출 문제를 논의했습니다."),
+        ]
+
+        queries = retrieval_queries("그래서 어떻게 하기로 했어?", history)
+
+        self.assertEqual(queries[0], "그래서 어떻게 하기로 했어?")
+        self.assertEqual(len(queries), 2)
+        self.assertIn("민주당과 오세훈 후보", queries[1])
+        self.assertIn("현재 질문: 그래서 어떻게 하기로 했어?", queries[1])
+
+    def test_intent_priority_reranks_structured_decision_without_losing_relevance_score(self):
+        transcript = AiSource(
+            sourceId="segment-001", type="transcript", text="검토했습니다.", relevanceScore=0.8
+        )
+        decision = AiSource(
+            sourceId="decision-001", type="decision", text="추가 검토하기로 결정했습니다.", relevanceScore=0.78
+        )
+        priority = retrieval_source_types("meeting", retrieval_intent("무엇을 하기로 결정했어?"))
+
+        merged = merge_retrieved_sources([[transcript, decision]], priority, limit=2)
+
+        self.assertEqual([source.sourceId for source in merged], ["decision-001", "segment-001"])
+        self.assertEqual(merged[0].relevanceScore, 0.78)
+
+    def test_follow_up_work_question_prioritizes_action_item_sources(self):
+        intent = retrieval_intent("그럼 후속 작업은 뭐야?")
+
+        self.assertEqual(intent, "action")
+        self.assertEqual(retrieval_source_types("meeting", intent)[0], "actionItem")
+
+    def test_meeting_follow_up_uses_contextual_query_but_cites_only_retrieved_source(self):
+        payload = BackendMeetingAiChatRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            question="그래서?",
+            history=[
+                BackendMeetingAiHistoryTurn(role="USER", content="오세훈 후보의 부동산 정책을 어떻게 평가했어?"),
+                BackendMeetingAiHistoryTurn(role="ASSISTANT", content="대출과 세금 정책을 논의했습니다."),
+            ],
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    meetingId="meeting-001",
+                    text="오세훈 후보의 부동산 정책을 어떻게 평가할지 논의했고 추가 검토가 필요하다고 했습니다.",
+                )
+            ],
+        )
+
+        with patch(
+            "app.main.call_openai_text",
+            return_value=(
+                '{"supported":true,"answer":"추가 검토가 필요하다고 논의했습니다.",'
+                '"sourceIds":["segment-001"]}',
+                "test-model",
+                None,
+            ),
+        ) as call_openai_text:
+            response = backend_meeting_chat(payload)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual([source.sourceId for source in response.sources], ["segment-001"])
+        user_content = call_openai_text.call_args.kwargs["user_content"]
+        self.assertIn("이전 대화 - 비신뢰 문맥", user_content)
+        self.assertIn("오세훈 후보의 부동산 정책", user_content)
+
     def test_meeting_scope_excludes_other_meetings_and_project_knowledge(self):
         chunks = [
             RagChunk(
@@ -1367,6 +1431,42 @@ class RagSafetyTest(unittest.TestCase):
         self.assertEqual(response.sources[0].sourceId, "segment-001")
         self.assertEqual(response.sources[0].startMs, 1000)
 
+    def test_backend_generate_report_accepts_grounded_summary_without_decisions_or_actions(self):
+        payload = BackendGenerateReportRequest(
+            projectId="space-001",
+            meetingId="meeting-001",
+            title="정책 토론",
+            sources=[
+                BackendMeetingAiSource(
+                    sourceId="segment-001",
+                    type="transcript",
+                    meetingId="meeting-001",
+                    text="부동산 정책과 대출 문제를 논의했습니다.",
+                )
+            ],
+        )
+
+        with patch(
+            "app.main.call_openai_text",
+            return_value=(
+                '{"supported":true,"summary":[{"text":"부동산 정책과 대출 문제를 논의했습니다.",'
+                '"sourceIds":["segment-001"]}],"decisions":[],"actionItems":[]}',
+                "test-model",
+                None,
+            ),
+        ) as call_openai_text:
+            response = backend_generate_report(payload)
+
+        self.assertEqual(response.schemaVersion, 2)
+        self.assertFalse(response.unsupported)
+        self.assertEqual([item.text for item in response.summary], ["부동산 정책과 대출 문제를 논의했습니다."])
+        self.assertEqual(response.decisions, [])
+        self.assertEqual(response.actionItems, [])
+        self.assertIn(
+            "decisions와 actionItems가 비어 있어도 supported를 true",
+            call_openai_text.call_args.kwargs["developer_content"],
+        )
+
     def test_backend_generate_report_keeps_edit_context_untrusted(self):
         payload = BackendGenerateReportRequest(
             projectId="space-001", meetingId="meeting-001", title="주간 회의",
@@ -1781,6 +1881,46 @@ class RagSafetyTest(unittest.TestCase):
         self.assertIn("이전 답변", user_content)
         self.assertIn("비신뢰 문맥", user_content)
         self.assertIn("knowledge-001", user_content)
+
+    def test_backend_project_follow_up_searches_raw_and_contextual_queries_in_the_same_scope(self):
+        payload = BackendProjectAiChatRequest(
+            projectId="space-001",
+            question="그래서?",
+            allowedMeetingIds=["meeting-001"],
+            history=[
+                BackendProjectAiHistoryTurn(role="USER", content="베타 출시 일정은 언제야?"),
+                BackendProjectAiHistoryTurn(role="ASSISTANT", content="9월 출시 일정이 논의됐습니다."),
+            ],
+        )
+        retrieved = AiSource(
+            sourceId="knowledge-001",
+            type="projectKnowledge",
+            text="베타 출시는 9월 18일입니다.",
+            relevanceScore=0.91,
+        )
+
+        with (
+            patch("app.main.search_postgres_sources", side_effect=[[], [retrieved]]) as search,
+            patch(
+                "app.main.call_openai_text",
+                return_value=(
+                    '{"supported":true,"answer":"베타 출시는 9월 18일입니다.",'
+                    '"sourceIds":["knowledge-001"]}',
+                    "test-model",
+                    None,
+                ),
+            ),
+        ):
+            response = backend_project_chat(payload)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(search.call_count, 2)
+        raw_request = search.call_args_list[0].args[0]
+        contextual_request = search.call_args_list[1].args[0]
+        self.assertEqual(raw_request.query, "그래서?")
+        self.assertIn("베타 출시 일정", contextual_request.query)
+        self.assertEqual(raw_request.allowedMeetingIds, ("meeting-001",))
+        self.assertEqual(contextual_request.allowedMeetingIds, ("meeting-001",))
 
     def test_untrusted_source_format_applies_context_limit_without_reordering(self):
         sources = [

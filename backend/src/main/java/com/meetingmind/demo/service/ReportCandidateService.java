@@ -4,6 +4,7 @@ import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.authz.MeetingAccessPolicy;
+import com.meetingmind.demo.authz.ParticipantAccessStatus;
 import com.meetingmind.demo.domain.MeetingReport;
 import com.meetingmind.demo.domain.MeetingReportStatus;
 import com.meetingmind.demo.domain.TranscriptSegment;
@@ -12,12 +13,17 @@ import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayResponse;
 import com.meetingmind.demo.dto.ai.ReportCandidateGenerationResponse;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -44,9 +50,14 @@ public class ReportCandidateService {
 
     public ReportCandidateGenerationResponse generate(String authorizationHeader, String meetingId) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
-        meetingAccessPolicy.requireEditAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
+        MeetingAccessPolicy.MeetingAccessContext accessContext = workspaceDomainService.meetingAccessContext(
+                meetingId, user.id()
+        );
+        meetingAccessPolicy.requireEditAccess(accessContext);
         WorkspaceDomainService.MeetingAiContext context = workspaceDomainService.meetingAiContext(meetingId);
-        return generateCandidate(user, context, context.meeting().title() + " 회의록", null, null);
+        return generateCandidate(
+                user, context, activeParticipantCount(accessContext), context.meeting().title(), null, null
+        );
     }
 
     public ReportCandidateGenerationResponse edit(
@@ -56,23 +67,34 @@ public class ReportCandidateService {
             String instruction
     ) {
         AuthUserResponse user = authService.currentUser(authorizationHeader);
-        meetingAccessPolicy.requireEditAccess(workspaceDomainService.meetingAccessContext(meetingId, user.id()));
+        MeetingAccessPolicy.MeetingAccessContext accessContext = workspaceDomainService.meetingAccessContext(
+                meetingId, user.id()
+        );
+        meetingAccessPolicy.requireEditAccess(accessContext);
         MeetingReport report = workspaceDomainService.meetingReportDetail(user.id(), meetingId, reportId);
         WorkspaceDomainService.MeetingAiContext context = workspaceDomainService.meetingAiContext(meetingId);
         String currentReportContent = hasText(report.markdown()) ? report.markdown() : report.summary();
-        return generateCandidate(user, context, report.title(), instruction.trim(), currentReportContent);
+        return generateCandidate(
+                user,
+                context,
+                activeParticipantCount(accessContext),
+                report.title(),
+                instruction.trim(),
+                currentReportContent
+        );
     }
 
     private ReportCandidateGenerationResponse generateCandidate(
             AuthUserResponse user,
             WorkspaceDomainService.MeetingAiContext context,
+            int participantCount,
             String title,
             String instruction,
             String currentReportMarkdown
     ) {
         List<ReportAiGatewayRequest.SourceContext> requestSources = sourceRows(context);
         if (requestSources.isEmpty()) {
-            return new ReportCandidateGenerationResponse(null, List.of(), true, "context-only");
+            return unsupportedResponse("NO_EVIDENCE", 0, "context-only");
         }
         ReportAiGatewayResponse aiResponse;
         try {
@@ -87,55 +109,99 @@ public class ReportCandidateService {
             ));
         } catch (AiGatewayException exception) {
             throw new AuthorizationException(
-                HttpStatus.SERVICE_UNAVAILABLE,
+                    HttpStatus.SERVICE_UNAVAILABLE,
                     "AI_PROVIDER_UNAVAILABLE",
-                "AI provider 응답을 받을 수 없습니다."
+                    "AI provider 응답을 받을 수 없습니다."
             );
         }
         recordUsage(user.id(), context, aiResponse);
 
         Set<String> allowedSourceIds = requestSources.stream()
                 .map(ReportAiGatewayRequest.SourceContext::sourceId)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Set<String> returnedSourceIds = aiResponse.sources().stream()
-                .map(ReportAiGatewayResponse.Source::sourceId)
-                .filter(allowedSourceIds::contains)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        List<ReportAiGatewayResponse.Source> responseSources = requestSources.stream()
-                .filter(source -> returnedSourceIds.contains(source.sourceId()))
-                .map(this::toResponseSource)
-                .toList();
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         if (aiResponse.unsupported()) {
-            return new ReportCandidateGenerationResponse(null, responseSources, true, aiResponse.model());
-        }
-        if (!hasText(aiResponse.summary()) || !hasText(aiResponse.markdown())) {
-            throw new AuthorizationException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "AI_PROVIDER_UNAVAILABLE",
-                    "AI provider 응답을 받을 수 없습니다."
+            return unsupportedResponse(
+                    normalizeUnsupportedReason(aiResponse.unsupportedReason(), "MODEL_UNSUPPORTED"),
+                    aiResponse.droppedCount(),
+                    aiResponse.model()
             );
         }
+
+        List<ReportAiGatewayResponse.SummarySentence> summaryRows = validSummaryRows(
+                aiResponse.summary(), allowedSourceIds
+        );
+        List<ReportAiGatewayResponse.Decision> decisions = validDecisionRows(
+                aiResponse.decisions(), allowedSourceIds
+        );
+        List<ReportAiGatewayResponse.ActionItem> actions = validActionRows(
+                aiResponse.actionItems(), allowedSourceIds
+        );
+        int coreDroppedCount = aiResponse.summary().size() - summaryRows.size()
+                + aiResponse.decisions().size() - decisions.size()
+                + aiResponse.actionItems().size() - actions.size();
+        int droppedCount = (int) Math.min(
+                Integer.MAX_VALUE,
+                (long) Math.max(0, aiResponse.droppedCount()) + coreDroppedCount
+        );
+        if (summaryRows.isEmpty()) {
+            return unsupportedResponse("UNVERIFIED_OUTPUT", droppedCount, aiResponse.model());
+        }
+
+        List<String> citedIds = citedSourceIds(summaryRows, decisions, actions);
+        Map<String, ReportAiGatewayRequest.SourceContext> sourcesById = new LinkedHashMap<>();
+        requestSources.forEach(source -> sourcesById.putIfAbsent(source.sourceId(), source));
+        List<ReportAiGatewayResponse.Source> responseSources = citedIds.stream()
+                .map(sourcesById::get)
+                .filter(java.util.Objects::nonNull)
+                .map(this::toResponseSource)
+                .toList();
         List<String> sourceIds = responseSources.stream()
                 .map(ReportAiGatewayResponse.Source::sourceId)
                 .toList();
         if (sourceIds.isEmpty()) {
-            return new ReportCandidateGenerationResponse(null, List.of(), true, "context-only");
+            return unsupportedResponse("UNVERIFIED_OUTPUT", droppedCount, aiResponse.model());
         }
+        String summary = summaryRows.stream()
+                .map(ReportAiGatewayResponse.SummarySentence::text)
+                .collect(Collectors.joining("\n"));
+        String markdown = renderMarkdown(
+                context, participantCount, title, summaryRows, decisions, actions, responseSources
+        );
         MeetingReport candidate = workspaceDomainService.saveReportCandidate(
                 context.meeting().id(),
                 user.id(),
                 title,
-                aiResponse.summary().trim(),
-                aiResponse.markdown().trim(),
-                decisionRows(aiResponse.decisions(), returnedSourceIds),
-                actionRows(aiResponse.actionItems(), returnedSourceIds),
+                summary,
+                markdown,
+                decisionRows(decisions),
+                actionRows(actions),
                 sourceIds
         );
         return new ReportCandidateGenerationResponse(
                 toCandidate(candidate),
                 responseSources,
                 false,
+                null,
+                droppedCount,
                 aiResponse.model()
+        );
+    }
+
+    private String normalizeUnsupportedReason(String value, String fallback) {
+        return switch (value == null ? "" : value) {
+            case "NO_EVIDENCE", "LOW_RELEVANCE", "MODEL_UNSUPPORTED", "UNVERIFIED_OUTPUT" -> value;
+            default -> fallback;
+        };
+    }
+
+    private ReportCandidateGenerationResponse unsupportedResponse(String reason, int droppedCount, String model) {
+        return new ReportCandidateGenerationResponse(
+                null,
+                List.of(),
+                true,
+                reason,
+                Math.max(0, droppedCount),
+                hasText(model) ? model : "context-only"
         );
     }
 
@@ -193,39 +259,241 @@ public class ReportCandidateService {
         );
     }
 
-    private List<MeetingReport.ReportDecision> decisionRows(
+    private List<ReportAiGatewayResponse.SummarySentence> validSummaryRows(
+            List<ReportAiGatewayResponse.SummarySentence> summary,
+            Set<String> allowedSourceIds
+    ) {
+        return summary.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(item -> new ReportAiGatewayResponse.SummarySentence(
+                        item.text() == null ? null : item.text().trim(),
+                        allowedIds(item.sourceIds(), allowedSourceIds)
+                ))
+                .filter(item -> hasText(item.text()) && !item.sourceIds().isEmpty())
+                .toList();
+    }
+
+    private List<ReportAiGatewayResponse.Decision> validDecisionRows(
             List<ReportAiGatewayResponse.Decision> decisions,
             Set<String> allowedSourceIds
     ) {
         return decisions.stream()
-                .filter(decision -> hasText(decision.title()))
-                .map(decision -> new MeetingReport.ReportDecision(
-                        "report-decision-" + UUID.randomUUID(),
-                        decision.title().trim(),
-                        blankToNull(decision.rationale()),
-                        allowedIds(decision.sourceIds(), allowedSourceIds)
+                .filter(java.util.Objects::nonNull)
+                .map(item -> new ReportAiGatewayResponse.Decision(
+                        item.title() == null ? null : item.title().trim(),
+                        blankToNull(item.rationale()),
+                        allowedIds(item.sourceIds(), allowedSourceIds)
                 ))
+                .filter(item -> hasText(item.title()) && !item.sourceIds().isEmpty())
                 .toList();
     }
 
-    private List<MeetingReport.ReportActionItem> actionRows(
+    private List<ReportAiGatewayResponse.ActionItem> validActionRows(
             List<ReportAiGatewayResponse.ActionItem> actions,
             Set<String> allowedSourceIds
     ) {
         return actions.stream()
-                .filter(action -> hasText(action.title()))
+                .filter(java.util.Objects::nonNull)
+                .map(item -> new ReportAiGatewayResponse.ActionItem(
+                        item.title() == null ? null : item.title().trim(),
+                        blankToNull(item.assignee()),
+                        blankToNull(item.dueDate()),
+                        allowedIds(item.sourceIds(), allowedSourceIds),
+                        "candidate"
+                ))
+                .filter(item -> hasText(item.title()) && !item.sourceIds().isEmpty())
+                .toList();
+    }
+
+    private List<String> citedSourceIds(
+            List<ReportAiGatewayResponse.SummarySentence> summary,
+            List<ReportAiGatewayResponse.Decision> decisions,
+            List<ReportAiGatewayResponse.ActionItem> actions
+    ) {
+        return Stream.of(
+                        summary.stream().flatMap(item -> item.sourceIds().stream()),
+                        decisions.stream().flatMap(item -> item.sourceIds().stream()),
+                        actions.stream().flatMap(item -> item.sourceIds().stream())
+                )
+                .flatMap(stream -> stream)
+                .distinct()
+                .toList();
+    }
+
+    private List<MeetingReport.ReportDecision> decisionRows(List<ReportAiGatewayResponse.Decision> decisions) {
+        return decisions.stream()
+                .map(decision -> new MeetingReport.ReportDecision(
+                        "report-decision-" + UUID.randomUUID(),
+                        decision.title(),
+                        decision.rationale(),
+                        decision.sourceIds()
+                ))
+                .toList();
+    }
+
+    private List<MeetingReport.ReportActionItem> actionRows(List<ReportAiGatewayResponse.ActionItem> actions) {
+        return actions.stream()
                 .map(action -> new MeetingReport.ReportActionItem(
                         "report-action-" + UUID.randomUUID(),
-                        action.title().trim(),
-                        blankToNull(action.assignee()),
-                        blankToNull(action.dueDate()),
-                        allowedIds(action.sourceIds(), allowedSourceIds)
+                        action.title(),
+                        action.assignee(),
+                        action.dueDate(),
+                        action.sourceIds()
                 ))
                 .toList();
     }
 
     private List<String> allowedIds(List<String> values, Set<String> allowedSourceIds) {
-        return values.stream().filter(allowedSourceIds::contains).distinct().toList();
+        if (values == null) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(allowedSourceIds::contains)
+                .distinct()
+                .toList();
+    }
+
+    private String renderMarkdown(
+            WorkspaceDomainService.MeetingAiContext context,
+            int participantCount,
+            String title,
+            List<ReportAiGatewayResponse.SummarySentence> summary,
+            List<ReportAiGatewayResponse.Decision> decisions,
+            List<ReportAiGatewayResponse.ActionItem> actions,
+            List<ReportAiGatewayResponse.Source> sources
+    ) {
+        Map<String, Integer> citationNumbers = new LinkedHashMap<>();
+        for (ReportAiGatewayResponse.Source source : sources) {
+            citationNumbers.putIfAbsent(source.sourceId(), citationNumbers.size() + 1);
+        }
+
+        StringBuilder markdown = new StringBuilder();
+        markdown.append("# ").append(markdownText(title)).append("\n\n");
+        markdown.append(meetingMetadata(context, participantCount)).append("\n\n");
+        markdown.append("## 요약\n\n");
+        summary.forEach(item -> markdown
+                .append(markdownText(item.text()))
+                .append(citations(item.sourceIds(), citationNumbers))
+                .append('\n'));
+
+        if (!decisions.isEmpty()) {
+            markdown.append("\n## 결정\n\n");
+            for (int index = 0; index < decisions.size(); index++) {
+                ReportAiGatewayResponse.Decision decision = decisions.get(index);
+                markdown.append(index + 1)
+                        .append(". ")
+                        .append(markdownText(decision.title()))
+                        .append(' ')
+                        .append(citations(decision.sourceIds(), citationNumbers))
+                        .append('\n');
+                if (hasText(decision.rationale())) {
+                    markdown.append("   ").append(markdownText(decision.rationale())).append('\n');
+                }
+            }
+        }
+
+        if (!actions.isEmpty()) {
+            markdown.append("\n## 다음 할 일\n\n");
+            for (ReportAiGatewayResponse.ActionItem action : actions) {
+                markdown.append("- [ ] ")
+                        .append(markdownText(action.title()))
+                        .append(' ')
+                        .append(citations(action.sourceIds(), citationNumbers))
+                        .append('\n')
+                        .append("  담당 ")
+                        .append(hasText(action.assignee()) ? markdownText(action.assignee()) : "미정")
+                        .append(" · 기한 ")
+                        .append(hasText(action.dueDate()) ? markdownText(action.dueDate()) : "미정")
+                        .append('\n');
+            }
+        }
+
+        markdown.append("\n## 근거\n\n");
+        for (ReportAiGatewayResponse.Source source : sources) {
+            Integer number = citationNumbers.get(source.sourceId());
+            markdown.append('[').append(number).append("] ")
+                    .append(sourceLabel(source));
+            String time = sourceTime(source);
+            if (hasText(time)) {
+                markdown.append(' ').append(markdownText(time));
+            }
+            markdown.append(" — ").append(markdownText(source.text())).append('\n');
+        }
+        markdown.append("\n---\nMeetingMind가 이 회의의 검증된 근거만 사용해 생성했습니다.");
+        return markdown.toString();
+    }
+
+    private String meetingMetadata(WorkspaceDomainService.MeetingAiContext context, int participantCount) {
+        OffsetDateTime start = context.meeting().startedAt() == null
+                ? context.meeting().scheduledAt()
+                : context.meeting().startedAt();
+        OffsetDateTime end = context.meeting().endedAt() == null
+                ? context.meeting().scheduledEndAt()
+                : context.meeting().endedAt();
+        String participantText = "참석 %d명".formatted(Math.max(0, participantCount));
+        if (start == null) {
+            return participantText;
+        }
+        DateTimeFormatter dateTime = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        String range = start.format(dateTime);
+        if (end != null) {
+            range += start.toLocalDate().equals(end.toLocalDate())
+                    ? "–" + end.format(DateTimeFormatter.ofPattern("HH:mm"))
+                    : "–" + end.format(dateTime);
+        }
+        return range + " · " + participantText;
+    }
+
+    private String citations(List<String> sourceIds, Map<String, Integer> citationNumbers) {
+        return sourceIds.stream()
+                .map(citationNumbers::get)
+                .filter(java.util.Objects::nonNull)
+                .map(number -> "[" + number + "]")
+                .collect(Collectors.joining());
+    }
+
+    private String sourceLabel(ReportAiGatewayResponse.Source source) {
+        if (hasText(source.speaker())) {
+            return markdownText(source.speaker());
+        }
+        return switch (source.type() == null ? "" : source.type()) {
+            case "decision" -> "기존 결정사항";
+            case "actionItem" -> "기존 실행 항목";
+            default -> hasText(source.title()) ? markdownText(source.title()) : "회의 근거";
+        };
+    }
+
+    private String sourceTime(ReportAiGatewayResponse.Source source) {
+        if (hasText(source.time())) {
+            return source.time();
+        }
+        if (source.startMs() == null) {
+            return null;
+        }
+        return source.endMs() == null
+                ? formatTimestamp(source.startMs())
+                : formatTimeRange(source.startMs(), source.endMs());
+    }
+
+    private String markdownText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim()
+                .replaceAll("\\s+", " ")
+                .replace("\\", "\\\\")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("*", "\\*")
+                .replace("_", "\\_")
+                .replace("`", "\\`");
+    }
+
+    private int activeParticipantCount(MeetingAccessPolicy.MeetingAccessContext accessContext) {
+        return (int) accessContext.participants().stream()
+                .filter(participant -> participant.accessStatus() == ParticipantAccessStatus.ACTIVE)
+                .count();
     }
 
     private ReportCandidateGenerationResponse.Candidate toCandidate(MeetingReport report) {

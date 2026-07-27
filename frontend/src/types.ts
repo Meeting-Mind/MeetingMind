@@ -801,6 +801,8 @@ export interface ReportCandidateResponse {
   candidate: StoredReportCandidate | null;
   sources: AiSource[];
   unsupported: boolean;
+  unsupportedReason: UnsupportedReason | null;
+  droppedCount: number;
   model: string;
 }
 

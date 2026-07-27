@@ -48,7 +48,10 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | 태스크 | 태스크 카드 | TaskCard | 칸반 보드에서 관리되는 확정된 작업 단위. | Space 또는 Meeting에서 생성될 수 있고 담당자/마감일/상태를 가진다. | task_cards, /spaces/{spaceId}/tasks | ActionItem과 혼용 시 전환 규칙 명시 | FR-KAN-01~08, FR-TASK-03 |
 | 태스크 | 담당자 | Assignee | TaskCard 또는 ActionItem을 수행할 책임자로 지정된 사용자. | 보통 SpaceMember/User를 참조한다. | assigneeId | Owner와 혼용 금지 | FR-KAN-05, FR-TASK-01 |
 | 용어 | 용어 사전 | DomainDictionary | 등록 용어와 설명을 저장하고 자막/AI 설명에 우선 사용하는 사전. | Space 또는 전역 범위로 둘 수 있다. | domain_terms, /domain-terms | 유비쿼터스 랭귀지 문서와 혼용 금지 | FR-TERM-01~05, NFR-COST-01 |
-| 용어 | 등록 용어 | DomainTerm | 용어 사전에 저장된 단어와 정의. | DomainDictionary에 속한다. | domain_terms | 미등록 용어와 혼용 금지 | FR-TERM-02 |
+| 용어 | 등록 용어 | DomainTerm | 용어 사전에 저장된 단어와 정의. Space가 직접 등록하며 같은 용어가 공용 사전에 있어도 Space 정의를 우선한다. | DomainDictionary에 속한다. | domain_terms | 미등록 용어, SharedDomainTerm과 혼용 금지 | FR-TERM-02, FR-TERM-05 |
+| 용어 | 공용 용어 | SharedDomainTerm | 관리자가 분야별로 미리 등록해 모든 Space에 제공하는 전역 기본 용어와 정의. | GlossaryCategory에 속하며 Space를 소유자로 갖지 않는다. | shared_domain_terms | DomainTerm과 혼용 금지. Space가 등록한 용어로 취급하지 않는다. | FR-TERM-02, NFR-COST-01 |
+| 용어 | 용어 분야 | GlossaryCategory | 공용 용어를 업무 분야 기준으로 묶은 분류. IT/소프트웨어, 금융, 의료처럼 산업이나 직무 단위로 나눈다. | SharedDomainTerm을 포함하고 Space 구독의 단위가 된다. | glossary_categories | 지식 폴더(KnowledgeFolder), 태그와 혼용 금지 | FR-TERM-02, FR-TERM-04 |
+| 용어 | 분야 구독 | SpaceGlossaryCategory | Space가 어떤 용어 분야를 제공받을지 정한 설정. 구독하지 않은 분야의 용어는 조회 단계에서 제외한다. | Space와 GlossaryCategory의 조인 엔티티. 행이 없으면 해당 분야를 구독 중으로 본다. | space_glossary_categories | 개인 설정으로 오해 금지. Space 단위로만 적용한다. | FR-TERM-04, NFR-AZ-01 |
 | 알림 | 알림 | Notification | 회의 초대, 일정 시작, 권한 변경 같은 이벤트를 사용자에게 전달하는 메시지. | User 또는 SpaceMember를 대상으로 한다. | notifications | Invitation과 혼용 금지 | FR-CAL-05, FR-MREG-03 |
 | 감사 | 감사 로그 | AuditLog | 권한 부여/회수, 오너 이양, 데이터 삭제 등 주요 행위의 추적 기록. | actor, target, before/after, occurredAt을 가진다. | audit_logs | 일반 앱 로그와 혼용 금지 | FR-ACL-06, NFR-LOG-02 |
 | 데이터 | 보존 정책 | RetentionPolicy | 음성 원본, STT 원문, 삭제 데이터의 보관 기간과 삭제 기준. | Space 또는 Meeting 단위 정책값으로 적용 가능. | retention_policy, retentionUntil | 백업 정책과 혼용 금지 | POL-RETAIN-01~02 |

@@ -159,7 +159,11 @@ class MigrationIntegrationTest {
                             has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'SELECT'),
                             has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'DELETE'),
                             has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'INSERT'),
-                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'UPDATE')
+                            has_table_privilege('meetingmind_core_app', 'chunk_source_segments', 'UPDATE'),
+                            has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'SELECT'),
+                            has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'INSERT'),
+                            has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'UPDATE'),
+                            has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'DELETE')
                         """)) {
                     assertThat(rows.next()).isTrue();
                     assertThat(rows.getBoolean(1)).isTrue();
@@ -168,6 +172,10 @@ class MigrationIntegrationTest {
                     assertThat(rows.getBoolean(4)).isTrue();
                     assertThat(rows.getBoolean(5)).isFalse();
                     assertThat(rows.getBoolean(6)).isFalse();
+                    assertThat(rows.getBoolean(7)).isTrue();
+                    assertThat(rows.getBoolean(8)).isTrue();
+                    assertThat(rows.getBoolean(9)).isFalse();
+                    assertThat(rows.getBoolean(10)).isFalse();
                 }
                 try (var rows = statement.executeQuery("""
                         select auth_user_id

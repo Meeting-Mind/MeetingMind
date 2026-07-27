@@ -2456,3 +2456,25 @@
 - 양성 대조를 함께 둔 이유: GUEST가 자기 회의를 읽을 수 있어야 셋업이 유효하다. 셋업이 잘못돼 모든 접근이 거부되는 상태는 거부 단정만으로는 통과처럼 보이지만 아무것도 증명하지 못한다. 따라서 `meetingDetail(guest, invitedMeeting)`이 성공하는 것을 먼저 단정한다.
 - 범위 한계: 브라우저 기반 수동 확인은 여전히 남는다. 이 테스트가 고정하는 것은 서버 권한 경계이며, UI가 그 경계를 우회하는 경로(예: 클라이언트에만 있는 필터)는 다루지 않는다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.GuestSpaceAclNegativeIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 210건/실패 0/skip 3(provider-gated)다.
+
+## M153 Contextual RAG Answer Quality
+
+- 문제 원인: Meeting AI는 대화형 UI와 달리 현재 질문만 AI에 전달해 `그래서`, `그럼`, `그거` 같은 후속 질문의 검색어가 사라졌다. Project AI는 최근 이력을 최종 모델 prompt에만 넣고 검색 query에는 반영하지 않았다. 두 경로 모두 고정 top-k 결과를 바로 사용해 질문 의도와 다른 source가 상위에 올 가능성이 있었다.
+- Core: `MeetingAiMessage`를 `(meetingId, userId)`로 영속화하고 회의 ACL을 확인한 뒤 같은 사용자·회의의 최근 10개 turn만 internal Meeting AI request에 전달한다. 성공한 응답의 USER/ASSISTANT 쌍만 저장한다. 이력은 RAG 근거나 citation이 아닌 비신뢰 query 문맥이다.
+- AI retrieval: 원문 질문은 항상 검색한다. 최근 이력이 있고 질문에 후속 지시어가 있을 때 최근 사용자 질문을 결합한 contextual query를 추가한다. Meeting은 query별 후보 12개에서 최종 8개, Project는 query별 후보 16개에서 최종 8개를 rank fusion·중복 제거한다. summary/decision/action/general intent에 맞춰 동일 scope 안에서 source type 우선순위를 조정한다.
+- 안전 경계: Meeting의 단일 `meetingId`, Project의 `projectId + allowedMeetingIds`, Backend 선행 ACL, citation source 검증, `LOW_RELEVANCE` evidence gate는 그대로 유지했다. 대화 이력이나 모델의 과거 답변은 source가 될 수 없으며 relevance threshold를 낮추지 않았다.
+- 관측성: 질문이나 이력 원문을 남기지 않고 `scope`, `intent`, `queryCount`, `contextualQuery`, `candidateCount`, `resultCount`, `sourceTypeCount`만 구조화 로그에 허용했다.
+- migration 충돌 방지: 운영에 이미 적용된 V29의 정확한 SQL(blob `735068c4e90481088bbbc25b382eea6edc57cfee`)을 `V29__grant_core_transcript_projection_delete.sql`로 복원했다. 동시에 추가된 공용 용어 사전 V30은 수정하지 않고 Meeting AI 이력 테이블을 V31로 배정했다. `meetingmind_core_app`에는 `SELECT, INSERT`만 부여하고 `UPDATE, DELETE`는 부여하지 않았다.
+- 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest` 1건 통과. `cd backend && ./gradlew test` 223건 / 실패 0 / skip 15. 전체 저장소를 read-only mount한 AI 이미지에서 `python -m unittest discover -s tests` 216건 / 실패 0 / skip 7. 후속 질문 raw/contextual 검색, 사용자·회의 이력 격리, action/decision source 우선순위, 동일 Project scope, citation 제한을 신규 회귀 테스트로 고정했다.
+- 남은 운영 검증: 이번 단계는 외부 provider 과금이 없는 자동 회귀까지 완료했다. 배포 후 실제 한국어 질문 세트로 전후 적중률과 `unsupportedReason` 분포를 측정한 뒤 threshold calibration 또는 transcript chunk 재설계·재색인을 별도 결정한다(`T460`).
+
+## M154 Grounded Summary-only Report Generation
+
+- 원인: AI service는 근거가 붙은 `summary[]`와 선택적인 decision/action item을 반환하도록 이미 바뀌었지만, Core의 `ReportAiGatewayResponse`는 구형 `summary: String`과 AI 생성 `markdown`을 계속 요구했다. 배포된 구형 provider 정책은 명시적 결정이나 할 일이 없으면 `unsupported`로 판정해, 같은 저장 전사를 Meeting AI는 검색할 수 있어도 회의록 후보는 만들지 못했다.
+- 계약: AI 내부 응답을 `schemaVersion: 2`로 고정하고 `summary[]`, `decisions[]`, `actionItems[]`, `sources[]`, `droppedCount`, `unsupported`, `unsupportedReason`, `model`, `usage`를 사용한다. Markdown은 AI 응답에서 제거하고 Core가 만든다. 같은 JSON fixture를 AI HTTP boundary와 Java gateway 역직렬화 테스트가 함께 읽어 schema drift를 막는다.
+- AI: provider prompt에 "검증 가능한 summary가 하나 이상이면 decision/action item이 비어 있어도 supported=true"를 명시했다. `GenerateReportResponse`는 `schemaVersion: 2`를 반환한다. 요약이 모두 citation 검증에서 제외된 경우만 `UNVERIFIED_OUTPUT`이다.
+- Core: AI에 실제로 전달한 single-meeting source ID를 기준으로 summary/decision/action citation을 다시 검증한다. 잘못된 decision/action은 해당 항목만 제외하고 `droppedCount`에 더하며, summary가 하나 이상 남으면 candidate를 저장한다. summary 텍스트와 Markdown, 각주 번호, 근거 목록은 동일한 검증 결과에서 조립한다. 빈 decision/action 절은 만들지 않는다.
+- rolling compatibility: Core gateway는 구형 문자열 요약 v1과 전환 중 생성된 versionless 구조화 응답을 읽어 v2 DTO로 정규화한다. 명시된 미지원 schema version은 거부한다. 배포 순서는 호환 Core -> v2 AI이며, 실제 전환 확인 후 다음 release에서 v1 어댑터를 제거한다(`T466`). 이번 작업에서는 배포하지 않았다.
+- Frontend: `unsupportedReason`별로 근거 없음, 낮은 관련성, 모델 미지원, citation 검증 실패를 구분한다. 결정/할 일 부재 문구를 제거했고, `unsupported=false + candidate=null` 또는 `unsupported=true + candidate!=null`은 계약 오류로 처리한다. 제외된 항목 수가 있으면 생성/편집 메시지에 알린다.
+- 데이터 영향: DB 컬럼과 관계는 바뀌지 않는다. `meeting_reports.summary`, `markdown`, `source_ids`에 신규 candidate부터 새 형식이 저장되므로 migration, `data-model.md`, ERD 변경은 없다. 참석자 수는 권한 검사에서 이미 읽은 active `MeetingParticipant` 목록을 재사용해 Markdown metadata에 넣으며 추가 조회나 공용 context 변경은 만들지 않았다.
+- 검증: AI Docker 고정 환경 `python -m unittest discover -s tests` 217건 / 실패 0 / skip 7. Backend `./gradlew test` 233건 / 실패 0 / skip 15. Frontend `npm test` 101건 / 실패 0, `npm run build` 통과. `python3 -m compileall app tests/test_meeting_ai.py`와 `git diff --check`도 통과했다. 신규 회귀는 summary-only 성공, forged summary 거부, 개별 항목 drop, 근거 번호 순서, unsupported reason 전달, v1/versionless v2 rolling 호환, unknown schema 거부, Frontend reason 문구를 포함한다.

@@ -7,6 +7,8 @@ public record ReportCandidateGenerationResponse(
         Candidate candidate,
         List<ReportAiGatewayResponse.Source> sources,
         boolean unsupported,
+        String unsupportedReason,
+        int droppedCount,
         String model
 ) {
     public ReportCandidateGenerationResponse {
