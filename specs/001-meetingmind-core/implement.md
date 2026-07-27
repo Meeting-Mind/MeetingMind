@@ -2456,3 +2456,34 @@
 - 양성 대조를 함께 둔 이유: GUEST가 자기 회의를 읽을 수 있어야 셋업이 유효하다. 셋업이 잘못돼 모든 접근이 거부되는 상태는 거부 단정만으로는 통과처럼 보이지만 아무것도 증명하지 못한다. 따라서 `meetingDetail(guest, invitedMeeting)`이 성공하는 것을 먼저 단정한다.
 - 범위 한계: 브라우저 기반 수동 확인은 여전히 남는다. 이 테스트가 고정하는 것은 서버 권한 경계이며, UI가 그 경계를 우회하는 경로(예: 클라이언트에만 있는 필터)는 다루지 않는다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.GuestSpaceAclNegativeIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 210건/실패 0/skip 3(provider-gated)다.
+
+## M153 Multi-participant Live STT
+
+- 원인: 참가자마다 `LocalTrackPublished`에서 자기 microphone track으로 start를 호출하지만 Core와 remote
+  STT가 회의 단위 `MeetingTranscript=PROCESSING`을 중복 시작으로 판단해 409를 반환했다. host가 회의
+  시작 직후 먼저 publish하므로 사실상 host session만 생성됐다.
+- 시작 수정: `WorkspaceDomainService.startMeetingTranscript`와 remote
+  `TranscriptionCoordinator.startTranscript`는 기존 `PROCESSING` row를 저장/audit 갱신 없이 그대로
+  반환한다. `MeetingTranscriptionController`도 remote status가 `PROCESSING`이면 Core aggregate를 공유한
+  뒤 참가자의 `trackId`와 `displayName`으로 새 gateway session/Track Egress를 시작한다.
+- 종료 수정: in-process registry는 sessions map을, remote registry는 sessions map과 shared DB의
+  `ACTIVE`/`STOPPING` session row를 함께 확인한다. remote는 현재 row를 먼저 `COMPLETED`/`FAILED`로
+  갱신해 자기 자신을 활성 session 집계에서 제외한다. 다른 session이 남아 있으면 aggregate 상태를
+  유지하고 마지막 session만 complete/fail을 수행한다. stale reaper와 cross-Pod stop도 같은 규칙을
+  사용하며, stop controller의 선제 complete와 FAILED session의 PROCESSING→COMPLETED 보정은 제거했다.
+- 동시 저장 수정: remote `appendSegment`, `completeTranscript`, `failTranscript`는
+  `meeting_transcripts` row의 pessimistic write lock을 획득한다. 참가자별 final segment가 동시에 도착해도
+  sequence count와 insert가 회의별로 직렬화되고 마지막 session terminal 전이도 중복 실행되지 않는다.
+- 계약/범위: Frontend, API request/response shape, DB schema와 권한 정책은 바꾸지 않았다. 계약 문서의
+  "회의당 활성 session 1개" 및 "개별 stop 즉시 COMPLETED" 설명을 다중 session aggregate 규칙으로
+  갱신했다. 실제 speaker displayName 전달은 이미 구현돼 있어 추가 변경하지 않았다.
+- 자동 검증:
+  - `cd backend && ./gradlew test` → 성공.
+  - `cd stt && ./gradlew test` → 성공.
+  - `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest` → 격리
+    PostgreSQL 5435에서 성공.
+  - 신규 회귀는 Core/remote PROCESSING 멱등성, 두 session 중 첫 stop/fail 후 aggregate 유지, 마지막
+    stop/fail terminal 전이, cross-Pod persisted row, stale reaper, controller 비선제 완료를 포함한다.
+- 남은 검증: 수정 이미지를 배포한 뒤 실제 두 사용자 microphone 발화가 모두 같은 dialogue에 서로 다른
+  speaker로 쌓이고, 한 명 퇴장 후 남은 참가자의 자막이 지속되며, 마지막 session 종료 때만 transcript가
+  terminal이 되는 NonProd smoke가 필요하다. 따라서 `T459`는 아직 완료 처리하지 않는다.

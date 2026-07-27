@@ -65,14 +65,7 @@ public class MeetingTranscriptionController {
         workspaceDomainService.requireTranscriptManagement(user.id(), meetingId);
         String providerId = sttProvider.providerId();
         TranscriptionStatusGatewayResponse remoteStatus = transcriptionGateway.status(meetingId).orElse(null);
-        if (remoteStatus != null && remoteStatus.status() == TranscriptStatus.PROCESSING) {
-            throw new AuthorizationException(
-                    HttpStatus.CONFLICT,
-                    "TRANSCRIPTION_ALREADY_PROCESSING",
-                    "이미 진행 중인 전사가 있습니다."
-            );
-        }
-        MeetingTranscript transcript = remoteStatus == null
+        MeetingTranscript transcript = remoteStatus == null || remoteStatus.status() == TranscriptStatus.PROCESSING
                 ? workspaceDomainService.startMeetingTranscript(user.id(), meetingId, providerId)
                 : workspaceDomainService.resumeMeetingTranscript(user.id(), meetingId, providerId);
 

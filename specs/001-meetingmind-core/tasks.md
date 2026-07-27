@@ -1144,3 +1144,17 @@ Perl이 없는 공식 Python 3.12.13 / Alpine 3.24 runtime으로 전환해 NonPr
 | T436 | [x] | ci/security-gate | Codex | Codex | T435 | `.github/workflows/ci.yml` | AI image에 한해 `--ignore-unfixed` 없는 Trivy HIGH/CRITICAL gate를 적용해 ECR과 다른 false-pass를 막는다. | local final image 전체 HIGH/CRITICAL 0, CI AI command 정적 검토와 `git diff --check` 통과. |
 | T437 | [x] | ecr/security-scan | 사용자+Codex | Codex | T436, 사용자 push 승인 | ECR `meetingmind-nonprod-v2-ai`, 새 immutable tag | 사용자 승인 후 local-scanned single ARM64 manifest를 push하고 returned child digest로 scan을 조회한다. | ECR tag `c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`가 동일 digest `sha256:c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`로 등록됐고 scan `COMPLETE`, findings `[]`, severity `{}`이다. |
 | T438 | [x] | docs/closeout | Codex | Codex | T437 | `specs/001-meetingmind-core/{tasks,implement}.md`, `.specify/memory/session-handoff.local.md` | 실제 image digest, size, test, Trivy, ECR 결과와 남은 MEDIUM/LOW를 기록한다. | 실행 결과가 문서와 일치하고 Terraform/ECS/runtime 미변경 및 미실행 사유가 남아 있다. |
+
+## M153 Multi-participant Live STT
+
+### Milestone Goal
+
+회의 참가자별 microphone track egress/STT session을 동시에 허용하고, 마지막 활성 session의 종료
+전까지 회의 단위 transcript가 `PROCESSING`을 유지되도록 한다.
+
+| ID | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T456 | [x] | backend/stt-start | Backend owner | Codex | T302 | `WorkspaceDomainService.java`, `MeetingTranscriptionController.java`, 관련 테스트 | Core `PROCESSING` start를 멱등 처리하고 remote의 선제 409를 제거한다. | 두 번째 참가자가 기존 transcript를 공유하면서 자기 track용 gateway session을 시작한다. |
+| T457 | [x] | backend/stt-lifecycle | Backend owner | Codex | T456 | Backend/STT `SttSessionRegistry.java`, `InternalTranscriptionController.java`, 관련 테스트 | 다른 활성 session이 남아 있으면 개별 stop/fail/reaper가 aggregate를 terminal로 바꾸지 않게 한다. | in-process, remote, cross-Pod row 경로에서 첫 session 종료 후 PROCESSING이 유지되고 마지막 session만 terminal 전이를 만든다. |
+| T458 | [x] | stt/segment-order | STT owner | Codex | T456 | `TranscriptionCoordinator.java`, `MeetingTranscriptRepository.java`, 관련 테스트 | 여러 session의 final segment sequence 계산을 회의 transcript row lock으로 직렬화한다. | sequence 조회·저장이 같은 pessimistic-write transaction 경계 안에서 수행된다. |
+| T459 | [ ] | verification/stt | Integration owner | Codex | T456,T457,T458 | Backend/STT 테스트, `specs/001-meetingmind-core/{contracts/live-stt-api,implement}.md` | 단위·통합 테스트와 2-user NonProd smoke 결과를 기록한다. | 자동 회귀가 통과하고 실제 두 참가자 발화/첫 퇴장 후 지속/마지막 퇴장 완료가 확인된다. |

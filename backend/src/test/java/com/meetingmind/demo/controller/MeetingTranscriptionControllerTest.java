@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -126,6 +127,45 @@ class MeetingTranscriptionControllerTest {
         assertThat(response.sessionId()).isEqualTo("session-2");
         verify(workspaceDomainService).requireTranscriptManagement("host-1", "meeting-1");
         verify(workspaceDomainService).resumeMeetingTranscript("host-1", "meeting-1", "soniox-realtime");
+    }
+
+    @Test
+    void startsAnotherParticipantSessionAgainstAnExistingProcessingTranscript() {
+        AuthService authService = mock(AuthService.class);
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        TranscriptionGateway transcriptionGateway = mock(TranscriptionGateway.class);
+        SttProvider sttProvider = mock(SttProvider.class);
+        MeetingTranscriptionController controller = new MeetingTranscriptionController(
+                authService, workspaceDomainService, transcriptionGateway, sttProvider
+        );
+        AuthUserResponse user = new AuthUserResponse("member-1", "member@meetingmind.test", "Member", null, "active");
+        Instant startedAt = Instant.parse("2026-07-27T03:00:00Z");
+        MeetingTranscript processing = new MeetingTranscript(
+                "meeting-1", TranscriptStatus.PROCESSING, "soniox-realtime", "ko-KR",
+                startedAt, null, null, null, false, null, startedAt, startedAt
+        );
+        when(authService.currentUser("Bearer token")).thenReturn(user);
+        when(sttProvider.providerId()).thenReturn("soniox-realtime");
+        when(transcriptionGateway.status("meeting-1")).thenReturn(Optional.of(
+                new TranscriptionStatusGatewayResponse("meeting-1", TranscriptStatus.PROCESSING)
+        ));
+        when(workspaceDomainService.startMeetingTranscript(
+                "member-1", "meeting-1", "soniox-realtime")).thenReturn(processing);
+        when(workspaceDomainService.meetingRoomName("meeting-1")).thenReturn("space-room-space-1");
+        when(transcriptionGateway.start(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new TranscriptionHandle("session-member", "egress-member"));
+
+        var response = controller.start(
+                "Bearer token",
+                "meeting-1",
+                new com.meetingmind.demo.dto.StartMeetingTranscriptionRequest("realtime", "track-member")
+        );
+
+        assertThat(response.sessionId()).isEqualTo("session-member");
+        verify(workspaceDomainService).startMeetingTranscript("member-1", "meeting-1", "soniox-realtime");
+        verify(workspaceDomainService, never()).resumeMeetingTranscript(anyString(), anyString(), anyString());
+        verify(transcriptionGateway).start(org.mockito.ArgumentMatchers.argThat(command ->
+                command.trackId().equals("track-member") && command.participantDisplayName().equals("Member")));
     }
 
     @Test

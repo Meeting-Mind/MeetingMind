@@ -98,22 +98,39 @@ class InternalTranscriptionControllerTest {
     }
 
     @Test
-    void stopReconcilesAProcessingTranscriptWhenTheEgressSessionAlreadyFailed() {
+    void stopKeepsAProcessingTranscriptWhenOneEgressSessionAlreadyFailed() {
         Instant now = Instant.now();
         TranscriptionSession session = new TranscriptionSession(
                 "session-1", "meeting-1", "room-1", "track-1", "egress-1",
                 TranscriptionSessionStatus.FAILED, "request-1", now, now);
         MeetingTranscript processing = transcript("meeting-1", TranscriptStatus.PROCESSING, now, null);
-        MeetingTranscript completed = transcript("meeting-1", TranscriptStatus.COMPLETED, now, now);
         when(sessionRepository.findById("session-1")).thenReturn(Optional.of(session));
         when(transcriptionCoordinator.getTranscript("meeting-1")).thenReturn(processing);
-        when(transcriptionCoordinator.completeTranscript("meeting-1")).thenReturn(completed);
 
         var response = controller.stop("session-1", "meeting-1");
 
-        assertThat(response.status()).isEqualTo("COMPLETED");
-        verify(transcriptionCoordinator).completeTranscript("meeting-1");
+        assertThat(response.status()).isEqualTo("PROCESSING");
+        verify(transcriptionCoordinator, never()).completeTranscript("meeting-1");
         verifyNoInteractions(liveKitEgressService);
+    }
+
+    @Test
+    void stopDelegatesAggregateCompletionToTheSessionRegistry() {
+        Instant now = Instant.now();
+        TranscriptionSession session = new TranscriptionSession(
+                "session-1", "meeting-1", "room-1", "track-1", "egress-1",
+                TranscriptionSessionStatus.ACTIVE, "request-1", now, now);
+        MeetingTranscript processing = transcript("meeting-1", TranscriptStatus.PROCESSING, now, null);
+        when(sessionRepository.findById("session-1")).thenReturn(Optional.of(session));
+        when(sessionRegistry.getEgressId("session-1")).thenReturn("egress-1");
+        when(transcriptionCoordinator.getTranscript("meeting-1")).thenReturn(processing);
+
+        var response = controller.stop("session-1", "meeting-1");
+
+        assertThat(response.status()).isEqualTo("PROCESSING");
+        verify(sessionRegistry).markStopping("session-1");
+        verify(sessionRegistry).close("session-1");
+        verify(transcriptionCoordinator, never()).completeTranscript("meeting-1");
     }
 
     @Test

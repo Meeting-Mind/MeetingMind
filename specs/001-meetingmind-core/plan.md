@@ -878,3 +878,19 @@ git diff --check
 - Alpine으로 해결할 수 없고 Debian 유지가 필수라면 즉시 구현을 중단한다.
   Bookworm security update가 나오기 전에는 CRITICAL/HIGH 0을 만들 수 없으므로
   vulnerability exception 또는 다른 minimal runtime 선택을 사용자 결정으로 올린다.
+
+## M153 Multi-participant Live STT
+
+- 목표: host가 먼저 선점한 회의 단위 `PROCESSING` transcript를 모든 참가자의 track별 STT session이
+  공유하고, 참가자 한 명의 퇴장이나 provider 실패가 남은 참가자의 전사를 종료하지 않게 한다.
+- 시작 결정: Core와 remote STT의 `PROCESSING` 재호출은 기존 transcript를 그대로 반환하는 멱등
+  동작이다. 세션과 LiveKit Track Egress는 요청별로 새로 생성한다.
+- 종료 결정: in-process는 registry map, remote는 registry map과 `transcription_sessions`의
+  `ACTIVE`/`STOPPING` row를 함께 확인한다. 현재 session row를 terminal로 갱신한 뒤 다른 활성 session이
+  없을 때만 aggregate를 `COMPLETED` 또는 `FAILED`로 전환한다.
+- 동시 저장 결정: remote `appendSegment`는 `meeting_transcripts` row를 pessimistic write lock으로
+  잡은 transaction 안에서 다음 sequence를 계산해 `(meeting_id, sequence)` 충돌을 방지한다.
+- 변경 경계: Frontend의 participant별 `trackId`/`sessionId` 관리는 유지한다. API shape, DB schema,
+  권한 모델과 provider 선택은 변경하지 않는다.
+- 검증: Core/remote start 멱등성, 2개 session 중 첫 stop/fail 후 `PROCESSING` 유지, 마지막 stop/fail의
+  terminal 전이, cross-Pod persisted-session 확인, remote stop controller의 비선제 완료를 자동화한다.

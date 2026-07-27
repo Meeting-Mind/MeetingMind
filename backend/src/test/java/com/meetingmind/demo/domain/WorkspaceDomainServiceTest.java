@@ -808,6 +808,27 @@ class WorkspaceDomainServiceTest {
     }
 
     @Test
+    void meetingParticipantsShareTheExistingProcessingTranscript() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult meeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Shared STT", SCHEDULED_AT, List.of()
+        );
+        context.service.addMeetingParticipant(owner.id(), meeting.meeting().id(), member.id(), "VIEWER", "member");
+
+        MeetingTranscript hostTranscript = context.service.startMeetingTranscript(
+                owner.id(), meeting.meeting().id(), "soniox-realtime");
+        MeetingTranscript memberTranscript = context.service.startMeetingTranscript(
+                member.id(), meeting.meeting().id(), "soniox-realtime");
+
+        assertThat(memberTranscript).isSameAs(hostTranscript);
+        assertThat(memberTranscript.status()).isEqualTo(TranscriptStatus.PROCESSING);
+    }
+
+    @Test
     void remoteTranscriptProjectionIsIdempotentAndReindexesOnlyChangedCompletedSnapshot() {
         CountingWorkspaceStore store = new CountingWorkspaceStore();
         WorkspaceDomainService service = new WorkspaceDomainService(store, new SpaceAccessPolicy(), FIXED_CLOCK);

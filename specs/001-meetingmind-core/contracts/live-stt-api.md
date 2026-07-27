@@ -275,7 +275,9 @@ None.
 - `trackId`: `realtime`일 때 required. LiveKit track egress 대상이다.
 - Core는 인증된 참여자의 `displayName`을 Core→STT 내부 시작 요청에 전달한다. STT session UUID나
   egress/track 식별자는 사용자용 화자명으로 저장하거나 표시하지 않는다.
-- 대상 회의에 대해 동시에 `PROCESSING` 상태인 전사 작업이 있으면 시작을 거부한다.
+- 같은 회의의 참가자는 각자 microphone `trackId`로 독립 STT session/track egress를 시작할 수 있다.
+  회의 단위 `MeetingTranscript`가 이미 `PROCESSING`이면 새 row를 만들거나 409로 거부하지 않고 기존
+  aggregate를 공유한다.
 
 ### Response
 
@@ -308,24 +310,29 @@ None.
 ### Notes
 
 - `Transcript.status`는 `PENDING` -> `PROCESSING` -> `COMPLETED` 또는 `FAILED`로 전이한다.
-- `PROCESSING` 시작 시 `meeting_transcripts`를 저장한다. provider callback의 segment는 즉시 저장하고, stop/provider complete 시 `COMPLETED`로 전환한다.
+- 첫 `PROCESSING` 시작 시 `meeting_transcripts`를 저장한다. 참가자별 provider callback의 segment는 같은
+  transcript에 speaker별로 즉시 저장하고, 마지막 활성 session이 stop/provider complete될 때만
+  `COMPLETED`로 전환한다.
 - Realtime STT가 별도 서비스인 `remote` gateway mode에서는 위 status/segment의 authoritative row가 STT DB에 있다. Core `/dialogue`는 사용자와 Meeting ACL을 먼저 검증한 뒤 Core→STT mTLS 내부 API의 transcript/status/partials를 반환한다. Core DB의 시작 row만 조회해 빈 segment를 성공 응답으로 반환하지 않는다.
 - 회의방 `Leave`는 Meeting 종료가 아니다. 현재 브라우저가 소유한 track egress/STT session만 정상
-  종료하고, 재참여 시 새 LiveKit microphone track으로 새 session을 시작한다. 기존 segment를 보존한
-  채 terminal transcript를 `PROCESSING`으로 재개하며, 동일 회의의 활성 session이 있으면 중복 시작은
-  계속 거부한다.
-- LiveKit Egress WebSocket이 정상 종료되면 마지막 audio를 provider에 flush한 뒤 target STT 세션을 종료해 `COMPLETED`로 전환한다. legacy `/api/stt/*` 세션은 기존 수동 transcript 조회 호환을 위해 registry에서 제거하지 않는다.
+  종료하고, 재참여 시 새 LiveKit microphone track으로 새 session을 시작한다. 다른 참가자의 활성
+  session과 기존 segment는 유지한다.
+- LiveKit Egress WebSocket이 정상 종료되면 마지막 audio를 provider에 flush한 뒤 해당 STT session만
+  종료한다. 같은 meeting의 다른 `ACTIVE`/`STOPPING` session이 없을 때만 aggregate transcript를
+  `COMPLETED`로 전환한다. legacy `/api/stt/*` 세션은 기존 수동 transcript 조회 호환을 위해 registry에서 제거하지 않는다.
 - legacy `/api/stt/*` HTTP controller는 기본 `local`/`db` runtime에 등록하지 않는다. 수동 smoke에서만 `legacy-stt` profile을 명시적으로 함께 활성화하며, 제품 UI와 운영 환경은 target Meeting API만 사용한다.
 - `COMPLETED` 전환은 DB trigger로 `TRANSCRIPT_COMPLETED` embedding job을 하나 생성한다. segment마다 job을 생성하지 않는다.
 - 분리 배포의 stop 성공 후 Core는 같은 meeting의 `GET /internal/v1/meetings/{meetingId}/transcript`를 mTLS로 즉시 조회해 report/task/AI/RAG용 derived projection을 하나의 Core DB transaction으로 교체한다.
 - projection은 STT `speakerId`, `segmentId`, sequence와 시간 범위를 보존하고 같은 snapshot 재시도를 no-op으로 처리한다. 이미 `COMPLETED`된 snapshot의 내용이 바뀐 경우만 `FULL_REINDEX`를 생성한다.
 - STT stop은 terminal session에 멱등이므로 STT 완료 후 Core projection 전에 장애가 난 경우 동일 stop 요청이 snapshot projection을 다시 시도한다. STT와 Core DB 사이에 FK나 cross-DB runtime read를 추가하지 않는다.
 - LiveKit `stopEgress`의 HTTP 412는 `FAILED_PRECONDITION`과 `EGRESS_FAILED`/`EGRESS_COMPLETE`/`EGRESS_ABORTED`가 함께 확인된 경우에만 이미 종료된 멱등 성공으로 처리한다. 다른 412 또는 5xx는 성공으로 완화하지 않는다.
-- durable session이 `FAILED`지만 transcript가 아직 `PROCESSING`인 재시도는 저장된 segment를 보존한 채 transcript를 `COMPLETED`로 조정하고, Core가 authoritative snapshot projection과 embedding enqueue를 계속 수행한다.
+- 개별 durable session이 `FAILED`여도 같은 meeting의 다른 활성 session이 있으면 aggregate transcript는
+  `PROCESSING`을 유지한다. 마지막 활성 session 자체가 실패한 경우에만 `FAILED`로 전환한다.
 
 ## POST /api/v1/meetings/{meetingId}/transcription/{sessionId}/stop
 
-실시간 STT 세션을 종료하고 저장된 transcript를 `COMPLETED`로 전환한다.
+현재 참가자의 실시간 STT 세션을 종료한다. 다른 활성 session이 없을 때만 저장된 transcript를
+`COMPLETED`로 전환한다.
 
 ### Status
 
@@ -354,7 +361,8 @@ None.
 - `403 MEETING_ACCESS_DENIED`: 종료 권한 없음
 - `404 STT_SESSION_NOT_FOUND`: 세션이 없거나 다른 회의 세션
 - `409 TRANSCRIPTION_NOT_PROCESSING`: 이미 완료되었거나 실패한 전사
-- `503 STT_PROVIDER_UNAVAILABLE`: LiveKit Egress 종료 실패. session은 `FAILED`로 전환해 무한 `PROCESSING` 상태를 남기지 않는다.
+- `503 STT_PROVIDER_UNAVAILABLE`: LiveKit Egress 종료 실패. 해당 session은 `FAILED`로 전환하되 다른
+  활성 session이 있으면 공유 transcript는 `PROCESSING`을 유지한다.
 
 ## POST /api/v1/meetings/{meetingId}/transcription/stop
 
