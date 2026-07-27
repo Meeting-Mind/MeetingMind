@@ -28,6 +28,20 @@ resource "terraform_data" "runtime_gate" {
     }
 
     precondition {
+      condition     = !contains(var.runtime_enabled_services, "bff") || length(var.auth_google_client_ids) > 0
+      error_message = "A browser-facing BFF runtime requires at least one Auth Google OAuth client ID."
+    }
+
+    precondition {
+      condition = (
+        !var.enable_deployment_smoke ||
+        !contains(var.runtime_enabled_services, "realtime-stt") ||
+        var.stt_public_ws_base_url != null
+      )
+      error_message = "Deployment-smoke Realtime STT requires stt_public_ws_base_url for LiveKit Egress audio delivery."
+    }
+
+    precondition {
       condition     = !contains(var.runtime_enabled_services, "ai") || var.ai_envoy_image_digest != null
       error_message = "Enabling the AI runtime requires an immutable mirrored ai-envoy sha256 digest."
     }
@@ -290,7 +304,7 @@ module "alb" {
   public_subnet_ids          = module.network.public_subnet_ids
   security_group_id          = module.security.alb_security_group_id
   enable_http_smoke_listener = var.enable_http_smoke_listener
-  enable_stt_smoke_route     = var.release_gates_acknowledged
+  enable_stt_smoke_route     = var.enable_deployment_smoke || var.release_gates_acknowledged
 
   depends_on = [
     terraform_data.deployment_smoke_gate,
@@ -306,13 +320,13 @@ module "frontend_edge" {
   name_prefix   = local.name_prefix
   alb_dns_name  = module.alb.dns_name
   alb_origin_id = "${local.name_prefix}-bff-alb"
+  custom_domain = var.frontend_custom_domain
   tags          = local.common_tags
 
   depends_on = [
     terraform_data.deployment_smoke_gate,
     terraform_data.release_gate,
     terraform_data.smoke_gate,
-    module.alb,
   ]
 }
 
@@ -370,6 +384,11 @@ module "task_definition" {
     each.key == "ai" && local.internal_mtls_enabled
     ? ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8001"]
     : []
+  )
+  background_workers = (
+    each.key == "ai"
+    ? { ai-worker = ["python", "-m", "app.embedding_worker"] }
+    : {}
   )
 }
 

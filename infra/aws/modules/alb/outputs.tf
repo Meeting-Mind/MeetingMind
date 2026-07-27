@@ -27,3 +27,13 @@ output "target_group_arn_suffixes" {
     realtime-stt = aws_lb_target_group.stt.arn_suffix
   }
 }
+
+output "stt_target_configuration" {
+  value = {
+    protocol              = aws_lb_target_group.stt.protocol
+    port                  = aws_lb_target_group.stt.port
+    health_check_protocol = one(aws_lb_target_group.stt.health_check).protocol
+    health_check_port     = one(aws_lb_target_group.stt.health_check).port
+    health_check_path     = one(aws_lb_target_group.stt.health_check).path
+  }
+}

@@ -71,7 +71,8 @@ public class InternalTranscriptionController {
         transcriptionCoordinator.startTranscript(request.meetingId(), sttProvider.providerId(), request.retentionUntil());
 
         String sessionId = sessionRegistry.createMeetingSession(
-                request.meetingId(), request.roomName(), request.trackId(), request.requestId());
+                request.meetingId(), request.roomName(), request.trackId(), request.requestId(),
+                request.participantDisplayName());
         try {
             String publicWsBaseUrl = DotenvConfig.require("PUBLIC_WS_BASE_URL");
             String token = egressTokenService.issue(sessionId);
@@ -99,8 +100,22 @@ public class InternalTranscriptionController {
         meetingId = session.meetingId();
 
         switch (session.status()) {
-            case COMPLETED, FAILED -> {
+            case COMPLETED -> {
                 return new TranscriptionStatusResponse(meetingId, transcriptionCoordinator.getTranscript(meetingId).status().name());
+            }
+            case FAILED -> {
+                var transcript = transcriptionCoordinator.getTranscript(meetingId);
+                if (transcript.status() == com.meetingmind.stt.domain.TranscriptStatus.PROCESSING) {
+                    try {
+                        transcript = transcriptionCoordinator.completeTranscript(meetingId);
+                    } catch (ResponseStatusException alreadyTerminal) {
+                        if (alreadyTerminal.getStatusCode() != HttpStatus.CONFLICT) {
+                            throw alreadyTerminal;
+                        }
+                        transcript = transcriptionCoordinator.getTranscript(meetingId);
+                    }
+                }
+                return new TranscriptionStatusResponse(meetingId, transcript.status().name());
             }
             default -> { }
         }

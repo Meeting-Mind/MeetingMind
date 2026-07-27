@@ -169,6 +169,14 @@ public abstract class WorkspaceStore {
 
     abstract List<TranscriptSegment> findTranscriptSegments(String meetingId);
 
+    abstract void replaceTranscriptProjection(
+            String meetingId,
+            List<MeetingSpeaker> speakers,
+            List<TranscriptSegment> segments
+    );
+
+    abstract void enqueueMeetingEmbeddingJob(String meetingId, String reason);
+
     abstract MeetingReport saveMeetingReport(MeetingReport report);
 
     abstract Optional<MeetingReport> findMeetingReportById(String reportId);

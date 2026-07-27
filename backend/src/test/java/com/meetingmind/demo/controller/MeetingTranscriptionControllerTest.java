@@ -19,11 +19,15 @@ import com.meetingmind.demo.domain.TranscriptStatus;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.gateway.InProcessTranscriptionGateway;
 import com.meetingmind.demo.gateway.TranscriptionGateway;
+import com.meetingmind.demo.gateway.TranscriptionHandle;
+import com.meetingmind.demo.dto.stt.MeetingTranscriptGatewayResponse;
+import com.meetingmind.demo.dto.stt.TranscriptionStatusGatewayResponse;
 import com.meetingmind.demo.service.LiveKitEgressService;
 import com.meetingmind.demo.service.SttProvider;
 import com.meetingmind.demo.service.SttSessionRegistry;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -88,6 +92,43 @@ class MeetingTranscriptionControllerTest {
     }
 
     @Test
+    void resumesACompletedRemoteTranscriptWithTheNewMicrophoneTrackAfterRejoin() {
+        AuthService authService = mock(AuthService.class);
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        TranscriptionGateway transcriptionGateway = mock(TranscriptionGateway.class);
+        SttProvider sttProvider = mock(SttProvider.class);
+        MeetingTranscriptionController controller = new MeetingTranscriptionController(
+                authService, workspaceDomainService, transcriptionGateway, sttProvider
+        );
+        AuthUserResponse user = new AuthUserResponse("host-1", "host@meetingmind.test", "Host", null, "active");
+        Instant startedAt = Instant.parse("2026-07-27T03:00:00Z");
+        MeetingTranscript resumed = new MeetingTranscript(
+                "meeting-1", TranscriptStatus.PROCESSING, "soniox-realtime", "ko-KR",
+                startedAt, null, null, null, false, null, startedAt, startedAt
+        );
+        when(authService.currentUser("Bearer token")).thenReturn(user);
+        when(sttProvider.providerId()).thenReturn("soniox-realtime");
+        when(transcriptionGateway.status("meeting-1")).thenReturn(Optional.of(
+                new TranscriptionStatusGatewayResponse("meeting-1", TranscriptStatus.COMPLETED)
+        ));
+        when(workspaceDomainService.resumeMeetingTranscript("host-1", "meeting-1", "soniox-realtime"))
+                .thenReturn(resumed);
+        when(workspaceDomainService.meetingRoomName("meeting-1")).thenReturn("space-room-space-1");
+        when(transcriptionGateway.start(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new TranscriptionHandle("session-2", "egress-2"));
+
+        var response = controller.start(
+                "Bearer token",
+                "meeting-1",
+                new com.meetingmind.demo.dto.StartMeetingTranscriptionRequest("realtime", "track-2")
+        );
+
+        assertThat(response.sessionId()).isEqualTo("session-2");
+        verify(workspaceDomainService).requireTranscriptManagement("host-1", "meeting-1");
+        verify(workspaceDomainService).resumeMeetingTranscript("host-1", "meeting-1", "soniox-realtime");
+    }
+
+    @Test
     void returnsPersistedDialogueWhileTranscriptionIsProcessing() {
         AuthService authService = mock(AuthService.class);
         WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
@@ -121,6 +162,47 @@ class MeetingTranscriptionControllerTest {
     }
 
     @Test
+    void returnsAuthoritativeRemoteDialogueWhenSttRunsAsASeparateService() {
+        AuthService authService = mock(AuthService.class);
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        TranscriptionGateway transcriptionGateway = mock(TranscriptionGateway.class);
+        MeetingTranscriptionController controller = new MeetingTranscriptionController(
+                authService,
+                workspaceDomainService,
+                transcriptionGateway,
+                mock(SttProvider.class)
+        );
+        AuthUserResponse user = new AuthUserResponse("viewer-1", "viewer@meetingmind.test", "Viewer", null, "active");
+        Instant now = Instant.parse("2026-07-27T02:00:00Z");
+        MeetingTranscript coreTranscript = new MeetingTranscript(
+                "meeting-1", TranscriptStatus.PROCESSING, "soniox-realtime", null,
+                now, null, null, null, false, null, now, now
+        );
+        when(authService.currentUser("Bearer token")).thenReturn(user);
+        when(workspaceDomainService.meetingTranscript(user.id(), "meeting-1"))
+                .thenReturn(new WorkspaceDomainService.MeetingTranscriptView(coreTranscript, List.of()));
+        when(transcriptionGateway.transcript("meeting-1")).thenReturn(Optional.of(
+                new MeetingTranscriptGatewayResponse(
+                        "meeting-1",
+                        TranscriptStatus.PROCESSING,
+                        List.of(new MeetingTranscriptGatewayResponse.Segment(
+                                "segment-remote-1", "speaker-1", "stt-session-1", "Viewer",
+                                100, 900, "STT 서비스에 저장된 자막입니다."
+                        ))
+                )
+        ));
+        when(transcriptionGateway.partials("meeting-1")).thenReturn(List.of());
+
+        var response = controller.dialogue("Bearer token", "meeting-1");
+
+        assertThat(response.status()).isEqualTo("PROCESSING");
+        assertThat(response.rows()).extracting(row -> row.text())
+                .containsExactly("STT 서비스에 저장된 자막입니다.");
+        verify(workspaceDomainService).meetingTranscript(user.id(), "meeting-1");
+        verify(transcriptionGateway).transcript("meeting-1");
+    }
+
+    @Test
     void marksTranscriptFailedWhenEgressStopFails() {
         AuthService authService = mock(AuthService.class);
         WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
@@ -147,6 +229,52 @@ class MeetingTranscriptionControllerTest {
                 });
 
         verify(sessionRegistry).failAndClose("session-1");
+    }
+
+    @Test
+    void projectsAuthoritativeRemoteSnapshotAfterStop() {
+        AuthService authService = mock(AuthService.class);
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        TranscriptionGateway transcriptionGateway = mock(TranscriptionGateway.class);
+        MeetingTranscriptionController controller = new MeetingTranscriptionController(
+                authService, workspaceDomainService, transcriptionGateway, mock(SttProvider.class)
+        );
+        AuthUserResponse user = new AuthUserResponse("host-1", "host@meetingmind.test", "Host", null, "active");
+        Instant now = Instant.parse("2026-07-27T03:00:00Z");
+        MeetingTranscript completed = new MeetingTranscript(
+                "meeting-1", TranscriptStatus.COMPLETED, "soniox-realtime", "ko-KR",
+                now, now, null, null, false, null, now, now
+        );
+        MeetingTranscriptGatewayResponse snapshot = new MeetingTranscriptGatewayResponse(
+                "meeting-1",
+                TranscriptStatus.COMPLETED,
+                List.of(new MeetingTranscriptGatewayResponse.Segment(
+                        "segment-stt-1", "speaker-stt-1", "화자 1", "Host",
+                        100, 900, "STT 원본 전사"
+                ))
+        );
+        when(authService.currentUser("Bearer token")).thenReturn(user);
+        when(transcriptionGateway.transcript("meeting-1")).thenReturn(Optional.of(snapshot));
+        when(workspaceDomainService.projectRemoteMeetingTranscript(
+                eq(user.id()), eq("meeting-1"), eq(TranscriptStatus.COMPLETED), org.mockito.ArgumentMatchers.anyList()
+        )).thenReturn(completed);
+
+        var response = controller.stop("Bearer token", "meeting-1", "session-1");
+
+        assertThat(response.transcriptStatus()).isEqualTo("COMPLETED");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<WorkspaceDomainService.RemoteTranscriptSegment>> segments =
+                ArgumentCaptor.forClass(List.class);
+        verify(workspaceDomainService).projectRemoteMeetingTranscript(
+                eq(user.id()), eq("meeting-1"), eq(TranscriptStatus.COMPLETED), segments.capture()
+        );
+        assertThat(segments.getValue())
+                .singleElement()
+                .satisfies(segment -> {
+                    assertThat(segment.id()).isEqualTo("segment-stt-1");
+                    assertThat(segment.speakerId()).isEqualTo("speaker-stt-1");
+                    assertThat(segment.text()).isEqualTo("STT 원본 전사");
+                });
     }
 
     @Test

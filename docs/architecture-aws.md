@@ -12,7 +12,7 @@ MeetingMind의 AWS 아키텍처 기준 문서다. 이전의 `architecture-aws-ec
 1. **인증된 사용자**는 브라우저로만 접근하고 액세스 토큰을 보유하지 않는다. 세션은 BFF가 발급한 opaque 쿠키뿐이다.
 2. **React SPA (Vite + TypeScript)** 가 회의·리포트·지식 화면을 제공한다.
 3. **MeetingMind Web API**는 same-origin `/api` 경로만 사용한다. 세션 쿠키 + CSRF로 호출하고 브라우저는 Core/Auth/AI를 직접 호출하지 않는다.
-4. **Edge (계획)** — Route 53, CloudFront, 정적 번들용 S3. 프런트엔드 배포 경로로 계획되어 있으나 아직 Terraform에 없다.
+4. **Edge (NonProd smoke 배포)** — 외부 가비아 DNS의 `app.meetingmind.co.kr`, 기존 `us-east-1` ACM 인증서, CloudFront와 OAC 기반 private S3 정적 origin을 사용한다. `/api/*`와 token-protected `/ws/egress-audio/*`만 ALB origin으로 전달한다. Route 53/WAF와 Terraform-managed ACM 발급은 정식 release gate에 남아 있다.
 5. **퍼블릭 서브넷 (2 AZ)** — Public ALB가 유일한 진입점이다. `/api/*`는 BFF 타깃 그룹으로, `/ws/egress-audio/*`는 Realtime STT 타깃 그룹으로 라우팅한다. Internet Gateway가 퍼블릭 라우트를, NAT Gateway가 프라이빗 서브넷 아웃바운드를, VPC 엔드포인트가 S3 게이트웨이와 ECR/Logs/Secrets 인터페이스를 담당한다.
 6. **프라이빗 앱 서브넷 (2 AZ)** — ECS Fargate 클러스터. 모든 서비스가 여기서만 돌고 서비스마다 태스크 롤·보안 그룹·CloudWatch 로그 그룹이 분리된다.
 7. **Session** — `Web BFF`(`:8081`)가 opaque 세션 쿠키와 CSRF를 관리하고, 허용 목록 경로만 내부 서비스로 프록시한다. Token Vault는 KMS 봉투 암호화를 사용한다.
@@ -25,12 +25,19 @@ MeetingMind의 AWS 아키텍처 기준 문서다. 이전의 `architecture-aws-ec
 14. **플랫폼 · 운영 공통** — ECR(불변 `sha256` 다이제스트), Secrets Manager(태스크 롤 최소 권한), KMS(Token Vault·JWT 서명·저장 암호화), CloudWatch + SNS(로그·알람·대시보드), IAM(태스크 롤 · GitHub OIDC).
 15. **외부 제공자** — LiveKit Cloud(WebRTC 미디어·Egress), Soniox(실시간 전사), OpenAI(LLM·임베딩·STT 폴백), GitHub Actions OIDC(이미지 빌드·스캔·배포). 브라우저의 WebRTC 미디어는 AWS를 거치지 않고 LiveKit Cloud로 직접 흐른다.
 
+## 런타임 호출 원칙
+
+- Browser는 BFF만 호출한다. Auth/Core/AI/STT의 내부 주소나 MeetingMind access JWT를 알지 못한다.
+- 현재 모든 Browser-facing 업무 endpoint는 Core가 소유한다. BFF의 `AI`/`LIVEKIT` 분류는 timeout·circuit·오류 격리를 위한 논리 정책이며, 실제 BFF→Core JWT audience는 `meetingmind-core`다.
+- Core는 Meeting/Space ACL을 먼저 확인한 뒤 mTLS로 AI와 STT를 호출한다. Auth는 인증 데이터, Core는 업무 ACL, STT는 remote transcript, AI는 vector/runtime 데이터를 각각 소유하며 다른 서비스 DB를 직접 읽지 않는다.
+- LiveKit Egress audio만 session-bound HMAC token으로 CloudFront→ALB→STT public WSS path를 사용한다. STT `/internal/*`은 Core SPIFFE mTLS만 허용한다.
+- 정확한 caller/destination/audience/data-owner 표는 `specs/002-bff-auth-msa/contracts/service-call-boundaries.md`를 기준으로 한다.
+
 ## 현재 배포 상태와 게이트
 
-그림에서 회색 점선으로 표시한 요소는 저장소의 Terraform에 아직 없다.
-
-- **Route 53 / CloudFront / 정적 호스팅 S3 버킷**: `infra/aws`에 리소스가 없다.
-- **ALB HTTPS 리스너 / ACM**: `enable_https_listener = false`이며 운영자 CIDR로 제한된 HTTP 스모크 리스너만 조건부로 만든다(`0.0.0.0/0` 금지).
+- CloudFront, private S3/OAC, custom viewer domain과 `/api/*`·`/ws/egress-audio/*` ALB origin은 NonProd deployment smoke로 배포됐다.
+- ALB는 CloudFront origin-facing managed prefix list만 HTTP origin으로 허용한다. 별도 ALB HTTPS listener, WAF, Route 53, Terraform-managed ACM lifecycle은 아직 정식 release gate에 남아 있다.
+- Realtime STT는 ALB의 HTTPS `8083` target과 HTTP `9083` readiness target을 사용한다. 공개 경로는 `/ws/egress-audio/*` 하나뿐이며 token 없는 handshake는 `403`으로 닫힌다.
 
 ECS 서비스는 정의만으로 뜨지 않고 게이트를 통과해야 desired count가 올라간다.
 

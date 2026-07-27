@@ -84,8 +84,8 @@ resource "aws_cloudfront_function" "spa_rewrite" {
   JAVASCRIPT
 }
 
-# D-034 intentionally defers the formal WAF policy to T059; this temporary distribution is
-# restricted to the CloudFront default domain and the ALB origin is prefix-list restricted.
+# D-034 intentionally defers the formal WAF policy to T059. The ALB origin remains restricted
+# to the AWS-managed CloudFront origin-facing prefix list.
 #trivy:ignore:AVD-AWS-0011:exp:2026-08-09
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
@@ -94,6 +94,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   default_root_object = "index.html"
   http_version        = "http2and3"
   price_class         = "PriceClass_200"
+  aliases             = var.custom_domain == null ? [] : [var.custom_domain.name]
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
@@ -122,6 +123,17 @@ resource "aws_cloudfront_distribution" "frontend" {
     cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
     origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     compress                 = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern             = "/ws/egress-audio/*"
+    target_origin_id         = var.alb_origin_id
+    viewer_protocol_policy   = "https-only"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD", "OPTIONS"]
+    cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    compress                 = false
   }
 
   ordered_cache_behavior {
@@ -154,13 +166,14 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  # The CloudFront default certificate fixes this API field to TLSv1 and ignores stronger
-  # configured values. D-034 accepts that bounded smoke limitation; T059 must replace the
-  # default domain with ACM and TLSv1.2_2021 before formal edge release.
+  # The default-domain fallback is limited to the bounded D-034 smoke. A configured custom
+  # domain uses its existing us-east-1 ACM certificate and the current CloudFront TLS policy.
   #trivy:ignore:AVD-AWS-0010:exp:2026-08-09
   viewer_certificate {
-    cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1"
+    acm_certificate_arn            = var.custom_domain == null ? null : var.custom_domain.acm_certificate_arn
+    cloudfront_default_certificate = var.custom_domain == null
+    minimum_protocol_version       = var.custom_domain == null ? "TLSv1" : "TLSv1.2_2021"
+    ssl_support_method             = var.custom_domain == null ? null : "sni-only"
   }
 
   tags = merge(local.resource_tags, {
@@ -171,6 +184,13 @@ resource "aws_cloudfront_distribution" "frontend" {
     precondition {
       condition     = var.alb_origin_id != local.static_origin_id
       error_message = "alb_origin_id must differ from the module's static S3 origin identifier."
+    }
+
+    precondition {
+      condition = var.custom_domain == null || (
+        try(split(":", var.custom_domain.acm_certificate_arn)[4], "") == data.aws_caller_identity.current.account_id
+      )
+      error_message = "The custom-domain ACM certificate must belong to the current AWS account."
     }
   }
 }

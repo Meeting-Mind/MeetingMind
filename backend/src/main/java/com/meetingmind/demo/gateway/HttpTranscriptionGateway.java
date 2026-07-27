@@ -19,6 +19,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -56,6 +57,7 @@ public class HttpTranscriptionGateway implements TranscriptionGateway {
     public TranscriptionHandle start(TranscriptionStartCommand command) {
         TranscriptionStartGatewayRequest request = new TranscriptionStartGatewayRequest(
                 command.meetingId(), command.roomName(), command.trackId(),
+                command.participantDisplayName(),
                 command.retentionUntil() == null ? null : command.retentionUntil().toString(),
                 command.requestId()
         );
@@ -98,12 +100,18 @@ public class HttpTranscriptionGateway implements TranscriptionGateway {
                 .toList();
     }
 
-    public MeetingTranscriptGatewayResponse transcript(String meetingId) {
-        return get(baseUrl + "/internal/v1/meetings/" + meetingId + "/transcript", MeetingTranscriptGatewayResponse.class);
+    @Override
+    public Optional<MeetingTranscriptGatewayResponse> transcript(String meetingId) {
+        return getOptional(
+                baseUrl + "/internal/v1/meetings/" + meetingId + "/transcript",
+                MeetingTranscriptGatewayResponse.class);
     }
 
-    public TranscriptionStatusGatewayResponse status(String meetingId) {
-        return get(baseUrl + "/internal/v1/meetings/" + meetingId + "/transcription-status", TranscriptionStatusGatewayResponse.class);
+    @Override
+    public Optional<TranscriptionStatusGatewayResponse> status(String meetingId) {
+        return getOptional(
+                baseUrl + "/internal/v1/meetings/" + meetingId + "/transcription-status",
+                TranscriptionStatusGatewayResponse.class);
     }
 
     private HttpRequest.Builder post(String uri) {
@@ -135,6 +143,28 @@ public class HttpTranscriptionGateway implements TranscriptionGateway {
                 .GET();
         applyHeaders(builder);
         return send(builder.build(), responseType);
+    }
+
+    private <T> Optional<T> getOptional(String uri, Class<T> responseType) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(uri))
+                .version(HttpClient.Version.HTTP_1_1)
+                .timeout(REQUEST_TIMEOUT)
+                .GET();
+        applyHeaders(builder);
+        HttpResponse<String> response = sendRaw(builder.build());
+        if (response.statusCode() == 404) {
+            return Optional.empty();
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new TranscriptionGatewayException(
+                    "STT service GET " + uri + " returned " + response.statusCode()
+            );
+        }
+        try {
+            return Optional.of(objectMapper.readValue(response.body(), responseType));
+        } catch (IOException exception) {
+            throw new TranscriptionGatewayException("STT response JSON is invalid.", exception);
+        }
     }
 
     private <T> List<T> getList(String uri, Class<T> elementType) {

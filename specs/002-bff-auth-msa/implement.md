@@ -715,3 +715,139 @@ Runtime matrix의 모든 거부 결과는 기대한 TLS, network, loader 또는 
   Cloud Map `failure_threshold` deprecation warning만 남는다.
 - 이 결과는 빠른 NonProd 배포 smoke만 완료한다. 정식 T048/T049/T059, Q-013, T047-E,
   autoscaling/SLO·부하·장애/rollback drill, custom domain/ACM/WAF와 Production 전환은 계속 open이다.
+
+## T059-S3 NonProd Custom Domain Drift Adoption
+
+- 사용자가 가비아에서 `app.meetingmind.co.kr` CNAME을 CloudFront 생성 도메인으로 연결하고,
+  CloudFront 배포 `E3VEAX4F98BOIE`에 `us-east-1` ACM 인증서를 수동 연결했다. 실제 CloudFront
+  상태는 alias `app.meetingmind.co.kr`, `sni-only`, `TLSv1.2_2021`이다.
+- 기존 Terraform refresh plan은 이 수동 alias와 인증서를 제거하고 기본 인증서/TLSv1로 되돌리는
+  in-place update를 계획했다. `frontend-edge` 모듈에 optional custom-domain 객체를 추가하고
+  environment root가 이를 전달하도록 수정해 같은 상태를 선언적으로 소유한다.
+- 실제 NonProd 값은 gitignored `terraform.tfvars`에 두고, 커밋 가능한 example은 기본 `null`과
+  외부 DNS/인증서 prerequisite만 설명한다. 가비아 DNS zone, ACM 발급과 DNS validation lifecycle은
+  Terraform state에 가져오지 않는다.
+- 모듈 입력은 lowercase DNS name, `us-east-1` ACM ARN 형식과 현재 AWS account 소유 여부를
+  fail-closed 검증한다. custom domain을 사용하면 CloudFront alias, ACM ARN, `sni-only`,
+  `TLSv1.2_2021`을 설정하고, 값이 없을 때만 기존 D-034 기본-domain fallback을 유지한다.
+- `terraform validate`와 실제 tfvars를 제외한 clean mock regression 29/29가 통과했다. 실제
+  `meetingmind-nonprod` 전체 refresh plan은 exit 0 `No changes`로 수렴해 CloudFront 또는 다른 AWS
+  resource mutation이 필요하지 않음을 확인했다. 기존 Cloud Map `failure_threshold` deprecation
+  warning만 남는다.
+- 공개 DNS는 `app.meetingmind.co.kr` → `d3tplbf18qeekd.cloudfront.net.` CNAME을 반환하고,
+  custom-domain HTTPS root와 `/api/v1/auth/session`은 모두 200을 반환했다. API 계약, ERD와 데이터
+  모델은 변경되지 않았다.
+- 이 작업은 이미 연결된 NonProd viewer domain의 drift만 수렴한다. Route 53, Terraform-managed ACM,
+  WAF, ALB HTTPS, LiveKit WSS, autoscaling/SLO·부하·장애/rollback과 Production 전환은 계속 open이다.
+
+## T059-S4 NonProd Google Login 503 Hotfix
+
+- `app.meetingmind.co.kr` 로그인 화면과 Frontend build에는 `VITE_GOOGLE_CLIENT_ID`가 설정돼 Google
+  Identity Services 버튼이 정상 렌더링됐다. 화면의 `play.google.com/log` CORP console 메시지는 버튼의
+  부수 telemetry 요청이며 MeetingMind `/api/v1/auth/google` 503과 별개다.
+- Auth `GoogleJwtCredentialVerifier`는 허용 client ID가 비면 credential parsing 전에
+  `503 AUTH_PROVIDER_UNAVAILABLE`을 반환한다. 기존 NonProd Auth ECS environment에는
+  `AUTH_GOOGLE_CLIENT_IDS`가 전혀 없어 BFF가 이를 `503 AUTH_SERVICE_UNAVAILABLE`과
+  `인증 서비스에 일시적으로 연결할 수 없습니다.`로 정규화했다.
+- Terraform에 공개 식별자 목록 `auth_google_client_ids`를 추가해 Auth task environment로 전달하고,
+  browser-facing BFF runtime은 목록이 비어 있으면 runtime gate에서 fail closed하도록 했다. 실제
+  gitignored NonProd tfvars에는 Frontend와 같은 Google OAuth web client ID를 설정했다. OAuth client
+  secret과 Google credential은 Terraform state나 task environment에 추가하지 않았다.
+- `terraform fmt -check -recursive`와 실제 tfvars를 제외한 clean `terraform validate`, mock regression
+  30/30이 통과했다. 회귀는 task environment 전달과 client ID 없는 BFF runtime plan 거부를 포함한다.
+  기존 Cloud Map `failure_threshold` deprecation warning만 남는다.
+- 이후 AWS SSO profile로 실제 plan/apply를 수행해 Auth task definition revision 5를 배포했고, 사용자가
+  `app.meetingmind.co.kr`에서 실제 Google 로그인과 세션 진입 성공을 확인했다. 따라서 T059-S4를
+  완료 처리했으며 API 계약, ERD와 데이터 모델은 변경되지 않았다.
+
+## T035-H1 Join Now LiveKit Audience Hotfix
+
+- 배포 증상은 회의 생성 후 `POST /api/v1/meetings/{meetingId}/livekit-token`이 401을 반환하고 BFF가
+  세션을 무효화해 로그인 화면으로 이동하는 것이었다. 배포된 BFF는 해당 route를 논리
+  `LIVEKIT` downstream으로 분류하면서 `meetingmind-livekit` access JWT를 선택했지만, 현재 HTTP
+  목적지와 ACL 소유자인 Core는 target mode에서 `meetingmind-core` audience만 검증했다.
+- `ProxyRoute`에 실제 resource audience를 명시해 목적지 장애 정책과 JWT audience를 분리했다.
+  LiveKit token과 transcription route는 기존 LiveKit timeout, bulkhead, circuit 및 오류 매핑을
+  유지하면서 Core access JWT를 사용한다. Browser API, Auth token schema, Core API와 데이터 모델은
+  변경하지 않았다.
+- BFF 전체 `./gradlew test`가 통과했고 회귀는 LiveKit route가 `meetingmind-core` audience로 token을
+  요청하면서 `DownstreamService.LIVEKIT` 정책으로 Core URL을 호출하는 조합을 검증한다.
+- ARM64 image `join-now-audience-20260727-8dd5f7fe4809`를 ECR에 push했고 child manifest digest
+  `sha256:a9d46431a7382498b7bc04f66cf4b70664dc2ca6e772a5378b74e71ea2bd695f`만 Terraform에 반영했다.
+  plan은 BFF task definition replacement와 BFF ECS service in-place update만 포함했고 저장한 plan을
+  그대로 apply해 revision 6으로 전환했다.
+- 첫 revision 6 task는 Valkey connection initialization 2초 timeout으로 한 번 종료됐으나 ECS 재시도
+  task가 정상 기동했다. 최종 BFF는 desired/running `1/1`, ALB target `healthy`, service stable이며
+  공개 root와 `/api/v1/auth/session`은 200이다. 실제 로그인 세션의 livekit-token 200과 `Join now`
+  화면 진입 확인 전까지 T035-H1은 open으로 유지한다.
+
+## T059-S5 Realtime STT WebSocket 503 Hotfix
+
+- `2026-07-27 01:55 KST` 실제 Core 로그에서 `POST https://stt.meetingmind.internal:8083/internal/v1/transcriptions returned 503`을 확인했다. 배포된 Realtime STT task definition에는 코드가 필수로 요구하는 `PUBLIC_WS_BASE_URL`이 없었고, deployment smoke는 STT target attachment와 `/ws/egress-audio/*` CloudFront/ALB route도 의도적으로 닫아 둔 상태였다.
+- Terraform은 명시적 HTTPS `stt_public_ws_base_url`을 STT task에 전달하고 값이 없는 deployment-smoke STT runtime을 거부한다. CloudFront는 cache-disabled WebSocket behavior를 ALB origin에 추가하고, ALB는 해당 path만 HTTPS `8083` STT target으로 전달한다.
+- STT readiness는 `MANAGEMENT_SERVER_ADDRESS=0.0.0.0`과 ALB SG에만 열린 HTTP `9083` health check를 사용한다. `/internal/*`은 기존 Core mTLS workload filter를 유지하고 공개 WebSocket은 기존 session-bound HMAC token 검증을 그대로 사용한다.
+- 코드/인프라 변경 후 clean Terraform mock regression은 30/30 통과했다. 기존 Cloud Map `failure_threshold` deprecation warning만 남는다. 실제 AWS plan/apply와 WSS/회의 E2E 결과는 이어서 기록한다.
+- 첫 실제 plan은 `frontend_edge`의 광범위한 `depends_on = [module.alb]` 때문에 STT target 교체가 S3 account data를 apply-time unknown으로 전파해 frontend bucket 교체를 계획했다. apply하지 않고 해당 module dependency를 제거했으며 `alb_dns_name` 입력의 암시적 의존성과 기존 gate dependency만 유지했다. 두 번째 plan은 frontend bucket/object 보존과 STT 관련 리소스만 포함했다.
+- 저장한 두 번째 plan을 apply해 STT task definition revision 7, HTTPS `8083` target group, HTTP `9083` readiness SG rule, ALB WebSocket listener rule과 CloudFront behavior를 배포했다. 최종 ECS service는 desired/running `1/1`, rollout `COMPLETED`, target `healthy`다.
+- `https://app.meetingmind.co.kr/ws/egress-audio/invalid-session`에 WebSocket upgrade header를 보내고 token을 생략한 negative check는 CloudFront를 거쳐 `403`으로 거부됐다. 이는 공개 route 도달성과 token fail-closed 경계를 함께 확인한다.
+- 최종 실제 refresh plan은 `No changes`로 수렴했다. 제어 가능한 로그인 브라우저 탭이 없어 실제 microphone track의 start→audio→dialogue는 이 세션에서 실행하지 못했으므로 T059-S5는 해당 사용자 E2E 확인 전까지 open으로 둔다.
+
+## T035-H2/T059-S6 Realtime Dialogue and Service-Call Boundary Audit
+
+- 사용자 화면에서 transcription start가 성공해 `STT Active`가 됐지만 live transcript가 비어 있었다. split runtime 코드를 대조한 결과 Realtime STT는 `meetingmind_stt` DB에 final segment/status를 저장하는 반면, Core `/api/v1/meetings/{meetingId}/dialogue`는 Core DB의 start compatibility row와 segment만 읽고 partial만 STT gateway에서 가져오고 있었다. 따라서 final event가 빠르게 확정되면 partial 폴링 구간을 놓치고 STT DB에 저장된 문장은 화면에 영구히 나타나지 않았다.
+- `TranscriptionGateway`에 remote authoritative transcript/status snapshot 계약을 추가하고 `ConfiguredTranscriptionGateway`가 선택 구현으로 전달하게 했다. in-process rollback은 기본 empty snapshot으로 기존 Core DB 경로를 유지한다. Core controller는 기존 `meetingTranscript(actor, meetingId)` 호출로 사용자·Meeting ACL을 먼저 검증한 뒤 remote mode에서 STT transcript status/final segments와 partial을 조합한다. stop 응답도 remote status를 우선한다.
+- 서비스 호출 대조에서 BFF의 AI route가 실제 `BFF_AI_BASE_URL=core.meetingmind.internal`로 Core를 호출하면서 `meetingmind-ai` access JWT를 선택하는 두 번째 audience 불일치를 확인했다. Meeting/Project AI route를 LiveKit route와 같은 방식으로 논리 AI timeout/circuit/error 정책과 실제 Core resource audience를 분리해 `meetingmind-core` JWT를 사용하도록 수정했다.
+- `contracts/service-call-boundaries.md`를 추가해 Browser→BFF, BFF→Auth/Core, Core→Auth/STT/AI/LiveKit, LiveKit Egress→public token WSS, STT/AI→provider의 caller·인증·SG와 데이터 owner를 한 표로 고정했다. Auth/Core/STT/AI DB 직접 교차 조회는 금지한다.
+- 이번 수정은 live dialogue read를 해결하지만 Core의 report/task/Meeting AI/embedding context는 여전히 Core DB transcript를 읽는다. STT source ID, revision, duplicate retry와 completion event를 보존하는 projection/context adapter가 없으므로 T059-S7로 분리했고 완료로 주장하지 않는다.
+
+### Verification and NonProd rollout
+
+- Backend targeted controller/gateway tests와 전체 `./gradlew test`, BFF targeted proxy tests와 전체 `./gradlew test`, `git diff --check`가 모두 통과했다.
+- Core/BFF ARM64 이미지를 빌드하고 최신 Trivy DB로 Alpine/JAR HIGH/CRITICAL 0건을 확인했다. ECR child manifest digest는 Core `sha256:617932440c5a5bc19736d4284bfd26a75b3f63f971593712cf28ce9da1e76256`, BFF `sha256:8fde30012e1cd4ce910e39f29141924c7e6286730195c46bc77c5d2e1793a361`이다.
+- Terraform validate는 성공했고 기존 Cloud Map `failure_threshold` deprecation warning만 남았다. 실제 plan은 Core/BFF task definition replacement와 두 ECS service in-place update만 포함한 `2 add, 2 change, 2 destroy`였으며 RDS/S3/CloudFront/ALB/SG 변경은 없었다. 저장 plan을 apply해 Core revision 5와 BFF revision 7을 배포했다.
+- 최종 두 서비스는 desired/running `1/1`, pending `0`, application container `HEALTHY`, rollout `COMPLETED`다. BFF ALB target `10.20.17.199:8081`은 healthy이며 공개 root/session/CSRF는 모두 HTTP 200이다. 최종 실제 Terraform plan은 `No changes`다.
+- 로그인된 Safari 세션을 자동 제어할 수 없어 실제 microphone 발화가 새 dialogue 응답에 표시되는지는 사용자의 현재/새 회의 확인이 필요하다. 따라서 T035-H2와 T059-S6은 배포 완료 상태지만 실제 signed-in E2E 전까지 open으로 유지한다.
+
+## T059-S8 Realtime STT Rejoin and Speaker Hotfix
+
+- 사용자 검증에서 live transcript가 표시되는 것은 확인됐지만 화자 영역에 `stt-{session UUID}`가 노출됐고, `Leave` 후 같은 회의 재참여 시 STT가 재개되지 않았다.
+- 화자 문제의 원인은 Core가 보유한 인증 사용자 display name이 `TranscriptionStartCommand`에서 STT 내부 요청으로 전달되지 않았고, STT가 session UUID를 speaker label과 speaker name 양쪽에 저장한 것이었다. 내부 시작 계약에 최대 100자의 `participantDisplayName`을 추가해 STT speaker에 사용하고, Frontend selector는 이미 저장된 정확한 `stt-{UUID}` 형식을 `참여자`로 정규화한다.
+- 재참여 문제의 원인은 `Leave`가 STT를 중지하지 않고 LiveKit track만 제거해 STT가 사라진 track으로 egress를 재시작한 뒤 실패했으며, Core compatibility transcript는 계속 `PROCESSING`, browser sessionStorage에는 이전 session ID가 남아 재참여 UI가 이를 활성 session으로 오인한 것이었다.
+- `Leave`는 소유한 session을 stop한 뒤 sessionStorage/ref를 제거한다. remote authoritative status가 `COMPLETED`/`FAILED`이면 Core와 STT transcript를 새 track으로 재개하고 기존 segment·최초 시작 시각을 보존한다. 새 session의 provider timestamp는 기존 최대 `endMs`를 offset으로 더해 과거 발화 사이에 섞이지 않게 했다. remote status가 `PROCESSING`이면 기존 중복 시작 거부를 유지한다.
+- API 필드가 추가됐지만 DB schema, ERD와 entity 관계는 바뀌지 않았다. durable STT→Core/AI projection 미완료 경계(T059-S7)도 그대로 유지한다.
+- 배포 전 검증은 Frontend 99 tests/build와 lint 0 error(기존 경고 3), Core 전체 Gradle test, Realtime STT 전체 Gradle test, `git diff --check`가 통과했다.
+- Core/Realtime STT ARM64 이미지를 빌드하고 최신 Trivy DB로 Alpine/JAR HIGH/CRITICAL 0건을 확인했다. ECR child manifest digest는 Core `sha256:7fd5a6e65eca6e0a93989d95d745e7d4af1edc23aeafd2fa09d2e5a7eb9daaf1`, Realtime STT `sha256:54adc15dbdb7193760ff4f337251eaf1ee4519017d9493f4ca9c1a0e4c01bc37`이다.
+- 실제 Terraform plan은 Core/STT task definition replacement와 두 ECS service in-place update만 포함한 `2 add, 2 change, 2 destroy`였고 저장 plan을 그대로 apply했다. Core revision 6과 Realtime STT revision 8은 desired/running `1/1`, pending `0`, rollout `COMPLETED`, application container `HEALTHY`, cert-loader exit 0이다. STT ALB target도 healthy이며 최종 refresh plan은 `No changes`다.
+- Frontend production build를 private S3 origin에 배포하고 CloudFront invalidation `IEBXKKO1DBYY4AR7UCW8D5JZ9S` 완료를 확인했다. 공개 index는 새 `/assets/index-B-gxv_Jk.js`를 참조하고 asset 및 `/api/v1/auth/session`은 HTTP 200이다.
+- 사용자 직전 화면이 실제 Join→STT audio→확정 dialogue를 증명하므로 T035-H1, T059-S5, T059-S6은 완료 처리했다. 2026-07-27 후속 확인으로 display name과 leave→rejoin STT 재개도 통과해 T059-S8을 완료 처리했다.
+
+## T059-S9 Realtime STT Partial Revision Hotfix
+
+- 사용자 화면에서 확정 row가 아닌 `LIVE` row 하나가 같은 내용을 반복하며 비정상적으로 길어졌다. Soniox mapper는 provider의 새 final token과 현재 non-final token을 조합해 같은 `soniox-live-{utterance}` segment ID의 최신 전체 가설을 내보낸다. 반면 공통 assembler는 새 가설이 이전 문장의 완전한 prefix가 아니면 두 전체 가설을 문자열로 연결했고, provider가 중간 단어를 수정할 때마다 누적 문장이 증식했다.
+- D-042에 따라 mapper→assembler `PARTIAL.text`를 최신 전체 snapshot으로 고정했다. assembler는 같은 partial ID의 후속 event를 교체하며, final 중복 키·fingerprint 처리와 빈 final boundary의 마지막 partial fallback은 변경하지 않는다.
+- prefix가 달라지는 partial snapshot 단위 회귀와 Soniox mapper→assembler 통합 회귀를 추가했고, targeted test와 Realtime STT 전체 `./gradlew test`, `git diff --check`가 통과했다.
+- ARM64 Realtime STT image `partial-revision-20260727-1`을 빌드하고 Trivy로 Alpine/JAR HIGH/CRITICAL 0건을 확인했다. ECR digest는 `sha256:01b15198aeaebadb93533f69a80c8de62ba865461dbd1784967e190af51f0309`다.
+- 실제 Terraform plan은 STT task definition replacement와 STT ECS service in-place update만 포함한 `1 add, 1 change, 1 destroy`였고, 저장 plan을 그대로 apply해 Realtime STT revision 9를 배포했다. task는 desired/running `1/1`, pending `0`, rollout `COMPLETED`, application container `HEALTHY`, cert-loader exit 0이며 STT ALB target은 healthy다. 배포 후 최종 refresh plan은 `No changes`로 수렴했다.
+- 실제 마이크 입력에서 긴 문장을 발화하며 provider가 중간 가설을 수정할 때 `LIVE` row가 반복 증식하지 않고 final로 전이하는지는 사용자 확인 전까지 T059-S9을 open으로 유지한다.
+
+## T059-S7 Durable STT Projection and AI Embedding Worker
+
+- AI chat 503과 근거 없음 응답을 분리해 추적했다. AI DB URL은 전용 `meetingmind_ai_app` 계정으로 Core DB를 가리키도록 이미 교정됐지만, Core runtime이 V24 이후 생성된 `ai_usage_events`를 읽고 기록할 권한이 없었고, STT가 소유한 완료 segment가 Core DB로 영속 projection되지 않았으며, ECS AI task에는 구현돼 있던 embedding worker가 실행되지 않았다.
+- D-043에 따라 Core의 transcription stop 성공 뒤 authoritative STT snapshot을 가져와 같은 transaction에서 speaker/segment를 원본 STT ID로 교체한다. 동일 snapshot 재시도는 no-op이고, 이미 완료된 transcript의 수정 snapshot은 `FULL_REINDEX`를 정확히 한 번 enqueue한다. Core DB가 report/task/Meeting AI/RAG의 읽기 모델이고 STT DB는 Core나 AI가 runtime에 직접 조회하지 않는다.
+- JDBC/JPA/in-memory store에 원자 교체와 embedding enqueue 계약을 추가했다. 기존 segment anchor를 먼저 제거하고 speaker/segment를 교체하며 JPA persistence context를 clear해 JDBC 변경 뒤 stale entity를 반환하지 않게 했다. controller/domain 회귀와 실제 PostgreSQL integration test는 STT ID 보존, 최초 완료 job 1개, 동일 재시도 추가 job 0개, 수정 완료 `FULL_REINDEX` 1개를 검증한다.
+- V26은 `meetingmind_core_app` role이 존재할 때 `ai_usage_events`에만 `SELECT, INSERT`를 부여한다. RDS master secret을 일회성 ECS Flyway task에 주입해 v25→v26을 적용했고 로그에서 `Successfully applied 1 migration ... v26`과 exit 0을 확인했다. 임시 execution-role inline policy와 task definition은 즉시 삭제했다.
+- ECS task module에 app image/env/secrets를 재사용하는 `background_workers`를 추가하고 NonProd AI에 `python -m app.embedding_worker` 컨테이너를 배치했다. clean Terraform regression 30/30과 실제 plan의 Core/AI task definition replacement 및 service update 4개 address만 확인한 뒤 저장 plan을 apply했다. 결과는 Core revision 7, AI revision 4이며 두 task 모두 `RUNNING/HEALTHY`; AI worker도 계속 실행 중이다.
+- 배포 전 Core 전체 `./gradlew test`, 실제 PostgreSQL `JdbcWorkspaceStoreIntegrationTest`, 빈 PostgreSQL V1→V26 `MigrationIntegrationTest`, `python3 -m compileall ai/app`, Terraform regression 30/30과 format이 통과했다. Core ARM64 ECR child digest는 `sha256:42ecbc3c8e4ad21fce9c5a8c2368fe6b6c200c0aa43fffe6dc6bd0e34dd152f4`이고 ECR scan은 완료, HIGH/CRITICAL 0건이다.
+- 배포 직후 원문을 출력하지 않는 read-only STT/Core hash audit에서 완료 STT 1건 중 `needsProjection=1`을 확인했다. authoritative STT snapshot으로 그 1건만 transaction backfill했고 `applied=1`; 재감사는 `alreadyProjectedExact=1`, `needsProjection=0`이다. completion trigger가 만든 embedding job generation 1을 worker가 첫 시도 954ms에 완료해 8 chunks를 활성화했고 queue는 pending/processing/failed 모두 0이다. 일회성 master-secret IAM 권한과 audit/backfill task definition도 삭제했다.
+- 인앱 브라우저에서 공개 root는 정상 로드됐지만 `/spaces`가 `/login`으로 이동해 로그인 계정의 Project AI 질문은 실행하지 않았다. 따라서 server-side STT→Core→active chunk 경계와 배포는 통과했지만, 실제 BFF→Core→AI source 응답은 사용자의 로그인 UI 확인 전까지 T059-S7의 마지막 acceptance로 남긴다.
+
+## T059-S10 Terminal Egress Stop and Projection Recovery
+
+- 사용자 재현 시 STT는 `Active`였지만 Core stop이 503을 반환하고 Project AI가 근거 없음으로 답했다. CloudWatch에서 LiveKit stop은 HTTP 412 `FAILED_PRECONDITION`과 `EGRESS_FAILED cannot be stopped`였고, Core projection은 `permission denied for table chunk_source_segments`에서 transaction rollback된 것을 확인했다. STT DB에는 완료 원문이 남아 있어 AI DB URL이나 원문 손실 문제가 아니었다.
+- `LiveKitEgressService`는 412와 terminal egress 상태가 모두 일치할 때만 stop을 멱등 완료로 처리한다. durable session이 이미 `FAILED`인 stop 재시도도 transcript가 `PROCESSING`이면 `completeTranscript`로 조정해 이후 Core snapshot pull을 막지 않는다. terminal/non-terminal 분류와 failed-session 조정 회귀를 추가했다.
+- V27은 `meetingmind_core_app`가 존재할 때 `chunk_source_segments`에 `SELECT, DELETE`를 부여한다. 운영 적용 후 실제 runtime credential 감사에서 기존 bootstrap의 `INSERT, UPDATE`가 남아 있음을 발견했다. 이미 적용된 V27 체크섬은 수정하지 않고 append-only V28에서 `INSERT, UPDATE`를 명시적으로 회수한다. 실제 PostgreSQL V1→V28 통합 테스트는 과도한 기존 권한을 재현한 뒤 `SELECT, DELETE=true`, `INSERT, UPDATE=false`를 확인한다.
+- Core/STT ARM64 이미지를 빌드해 ECR scan `COMPLETE`, finding 0건을 확인했다. 최종 child digest는 V28 포함 Core `sha256:2876feaae8e8443827dddf37631226534a74c68ebf0d8479d092c5970abf2137`, STT `sha256:de032b4bf4245daf9732afc8a97a61583ba658f47d259732dab1e062ecb7a0e4`다.
+- 서비스 배포 전에 RDS master secret을 일회성 ECS Flyway task에만 주입해 v26→v27을 적용했다. 로그에서 27개 migration 검증, `Migrating ... version 27`, `Successfully applied 1 migration ... v27`, exit 0을 확인했다. 실제 runtime 권한 감사에서 발견한 기존 과다 권한은 같은 방식으로 v27→v28을 선적용했고 28개 migration 검증, v28 성공과 exit 0을 확인했다. `meetingmind_core_app` credential 재감사는 `SELECT/DELETE=true`, `INSERT/UPDATE=false`였다. 각 실행의 임시 IAM policy와 task definition은 즉시 제거했다.
+- 첫 Terraform plan은 Core/STT task definition replacement와 두 service update만 포함한 `2 add, 2 change, 2 destroy`였고 Core revision 8/STT revision 10을 배포했다. V28 포함 Core의 후속 plan은 Core task/service만 포함한 `1 add, 1 change, 1 destroy`였으며 저장 plan으로 Core revision 9를 배포했다. Core/STT는 desired/running `1/1`, pending 0, rollout `COMPLETED`, application container `HEALTHY`; STT target도 healthy이고 최종 plan은 `No changes`다.
+- 원문을 출력하지 않은 read-only 감사에서 `testin`은 STT `COMPLETED` 3건/49 segments/590자였지만 Core는 `PROCESSING` 3건/0 segments, embedding job/chunk 0건이었다. active/stopping session이 없는 세 회의만 STT ID·sequence·시간·text를 exact 검증하며 transaction backfill했고 `applied=3`, `segments=49`, `jobsExpected=3`으로 완료했다.
+- 최종 감사는 STT/Core 모두 `COMPLETED` 3건, 49 segments, 590자로 일치했다. AI worker는 embedding job 3건을 모두 `COMPLETED`로 처리했고 active transcript chunks 12개 전부 vectorized됐다. 일회성 감사/백필 task definition과 AI execution role의 임시 master-secret policy를 모두 제거했다.

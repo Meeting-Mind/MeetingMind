@@ -238,6 +238,48 @@ flowchart LR
 
 충돌 경계는 A가 `bff/**`, B가 `frontend/**`와 신규 edge module만 소유하고, C가 기존 Terraform environment/module과 shared specs를 단독 소유하는 것으로 고정한다. 통합 순서는 A/B source 검증 → C Terraform 통합 검증 → no-delete plan 검토 → apply → 정적 asset upload/invalidation → AWS와 Browser smoke다. release gate, autoscaling, custom domain과 운영 SLO 항목은 변경하지 않는다.
 
+### 2026-07-26 NonProd custom domain drift 수렴
+
+- Team Members: 사용자 1명(가비아 DNS와 ACM 연결), integration owner 1명
+- Agents: root Codex 1개가 순차 수행하며 병렬 작업은 없다.
+- 목표: Console에서 연결된 `app.meetingmind.co.kr`와 기존 `us-east-1` ACM 인증서 참조를 Terraform 선언에 반영해 이후 apply가 alias·인증서를 제거하지 않도록 한다.
+- 파일 경계: `infra/aws/modules/frontend-edge/**`, `infra/aws/environments/nonprod-v2/**`, `specs/002-bff-auth-msa/{clarify,plan,tasks,implement}.md`만 수정한다. API 계약, ERD와 데이터 모델은 영향을 받지 않는다.
+- 통합 순서: 실제 CloudFront/Gabia 값 확인 → optional module input과 NonProd 값 반영 → mock regression → 실제 refresh-only plan과 HTTPS 확인이다. 가비아 zone과 ACM 발급·검증 lifecycle은 외부 관리로 남기고 WAF/ALB HTTPS/LiveKit WSS를 포함한 정식 T059는 계속 open으로 둔다.
+
+### 2026-07-27 NonProd Google 로그인 503 hotfix
+
+- Team Members: 사용자 1명(배포 증상 확인), integration owner 1명
+- Agents: root Codex 1개가 순차 수행하며 병렬 작업은 없다.
+- 목표: Frontend에는 설정됐지만 Auth ECS task에서 누락된 Google OAuth audience allowlist를 주입해 `/api/v1/auth/google`의 설정 누락 503을 제거한다.
+- 파일 경계: `infra/aws/environments/nonprod-v2/{variables,locals,main,terraform.tfvars.example,README}.tf*`, Terraform 회귀와 `specs/002-bff-auth-msa/{clarify,plan,tasks,implement}.md`만 수정한다. API 계약, ERD와 데이터 모델은 변경하지 않는다.
+- 통합 순서: 503 code path와 배포 environment 대조 → client ID variable/task 주입 → BFF runtime fail-closed gate와 회귀 → NonProd plan/apply → 실제 Google login smoke다.
+
+### 2026-07-27 Join now LiveKit audience hotfix
+
+- Team Members: 사용자 1명(배포 증상·로그인 복귀 확인), integration owner 1명
+- Agents: root Codex 1개가 순차 수행하며 병렬 작업은 없다.
+- 목표: Core가 소유한 LiveKit 토큰·transcription route에 `meetingmind-livekit` access를 보내 발생한 최종 401과 BFF 세션 폐기를 제거한다.
+- 파일 경계: `bff/src/{main,test}/**`, `specs/002-bff-auth-msa/{contracts/bff-proxy-routes.md,clarify.md,plan.md,tasks.md,implement.md}`만 수정한다. Browser API, Auth token schema, Core API/ERD와 데이터 모델은 변경하지 않는다.
+- 통합 순서: 배포된 BFF 목적지/Core validation mode 확인 → logical downstream 정책과 actual resource audience 분리 → BFF 회귀·image build → 단일 BFF task definition rollout → 기존 Google 세션으로 `Join now`와 LiveKit token 200 검증이다.
+
+### 2026-07-27 Realtime dialogue and service-call boundary audit
+
+- Team Members: 사용자 1명(실제 회의 증상 확인), integration owner 1명
+- Agents: root Codex 1개가 순차 수행하며 병렬 작업은 없다.
+- 목표: Realtime STT가 시작된 뒤 확정 자막이 보이지 않는 remote DB 소유권 단절을 수정하고, BFF/Auth/Core/STT/AI의 실제 caller·destination·JWT audience·mTLS·데이터 소유권을 코드와 Terraform에 대조한다.
+- 파일 경계: `backend`의 transcription gateway/controller/tests, `bff`의 proxy audience/tests, `specs/002-bff-auth-msa/contracts/**`, live STT contract와 관련 plan/tasks/implement만 수정한다. Auth token schema, Browser API, DB migration/ERD는 변경하지 않는다.
+- 통합 순서: Core/STT source-of-truth 확인 → remote transcript read 계약과 Core ACL 선검증 유지 → BFF logical resilience/destination audience 대조 → 회귀 → Core/BFF image rollout → 실제 발화 dialogue 확인이다.
+- 이번 수정은 Browser dialogue를 authoritative STT source에 연결한다. report/task/Meeting AI/embedding용 durable projection은 데이터 중복·수정·완료 event의 멱등 계약이 필요하므로 T059-S7로 분리하고 완료로 주장하지 않는다.
+
+### 2026-07-27 Durable STT projection and embedding worker
+
+- Team Members: 사용자 1명(NonProd STT/AI 증상 확인), integration owner 1명
+- Agents: root Codex 1개가 순차 수행하며 병렬 작업은 없다.
+- 목표: STT의 authoritative transcript를 Core의 report/task/Meeting AI/RAG 원천으로 멱등 projection하고, ECS AI task에 이미 구현된 embedding worker를 실행해 Project AI가 실제 근거를 검색하게 한다.
+- 파일 경계: `backend` transcript domain/store/controller/tests, `infra/aws/modules/ecs-task/**`, NonProd environment/tests/README, live STT·service-call·data model/ERD 계약과 tasks/implement를 수정한다. STT DB schema, Browser API, Auth token schema와 cross-DB FK는 바꾸지 않는다.
+- shared contract: STT는 원본 소유자, Core는 downstream derived projection 소유자다. Core가 ACL을 먼저 검증하고 Core→STT mTLS snapshot을 pull하며 STT speaker/segment ID를 출처 ID로 보존한다.
+- 통합 순서: 계약 고정 → Core 원자적 projection·retry/revision 회귀 → ECS worker task definition 회귀 → Core/AI 빌드 → Terraform plan/apply → 완료 회의 transcript·embedding job·AI source E2E 검증이다.
+
 ## Conflict Boundaries
 
 - Single-owner files:
@@ -341,7 +383,7 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 
 1. Q-020/Q-021 권장안에 따라 Browser/Core external user ID는 `user-{Auth UUID}`를 유지하고 BFF가 신규 Core projection을 동기 생성한다.
 2. BFF Auth client를 `legacy`와 `auth-service` provider로 분리하되 Browser endpoint/cookie/CSRF shape는 유지한다. provider fallback은 요청 실패 시 자동 수행하지 않고 배포 설정으로만 선택한다.
-3. Token Bundle은 legacy 단일 access인 schema v1과 target audience별 access map인 schema v2를 명시적으로 구분한다. target route는 `CORE/AI/LIVEKIT`별 정확한 audience token만 선택하며 다른 audience나 legacy token을 복제하지 않는다.
+3. Token Bundle은 legacy 단일 access인 schema v1과 target audience별 access map인 schema v2를 명시적으로 구분한다. target route는 실제 resource owner가 검증하는 정확한 audience token만 선택하며 다른 audience나 legacy token을 복제하지 않는다. Phase 1 LiveKit 논리 route는 LiveKit 장애 격리 정책을 유지하면서 Core 소유 API에 `meetingmind-core` token을 보낸다.
 4. BFF target 로그인은 Auth Service가 발급한 실제 `authSessionId`와 Auth User UUID를 session에 저장한다. Spring Session Redis의 principal/user index를 활성화해 T024가 사용자 전체 BffSession을 조회할 수 있게 한다.
 5. Core는 JWT header profile로 legacy HS256과 target `RS256/at+jwt/kid`를 먼저 분류하고 선택된 validator 하나만 실행한다. target 검증 실패를 legacy validator로 재시도하지 않아 downgrade를 막는다.
 6. target JWT `sub` UUID는 Core `users.auth_user_id`로 resource User를 찾고 기존 문자열 업무 FK를 사용한다. BFF는 target 인증 성공 뒤 Core target access+workload identity로 멱등 projection을 만들고 성공 후에만 Browser session을 만든다.
@@ -368,6 +410,37 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 - 도메인 전에는 제한된 ALB smoke test만 허용하고, 도메인 후 S3+CloudFront/WAF, HTTPS ALB, browser cookie와 LiveKit WSS를 검증한다.
 - immutable Git SHA/digest ECR image, ALB/ECS health check, 로그·경보·Service Auto Scaling과 Multi-AZ failure drill을 통과한 서비스만 V2로 전환한다.
 - 관측 기간과 rollback 검증이 끝난 뒤 사용자 별도 승인으로 기존 환경을 정리하며, 검증된 모듈을 별도 Production 계정에 적용할 준비를 한다.
+
+#### T059-S5 Realtime STT WebSocket Hotfix Boundary
+
+1. Realtime STT task는 `PUBLIC_WS_BASE_URL`을 명시적으로 받아 LiveKit Egress destination을 만들며, browser smoke에서 값이 없으면 Terraform plan을 거부한다.
+2. CloudFront는 `/ws/egress-audio/*`의 query와 WebSocket upgrade header를 cache 없이 ALB origin으로 전달하고, ALB listener는 이 path만 Realtime STT target으로 보낸다.
+3. ALB→STT application traffic은 HTTPS `8083`, readiness는 SG로 제한한 HTTP `9083`을 사용한다. `/internal/*` workload API의 Core mTLS 경계는 바꾸지 않는다.
+4. 공개 WebSocket은 session-bound 짧은 수명의 HMAC token 검증을 계속 요구하며, token 없는 handshake와 다른 public STT path는 거부한다.
+5. 검증은 Terraform clean mock regression, 실제 plan/apply, target health, token negative handshake와 회의 start→audio→dialogue 순서로 수행한다.
+
+#### T059-S8 Realtime STT Rejoin and Speaker Boundary
+
+1. Core는 인증 사용자 display name을 Core→STT 내부 시작 요청에 전달하고 STT는 session UUID 대신 이를 speaker label/name으로 저장한다.
+2. Frontend는 기존 `stt-{UUID}` row/partial도 사용자용 `참여자`로 정규화해 이미 저장된 내부 식별자를 화면에 노출하지 않는다.
+3. `Leave`는 현재 브라우저가 소유한 STT session을 best-effort stop하고 browser session ID를 폐기한 뒤 LiveKit room을 나간다. 다른 참여자가 소유한 활성 session은 중지하지 않는다.
+4. 재참여 start는 STT authoritative status가 terminal일 때 Core compatibility row와 STT transcript를 `PROCESSING`으로 재개한다. 활성 remote session이 있으면 중복 시작을 계속 거부한다.
+5. 재개는 기존 segment를 삭제하지 않고 마지막 `endMs`를 새 session offset으로 사용한다. 검증은 Frontend/Core/STT 회귀·build, immutable image와 정적 asset 배포, 실제 leave→rejoin 발화 순서로 수행한다.
+
+#### T059-S9 Realtime STT Partial Revision Boundary
+
+1. provider adapter는 delta 또는 가설 수정 event를 같은 provider segment의 최신 전체 partial snapshot으로 정규화한다.
+2. assembler는 같은 session/track/provider segment ID의 partial을 추가 문자열로 병합하지 않고 최신 snapshot으로 교체한다.
+3. provider가 인식 가설을 prefix가 다른 문장으로 수정하더라도 `LIVE` row가 증식하지 않아야 하며, final은 기존 멱등 키와 fingerprint로 한 번만 확정한다.
+4. 검증은 수정 partial 회귀, Realtime STT 전체 test, immutable image scan/배포, 실제 긴 발화의 `LIVE`→final 전이로 수행한다.
+
+#### T059-S10 Terminal Egress Stop and Projection Recovery Boundary
+
+1. LiveKit stop의 412는 응답이 `FAILED_PRECONDITION`이면서 egress 상태가 `FAILED`, `COMPLETE`, `ABORTED`인 경우에만 이미 종료된 멱등 성공으로 분류한다. 다른 412와 provider 5xx는 기존 실패 매핑을 유지한다.
+2. durable STT session이 이미 `FAILED`인 재시도는 저장 transcript가 `PROCESSING`이면 완료 상태로 조정하고, Core stop 흐름이 authoritative snapshot pull과 원자 projection을 계속할 수 있게 한다.
+3. Core runtime role에는 V27로 `chunk_source_segments`의 projection 교체에 필요한 `SELECT, DELETE`를 부여한다. 이미 적용된 migration은 체크섬을 바꾸지 않고, 운영 bootstrap에서 남은 `INSERT, UPDATE`는 append-only V28에서 회수한다.
+4. 기존 실패 데이터 복구는 active/stopping session이 없는 대상만 STT 원본 ID·sequence·시간·text와 exact 대사한 뒤 transaction으로 교체하고 embedding job을 생성한다.
+5. 검증은 Core/STT 전체 test, 실제 PostgreSQL V1→V28 role privilege test, immutable ARM64 image scan, V27/V28 선적용, 제한된 Terraform rollout, 데이터 exact audit와 vector chunk 생성으로 수행한다.
 
 ### Phase 5 — Domain Extraction
 

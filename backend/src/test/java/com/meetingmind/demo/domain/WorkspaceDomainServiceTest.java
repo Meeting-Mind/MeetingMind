@@ -807,6 +807,64 @@ class WorkspaceDomainServiceTest {
         assertThat(memberDashboard.latestReports()).isEmpty();
     }
 
+    @Test
+    void remoteTranscriptProjectionIsIdempotentAndReindexesOnlyChangedCompletedSnapshot() {
+        CountingWorkspaceStore store = new CountingWorkspaceStore();
+        WorkspaceDomainService service = new WorkspaceDomainService(store, new SpaceAccessPolicy(), FIXED_CLOCK);
+        User owner = new User(
+                "user-owner", "owner@meetingmind.ai", "Owner", null, "active",
+                FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
+        );
+        store.saveUser(owner);
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult meeting = service.createMeeting(
+                owner.id(), space.space().id(), "STT projection", SCHEDULED_AT, List.of()
+        );
+        service.startMeetingTranscript(owner.id(), meeting.meeting().id(), "soniox-realtime");
+        List<WorkspaceDomainService.RemoteTranscriptSegment> snapshot = List.of(
+                new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "segment-stt-1", "speaker-stt-1", "화자 1", "Owner",
+                        100, 900, "첫 전사 내용"
+                )
+        );
+
+        MeetingTranscript completed = service.projectRemoteMeetingTranscript(
+                owner.id(), meeting.meeting().id(), TranscriptStatus.COMPLETED, snapshot
+        );
+        service.projectRemoteMeetingTranscript(
+                owner.id(), meeting.meeting().id(), TranscriptStatus.COMPLETED, snapshot
+        );
+
+        assertThat(completed.status()).isEqualTo(TranscriptStatus.COMPLETED);
+        assertThat(store.findTranscriptSegments(meeting.meeting().id()))
+                .singleElement()
+                .satisfies(segment -> {
+                    assertThat(segment.id()).isEqualTo("segment-stt-1");
+                    assertThat(segment.speakerId()).isEqualTo("speaker-stt-1");
+                    assertThat(segment.source()).isEqualTo("stt-remote");
+                    assertThat(segment.sequence()).isZero();
+                });
+        assertThat(store.projectionReplacements).isEqualTo(1);
+        assertThat(store.embeddingReindexes).isZero();
+
+        service.projectRemoteMeetingTranscript(
+                owner.id(),
+                meeting.meeting().id(),
+                TranscriptStatus.COMPLETED,
+                List.of(new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "segment-stt-1", "speaker-stt-1", "화자 1", "Owner",
+                        100, 950, "수정된 전사 내용"
+                ))
+        );
+
+        assertThat(store.findTranscriptSegments(meeting.meeting().id()))
+                .singleElement()
+                .extracting(TranscriptSegment::text)
+                .isEqualTo("수정된 전사 내용");
+        assertThat(store.projectionReplacements).isEqualTo(2);
+        assertThat(store.embeddingReindexes).isEqualTo(1);
+    }
+
     private TestContext newContext() {
         InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
         WorkspaceDomainService service = new WorkspaceDomainService(
@@ -835,6 +893,26 @@ class WorkspaceDomainServiceTest {
                     FIXED_CLOCK.instant()
             );
             return store.saveUser(user);
+        }
+    }
+
+    private static final class CountingWorkspaceStore extends InMemoryWorkspaceStore {
+        private int projectionReplacements;
+        private int embeddingReindexes;
+
+        @Override
+        synchronized void replaceTranscriptProjection(
+                String meetingId,
+                List<MeetingSpeaker> speakers,
+                List<TranscriptSegment> segments
+        ) {
+            projectionReplacements++;
+            super.replaceTranscriptProjection(meetingId, speakers, segments);
+        }
+
+        @Override
+        void enqueueMeetingEmbeddingJob(String meetingId, String reason) {
+            embeddingReindexes++;
         }
     }
 }

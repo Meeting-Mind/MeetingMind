@@ -62,7 +62,7 @@ public class InMemoryTranscriptAssembler implements TranscriptAssembler {
         }
         String partialId = partialId(event);
         PendingPartial existing = session.partials.get(partialId);
-        PendingPartial next = new PendingPartial(partialId, event, mergePartialText(existing, text));
+        PendingPartial next = new PendingPartial(partialId, event, text);
         if (existing != null && existing.text().equals(next.text())) {
             return TranscriptChange.empty();
         }
@@ -138,29 +138,6 @@ public class InMemoryTranscriptAssembler implements TranscriptAssembler {
 
     private static String trackKey(String trackId) {
         return trackId == null ? "unknown-track" : trackId;
-    }
-
-    private static String mergePartialText(PendingPartial existing, String incoming) {
-        if (existing == null) {
-            return incoming;
-        }
-        String previous = existing.text();
-        if (incoming.startsWith(previous)) {
-            return incoming;
-        }
-        if (previous.endsWith(incoming)) {
-            return previous;
-        }
-        char left = previous.charAt(previous.length() - 1);
-        char right = incoming.charAt(0);
-        boolean tightJoin = Character.isLetterOrDigit(left) && Character.isLetterOrDigit(right)
-                || isHangul(left)
-                || isHangul(right);
-        return tightJoin ? previous + incoming : previous + " " + incoming;
-    }
-
-    private static boolean isHangul(char value) {
-        return value >= '\uAC00' && value <= '\uD7A3';
     }
 
     private record SessionAssembly(

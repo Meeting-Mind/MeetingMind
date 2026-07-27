@@ -27,4 +27,18 @@ class LiveKitEgressServiceTest {
         assertThat(LiveKitEgressService.egressWebSocketUrl("http://127.0.0.1:8080/", "session-2", "tok"))
                 .isEqualTo("ws://127.0.0.1:8080/ws/egress-audio/session-2?token=tok");
     }
+
+    @Test
+    void treatsAlreadyTerminalEgressStopAsIdempotent() {
+        assertThat(LiveKitEgressService.isTerminalStopConflict(
+                412,
+                "{\"code\":\"failed_precondition\",\"msg\":\"egress with status EGRESS_FAILED cannot be stopped\"}"
+        )).isTrue();
+        assertThat(LiveKitEgressService.isTerminalStopConflict(
+                412,
+                "{\"code\":\"failed_precondition\",\"msg\":\"egress with status EGRESS_COMPLETE cannot be stopped\"}"
+        )).isTrue();
+        assertThat(LiveKitEgressService.isTerminalStopConflict(412, "track is not ready")).isFalse();
+        assertThat(LiveKitEgressService.isTerminalStopConflict(500, "EGRESS_FAILED")).isFalse();
+    }
 }

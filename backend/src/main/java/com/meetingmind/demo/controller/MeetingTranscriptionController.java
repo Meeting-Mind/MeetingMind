@@ -10,6 +10,8 @@ import com.meetingmind.demo.dto.MeetingDialogueResponse;
 import com.meetingmind.demo.dto.MeetingTranscriptionStartResponse;
 import com.meetingmind.demo.dto.MeetingTranscriptStatusResponse;
 import com.meetingmind.demo.dto.StartMeetingTranscriptionRequest;
+import com.meetingmind.demo.dto.stt.MeetingTranscriptGatewayResponse;
+import com.meetingmind.demo.dto.stt.TranscriptionStatusGatewayResponse;
 import com.meetingmind.demo.gateway.TranscriptionGateway;
 import com.meetingmind.demo.gateway.TranscriptionHandle;
 import com.meetingmind.demo.gateway.TranscriptionSessionNotFoundException;
@@ -18,6 +20,7 @@ import com.meetingmind.demo.gateway.TranscriptionStartException;
 import com.meetingmind.demo.gateway.TranscriptionStopException;
 import com.meetingmind.demo.service.SttProvider;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +62,19 @@ public class MeetingTranscriptionController {
             @Valid @RequestBody StartMeetingTranscriptionRequest request
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
-        MeetingTranscript transcript = workspaceDomainService.startMeetingTranscript(user.id(), meetingId, sttProvider.providerId());
+        workspaceDomainService.requireTranscriptManagement(user.id(), meetingId);
+        String providerId = sttProvider.providerId();
+        TranscriptionStatusGatewayResponse remoteStatus = transcriptionGateway.status(meetingId).orElse(null);
+        if (remoteStatus != null && remoteStatus.status() == TranscriptStatus.PROCESSING) {
+            throw new AuthorizationException(
+                    HttpStatus.CONFLICT,
+                    "TRANSCRIPTION_ALREADY_PROCESSING",
+                    "이미 진행 중인 전사가 있습니다."
+            );
+        }
+        MeetingTranscript transcript = remoteStatus == null
+                ? workspaceDomainService.startMeetingTranscript(user.id(), meetingId, providerId)
+                : workspaceDomainService.resumeMeetingTranscript(user.id(), meetingId, providerId);
 
         try {
             String roomName = workspaceDomainService.meetingRoomName(meetingId);
@@ -132,9 +147,40 @@ public class MeetingTranscriptionController {
                     "LiveKit egress 서비스를 중지할 수 없습니다."
             );
         }
+        MeetingTranscriptGatewayResponse snapshot = transcriptionGateway.transcript(meetingId).orElse(null);
+        String transcriptStatus;
+        if (snapshot == null) {
+            transcriptStatus = workspaceDomainService.meetingTranscript(user.id(), meetingId)
+                    .transcript().status().name();
+        } else {
+            if (!meetingId.equals(snapshot.meetingId())) {
+                throw new AuthorizationException(
+                        HttpStatus.BAD_GATEWAY,
+                        "STT_INVALID_RESPONSE",
+                        "STT 전사 응답의 회의 식별자가 일치하지 않습니다."
+                );
+            }
+            MeetingTranscript projected = workspaceDomainService.projectRemoteMeetingTranscript(
+                    user.id(),
+                    meetingId,
+                    snapshot.status(),
+                    snapshot.segments().stream()
+                            .map(segment -> new WorkspaceDomainService.RemoteTranscriptSegment(
+                                    segment.id(),
+                                    segment.speakerId(),
+                                    segment.speakerLabel(),
+                                    segment.speakerName(),
+                                    segment.startMs(),
+                                    segment.endMs(),
+                                    segment.text()
+                            ))
+                            .toList()
+            );
+            transcriptStatus = projected.status().name();
+        }
         return new MeetingTranscriptStatusResponse(
                 meetingId,
-                workspaceDomainService.meetingTranscript(user.id(), meetingId).transcript().status().name()
+                transcriptStatus
         );
     }
 
@@ -145,15 +191,25 @@ public class MeetingTranscriptionController {
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
         WorkspaceDomainService.MeetingTranscriptView view = workspaceDomainService.meetingTranscript(user.id(), meetingId);
-        return new MeetingDialogueResponse(
-                meetingId,
-                view.transcript().status().name(),
-                view.segments().stream()
+        MeetingTranscriptGatewayResponse remote = transcriptionGateway.transcript(meetingId).orElse(null);
+        String status = remote == null ? view.transcript().status().name() : remote.status().name();
+        List<MeetingDialogueResponse.Row> rows = remote == null
+                ? view.segments().stream()
                         .map(segment -> new MeetingDialogueResponse.Row(
                                 segment.id(), segment.speakerId(), segment.speakerLabel(), segment.speakerName(),
                                 segment.startMs(), segment.endMs(), segment.text()
                         ))
-                        .toList(),
+                        .toList()
+                : remote.segments().stream()
+                        .map(segment -> new MeetingDialogueResponse.Row(
+                                segment.id(), segment.speakerId(), segment.speakerLabel(), segment.speakerName(),
+                                Math.toIntExact(segment.startMs()), Math.toIntExact(segment.endMs()), segment.text()
+                        ))
+                        .toList();
+        return new MeetingDialogueResponse(
+                meetingId,
+                status,
+                rows,
                 transcriptionGateway.partials(meetingId)
         );
     }

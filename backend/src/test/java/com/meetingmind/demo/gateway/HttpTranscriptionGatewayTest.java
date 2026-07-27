@@ -44,6 +44,27 @@ class HttpTranscriptionGatewayTest {
             assertThat(handle.egressId()).isEqualTo("egress-1");
             assertThat(receivedMethod.get()).isEqualTo("POST");
             assertThat(receivedBody.get()).contains("\"meetingId\":\"meeting-1\"");
+            assertThat(receivedBody.get()).contains("\"participantDisplayName\":\"Kim\"");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void returnsEmptyWhenAnAuthoritativeTranscriptDoesNotExistYet() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/meetings/meeting-1/transcription-status", exchange -> {
+            exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
+                    HttpClient.newHttpClient(), new ObjectMapper(),
+                    "http://127.0.0.1:" + server.getAddress().getPort()
+            );
+
+            assertThat(gateway.status("meeting-1")).isEmpty();
         } finally {
             server.stop(0);
         }
@@ -139,6 +160,35 @@ class HttpTranscriptionGatewayTest {
             assertThat(partials).hasSize(1);
             assertThat(partials.get(0).speakerLabel()).isEqualTo("A");
             assertThat(partials.get(0).text()).isEqualTo("hel");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void readsTheAuthoritativeTranscriptForAMeeting() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/meetings/meeting-1/transcript", exchange -> {
+            byte[] response = ("{\"meetingId\":\"meeting-1\",\"status\":\"PROCESSING\","
+                    + "\"segments\":[{\"id\":\"segment-1\",\"speakerId\":\"speaker-1\","
+                    + "\"speakerLabel\":\"A\",\"speakerName\":\"Alice\",\"startMs\":10,"
+                    + "\"endMs\":500,\"text\":\"hello\"}]}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            HttpTranscriptionGateway gateway = new HttpTranscriptionGateway(
+                    HttpClient.newHttpClient(), new ObjectMapper(),
+                    "http://127.0.0.1:" + server.getAddress().getPort()
+            );
+
+            var transcript = gateway.transcript("meeting-1").orElseThrow();
+
+            assertThat(transcript.status()).isEqualTo(com.meetingmind.demo.domain.TranscriptStatus.PROCESSING);
+            assertThat(transcript.segments()).extracting(segment -> segment.text()).containsExactly("hello");
         } finally {
             server.stop(0);
         }

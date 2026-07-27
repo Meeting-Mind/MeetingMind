@@ -5627,7 +5627,8 @@ const LiveMeeting = () => {
               setSttState("active");
             } catch (cause) {
               if (isTranscriptionAlreadyProcessingError(cause)) {
-                sttSessionIdRef.current = sessionStorage.getItem(sttSessionStorageKey(meetingId));
+                sttSessionIdRef.current = null;
+                sessionStorage.removeItem(sttSessionStorageKey(meetingId));
                 setSttState("active");
                 setTranscriptError("");
                 return;
@@ -5674,13 +5675,6 @@ const LiveMeeting = () => {
           await room.localParticipant.setMicrophoneEnabled(initialDevicePreferencesRef.current.micOn);
         } catch (cause) {
           console.warn("[LiveMeeting] microphone setup failed", cause);
-        }
-        const existingSttSessionId = sessionStorage.getItem(sttSessionStorageKey(meetingId));
-        if (existingSttSessionId) {
-          sttSessionIdRef.current = existingSttSessionId;
-          sttStartedRef.current = true;
-          setSttState("active");
-          setTranscriptError("");
         }
         syncSnapshot(room);
         if (mounted) {
@@ -5737,8 +5731,10 @@ const LiveMeeting = () => {
       return;
     }
     setTranscriptStatus(status);
-    if (status === "PROCESSING" || status === "COMPLETED") {
+    if (status === "PROCESSING") {
       setSttState("active");
+    } else if (status === "COMPLETED") {
+      setSttState("idle");
     } else if (status === "FAILED") {
       setSttState("failed");
     }
@@ -5839,7 +5835,19 @@ const LiveMeeting = () => {
       return;
     }
     setEnding(true);
-    stopSttOnUnmountRef.current = false;
+    const sessionId = sttSessionIdRef.current ?? sessionStorage.getItem(sttSessionStorageKey(meetingId));
+    try {
+      if (sessionId) {
+        await stopMeetingTranscription(authSession, meetingId, sessionId);
+      }
+    } catch {
+      // Leaving must still disconnect. The STT service will reconcile the closed LiveKit track.
+    } finally {
+      sessionStorage.removeItem(sttSessionStorageKey(meetingId));
+      sttSessionIdRef.current = null;
+      sttStartedRef.current = false;
+      stopSttOnUnmountRef.current = false;
+    }
     const room = roomRef.current;
     if (room) {
       await room.disconnect();

@@ -56,4 +56,25 @@ class SonioxTranscriptEventMapperTest {
         assertThat(endpoint).extracting(TranscriptEvent::text).containsExactly("첫 문장입니다.");
         assertThat(endpoint).extracting(TranscriptEvent::type).containsExactly(TranscriptEventType.FINAL);
     }
+
+    @Test
+    void revisedLiveHypothesisReplacesThePreviousAssemblerSnapshot() throws Exception {
+        SonioxTranscriptEventMapper mapper = new SonioxTranscriptEventMapper(
+                new SttSessionContext("session-1", "meeting-1", "participant-1", "track-1")
+        );
+        TranscriptAssembler assembler = new InMemoryTranscriptAssembler();
+
+        mapper.map(OBJECT_MAPPER.readTree("""
+                {"tokens":[{"text":"ERP 시스템을 만들면","is_final":false,"start_ms":0,"end_ms":300}]}
+                """)).forEach(assembler::accept);
+        mapper.map(OBJECT_MAPPER.readTree("""
+                {"tokens":[
+                  {"text":"ERP 시스템을 ","is_final":true,"start_ms":0,"end_ms":200},
+                  {"text":"만들어보면 좋겠습니다","is_final":false,"start_ms":200,"end_ms":500}
+                ]}
+                """)).forEach(assembler::accept);
+
+        assertThat(assembler.partials("session-1")).extracting(TranscriptPartial::text)
+                .containsExactly("ERP 시스템을 만들어보면 좋겠습니다");
+    }
 }

@@ -156,10 +156,26 @@ locals {
     readonlyRootFilesystem = true
   }
 
+  worker_containers = [
+    for worker_name in sort(keys(var.background_workers)) : merge(local.base_container, {
+      name    = worker_name
+      command = var.background_workers[worker_name]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.log_group_name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = worker_name
+        }
+      }
+    })
+  ]
+
   containers = concat(
     local.tls_enabled ? [local.cert_loader_container] : [],
     local.envoy_enabled ? [local.envoy_container] : [],
     [local.container],
+    local.worker_containers,
   )
 }
 

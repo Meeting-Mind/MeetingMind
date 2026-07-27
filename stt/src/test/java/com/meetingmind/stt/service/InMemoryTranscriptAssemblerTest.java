@@ -43,6 +43,23 @@ class InMemoryTranscriptAssemblerTest {
                 .containsExactly("여기까지 들었습니다");
     }
 
+    @Test
+    void replacesARevisedPartialSnapshotInsteadOfAppendingIt() {
+        TranscriptAssembler assembler = new InMemoryTranscriptAssembler();
+
+        assembler.accept(event(
+                TranscriptEventType.PARTIAL, "partial-1", "speaker-1", "ERP 시스템을 만들면", 1, 0, 300
+        ));
+        TranscriptChange revised = assembler.accept(event(
+                TranscriptEventType.PARTIAL, "partial-2", "speaker-1", "ERP 시스템을 만들어보면 좋겠습니다", 2, 0, 500
+        ));
+
+        assertThat(revised.partialsUpserted()).extracting(TranscriptPartial::text)
+                .containsExactly("ERP 시스템을 만들어보면 좋겠습니다");
+        assertThat(assembler.partials("session-1")).extracting(TranscriptPartial::text)
+                .containsExactly("ERP 시스템을 만들어보면 좋겠습니다");
+    }
+
     private static TranscriptEvent event(
             TranscriptEventType type,
             String eventId,

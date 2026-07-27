@@ -359,6 +359,7 @@ Backend는 아래 논리 구조의 `TranscriptSegment` 원천을 PostgreSQL에 �
 ### TranscriptSegment Source
 
 STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용 중심으로 쌓인다.
+분리 배포에서 STT DB가 authoritative source이며 Core DB의 `TranscriptSegment`는 report/task/AI/RAG용 derived projection이다. Core는 stop 성공 후 mTLS snapshot을 pull해 meeting 단위로 원자적 교체하고, `source=stt-remote`와 STT의 speaker/segment ID를 보존한다. 물리 relation은 바뀌지 않으며 STT DB로의 FK나 cross-DB join을 추가하지 않는다.
 
 - `id`: segment id
 - `meetingId`

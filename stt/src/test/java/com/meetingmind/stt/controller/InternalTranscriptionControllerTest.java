@@ -11,6 +11,8 @@ import static org.mockito.Mockito.when;
 
 import com.meetingmind.stt.domain.TranscriptionSession;
 import com.meetingmind.stt.domain.TranscriptionSessionStatus;
+import com.meetingmind.stt.domain.MeetingTranscript;
+import com.meetingmind.stt.domain.TranscriptStatus;
 import com.meetingmind.stt.dto.ActiveSessionResponse;
 import com.meetingmind.stt.dto.PartialResponse;
 import com.meetingmind.stt.dto.StartTranscriptionRequest;
@@ -48,12 +50,39 @@ class InternalTranscriptionControllerTest {
         when(sessionRepository.findByRequestId("request-1")).thenReturn(Optional.of(existing));
 
         TranscriptionStartResponse response = controller.start(
-                new StartTranscriptionRequest("meeting-1", "room-1", "track-1", null, "request-1"));
+                new StartTranscriptionRequest("meeting-1", "room-1", "track-1", "Kim", null, "request-1"));
 
         assertThat(response.sessionId()).isEqualTo("session-1");
         assertThat(response.egressId()).isEqualTo("egress-1");
         verifyNoInteractions(transcriptionCoordinator);
-        verify(sessionRegistry, never()).createMeetingSession(any(), any(), any(), any());
+        verify(sessionRegistry, never()).createMeetingSession(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void startUsesTheParticipantDisplayNameInsteadOfTheInternalSessionId() {
+        System.setProperty("PUBLIC_WS_BASE_URL", "https://stt.example.test");
+        try {
+            when(sttProvider.providerId()).thenReturn("soniox-realtime");
+            when(sessionRegistry.createMeetingSession(
+                    "meeting-1", "room-1", "track-1", "request-1", "김수진"))
+                    .thenReturn("session-1");
+            when(egressTokenService.issue("session-1")).thenReturn("egress-token");
+            when(liveKitEgressService.startTrackEgress(
+                    org.mockito.ArgumentMatchers.eq("room-1"),
+                    org.mockito.ArgumentMatchers.eq("track-1"),
+                    org.mockito.ArgumentMatchers.anyString()))
+                    .thenReturn("egress-1");
+
+            TranscriptionStartResponse response = controller.start(
+                    new StartTranscriptionRequest(
+                            "meeting-1", "room-1", "track-1", "김수진", null, "request-1"));
+
+            assertThat(response.sessionId()).isEqualTo("session-1");
+            verify(sessionRegistry).createMeetingSession(
+                    "meeting-1", "room-1", "track-1", "request-1", "김수진");
+        } finally {
+            System.clearProperty("PUBLIC_WS_BASE_URL");
+        }
     }
 
     @Test
@@ -66,6 +95,25 @@ class InternalTranscriptionControllerTest {
         assertThatThrownBy(() -> controller.stop("session-1", "meeting-2"))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+    }
+
+    @Test
+    void stopReconcilesAProcessingTranscriptWhenTheEgressSessionAlreadyFailed() {
+        Instant now = Instant.now();
+        TranscriptionSession session = new TranscriptionSession(
+                "session-1", "meeting-1", "room-1", "track-1", "egress-1",
+                TranscriptionSessionStatus.FAILED, "request-1", now, now);
+        MeetingTranscript processing = transcript("meeting-1", TranscriptStatus.PROCESSING, now, null);
+        MeetingTranscript completed = transcript("meeting-1", TranscriptStatus.COMPLETED, now, now);
+        when(sessionRepository.findById("session-1")).thenReturn(Optional.of(session));
+        when(transcriptionCoordinator.getTranscript("meeting-1")).thenReturn(processing);
+        when(transcriptionCoordinator.completeTranscript("meeting-1")).thenReturn(completed);
+
+        var response = controller.stop("session-1", "meeting-1");
+
+        assertThat(response.status()).isEqualTo("COMPLETED");
+        verify(transcriptionCoordinator).completeTranscript("meeting-1");
+        verifyNoInteractions(liveKitEgressService);
     }
 
     @Test
@@ -87,5 +135,17 @@ class InternalTranscriptionControllerTest {
         assertThat(partials).hasSize(1);
         assertThat(partials.get(0).speakerLabel()).isEqualTo("A");
         assertThat(partials.get(0).text()).isEqualTo("hel");
+    }
+
+    private static MeetingTranscript transcript(
+            String meetingId,
+            TranscriptStatus status,
+            Instant startedAt,
+            Instant completedAt
+    ) {
+        return new MeetingTranscript(
+                meetingId, status, "soniox-realtime", "ko-KR", startedAt, completedAt,
+                null, null, false, null, startedAt, completedAt == null ? startedAt : completedAt
+        );
     }
 }

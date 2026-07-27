@@ -9,6 +9,10 @@ public record MeetingTranscriptGatewayResponse(
         List<Segment> segments
 ) {
 
+    public MeetingTranscriptGatewayResponse {
+        segments = segments == null ? List.of() : List.copyOf(segments);
+    }
+
     public record Segment(
             String id,
             String speakerId,

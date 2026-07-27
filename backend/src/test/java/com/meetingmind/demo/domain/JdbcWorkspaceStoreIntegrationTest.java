@@ -386,6 +386,83 @@ class JdbcWorkspaceStoreIntegrationTest {
         )).isEqualTo(1);
     }
 
+    @Test
+    void projectsRemoteTranscriptWithStableIdsAndReindexesOnlyARevision() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("projection-owner-" + suffix, now));
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(
+                owner.id(), "Remote Projection Space", "authoritative STT projection"
+        );
+        WorkspaceDomainService.MeetingCreationResult meeting = service.createMeeting(
+                owner.id(),
+                space.space().id(),
+                "Remote Projection Meeting",
+                OffsetDateTime.of(2026, 7, 27, 10, 0, 0, 0, ZoneOffset.UTC),
+                List.of()
+        );
+        service.startMeetingTranscript(owner.id(), meeting.meeting().id(), "soniox-realtime");
+        List<WorkspaceDomainService.RemoteTranscriptSegment> snapshot = List.of(
+                new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "remote-segment-" + suffix,
+                        "remote-speaker-" + suffix,
+                        "화자 1",
+                        "Owner",
+                        100,
+                        900,
+                        "원격 STT 전사를 Core에 투영합니다."
+                )
+        );
+
+        service.projectRemoteMeetingTranscript(
+                owner.id(), meeting.meeting().id(), TranscriptStatus.COMPLETED, snapshot
+        );
+        entityManager.flush();
+        service.projectRemoteMeetingTranscript(
+                owner.id(), meeting.meeting().id(), TranscriptStatus.COMPLETED, snapshot
+        );
+        entityManager.flush();
+
+        assertThat(store.findTranscriptSegments(meeting.meeting().id()))
+                .singleElement()
+                .satisfies(segment -> {
+                    assertThat(segment.id()).isEqualTo("remote-segment-" + suffix);
+                    assertThat(segment.speakerId()).isEqualTo("remote-speaker-" + suffix);
+                    assertThat(segment.source()).isEqualTo("stt-remote");
+                });
+        assertThat(jdbc.queryForObject(
+                "select count(*) from embedding_jobs where meeting_id = ?",
+                Integer.class,
+                meeting.meeting().id()
+        )).isEqualTo(1);
+
+        service.projectRemoteMeetingTranscript(
+                owner.id(),
+                meeting.meeting().id(),
+                TranscriptStatus.COMPLETED,
+                List.of(new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "remote-segment-" + suffix,
+                        "remote-speaker-" + suffix,
+                        "화자 1",
+                        "Owner",
+                        100,
+                        950,
+                        "수정된 원격 STT 전사입니다."
+                ))
+        );
+        entityManager.flush();
+
+        assertThat(store.findTranscriptSegments(meeting.meeting().id()))
+                .singleElement()
+                .extracting(TranscriptSegment::text)
+                .isEqualTo("수정된 원격 STT 전사입니다.");
+        assertThat(jdbc.queryForObject(
+                "select count(*) from embedding_jobs where meeting_id = ? and trigger_reason = 'FULL_REINDEX'",
+                Integer.class,
+                meeting.meeting().id()
+        )).isEqualTo(1);
+    }
+
     private User user(String id, Instant now) {
         return new User(id, id + "@meetingmind.test", id, null, "active", now, now);
     }

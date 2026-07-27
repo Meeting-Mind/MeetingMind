@@ -61,16 +61,13 @@ public class TranscriptionCoordinator {
         if (existing != null && existing.status() == TranscriptStatus.PROCESSING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 진행 중인 전사가 있습니다.");
         }
-        if (existing != null && existing.status() == TranscriptStatus.COMPLETED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "완료된 전사가 있습니다.");
-        }
         Instant now = Instant.now(clock);
         return transcriptRepository.save(new MeetingTranscript(
                 meetingId,
                 TranscriptStatus.PROCESSING,
                 provider,
                 "ko-KR",
-                now,
+                existing == null ? now : existing.startedAt(),
                 null,
                 null,
                 retentionUntil,
@@ -138,6 +135,13 @@ public class TranscriptionCoordinator {
 
     public List<TranscriptSegment> getSegments(String meetingId) {
         return segmentRepository.findByMeetingIdOrderBySequenceAsc(meetingId);
+    }
+
+    public int nextSegmentOffsetMs(String meetingId) {
+        return segmentRepository.findByMeetingIdOrderBySequenceAsc(meetingId).stream()
+                .mapToInt(TranscriptSegment::endMs)
+                .max()
+                .orElse(0);
     }
 
     private MeetingTranscript requireProcessingTranscript(String meetingId) {

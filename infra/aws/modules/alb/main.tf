@@ -54,7 +54,7 @@ resource "aws_lb_target_group" "bff" {
 resource "aws_lb_target_group" "stt" {
   name        = substr("${var.name_prefix}-stt", 0, 32)
   port        = 8083
-  protocol    = "HTTP"
+  protocol    = "HTTPS"
   target_type = "ip"
   vpc_id      = var.vpc_id
 
@@ -66,7 +66,7 @@ resource "aws_lb_target_group" "stt" {
     interval            = 30
     matcher             = "200"
     path                = "/actuator/health/readiness"
-    port                = "traffic-port"
+    port                = "9083"
     protocol            = "HTTP"
     timeout             = 5
     unhealthy_threshold = 3

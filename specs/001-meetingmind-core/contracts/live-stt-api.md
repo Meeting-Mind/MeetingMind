@@ -273,6 +273,8 @@ None.
 
 - `mode`: 현재 `realtime`만 지원한다. `postprocess`는 오디오 업로드 결정(T027) 이후 추가한다.
 - `trackId`: `realtime`일 때 required. LiveKit track egress 대상이다.
+- Core는 인증된 참여자의 `displayName`을 Core→STT 내부 시작 요청에 전달한다. STT session UUID나
+  egress/track 식별자는 사용자용 화자명으로 저장하거나 표시하지 않는다.
 - 대상 회의에 대해 동시에 `PROCESSING` 상태인 전사 작업이 있으면 시작을 거부한다.
 
 ### Response
@@ -307,9 +309,19 @@ None.
 
 - `Transcript.status`는 `PENDING` -> `PROCESSING` -> `COMPLETED` 또는 `FAILED`로 전이한다.
 - `PROCESSING` 시작 시 `meeting_transcripts`를 저장한다. provider callback의 segment는 즉시 저장하고, stop/provider complete 시 `COMPLETED`로 전환한다.
+- Realtime STT가 별도 서비스인 `remote` gateway mode에서는 위 status/segment의 authoritative row가 STT DB에 있다. Core `/dialogue`는 사용자와 Meeting ACL을 먼저 검증한 뒤 Core→STT mTLS 내부 API의 transcript/status/partials를 반환한다. Core DB의 시작 row만 조회해 빈 segment를 성공 응답으로 반환하지 않는다.
+- 회의방 `Leave`는 Meeting 종료가 아니다. 현재 브라우저가 소유한 track egress/STT session만 정상
+  종료하고, 재참여 시 새 LiveKit microphone track으로 새 session을 시작한다. 기존 segment를 보존한
+  채 terminal transcript를 `PROCESSING`으로 재개하며, 동일 회의의 활성 session이 있으면 중복 시작은
+  계속 거부한다.
 - LiveKit Egress WebSocket이 정상 종료되면 마지막 audio를 provider에 flush한 뒤 target STT 세션을 종료해 `COMPLETED`로 전환한다. legacy `/api/stt/*` 세션은 기존 수동 transcript 조회 호환을 위해 registry에서 제거하지 않는다.
 - legacy `/api/stt/*` HTTP controller는 기본 `local`/`db` runtime에 등록하지 않는다. 수동 smoke에서만 `legacy-stt` profile을 명시적으로 함께 활성화하며, 제품 UI와 운영 환경은 target Meeting API만 사용한다.
 - `COMPLETED` 전환은 DB trigger로 `TRANSCRIPT_COMPLETED` embedding job을 하나 생성한다. segment마다 job을 생성하지 않는다.
+- 분리 배포의 stop 성공 후 Core는 같은 meeting의 `GET /internal/v1/meetings/{meetingId}/transcript`를 mTLS로 즉시 조회해 report/task/AI/RAG용 derived projection을 하나의 Core DB transaction으로 교체한다.
+- projection은 STT `speakerId`, `segmentId`, sequence와 시간 범위를 보존하고 같은 snapshot 재시도를 no-op으로 처리한다. 이미 `COMPLETED`된 snapshot의 내용이 바뀐 경우만 `FULL_REINDEX`를 생성한다.
+- STT stop은 terminal session에 멱등이므로 STT 완료 후 Core projection 전에 장애가 난 경우 동일 stop 요청이 snapshot projection을 다시 시도한다. STT와 Core DB 사이에 FK나 cross-DB runtime read를 추가하지 않는다.
+- LiveKit `stopEgress`의 HTTP 412는 `FAILED_PRECONDITION`과 `EGRESS_FAILED`/`EGRESS_COMPLETE`/`EGRESS_ABORTED`가 함께 확인된 경우에만 이미 종료된 멱등 성공으로 처리한다. 다른 412 또는 5xx는 성공으로 완화하지 않는다.
+- durable session이 `FAILED`지만 transcript가 아직 `PROCESSING`인 재시도는 저장된 segment를 보존한 채 transcript를 `COMPLETED`로 조정하고, Core가 authoritative snapshot projection과 embedding enqueue를 계속 수행한다.
 
 ## POST /api/v1/meetings/{meetingId}/transcription/{sessionId}/stop
 
@@ -437,7 +449,7 @@ None.
 ### Notes
 
 - `PROCESSING`에서도 이미 저장된 segment를 반환해 실시간 자막 polling을 지원한다. `COMPLETED`와 `FAILED`도 같은 shape으로 반환하며, segment가 없으면 `rows`는 빈 배열이다.
-- `partials`는 아직 확정되지 않은 현재 발화이며 DB에 저장하지 않는다. `rawEvents`와 provider 원문 이벤트는 사용자 API에 포함하지 않는다.
+- `partials`는 아직 확정되지 않은 현재 발화이며 DB에 저장하지 않는다. 같은 session/track/provider segment ID의 후속 partial `text`는 이전 문자열에 덧붙이는 delta가 아니라 해당 발화의 최신 전체 snapshot으로 교체한다. provider delta는 mapper가 snapshot으로 조립한 뒤 assembler에 전달한다. `rawEvents`와 provider 원문 이벤트는 사용자 API에 포함하지 않는다.
 - 원시 provider 이벤트는 기본 profile에서 노출하지 않는다. 진단이 필요할 때만 `stt-debug` profile과 `STT_DEBUG_TOKEN`을 명시해 `GET /internal/stt/sessions/{sessionId}/raw-events`를 사용한다. 세션 종료 후에는 in-memory 이벤트도 제거된다.
 - speaker displayName 변경은 `meeting-api.md`의 speaker 수정 endpoint를 사용한다.
 

@@ -302,6 +302,16 @@ class JpaWorkspaceStore extends DelegatingWorkspaceStore {
     }
 
     @Override
+    void replaceTranscriptProjection(
+            String meetingId,
+            List<MeetingSpeaker> speakers,
+            List<TranscriptSegment> segments
+    ) {
+        super.replaceTranscriptProjection(meetingId, speakers, segments);
+        persistence.clear();
+    }
+
+    @Override
     MeetingReport saveMeetingReport(MeetingReport report) {
         return persistence.saveMeetingReport(report);
     }

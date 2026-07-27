@@ -54,7 +54,7 @@ public class BffProxyController {
                 forwardedBody.body());
         ProxyResponse response = tokenManager.execute(
                 request,
-                route.service().audience(),
+                route.audience(),
                 authorization -> downstreamClient.execute(route.service(), proxyRequest, authorization));
         aiUsageRecorder.recordIfPresent(request, route, response);
         HttpHeaders responseHeaders = new HttpHeaders();

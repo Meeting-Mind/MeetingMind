@@ -96,6 +96,18 @@ describe("buildTranscriptEntries", () => {
       )
     ).toEqual([]);
   });
+
+  it("내부 STT session UUID를 사용자용 화자명으로 노출하지 않는다", () => {
+    const internalLabel = "stt-30046e97-9a2b-4773-b314-de3f5800e680";
+    const entries = buildTranscriptEntries(
+      dialogue({
+        rows: [row({ speakerLabel: internalLabel, speakerName: internalLabel })],
+        partials: [{ speakerLabel: internalLabel, speakerName: null, text: "말하는 중" }]
+      })
+    );
+
+    expect(entries.map((entry) => entry.speakerName)).toEqual(["참여자", "참여자"]);
+  });
 });
 
 describe("filterTranscriptEntries", () => {

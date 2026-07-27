@@ -149,11 +149,12 @@ Private runtime promotion은 public traffic 없이 Auth/AI/Realtime STT/Core를 
 
 `release_gates_acknowledged=false`인 동안 Terraform은 기본적으로 BFF, public listener와
 autoscaling을 모두 거부한다. D-034의 별도 deployment smoke gate만 BFF 1개와 CloudFront
-기본 도메인 검증을 제한적으로 예외 허용한다. 다음 항목은 private runtime promotion과
+browser smoke를 제한적으로 예외 허용한다. 다음 항목은 private runtime promotion과
 분리된 정식 BFF/public release gate다.
 
 - Q-013 SLO/RTO/RPO와 autoscaling 값 승인
 - BFF가 Valkey IAM의 15분 token 갱신과 12시간 connection 재인증을 지원하고 TLS 연결 테스트 통과
+- Frontend `VITE_GOOGLE_CLIENT_ID`와 Auth `auth_google_client_ids` audience allowlist 일치
 - T047-E least-privilege runtime 검증
 - T048 정상 ECS service와 T049 관측/autoscaling 완료 기준
 
@@ -191,6 +192,8 @@ mtls_validation_services        = []
 
 validation 또는 runtime mode가 켜지면 모든 task definition에 cert-loader init container, task-scoped `meetingmind-tls` volume과 application read-only mount가 추가된다. loader는 task role로 자기 서비스의 TLS bundle secret만 읽고, 검증 실패 시 `SUCCESS` dependency가 application 시작을 차단한다.
 
+AI task는 같은 immutable AI image, `AI_DATABASE_URL`, OpenAI secret과 task role을 공유하는 `ai-worker` essential container를 함께 실행한다. API는 Envoy 뒤 loopback Uvicorn으로 유지하고 worker는 `python -m app.embedding_worker`로 Core DB의 `embedding_jobs` lease를 claim해 처리한다. worker 중단은 task 전체 replacement로 복구하며 lease 만료 job은 재선점한다.
+
 ## 8. Deployment smoke gate
 
 운영 전환 전 Browser→BFF→private service가 동작하는지만 빠르게 확인할 때 다음 값을 함께
@@ -205,14 +208,27 @@ enable_deployment_smoke                = true
 deployment_smoke_gates_acknowledged    = true
 release_gates_acknowledged             = false
 enable_autoscaling                     = false
+frontend_custom_domain = {
+  name                = "app.meetingmind.co.kr"
+  acm_certificate_arn = "arn:aws:acm:us-east-1:<nonprod-account-id>:certificate/<certificate-id>"
+}
+auth_google_client_ids = ["<google-oauth-web-client-id>.apps.googleusercontent.com"]
+stt_public_ws_base_url  = "https://app.meetingmind.co.kr"
 ```
 
 이 mode는 BFF desired count를 정확히 1로 강제하고, private subnet/public IP disabled/mTLS와
 Valkey IAM+TLS를 유지한다. ALB HTTP origin은 AWS-managed CloudFront origin-facing prefix
-list에서만 접근할 수 있고, CloudFront 기본 HTTPS 도메인이 private S3/OAC 정적 asset과
-`/api/*` BFF origin을 same-origin으로 제공한다. Realtime STT public websocket rule은 열지 않는다.
-custom domain, Route 53/ACM, WAF 정식 정책, autoscaling, SLO와 장애·부하 검증은 이 smoke의
-완료 조건이 아니므로 T048/T049/T059와 정식 release gate는 계속 open이다.
+list에서만 접근할 수 있고, `app.meetingmind.co.kr`가 private S3/OAC 정적 asset, `/api/*`
+BFF origin과 token-protected `/ws/egress-audio/*` Realtime STT origin을 same-origin으로 제공한다. 기존 ACM 인증서는 CloudFront 요구사항에 따라
+`us-east-1`에 있어야 한다. 이 root는 CloudFront alias, 인증서 참조, `TLSv1.2_2021`만 관리하고
+가비아의 `app` CNAME과 ACM 발급·DNS 검증 레코드는 외부 관리 상태로 둔다. Realtime STT public
+WebSocket은 `PUBLIC_WS_BASE_URL`, session-bound HMAC token, CloudFront-only ALB ingress를 모두 요구하며
+그 밖의 STT public route는 열지 않는다. Route 53, Terraform-managed ACM, WAF 정식 정책, autoscaling,
+SLO와 장애·부하 검증은 이 smoke의 완료 조건이 아니므로 T048/T049/T059와 정식 release gate는
+계속 open이다. `frontend_custom_domain = null`이면 제한된 기본 CloudFront 도메인 fallback을 쓴다.
+Google OAuth client ID는 공개 식별자이므로 Terraform 변수로 task environment에 전달한다. BFF를
+runtime allowlist에 넣을 때 이 목록이 비어 있으면 plan이 실패한다. 목록은 Frontend build의
+`VITE_GOOGLE_CLIENT_ID`와 일치해야 하며 OAuth client secret은 이 변수에 넣지 않는다.
 
 ## 9. Operator HTTP smoke gate
 
@@ -227,11 +243,13 @@ enable_http_smoke_listener = true
 
 ## 10. 아직 이 root가 만들지 않는 것
 
-- Route 53, ACM, ALB HTTPS listener와 정식 WAF 정책
-- custom domain 기반 CloudFront origin 검증과 정식 edge release
+- Route 53, ACM 인증서 발급·DNS 검증, ALB HTTPS listener와 정식 WAF 정책
+- custom domain을 포함한 정식 edge release와 LiveKit WSS 검증
 - offline NonProd CA material, TLS bundle secret version과 실제 인증서 발급 (cert-loader delivery/IAM/volume source는 T047-B3에서 구현됨)
 - AI Envoy sidecar와 rotation runbook의 실제 구현
 - Production account/state
 - 기존 수작업 환경 삭제
 
-도메인과 Q-023 결정이 준비되면 별도 검토된 변경으로 추가한다. 기존 환경 삭제는 V2 cutover 및 rollback 관측이 끝난 뒤 별도 승인으로 수행한다.
+현재 NonProd custom domain 연결은 외부 가비아 DNS와 기존 ACM 인증서를 전제로 한다. Terraform이
+이 외부 prerequisite 자체를 만들지는 않는다. 기존 환경 삭제는 V2 cutover 및 rollback 관측이
+끝난 뒤 별도 승인으로 수행한다.

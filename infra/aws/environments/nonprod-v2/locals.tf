@@ -199,6 +199,7 @@ locals {
         AUTH_DB_MIGRATION_USER      = "meetingmind_auth_migrator"
         AUTH_SIGNING_PROVIDER       = "aws-kms"
         AUTH_SIGNING_ISSUER         = "https://auth.meetingmind.internal"
+        AUTH_GOOGLE_CLIENT_IDS      = join(",", var.auth_google_client_ids)
         AUTH_BFF_SPIFFE_PRINCIPALS  = local.tls_service_contracts.bff.spiffe_id
         AUTH_JWKS_SPIFFE_PRINCIPALS = join(",", [local.tls_service_contracts.bff.spiffe_id, local.tls_service_contracts.core.spiffe_id])
       }
@@ -285,6 +286,8 @@ locals {
         STT_PROVIDER                                = "soniox-realtime"
         STT_FALLBACK_PROVIDER                       = "openai-realtime"
         STT_DEBUG_AUDIO_DUMP                        = "false"
+        PUBLIC_WS_BASE_URL                          = var.stt_public_ws_base_url == null ? "" : var.stt_public_ws_base_url
+        MANAGEMENT_SERVER_ADDRESS                   = "0.0.0.0"
         MEETINGMIND_STT_ALLOWED_PRINCIPALS          = local.tls_service_contracts.core.spiffe_id
         MEETINGMIND_STT_ALLOW_TEST_PRINCIPAL_HEADER = "false"
       }
@@ -312,7 +315,7 @@ locals {
       : tolist([])
     )
     realtime-stt = (
-      var.enable_http_smoke_listener && var.release_gates_acknowledged && !var.enable_mtls_validation_services
+      var.enable_http_smoke_listener && (var.enable_deployment_smoke || var.release_gates_acknowledged) && !var.enable_mtls_validation_services
       ? tolist([module.alb.target_group_arns["realtime-stt"]])
       : tolist([])
     )

@@ -90,9 +90,58 @@ variable "enable_deployment_smoke" {
 }
 
 variable "deployment_smoke_gates_acknowledged" {
-  description = "Acknowledges only the bounded BFF one-task, Valkey IAM/TLS, CloudFront-default-domain deployment smoke contract."
+  description = "Acknowledges only the bounded BFF one-task, Valkey IAM/TLS, and CloudFront browser smoke contract."
   type        = bool
   default     = false
+}
+
+variable "frontend_custom_domain" {
+  description = "Optional frontend viewer domain and an existing us-east-1 ACM certificate. DNS and certificate issuance remain externally managed."
+  type = object({
+    name                = string
+    acm_certificate_arn = string
+  })
+  default = null
+
+  validation {
+    condition = var.frontend_custom_domain == null || (
+      try(var.frontend_custom_domain.name, "") == lower(try(var.frontend_custom_domain.name, "")) &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", try(var.frontend_custom_domain.name, ""))) &&
+      strcontains(try(var.frontend_custom_domain.name, ""), ".") &&
+      !strcontains(try(var.frontend_custom_domain.name, ""), "..") &&
+      can(regex("^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]{36}$", try(var.frontend_custom_domain.acm_certificate_arn, "")))
+    )
+    error_message = "frontend_custom_domain must contain a lowercase DNS name and a us-east-1 ACM certificate ARN."
+  }
+}
+
+variable "auth_google_client_ids" {
+  description = "Google OAuth web client IDs accepted by the Auth Service when validating browser credentials."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for client_id in var.auth_google_client_ids :
+      can(regex("^[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com$", client_id))
+    ])
+    error_message = "auth_google_client_ids must contain only Google OAuth web client IDs."
+  }
+}
+
+variable "stt_public_ws_base_url" {
+  description = "Public HTTPS origin used by LiveKit Egress to reach the token-protected Realtime STT WebSocket endpoint."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = var.stt_public_ws_base_url == null || can(regex(
+      "^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$",
+      var.stt_public_ws_base_url
+    ))
+    error_message = "stt_public_ws_base_url must be an HTTPS origin without a path, query, or fragment."
+  }
 }
 
 variable "internal_mtls_material_ready" {
