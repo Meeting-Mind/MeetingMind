@@ -46,12 +46,3 @@ resource "aws_route53_record" "app_ipv6" {
   }
 }
 
-resource "aws_route53_record" "legacy_acm_validation" {
-  for_each = var.legacy_acm_validation_records
-
-  zone_id = aws_route53_zone.root.zone_id
-  name    = each.key
-  type    = "CNAME"
-  ttl     = 300
-  records = [each.value]
-}

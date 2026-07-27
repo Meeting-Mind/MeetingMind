@@ -1,9 +1,2 @@
 expected_aws_account_id    = "<aws-account-id>"
 cloudfront_distribution_id = "<cloudfront-distribution-id>"
-
-# Copy every validation CNAME of certificates that were issued outside Terraform. Read them with:
-#   aws acm describe-certificate --region us-east-1 --certificate-arn <arn> \
-#     --query 'Certificate.DomainValidationOptions[].ResourceRecord'
-legacy_acm_validation_records = {
-  "_<hash>.<domain>." = "_<hash>.<hash>.acm-validations.aws."
-}

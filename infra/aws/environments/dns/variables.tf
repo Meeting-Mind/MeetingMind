@@ -41,20 +41,3 @@ variable "cloudfront_distribution_id" {
   }
 }
 
-# The pre-existing us-east-1 certificate was issued and validated outside Terraform against
-# Gabia DNS. Its validation CNAME must survive the nameserver cutover or ACM auto-renewal
-# fails silently. Stage 3 replaces the certificate with a Terraform-managed one and empties
-# this map.
-variable "legacy_acm_validation_records" {
-  description = "Validation CNAMEs of externally issued ACM certificates, keyed by record name."
-  type        = map(string)
-  default     = {}
-
-  validation {
-    condition = alltrue([
-      for name, value in var.legacy_acm_validation_records :
-      endswith(value, ".acm-validations.aws.")
-    ])
-    error_message = "Each value must be an ACM validation target ending in '.acm-validations.aws.'."
-  }
-}

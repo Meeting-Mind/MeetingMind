@@ -46,16 +46,41 @@ dig @b.dns.kr NS meetingmind.co.kr +norecurse       # .kr 레지스트리 위임
 레지스트리 위임 TTL이 86400이라 캐시된 리졸버는 최대 하루 늦게 따라온다. 그동안에도 양쪽 응답이
 같은 CloudFront를 가리키므로 접속에는 영향이 없다.
 
-### Stage 3 — ACM을 Terraform 관리로 (미구현)
+### Stage 3 — ACM을 Terraform 관리로 — 발급 완료, 전환 대기
 
-위임 확인 후 `aws_acm_certificate`(us-east-1, DNS 검증) + `aws_route53_record` +
-`aws_acm_certificate_validation`을 추가하고, `modules/frontend-edge`의 `custom_domain` 변수를
-외부 ARN 주입에서 내부 참조로 바꾼다. 무중단 순서는 **새 인증서 발급 → CloudFront viewer
-certificate 교체 → 배포 확인 → 기존 인증서 폐기**다. 교체가 끝나면
-`legacy_acm_validation_records`를 비운다.
+`acm.tf`가 `app.meetingmind.co.kr` 인증서를 us-east-1에 발급하고 DNS 검증까지 끝낸다. ARN은
+`app_certificate_arn` output으로 나온다.
 
-현재 인증서는 `app.meetingmind.co.kr` 단일 도메인이다. Stage 3에서 재발급할 때 apex와 다른 환경
-서브도메인을 SAN에 포함할지 결정한다.
+```
+arn:aws:acm:us-east-1:825820234979:certificate/de22f099-addb-4b9b-929f-6f2e9003a291
+```
+
+ACM은 같은 도메인에 대해 검증 CNAME 이름을 재사용한다. 그래서 이 인증서의 검증 레코드는 외부
+발급 인증서가 쓰던 레코드와 **같은 레코드**다. 두 리소스가 한 레코드를 관리하는 상태를 없애려고
+`legacy_acm_validation_records`는 `terraform state rm`으로 추적만 끊고 제거했다. config에서 그냥
+지웠다면 레코드가 삭제되어 새 인증서의 자동 갱신이 깨졌을 것이다.
+
+**남은 전환 작업** — `environments/nonprod-v2`에서 수행한다.
+
+```hcl
+frontend_custom_domain = {
+  name                = "app.meetingmind.co.kr"
+  acm_certificate_arn = "arn:aws:acm:us-east-1:825820234979:certificate/de22f099-addb-4b9b-929f-6f2e9003a291"
+}
+```
+
+`terraform apply` 후 CloudFront 배포 반영(약 10분)을 기다리고, 아래로 확인한 뒤 기존 인증서
+`da6b3700-51f0-4e72-8fb4-e3b456cdb962`를 삭제한다. 사용 중인 인증서는 ACM이 삭제를 거부하므로
+`InUse`가 비워진 것을 먼저 확인한다.
+
+```bash
+curl -sI https://app.meetingmind.co.kr | head -1
+aws acm list-certificates --region us-east-1 \
+  --query 'CertificateSummaryList[].{Arn:CertificateArn,InUse:InUse}' --output table
+```
+
+`nonprod-v2`는 상태 파일을 다른 작업과 공유하므로, apply 시점에 워킹트리의 다른 변경이 함께
+배포된다는 점을 확인하고 진행한다.
 
 ## 현재 상태
 
