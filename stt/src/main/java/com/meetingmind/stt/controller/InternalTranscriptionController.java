@@ -105,16 +105,6 @@ public class InternalTranscriptionController {
             }
             case FAILED -> {
                 var transcript = transcriptionCoordinator.getTranscript(meetingId);
-                if (transcript.status() == com.meetingmind.stt.domain.TranscriptStatus.PROCESSING) {
-                    try {
-                        transcript = transcriptionCoordinator.completeTranscript(meetingId);
-                    } catch (ResponseStatusException alreadyTerminal) {
-                        if (alreadyTerminal.getStatusCode() != HttpStatus.CONFLICT) {
-                            throw alreadyTerminal;
-                        }
-                        transcript = transcriptionCoordinator.getTranscript(meetingId);
-                    }
-                }
                 return new TranscriptionStatusResponse(meetingId, transcript.status().name());
             }
             default -> { }
@@ -132,16 +122,6 @@ public class InternalTranscriptionController {
                     HttpStatus.SERVICE_UNAVAILABLE, "LiveKit egress 서비스를 중지할 수 없습니다.", exception);
         }
         sessionRegistry.close(sessionId);
-        // ponytail: close() only completes the transcript when this Pod owns the live
-        // client; retry here (swallowing "already terminal") covers the cross-Pod stop
-        // case until sticky egress routing lands.
-        try {
-            transcriptionCoordinator.completeTranscript(meetingId);
-        } catch (ResponseStatusException alreadyTerminal) {
-            if (alreadyTerminal.getStatusCode() != HttpStatus.CONFLICT) {
-                throw alreadyTerminal;
-            }
-        }
         return new TranscriptionStatusResponse(meetingId, transcriptionCoordinator.getTranscript(meetingId).status().name());
     }
 

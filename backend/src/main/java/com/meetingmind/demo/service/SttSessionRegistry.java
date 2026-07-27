@@ -3,6 +3,7 @@ package com.meetingmind.demo.service;
 import com.meetingmind.demo.dto.TranscriptEntryResponse;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.config.DotenvConfig;
+import com.meetingmind.demo.authz.AuthorizationException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -333,8 +335,10 @@ public class SttSessionRegistry {
                         Instant.now()
                 );
             }
-            if (state.meetingId() != null && !state.failed().get()) {
-                workspaceDomainService.completeMeetingTranscript(state.meetingId());
+            if (state.meetingId() != null
+                    && !state.failed().get()
+                    && !hasOtherActiveSession(state.meetingId(), sessionId)) {
+                completeTranscriptIfProcessing(state.meetingId());
             }
         }
     }
@@ -344,8 +348,36 @@ public class SttSessionRegistry {
         if (state != null) {
             state.client().close();
             transcriptAssembler.discard(sessionId);
-            if (state.meetingId() != null && state.failed().compareAndSet(false, true)) {
-                workspaceDomainService.failMeetingTranscript(state.meetingId());
+            if (state.meetingId() != null
+                    && state.failed().compareAndSet(false, true)
+                    && !hasOtherActiveSession(state.meetingId(), sessionId)) {
+                failTranscriptIfProcessing(state.meetingId());
+            }
+        }
+    }
+
+    private boolean hasOtherActiveSession(String meetingId, String excludingSessionId) {
+        return sessions.values().stream()
+                .anyMatch(state -> meetingId.equals(state.meetingId())
+                        && !excludingSessionId.equals(state.sessionId()));
+    }
+
+    private void completeTranscriptIfProcessing(String meetingId) {
+        try {
+            workspaceDomainService.completeMeetingTranscript(meetingId);
+        } catch (AuthorizationException exception) {
+            if (exception.status() != HttpStatus.CONFLICT) {
+                throw exception;
+            }
+        }
+    }
+
+    private void failTranscriptIfProcessing(String meetingId) {
+        try {
+            workspaceDomainService.failMeetingTranscript(meetingId);
+        } catch (AuthorizationException exception) {
+            if (exception.status() != HttpStatus.CONFLICT) {
+                throw exception;
             }
         }
     }

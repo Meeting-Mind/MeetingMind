@@ -3,6 +3,7 @@ package com.meetingmind.stt.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,15 +32,16 @@ class TranscriptionCoordinatorTest {
             transcriptRepository, speakerRepository, segmentRepository, clock);
 
     @Test
-    void startTranscriptRejectsWhenAlreadyProcessing() {
+    void startTranscriptReturnsTheExistingProcessingTranscript() {
         MeetingTranscript existing = new MeetingTranscript(
                 "meeting-1", TranscriptStatus.PROCESSING, "clova-nest", "ko-KR",
                 Instant.now(clock), null, null, null, false, null, Instant.now(clock), Instant.now(clock));
         when(transcriptRepository.findById("meeting-1")).thenReturn(Optional.of(existing));
 
-        assertThatThrownBy(() -> coordinator.startTranscript("meeting-1", "clova-nest", null))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("이미 진행 중");
+        MeetingTranscript result = coordinator.startTranscript("meeting-1", "clova-nest", null);
+
+        assertThat(result).isSameAs(existing);
+        verify(transcriptRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -61,7 +63,7 @@ class TranscriptionCoordinatorTest {
 
     @Test
     void appendSegmentRejectsWhenTranscriptIsNotProcessing() {
-        when(transcriptRepository.findById("meeting-1")).thenReturn(Optional.empty());
+        when(transcriptRepository.findByMeetingIdForUpdate("meeting-1")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> coordinator.appendSegment("meeting-1", "stt-1", "Speaker", 0, 100, "hello"))
                 .isInstanceOf(ResponseStatusException.class);
@@ -72,7 +74,7 @@ class TranscriptionCoordinatorTest {
         MeetingTranscript processing = new MeetingTranscript(
                 "meeting-1", TranscriptStatus.PROCESSING, "clova-nest", "ko-KR",
                 Instant.now(clock), null, null, null, false, null, Instant.now(clock), Instant.now(clock));
-        when(transcriptRepository.findById("meeting-1")).thenReturn(Optional.of(processing));
+        when(transcriptRepository.findByMeetingIdForUpdate("meeting-1")).thenReturn(Optional.of(processing));
         MeetingSpeaker speaker = new MeetingSpeaker("speaker-1", "meeting-1", "stt-1", "Speaker", Instant.now(clock));
         when(speakerRepository.findByMeetingIdAndLabel("meeting-1", "stt-1")).thenReturn(Optional.of(speaker));
         when(segmentRepository.countByMeetingId("meeting-1")).thenReturn(2);
@@ -90,7 +92,7 @@ class TranscriptionCoordinatorTest {
         MeetingTranscript completed = new MeetingTranscript(
                 "meeting-1", TranscriptStatus.COMPLETED, "clova-nest", "ko-KR",
                 Instant.now(clock), Instant.now(clock), null, null, false, null, Instant.now(clock), Instant.now(clock));
-        when(transcriptRepository.findById("meeting-1")).thenReturn(Optional.of(completed));
+        when(transcriptRepository.findByMeetingIdForUpdate("meeting-1")).thenReturn(Optional.of(completed));
 
         assertThatThrownBy(() -> coordinator.completeTranscript("meeting-1"))
                 .isInstanceOf(ResponseStatusException.class);

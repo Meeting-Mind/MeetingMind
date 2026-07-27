@@ -1169,3 +1169,17 @@ Perl이 없는 공식 Python 3.12.13 / Alpine 3.24 runtime으로 전환해 NonPr
 - [x] T464 [frontend] [owner: Codex] [agent: Codex] [depends: T463] 실패 사유별 안내, 비정상 `candidate=null` 계약 오류 처리, 제외 항목 수 알림을 연결한다.
 - [x] T465 [verification] [owner: Codex] [agent: Codex] [depends: T462,T463,T464] AI 217건(외부 조건 7 skip), Backend 233건(환경 조건 15 skip), Frontend 101건과 production build, `git diff --check`를 통과하고 결과를 `implement.md`에 기록한다.
 - [ ] T466 [deploy] [owner: AI/Backend Deploy] [depends: T465] 호환 Core -> schema v2 AI 순서로 배포하고 summary-only 실제 회의를 검증한 뒤 다음 release에서 v1 어댑터 제거 여부를 결정한다.
+
+## M155 Multi-participant Live STT
+
+### Milestone Goal
+
+회의 참가자별 microphone track egress/STT session을 동시에 허용하고, 마지막 활성 session의 종료
+전까지 회의 단위 transcript가 `PROCESSING`을 유지되도록 한다.
+
+| ID | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T467 | [x] | backend/stt-start | Backend owner | Codex | T302 | `WorkspaceDomainService.java`, `MeetingTranscriptionController.java`, 관련 테스트 | Core `PROCESSING` start를 멱등 처리하고 remote의 선제 409를 제거한다. | 두 번째 참가자가 기존 transcript를 공유하면서 자기 track용 gateway session을 시작한다. |
+| T468 | [x] | backend/stt-lifecycle | Backend owner | Codex | T467 | Backend/STT `SttSessionRegistry.java`, `InternalTranscriptionController.java`, 관련 테스트 | 다른 활성 session이 남아 있으면 개별 stop/fail/reaper가 aggregate를 terminal로 바꾸지 않게 한다. | in-process, remote, cross-Pod row 경로에서 첫 session 종료 후 PROCESSING이 유지되고 마지막 session만 terminal 전이를 만든다. |
+| T469 | [x] | stt/segment-order | STT owner | Codex | T467 | `TranscriptionCoordinator.java`, `MeetingTranscriptRepository.java`, 관련 테스트 | 여러 session의 final segment sequence 계산을 회의 transcript row lock으로 직렬화한다. | sequence 조회·저장이 같은 pessimistic-write transaction 경계 안에서 수행된다. |
+| T470 | [ ] | verification/stt | Integration owner | Codex | T467,T468,T469 | Backend/STT 테스트, `specs/001-meetingmind-core/{contracts/live-stt-api,implement}.md` | 단위·통합 테스트와 2-user NonProd smoke 결과를 기록한다. | 자동 회귀가 통과하고 실제 두 참가자 발화/첫 퇴장 후 지속/마지막 퇴장 완료가 확인된다. |

@@ -1626,7 +1626,7 @@ public class WorkspaceDomainService {
 
         MeetingTranscript existing = store.findMeetingTranscript(meetingId).orElse(null);
         if (existing != null && existing.status() == TranscriptStatus.PROCESSING) {
-            throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_ALREADY_PROCESSING", "이미 진행 중인 전사가 있습니다.");
+            return existing;
         }
         if (existing != null && existing.status() == TranscriptStatus.COMPLETED) {
             throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_ALREADY_COMPLETED", "완료된 전사가 있습니다.");

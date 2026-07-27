@@ -1,0 +1,6 @@
+bucket       = "meetingmind-terraform-state-<aws-account-id>"
+key          = "dns/terraform.tfstate"
+region       = "ap-northeast-2"
+encrypt      = true
+kms_key_id   = "arn:aws:kms:ap-northeast-2:<aws-account-id>:key/<state-kms-key-id>"
+use_lockfile = true

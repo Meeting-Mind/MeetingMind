@@ -15,8 +15,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Holds the live per-Pod STT session state (the CLOVA gRPC stream client can
@@ -33,6 +35,10 @@ import org.springframework.stereotype.Component;
 public class SttSessionRegistry {
 
     private static final int HEARTBEAT_STALE_SECONDS = 90;
+    private static final List<String> ACTIVE_SESSION_STATUSES = List.of(
+            TranscriptionSessionStatus.ACTIVE.name(),
+            TranscriptionSessionStatus.STOPPING.name()
+    );
 
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
     private final TranscriptionCoordinator transcriptionCoordinator;
@@ -250,8 +256,7 @@ public class SttSessionRegistry {
                 .map(SessionState::sessionId)
                 .findFirst()
                 .orElseGet(() -> sessionRepository
-                        .findByMeetingIdAndStatusIn(meetingId, List.of(
-                                TranscriptionSessionStatus.ACTIVE.name(), TranscriptionSessionStatus.STOPPING.name()))
+                        .findByMeetingIdAndStatusIn(meetingId, ACTIVE_SESSION_STATUSES)
                         .stream()
                         .findFirst()
                         .map(TranscriptionSession::sessionId)
@@ -286,6 +291,11 @@ public class SttSessionRegistry {
     /** Idempotent: closing an already-closed/unknown session (e.g. duplicate stop) is a no-op. */
     public void close(String sessionId) {
         SessionState state = sessions.remove(sessionId);
+        TranscriptionSession row = sessionRepository.findById(sessionId).orElse(null);
+        if (state == null && (row == null || isTerminal(row.status()))) {
+            return;
+        }
+        String meetingId = state == null ? row.meetingId() : state.meetingId();
         if (state != null) {
             state.client().close();
             for (AssembledTranscriptSegment finalSegment : transcriptAssembler.flush(sessionId)) {
@@ -297,24 +307,65 @@ public class SttSessionRegistry {
                         state.segmentOffsetMs()
                 );
             }
-            if (!state.failed().get()) {
-                transcriptionCoordinator.completeTranscript(state.meetingId());
-            }
         }
-        touchSessionRow(sessionId, row -> row.setStatus(TranscriptionSessionStatus.COMPLETED));
+        touchSessionRow(sessionId, session -> session.setStatus(TranscriptionSessionStatus.COMPLETED));
+        if ((state == null || !state.failed().get()) && !hasOtherActiveSession(meetingId, sessionId)) {
+            completeTranscriptIfProcessing(meetingId);
+        }
     }
 
     /** Idempotent: failing an already-closed/unknown session is a no-op. */
     public void failAndClose(String sessionId) {
         SessionState state = sessions.remove(sessionId);
+        TranscriptionSession row = sessionRepository.findById(sessionId).orElse(null);
+        if (state == null && (row == null || isTerminal(row.status()))) {
+            return;
+        }
+        String meetingId = state == null ? row.meetingId() : state.meetingId();
+        boolean newlyFailed = state == null || state.failed().compareAndSet(false, true);
         if (state != null) {
             state.client().close();
             transcriptAssembler.discard(sessionId);
-            if (state.failed().compareAndSet(false, true)) {
-                transcriptionCoordinator.failTranscript(state.meetingId());
+        }
+        touchSessionRow(sessionId, session -> session.setStatus(TranscriptionSessionStatus.FAILED));
+        if (newlyFailed && !hasOtherActiveSession(meetingId, sessionId)) {
+            failTranscriptIfProcessing(meetingId);
+        }
+    }
+
+    private boolean hasOtherActiveSession(String meetingId, String excludingSessionId) {
+        boolean inThisPod = sessions.values().stream()
+                .anyMatch(state -> meetingId.equals(state.meetingId())
+                        && !excludingSessionId.equals(state.sessionId()));
+        if (inThisPod) {
+            return true;
+        }
+        return sessionRepository.findByMeetingIdAndStatusIn(meetingId, ACTIVE_SESSION_STATUSES).stream()
+                .anyMatch(row -> !excludingSessionId.equals(row.sessionId()));
+    }
+
+    private static boolean isTerminal(TranscriptionSessionStatus status) {
+        return status == TranscriptionSessionStatus.COMPLETED || status == TranscriptionSessionStatus.FAILED;
+    }
+
+    private void completeTranscriptIfProcessing(String meetingId) {
+        try {
+            transcriptionCoordinator.completeTranscript(meetingId);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() != HttpStatus.CONFLICT) {
+                throw exception;
             }
         }
-        touchSessionRow(sessionId, row -> row.setStatus(TranscriptionSessionStatus.FAILED));
+    }
+
+    private void failTranscriptIfProcessing(String meetingId) {
+        try {
+            transcriptionCoordinator.failTranscript(meetingId);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() != HttpStatus.CONFLICT) {
+                throw exception;
+            }
+        }
     }
 
     private void touchSessionRow(String sessionId, Consumer<TranscriptionSession> mutator) {
@@ -348,10 +399,12 @@ public class SttSessionRegistry {
                 row.setStatus(TranscriptionSessionStatus.FAILED);
                 row.setUpdatedAt(Instant.now());
                 sessionRepository.save(row);
-                try {
-                    transcriptionCoordinator.failTranscript(row.meetingId());
-                } catch (RuntimeException ignored) {
-                    // transcript already terminal (completed/failed) — nothing to reconcile.
+                if (!hasOtherActiveSession(row.meetingId(), row.sessionId())) {
+                    try {
+                        transcriptionCoordinator.failTranscript(row.meetingId());
+                    } catch (RuntimeException ignored) {
+                        // transcript already terminal (completed/failed) — nothing to reconcile.
+                    }
                 }
             }
         }
