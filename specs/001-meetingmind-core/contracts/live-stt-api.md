@@ -325,6 +325,7 @@ None.
 - 분리 배포의 stop 성공 후 Core는 같은 meeting의 `GET /internal/v1/meetings/{meetingId}/transcript`를 mTLS로 즉시 조회해 report/task/AI/RAG용 derived projection을 하나의 Core DB transaction으로 교체한다.
 - projection은 STT `speakerId`, `segmentId`, sequence와 시간 범위를 보존하고 같은 snapshot 재시도를 no-op으로 처리한다. 이미 `COMPLETED`된 snapshot의 내용이 바뀐 경우만 `FULL_REINDEX`를 생성한다.
 - STT stop은 terminal session에 멱등이므로 STT 완료 후 Core projection 전에 장애가 난 경우 동일 stop 요청이 snapshot projection을 다시 시도한다. STT와 Core DB 사이에 FK나 cross-DB runtime read를 추가하지 않는다.
+- Core remote mode는 로컬 transcript가 `PROCESSING`, `FAILED`, 또는 segment 없는 `COMPLETED`인 경우에만 제한된 batch로 같은 snapshot API를 재조회한다. snapshot이 terminal이 아니면 변경하지 않고, terminal이면 stop 경로와 같은 원자 projection 및 embedding generation 규칙을 적용한다.
 - LiveKit `stopEgress`의 HTTP 412는 `FAILED_PRECONDITION`과 `EGRESS_FAILED`/`EGRESS_COMPLETE`/`EGRESS_ABORTED`가 함께 확인된 경우에만 이미 종료된 멱등 성공으로 처리한다. 다른 412 또는 5xx는 성공으로 완화하지 않는다.
 - 개별 durable session이 `FAILED`여도 같은 meeting의 다른 활성 session이 있으면 aggregate transcript는
   `PROCESSING`을 유지한다. 마지막 활성 session 자체가 실패한 경우에만 `FAILED`로 전환한다.

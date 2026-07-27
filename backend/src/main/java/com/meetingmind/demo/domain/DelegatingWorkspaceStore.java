@@ -69,6 +69,7 @@ abstract class DelegatingWorkspaceStore extends WorkspaceStore {
     @Override Optional<MeetingTranscript> findMeetingTranscript(String meetingId) { return delegate.findMeetingTranscript(meetingId); }
     @Override TranscriptSegment addTranscriptSegment(String meetingId, String speakerId, String speakerLabel, String speakerName, int startMs, int endMs, String text, String source, int sequence) { return delegate.addTranscriptSegment(meetingId, speakerId, speakerLabel, speakerName, startMs, endMs, text, source, sequence); }
     @Override List<TranscriptSegment> findTranscriptSegments(String meetingId) { return delegate.findTranscriptSegments(meetingId); }
+    @Override List<String> findTranscriptProjectionCandidateMeetingIds(int limit) { return delegate.findTranscriptProjectionCandidateMeetingIds(limit); }
     @Override void replaceTranscriptProjection(String meetingId, List<MeetingSpeaker> speakers, List<TranscriptSegment> segments) { delegate.replaceTranscriptProjection(meetingId, speakers, segments); }
     @Override void enqueueMeetingEmbeddingJob(String meetingId, String reason) { delegate.enqueueMeetingEmbeddingJob(meetingId, reason); }
     @Override MeetingReport saveMeetingReport(MeetingReport report) { return delegate.saveMeetingReport(report); }

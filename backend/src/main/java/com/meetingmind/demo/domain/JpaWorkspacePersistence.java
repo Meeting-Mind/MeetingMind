@@ -489,6 +489,10 @@ public class JpaWorkspacePersistence {
         if (taskCard != null) {
             return taskCard.spaceId;
         }
+        ProjectKnowledge knowledge = entityManager.find(ProjectKnowledge.class, resourceId);
+        if (knowledge != null) {
+            return knowledge.spaceId;
+        }
         MeetingReport report = entityManager.find(MeetingReport.class, resourceId);
         if (report != null) {
             Meeting reportMeeting = entityManager.find(Meeting.class, report.meetingId);

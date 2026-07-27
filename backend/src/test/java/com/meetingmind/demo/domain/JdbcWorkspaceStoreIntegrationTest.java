@@ -462,6 +462,83 @@ class JdbcWorkspaceStoreIntegrationTest {
         )).isEqualTo(1);
     }
 
+    @Test
+    void projectKnowledgeCrudResolvesAuditSpace() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("knowledge-owner-" + suffix, now));
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(
+                owner.id(), "Knowledge Audit Space", "project knowledge audit"
+        );
+
+        ProjectKnowledge knowledge = service.createProjectKnowledge(
+                owner.id(), space.space().id(), "manual", "운영 기준", "AI 근거로 사용할 공식 지식", null
+        );
+        entityManager.flush();
+
+        assertThat(jdbc.queryForObject(
+                """
+                select count(*) from audit_logs
+                where action = 'PROJECT_KNOWLEDGE_CREATED'
+                  and target_id = ?
+                  and space_id = ?
+                """,
+                Integer.class,
+                knowledge.id(),
+                space.space().id()
+        )).isEqualTo(1);
+    }
+
+    @Test
+    void reconciliationRestoresMissingProjectionAndCreatesNewGeneration() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("reconcile-owner-" + suffix, now));
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(
+                owner.id(), "Reconciliation Space", "durable transcript projection"
+        );
+        WorkspaceDomainService.MeetingCreationResult meeting = service.createMeeting(
+                owner.id(),
+                space.space().id(),
+                "Reconciliation Meeting",
+                OffsetDateTime.of(2026, 7, 27, 12, 0, 0, 0, ZoneOffset.UTC),
+                List.of()
+        );
+        service.startMeetingTranscript(owner.id(), meeting.meeting().id(), "soniox-realtime");
+        List<WorkspaceDomainService.RemoteTranscriptSegment> snapshot = List.of(
+                new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "reconcile-segment-" + suffix,
+                        "reconcile-speaker-" + suffix,
+                        "화자 1",
+                        "Owner",
+                        100,
+                        900,
+                        "누락된 전사를 자동 복구합니다."
+                )
+        );
+
+        entityManager.flush();
+        assertThat(service.transcriptProjectionCandidateMeetingIds(20)).contains(meeting.meeting().id());
+        service.reconcileRemoteMeetingTranscript(meeting.meeting().id(), TranscriptStatus.COMPLETED, snapshot);
+        entityManager.flush();
+        assertThat(service.transcriptProjectionCandidateMeetingIds(20)).doesNotContain(meeting.meeting().id());
+
+        jdbc.update("delete from transcript_segments where meeting_id = ?", meeting.meeting().id());
+        assertThat(service.transcriptProjectionCandidateMeetingIds(20)).contains(meeting.meeting().id());
+        service.reconcileRemoteMeetingTranscript(meeting.meeting().id(), TranscriptStatus.COMPLETED, snapshot);
+        entityManager.flush();
+
+        assertThat(store.findTranscriptSegments(meeting.meeting().id()))
+                .singleElement()
+                .extracting(TranscriptSegment::id)
+                .isEqualTo("reconcile-segment-" + suffix);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from embedding_jobs where meeting_id = ? and trigger_reason = 'FULL_REINDEX'",
+                Integer.class,
+                meeting.meeting().id()
+        )).isEqualTo(1);
+    }
+
     private User user(String id, Instant now) {
         return new User(id, id + "@meetingmind.test", id, null, "active", now, now);
     }

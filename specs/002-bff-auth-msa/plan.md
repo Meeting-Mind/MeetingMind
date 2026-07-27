@@ -442,6 +442,23 @@ T034 완료 뒤 실제 코드를 대조한 결과 T035는 다음 순서로 한 �
 4. 기존 실패 데이터 복구는 active/stopping session이 없는 대상만 STT 원본 ID·sequence·시간·text와 exact 대사한 뒤 transaction으로 교체하고 embedding job을 생성한다.
 5. 검증은 Core/STT 전체 test, 실제 PostgreSQL V1→V28 role privilege test, immutable ARM64 image scan, V27/V28 선적용, 제한된 Terraform rollout, 데이터 exact audit와 vector chunk 생성으로 수행한다.
 
+#### T059-S11 Durable AI Evidence Reconciliation Boundary
+
+1. Core는 remote STT mode에서 `PROCESSING`, `FAILED`, 또는 segment가 없는 `COMPLETED` transcript만 제한된 batch로 선택해 authoritative STT snapshot을 재확인한다.
+2. reconciliation은 브라우저에 신규 API를 노출하지 않고, Core가 자신의 후보 meeting ID를 Core→STT mTLS gateway로 조회한 후 기존 원자적 projection 로직을 재사용한다.
+3. remote snapshot이 terminal이 아니거나 없으면 건너뛰고, meeting ID 불일치나 개별 오류는 원문을 로그하지 않고 해당 후보만 실패처리하여 나머지 batch를 계속한다.
+4. 첫 `COMPLETED` projection은 기존 DB trigger로 `TRANSCRIPT_COMPLETED` embedding job을 만들고, 이미 `COMPLETED`인 빈/변경 projection은 기존 `FULL_REINDEX` generation을 만들어 실패한 `INVALID_SOURCE` job을 덮어쓴다.
+5. Project Knowledge CRUD의 audit space resolution은 `project_knowledge.id`에서 `space_id`를 조회해 동일 transaction이 감사 로그 단계에서 rollback되지 않게 한다.
+6. Core runtime은 원자 projection 교체에 필요한 `chunk_source_segments`, `transcript_segments`, `meeting_speakers` 삭제 권한만 가진다. 운영에서 발견한 후자의 누락은 기존 migration 체크섬을 바꾸지 않고 append-only V29로 보완한다.
+7. 검증은 in-memory reconciliation 단위 테스트, JDBC 후보 선택/재색인 통합 테스트, Project Knowledge audit 통합 테스트, 실제 PostgreSQL V1→V29 privilege test와 Core 전체 회귀로 수행한다.
+
+#### T059-S12 Google Callback Remount Hotfix Boundary
+
+1. Google Identity Services script와 client ID별 SDK 초기화는 재사용하되, 로그인 UI가 마운트될 때마다 module dispatcher의 현재 credential callback 대상을 교체한다.
+2. SDK callback이 unmount된 로그인 화면의 `disabled`/handler ref를 직접 보유하지 않게 하고, cleanup은 자신이 등록한 dispatcher와 button element만 정리한다.
+3. Google ID token, BFF `/api/v1/auth/google`, CSRF, audience 검증 계약은 바꾸지 않는다.
+4. 회귀는 첫 Google 요청이 진행 중인 상태에서 로그인 화면을 벗어났다가 다시 진입해 SDK 재초기화 없이 두 번째 버튼 callback과 요청이 실행되는 브라우저 시나리오로 검증한다.
+
 ### Phase 5 — Domain Extraction
 
 - 기존 Core를 즉시 모두 쪼개지 않고 장애·부하·변경 경계가 확인된 Realtime/STT, Meeting, Workspace 순서 후보로 추출한다.

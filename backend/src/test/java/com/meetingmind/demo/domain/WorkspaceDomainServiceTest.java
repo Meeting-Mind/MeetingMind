@@ -886,6 +886,37 @@ class WorkspaceDomainServiceTest {
         assertThat(store.embeddingReindexes).isEqualTo(1);
     }
 
+    @Test
+    void reconciliationCandidatesIncludeIncompleteAndEmptyCompletedTranscripts() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult processingMeeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Processing", SCHEDULED_AT, List.of()
+        );
+        WorkspaceDomainService.MeetingCreationResult completedMeeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Completed", SCHEDULED_AT.plusHours(1), List.of()
+        );
+        context.service.startMeetingTranscript(owner.id(), processingMeeting.meeting().id(), "soniox-realtime");
+        context.service.startMeetingTranscript(owner.id(), completedMeeting.meeting().id(), "soniox-realtime");
+        context.service.reconcileRemoteMeetingTranscript(
+                completedMeeting.meeting().id(),
+                TranscriptStatus.COMPLETED,
+                List.of(new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "segment-1", "speaker-1", "화자 1", "Owner", 100, 900, "완료된 전사"
+                ))
+        );
+
+        assertThat(context.service.transcriptProjectionCandidateMeetingIds(20))
+                .contains(processingMeeting.meeting().id())
+                .doesNotContain(completedMeeting.meeting().id());
+
+        context.store.replaceTranscriptProjection(completedMeeting.meeting().id(), List.of(), List.of());
+
+        assertThat(context.service.transcriptProjectionCandidateMeetingIds(20))
+                .contains(processingMeeting.meeting().id(), completedMeeting.meeting().id());
+    }
+
     private TestContext newContext() {
         InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
         WorkspaceDomainService service = new WorkspaceDomainService(

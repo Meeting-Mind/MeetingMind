@@ -34,6 +34,7 @@ declare global {
 const scriptId = "meetingmind-google-identity";
 let scriptRequest: Promise<GoogleIdentityApi> | null = null;
 let initializedClientId: string | null = null;
+let activeCredentialCallback: ((response: GoogleCredentialResponse) => void) | null = null;
 
 export function GoogleCredentialButton({
   clientId,
@@ -75,42 +76,43 @@ export function GoogleCredentialButton({
   }, [onError]);
 
   useEffect(() => {
-    if (!google || !buttonRef.current) {
+    const buttonElement = buttonRef.current;
+    if (!google || !buttonElement) {
       return;
     }
-    buttonRef.current.innerHTML = "";
+    buttonElement.innerHTML = "";
+    const handleCredential = (response: GoogleCredentialResponse) => {
+      if (disabledRef.current) {
+        return;
+      }
+      if (!response.credential) {
+        onErrorRef.current("Unable to verify the Google credential response.");
+        return;
+      }
+      onCredentialRef.current(response.credential);
+    };
+    activeCredentialCallback = handleCredential;
     if (initializedClientId !== clientId) {
       google.accounts.id.initialize({
         client_id: clientId,
-        callback: (response) => {
-          if (disabledRef.current) {
-            return;
-          }
-          if (!response.credential) {
-            onErrorRef.current("Unable to verify the Google credential response.");
-            return;
-          }
-          onCredentialRef.current(response.credential);
-        }
+        callback: (response) => activeCredentialCallback?.(response)
       });
       initializedClientId = clientId;
     }
-    google.accounts.id.renderButton(buttonRef.current, {
+    google.accounts.id.renderButton(buttonElement, {
       theme: "outline",
       size: "large",
       shape: "pill",
       text: "continue_with",
       width: 320
     });
-  }, [clientId, google]);
-
-  useEffect(() => {
     return () => {
-      if (buttonRef.current) {
-        buttonRef.current.innerHTML = "";
+      if (activeCredentialCallback === handleCredential) {
+        activeCredentialCallback = null;
       }
+      buttonElement.innerHTML = "";
     };
-  }, []);
+  }, [clientId, google]);
 
   return (
     <div

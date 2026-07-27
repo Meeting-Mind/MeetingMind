@@ -1761,6 +1761,30 @@ public class WorkspaceDomainService {
             List<RemoteTranscriptSegment> remoteSegments
     ) {
         requireTranscriptManagement(actorUserId, meetingId);
+        return projectRemoteMeetingTranscript(meetingId, remoteStatus, remoteSegments);
+    }
+
+    public List<String> transcriptProjectionCandidateMeetingIds(int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("projection reconciliation batch size must be between 1 and 100");
+        }
+        return store.findTranscriptProjectionCandidateMeetingIds(limit);
+    }
+
+    @Transactional
+    public MeetingTranscript reconcileRemoteMeetingTranscript(
+            String meetingId,
+            TranscriptStatus remoteStatus,
+            List<RemoteTranscriptSegment> remoteSegments
+    ) {
+        return projectRemoteMeetingTranscript(meetingId, remoteStatus, remoteSegments);
+    }
+
+    private MeetingTranscript projectRemoteMeetingTranscript(
+            String meetingId,
+            TranscriptStatus remoteStatus,
+            List<RemoteTranscriptSegment> remoteSegments
+    ) {
         store.lockMeeting(meetingId);
         requireMeeting(meetingId);
         MeetingTranscript current = store.findMeetingTranscript(meetingId)

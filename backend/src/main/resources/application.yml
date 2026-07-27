@@ -49,6 +49,10 @@ meetingmind:
   stt:
     gateway-mode: ${STT_GATEWAY_MODE:in-process}
     base-url: ${MEETINGMIND_STT_BASE_URL:http://localhost:8083}
+    projection-reconciliation:
+      enabled: ${STT_PROJECTION_RECONCILIATION_ENABLED:false}
+      fixed-delay: ${STT_PROJECTION_RECONCILIATION_FIXED_DELAY:30s}
+      batch-size: ${STT_PROJECTION_RECONCILIATION_BATCH_SIZE:20}
 
 management:
   endpoints:

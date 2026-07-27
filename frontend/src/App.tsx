@@ -7472,10 +7472,10 @@ const LoginPage = () => {
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
-          <span className="text-white font-bold text-lg">MeetingMind</span>
+          <span className="text-background font-bold text-lg">MeetingMind</span>
         </div>
         <div className="space-y-6">
-          <blockquote className="text-white/80 text-xl leading-relaxed font-light">
+          <blockquote className="text-background/80 text-xl leading-relaxed font-light">
             {korean
               ? "회의에서 내린 모든 결정은 기억되고, 실행되며, 다음 업무로 이어져야 합니다."
               : "Every decision we make in meetings deserves to be remembered, acted on, and built upon."}
@@ -7486,14 +7486,14 @@ const LoginPage = () => {
               { icon: <Sparkles className="w-4 h-4" />, text: korean ? "AI 회의록, 결정사항, 태스크 후보 생성" : "AI-generated reports, decisions, and task extraction" },
               { icon: <Library className="w-4 h-4" />, text: korean ? "회의에서 자동으로 쌓이는 프로젝트 지식" : "Project knowledge base built automatically from meetings" },
             ].map(f => (
-              <div key={f.text} className="flex items-center gap-3 text-white/60 text-sm">
-                <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center shrink-0">{f.icon}</div>
+              <div key={f.text} className="flex items-center gap-3 text-background/60 text-sm">
+                <div className="w-7 h-7 rounded-lg bg-background/10 flex items-center justify-center shrink-0">{f.icon}</div>
                 {f.text}
               </div>
             ))}
           </div>
         </div>
-        <p className="text-white/30 text-xs">© 2024 MeetingMind. All rights reserved.</p>
+        <p className="text-background/30 text-xs">© 2024 MeetingMind. All rights reserved.</p>
       </div>
 
       {/* Right — Form */}

@@ -94,3 +94,108 @@ test("keeps the create-space dialog open when the request fails", async ({ page,
   await expect(dialog.getByRole("alert")).toBeVisible();
   await expect(page.getByText("Rejected CI Space", { exact: true })).toHaveCount(0);
 });
+
+test("refreshes the Google callback when the sign-in page remounts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const browserWindow = window as Window & {
+      google: {
+        accounts: {
+          id: {
+            initialize: (config: {
+              callback: (response: { credential?: string }) => void;
+            }) => void;
+            renderButton: (element: HTMLElement) => void;
+          };
+        };
+      };
+      meetingMindGoogleCallback?: (response: { credential?: string }) => void;
+      meetingMindGoogleInitializeCount?: number;
+    };
+    browserWindow.meetingMindGoogleInitializeCount = 0;
+    browserWindow.google = {
+      accounts: {
+        id: {
+          initialize: (config) => {
+            browserWindow.meetingMindGoogleInitializeCount =
+              (browserWindow.meetingMindGoogleInitializeCount ?? 0) + 1;
+            browserWindow.meetingMindGoogleCallback = config.callback;
+          },
+          renderButton: (element) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = "Mock Google sign-in";
+            button.addEventListener("click", () => {
+              browserWindow.meetingMindGoogleCallback?.({ credential: "mock-google-credential" });
+            });
+            element.appendChild(button);
+          }
+        }
+      }
+    };
+  });
+
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: false, user: null, session: null })
+  }));
+  await page.route("**/api/v1/auth/csrf", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ token: "mock-csrf", headerName: "X-CSRF-TOKEN" })
+  }));
+
+  let googleRequestCount = 0;
+  let releaseFirstGoogleRequest!: () => void;
+  let markFirstGoogleRequestSeen!: () => void;
+  let markFirstGoogleRequestDone!: () => void;
+  const firstGoogleRequestReleased = new Promise<void>((resolve) => {
+    releaseFirstGoogleRequest = resolve;
+  });
+  const firstGoogleRequestSeen = new Promise<void>((resolve) => {
+    markFirstGoogleRequestSeen = resolve;
+  });
+  const firstGoogleRequestDone = new Promise<void>((resolve) => {
+    markFirstGoogleRequestDone = resolve;
+  });
+  await page.route("**/api/v1/auth/google", async (route) => {
+    googleRequestCount += 1;
+    if (googleRequestCount === 1) {
+      markFirstGoogleRequestSeen();
+      await firstGoogleRequestReleased;
+    }
+    await route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({ code: "GOOGLE_CREDENTIAL_INVALID", message: "Mock credential rejected" })
+    });
+    if (googleRequestCount === 1) {
+      markFirstGoogleRequestDone();
+    }
+  });
+
+  await page.goto("/login");
+  await page.getByRole("button", { name: "Mock Google sign-in" }).click();
+  await firstGoogleRequestSeen;
+
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.getByTestId("sign-in-page")).toBeHidden();
+  releaseFirstGoogleRequest();
+  await firstGoogleRequestDone;
+
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/login");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.getByTestId("sign-in-page")).toBeVisible();
+  await page.getByRole("button", { name: "Mock Google sign-in" }).click();
+
+  await expect(page.getByTestId("sign-in-error")).toHaveText("Mock credential rejected");
+  expect(googleRequestCount).toBe(2);
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { meetingMindGoogleInitializeCount?: number }
+  ).meetingMindGoogleInitializeCount)).toBe(1);
+});

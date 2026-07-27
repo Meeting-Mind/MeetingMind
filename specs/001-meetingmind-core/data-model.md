@@ -371,6 +371,8 @@ Backend는 아래 논리 구조의 `TranscriptSegment` 원천을 PostgreSQL에 �
 
 STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용 중심으로 쌓인다.
 분리 배포에서 STT DB가 authoritative source이며 Core DB의 `TranscriptSegment`는 report/task/AI/RAG용 derived projection이다. Core는 stop 성공 후 mTLS snapshot을 pull해 meeting 단위로 원자적 교체하고, `source=stt-remote`와 STT의 speaker/segment ID를 보존한다. 물리 relation은 바뀌지 않으며 STT DB로의 FK나 cross-DB join을 추가하지 않는다.
+remote mode의 Core reconciliation은 자신의 `MeetingTranscript` 중 `PROCESSING`, `FAILED`, 또는 segment가 없는 `COMPLETED` 행만 제한된 batch 후보로 선택한다. 새 테이블이나 cross-DB 관계는 추가하지 않고, authoritative snapshot이 terminal일 때만 기존 원자 projection을 재사용한다.
+Core runtime role은 이 원자 교체를 위해 `chunk_source_segments`, `transcript_segments`, `meeting_speakers`의 기존 projection 삭제 권한만 사용한다. AI가 소유하는 chunk provenance 쓰기 권한은 Core에 부여하지 않는다.
 
 - `id`: segment id
 - `meetingId`
