@@ -2589,3 +2589,17 @@
   최종 `terraform plan -detailed-exitcode`는 exit 0과 `No changes`를 반환했다. 기존
   `TranscriptProjectionReconciler`의 3개 회의 `AuthorizationException` 경고는 이번 변경과
   무관한 선행 운영 이슈로 계속 관찰된다.
+
+## M159 Google Sign-in E2E CI Environment
+
+- 원인: Google callback E2E는 브라우저에 Google Identity API mock을 주입했지만 로그인 화면은
+  `VITE_GOOGLE_CLIENT_ID`가 있을 때만 `GoogleCredentialButton`을 렌더링한다. 로컬에서는 Git에서
+  제외된 `frontend/.env`가 이 값을 제공해 통과했고, `.env`가 없는 GitHub Actions에서는 mock 버튼이
+  생성되지 않아 locator가 30초 후 timeout 됐다.
+- 수정: `frontend/playwright.config.ts`가 띄우는 Frontend dev server에만
+  `VITE_GOOGLE_CLIENT_ID=ci-e2e-google-client-id`를 전달한다. 값은 실제 Google 요청에 쓰이지 않는
+  테스트 placeholder이며, 테스트가 `window.google`과 인증 API를 모두 mock한다. 개인 `.env`, 운영
+  client ID, 애플리케이션 runtime 분기는 변경하지 않았다.
+- 검증: `CI=true`와 격리 포트를 사용한 대상 Google callback E2E 1건이 통과했다. 같은 조건의
+  `npm run test:e2e` 전체 결과는 12건 통과, LiveKit credential이 필요한 opt-in media test 1건 skip,
+  실패 0건이다.

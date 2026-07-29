@@ -1219,3 +1219,13 @@ AI Report의 근거 검증과 단일 회의 권한 경계는 유지하면서, �
 - [x] T479 [ai/report] [owner: Codex] [agent: Codex] [depends: T478] 24개 단위 병렬 map, 원본 citation 기반 reduce, 구조 실패 1회 재시도와 결정적 fallback을 구현한다.
 - [x] T480 [core/frontend] [owner: Codex] [agent: Codex] [depends: T479] Core가 생성 품질 metadata를 전달하고 Frontend가 계층 합성·fallback 경고를 표시한다.
 - [x] T481 [verification/deploy] [owner: Codex] [agent: Codex] [depends: T480] AI/Core/Frontend 전체 회귀, 이미지 scan, NonProd rollout과 공개 smoke를 완료한다.
+
+## M159 Google Sign-in E2E CI Environment
+
+### Milestone Goal
+
+개인 `frontend/.env`나 운영 Google OAuth 설정을 저장소에 포함하지 않고도 Google callback 회귀
+테스트가 CI의 격리된 Frontend 서버에서 결정적으로 실행되도록 한다.
+
+- [x] T482 [frontend/test-config] [owner: Codex] [agent: Codex] Playwright Frontend web server에 테스트 전용 `VITE_GOOGLE_CLIENT_ID` placeholder를 주입한다. 애플리케이션 코드, 로컬 `.env`, 운영 OAuth 설정은 변경하지 않는다.
+- [x] T483 [verification] [owner: Codex] [agent: Codex] [depends: T482] 실패했던 Google callback 시나리오와 전체 Playwright suite를 CI 모드에서 재실행하고 결과를 `implement.md`에 기록한다.
