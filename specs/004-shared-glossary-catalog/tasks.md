@@ -61,3 +61,64 @@ skip된 15개는 `CI_POSTGRES_URL` 등 외부 자원이 필요한 통합 테스�
 - [ ] **T9. 구독 설정 API·화면** — 스키마만 준비됨. 기본값(전체 구독)으로만 동작한다.
 - [ ] **T10. 동의어 매칭** — `FR-TERM-02`가 요구하나 현재는 완전 일치만 지원한다.
 - [ ] **T11. 공용 용어 embedding 색인** — `SourceType.GLOSSARY` 생성 경로 없음.
+
+## Milestone 3 — Space 분야 선택과 공용 사전 노출
+
+- [x] **T12. 요구사항·계약·데이터 모델 확장** (docs/contracts)
+  - owner: 사용자 / agent: Codex / dependency: T1~T6
+  - 파일: `requirements/*`, `specs/004-*`, `specs/001-*/contracts/*`, `specs/001-*/data-model.md`, `specs/001-*/erd.md`
+  - 완료 기준: 다중 선택, 기타 입력, 중복 검증, 통합 용어 응답이 구현 전에 문서화된다.
+- [x] **T13. 카테고리 저장·통합 조회 API** (data/backend)
+  - owner: 사용자 / agent: Codex / dependency: T12
+  - 파일: `V33*`, `SharedGlossaryStore*`, `SpaceController`, `DomainTermController`, DTO와 테스트
+  - 완료 기준: 선택 저장과 공용/Space 용어 통합 목록이 권한·중복 검증과 함께 동작한다.
+- [x] **T14. Space 생성과 용어 노출 UI** (frontend)
+  - owner: 사용자 / agent: Codex / dependency: T13
+  - 파일: `frontend/src/App.tsx`, `frontend/src/api/*`, `frontend/src/types.ts`
+  - 완료 기준: 두 생성 화면에서 다중 선택/기타 입력이 가능하고 용어사전·회의 자막에서 공용 용어가 보인다.
+- [x] **T15. 통합 검증과 구현 기록** (verification/docs)
+  - owner: 사용자 / agent: Codex / dependency: T13, T14
+  - 파일: 테스트, `tasks.md`, `implement.md`
+  - 완료 기준: Backend tests, Frontend build와 관련 회귀 테스트 결과가 기록된다.
+
+## 확장 검증 결과 (2026-07-27)
+
+| 항목 | 명령 | 결과 |
+| --- | --- | --- |
+| Backend 전체 | `cd backend && ./gradlew test` | 248 tests, 실패 0, skip 18 |
+| PostgreSQL migration/선택 필터 | `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest.persistsSelectedAndCustomGlossaryCategoriesAndFiltersSharedTerms` | V1~V33 및 금융 선택/기타 저장 통과 |
+| BFF route | `cd bff && ./gradlew test --tests com.meetingmind.bff.proxy.ProxyRouteRegistryTest` | 통과 |
+| Frontend build | `cd frontend && npm run build` | 통과, 기존 large chunk 경고만 발생 |
+| Frontend unit | `cd frontend && npm run test -- --run` | 10 files, 101 tests 통과 |
+| Frontend lint | `cd frontend && npm run lint` | 오류 0, 기존 경고 2개 |
+| Diff whitespace | `git diff --check` | 통과 |
+
+## Milestone 4 — 용어사전 Knowledge 노드
+
+- [x] **T16. 통합 용어 카탈로그 재사용 경계** (backend)
+  - owner: 사용자 / agent: Codex / dependency: T13
+  - 파일: `DomainTermCatalogService`, `DomainTermController`와 테스트
+  - 완료 기준: Space 용어 우선·구독 공용 용어 병합 규칙을 API와 graph가 같은 서비스에서 사용한다.
+- [x] **T17. Knowledge graph 용어 노드 계약·응답** (contracts/backend)
+  - owner: 사용자 / agent: Codex / dependency: T16
+  - 파일: `knowledge-api.md`, `KnowledgeGraphResponse`, `KnowledgeGraphService`와 테스트
+  - 완료 기준: ACTIVE 통합 용어가 `GLOSSARY` 노드로 반환되고 정의와 `nodeTypes=GLOSSARY` 필터가 동작한다.
+- [x] **T18. 용어 노드 정의 UI** (frontend)
+  - owner: 사용자 / agent: Codex / dependency: T17
+  - 파일: `frontend/src/types.ts`, `frontend/src/features/knowledge/*`
+  - 완료 기준: 용어 노드가 용어 그룹으로 표시되고 선택 패널에서 정의를 읽을 수 있다.
+- [x] **T19. 회귀 검증과 구현 기록** (verification/docs)
+  - owner: 사용자 / agent: Codex / dependency: T16~T18
+  - 파일: 관련 테스트, `tasks.md`, `implement.md`
+  - 완료 기준: Backend 관련 테스트, Frontend unit/build, diff 검증 결과가 기록된다.
+
+## Knowledge 노드 검증 결과 (2026-07-27)
+
+| 항목 | 명령 | 결과 |
+| --- | --- | --- |
+| Backend 관련 단위 | `cd backend && ./gradlew test --tests com.meetingmind.demo.domain.DomainTermCatalogServiceTest --tests com.meetingmind.demo.controller.DomainTermControllerTest --tests com.meetingmind.demo.service.KnowledgeGraphServiceTest --tests com.meetingmind.demo.service.HttpAiGatewayClientEndpointTest` | 통과 |
+| Backend 전체 | `cd backend && ./gradlew test` | 250 tests, 실패 0, skip 18 |
+| Frontend unit | `cd frontend && npm run test -- --run src/features/knowledge/api.test.ts` | 10 files, 102 tests 통과 |
+| Frontend build | `cd frontend && npm run build` | 통과, 기존 large chunk 경고만 발생 |
+| Frontend lint | `cd frontend && npm run lint` | 오류 0, 기존 경고 2개 |
+| Diff whitespace | `git diff --check` | 통과 |

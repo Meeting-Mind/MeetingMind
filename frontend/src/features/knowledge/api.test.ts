@@ -79,4 +79,26 @@ describe("buildGraphView", () => {
     expect(view.nodes[0].orphan).toBe(true);
     expect(view.nodes[0].kind).toBe("transcript");
   });
+
+  it("용어 노드의 종류와 정의를 화면 모델에 보존한다", () => {
+    const response: KnowledgeGraphResponse = {
+      ...baseResponse(),
+      nodes: [
+        {
+          id: "glossary:term-1",
+          sourceType: "glossary",
+          nodeType: "GLOSSARY",
+          title: "RAG",
+          description: "검색 결과를 근거로 답변을 생성하는 방식",
+          sourceMeetingId: null,
+          embeddingStatus: null
+        }
+      ]
+    };
+
+    const view = buildGraphView(response);
+
+    expect(view.nodes[0].kind).toBe("glossary");
+    expect(view.nodes[0].description).toBe("검색 결과를 근거로 답변을 생성하는 방식");
+  });
 });

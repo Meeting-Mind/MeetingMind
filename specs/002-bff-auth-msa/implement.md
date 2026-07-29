@@ -875,3 +875,4 @@ Runtime matrix의 모든 거부 결과는 기대한 TLS, network, loader 또는 
 - `frontend npm test` 99개와 `npm run build`가 통과했다. 새 Playwright 회귀는 첫 Google 요청을 보류한 채 로그인 화면을 unmount하고 다시 진입한 다음 SDK 초기화 1회를 유지하면서 두 번째 Google callback과 `/api/v1/auth/google` 요청이 실행되는 것을 검증해 1/1 통과했다.
 - 최종 build asset `index-CuNObSdC.js`를 NonProd private S3에 먼저 업로드하고 no-cache `index.html`을 마지막에 교체했다. CloudFront distribution `E3VEAX4F98BOIE` invalidation `IA2C8FBILNV1J6YIL8KFK9YH7L` 완료 후 원격 HTML/JS SHA-256이 로컬 build와 일치했다.
 - 운영 브라우저가 최종 asset을 로드한 상태에서 Google 로그인→로그아웃→새로고침 없는 `/login` 재진입→Google 재로그인이 모두 `/spaces`로 성공했다. 최종 load 이후 SDK 중복 초기화 경고는 없었고, 검증용 Browser session은 즉시 로그아웃해 T059-S12를 완료했다.
+- 2026-07-27: Space 생성 분야 선택 UI가 조회하는 `GET /api/v1/glossary/categories`를 Core allowlist에 추가했다. 경로는 고정 literal이며 다른 glossary 관리 경로는 열지 않았다. `ProxyRouteRegistryTest`로 Core 분류를 검증했다.

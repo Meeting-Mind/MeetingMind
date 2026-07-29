@@ -57,6 +57,7 @@ from app.main import (
     retrieval_queries,
     retrieval_source_types,
     search_postgres_sources,
+    select_report_context_sources,
     validation_exception_handler,
 )
 from app.rag import InMemoryRagRetriever, RagChunk, RagSearchRequest, chunk_to_source
@@ -1483,35 +1484,22 @@ class RagSafetyTest(unittest.TestCase):
         self.assertIn("기존 보고서 본문", user_content)
         self.assertIn("근거 없이 새 결정을 추가해줘", user_content)
 
-    def test_report_generation_limits_provider_context_to_first_twelve_sources(self):
+    def test_report_generation_evenly_samples_twenty_four_unscored_sources(self):
         sources = [
             AiSource(
                 sourceId=f"segment-{index:03d}",
                 type="transcript",
                 text=f"{index}번째 보고서 근거입니다.",
-                relevanceScore=0.9,
             )
-            for index in range(15)
+            for index in range(30)
         ]
 
-        with patch(
-            "app.main.call_openai_text",
-            return_value=(
-                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
-                '{"title":"결정","sourceIds":["segment-000"]}],'
-                '"actionItems":[]}',
-                "test-model",
-                None,
-            ),
-        ) as call_openai_text:
-            response = generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
-
-        self.assertFalse(response.unsupported)
-        user_content = call_openai_text.call_args.kwargs["user_content"]
-        self.assertIn("segment-000", user_content)
-        self.assertIn("segment-011", user_content)
-        self.assertNotIn("segment-012", user_content)
-        self.assertNotIn("14번째 보고서 근거입니다.", user_content)
+        context_ids = [source.sourceId for source in select_report_context_sources(sources)]
+        self.assertEqual(len(context_ids), 24)
+        self.assertEqual(context_ids[0], "segment-000")
+        self.assertEqual(context_ids[-1], "segment-029")
+        self.assertIn("segment-015", context_ids)
+        self.assertNotIn("segment-028", context_ids)
 
     def test_report_generation_drops_low_score_sources_first_when_over_limit(self):
         # AH-009: source가 상한을 넘으면 낮은 score부터 버려야 한다.
@@ -1522,33 +1510,21 @@ class RagSafetyTest(unittest.TestCase):
                 sourceId=f"segment-{index:03d}",
                 type="transcript",
                 text=f"{index}번째 보고서 근거입니다.",
-                relevanceScore=0.9 if index >= 12 else 0.2,
+                relevanceScore=0.9 if index >= 24 else 0.2,
             )
-            for index in range(15)
+            for index in range(27)
         ]
 
-        with patch(
-            "app.main.call_openai_text",
-            return_value=(
-                '{"supported":true,"summary":[{"text":"요약","sourceIds":["segment-001"]}],"decisions":['
-                '{"title":"결정","sourceIds":["segment-012"]}],'
-                '"actionItems":[]}',
-                "test-model",
-                None,
-            ),
-        ) as call_openai_text:
-            generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
-
-        user_content = call_openai_text.call_args.kwargs["user_content"]
-        for source_id in ("segment-012", "segment-013", "segment-014"):
-            self.assertIn(source_id, user_content)
+        context_ids = [source.sourceId for source in select_report_context_sources(sources)]
+        for source_id in ("segment-024", "segment-025", "segment-026"):
+            self.assertIn(source_id, context_ids)
         # scope를 넓히지 않는다: 전달한 source 밖의 ID가 문맥에 들어가지 않는다.
-        self.assertNotIn("segment-015", user_content)
-        # 상한을 실제로 지킨다: 12건만 남으므로 low-score 3건은 빠진다.
+        self.assertNotIn("segment-027", context_ids)
+        # 상한을 실제로 지킨다: 24건만 남으므로 low-score 3건은 빠진다.
         dropped = [
             source_id
-            for source_id in (f"segment-{index:03d}" for index in range(12))
-            if source_id not in user_content
+            for source_id in (f"segment-{index:03d}" for index in range(24))
+            if source_id not in context_ids
         ]
         self.assertEqual(len(dropped), 3)
 
@@ -1638,7 +1614,7 @@ class RagSafetyTest(unittest.TestCase):
         self.assertIn("[기존 보고서 본문 - 비신뢰 문맥]", user_content)
         self.assertIn("forged-source", user_content)
 
-    def test_backend_generate_report_maps_provider_error_to_503(self):
+    def test_backend_generate_report_falls_back_when_provider_is_unavailable(self):
         payload = BackendGenerateReportRequest(
             projectId="space-001",
             meetingId="meeting-001",
@@ -1654,11 +1630,57 @@ class RagSafetyTest(unittest.TestCase):
         )
 
         with patch("app.main.call_openai_text", side_effect=HTTPException(status_code=502, detail="boom")):
-            with self.assertRaises(HTTPException) as raised:
-                backend_meeting_ai_generate_report(payload)
+            response = backend_meeting_ai_generate_report(payload)
 
-        self.assertEqual(raised.exception.status_code, 503)
-        self.assertEqual(raised.exception.detail["code"], "AI_PROVIDER_UNAVAILABLE")
+        self.assertFalse(response.unsupported)
+        self.assertTrue(response.degraded)
+        self.assertEqual(response.generationMode, "EXTRACTIVE_FALLBACK")
+        self.assertEqual(response.summary[0].sourceIds, ["segment-001"])
+
+    def test_report_generation_retries_structured_output_once(self):
+        sources = [AiSource(sourceId="segment-001", type="transcript", text="권한 정책을 확정했습니다.")]
+        with patch("app.main.call_openai_text", side_effect=[
+            ("not-json", "test-model", None),
+            ('{"supported":true,"summary":[{"text":"권한 정책을 확정했습니다.","sourceIds":["segment-001"]}],"decisions":[],"actionItems":[]}', "test-model", None),
+        ]) as provider:
+            response = generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
+
+        self.assertFalse(response.unsupported)
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(response.attemptCount, 2)
+        self.assertIn("직전 응답은 구조 또는 인용 검증에 실패", provider.call_args.kwargs["developer_content"])
+
+    def test_report_generation_uses_extract_fallback_after_retry_failure(self):
+        sources = [AiSource(sourceId="segment-001", type="transcript", text="원문 발화를 그대로 사용합니다.")]
+        with patch("app.main.call_openai_text", side_effect=[
+            ("not-json", "test-model", None),
+            ("still-not-json", "test-model", None),
+        ]):
+            response = generate_report_from_sources("meeting-001", "주간 회의", "markdown", sources)
+
+        self.assertEqual(response.generationMode, "EXTRACTIVE_FALLBACK")
+        self.assertTrue(response.degraded)
+        self.assertEqual(response.attemptCount, 2)
+        self.assertEqual(response.summary[0].text, "원문 발화를 그대로 사용합니다.")
+        self.assertEqual(response.decisions, [])
+        self.assertEqual(response.actionItems, [])
+
+    def test_long_report_maps_chunks_then_reduces_with_original_citations(self):
+        sources = [
+            AiSource(sourceId=f"segment-{index:03d}", type="transcript", text=f"{index}번째 발화")
+            for index in range(30)
+        ]
+        with patch("app.main.call_openai_text", side_effect=[
+            ('{"supported":true,"summary":[{"text":"앞 구간","sourceIds":["segment-000"]}],"decisions":[],"actionItems":[]}', "test-model", None),
+            ('{"supported":true,"summary":[{"text":"뒤 구간","sourceIds":["segment-029"]}],"decisions":[],"actionItems":[]}', "test-model", None),
+            ('{"supported":true,"summary":[{"text":"전체 요약","sourceIds":["segment-000","segment-029"]}],"decisions":[],"actionItems":[]}', "test-model", None),
+        ]) as provider:
+            response = generate_report_from_sources("meeting-001", "긴 회의", "markdown", sources)
+
+        self.assertEqual(provider.call_count, 3)
+        self.assertEqual(response.generationMode, "AI_HIERARCHICAL")
+        self.assertEqual(response.attemptCount, 3)
+        self.assertEqual(response.summary[0].sourceIds, ["segment-000", "segment-029"])
 
     def test_backend_project_chat_rejects_source_from_another_project(self):
         payload = BackendProjectAiChatRequest(

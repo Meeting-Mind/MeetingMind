@@ -123,6 +123,13 @@ class MigrationIntegrationTest {
                     insert into embedding_jobs (id, space_id, meeting_id, generation)
                     values ('migration-job', 'migration-space', 'migration-meeting', 1)
                     """);
+            statement.executeUpdate("""
+                    insert into domain_terms (
+                        id, space_id, term, definition, status
+                    ) values
+                        ('migration-term-a', 'migration-space', 'Migration Alpha', '첫 번째 이관 용어', 'ACTIVE'),
+                        ('migration-term-b', 'migration-space', 'Migration Beta', '두 번째 이관 용어', 'ACTIVE')
+                    """);
             // 운영 bootstrap에서 남을 수 있는 과도한 기존 권한도 후속 migration이 회수해야 한다.
             statement.executeUpdate("""
                     grant insert, update on table chunk_source_segments to meetingmind_core_app
@@ -165,7 +172,11 @@ class MigrationIntegrationTest {
                             has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'SELECT'),
                             has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'INSERT'),
                             has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'UPDATE'),
-                            has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'DELETE')
+                            has_table_privilege('meetingmind_core_app', 'meeting_ai_messages', 'DELETE'),
+                            has_table_privilege('meetingmind_core_app', 'space_custom_glossary_categories', 'SELECT'),
+                            has_table_privilege('meetingmind_core_app', 'space_custom_glossary_categories', 'INSERT'),
+                            has_table_privilege('meetingmind_core_app', 'knowledge_graph_edges', 'SELECT'),
+                            has_table_privilege('meetingmind_core_app', 'knowledge_graph_edges', 'INSERT')
                         """)) {
                     assertThat(rows.next()).isTrue();
                     assertThat(rows.getBoolean(1)).isTrue();
@@ -180,6 +191,35 @@ class MigrationIntegrationTest {
                     assertThat(rows.getBoolean(10)).isTrue();
                     assertThat(rows.getBoolean(11)).isFalse();
                     assertThat(rows.getBoolean(12)).isFalse();
+                    assertThat(rows.getBoolean(13)).isTrue();
+                    assertThat(rows.getBoolean(14)).isTrue();
+                    assertThat(rows.getBoolean(15)).isTrue();
+                    assertThat(rows.getBoolean(16)).isFalse();
+                }
+                statement.executeUpdate("""
+                        insert into knowledge_graph_edges (
+                            id, space_id, from_node_id, to_node_id, similarity
+                        ) values (
+                            'migration-graph-edge',
+                            'migration-space',
+                            'glossary:migration-term-a',
+                            'glossary:migration-term-b',
+                            0.5
+                        )
+                        """);
+                try (var rows = statement.executeQuery("""
+                        select from_node_id, to_node_id, similarity
+                        from knowledge_graph_edges
+                        where space_id = 'migration-space'
+                        """)) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(List.of(rows.getString("from_node_id"), rows.getString("to_node_id")))
+                            .containsExactlyInAnyOrder(
+                                    "glossary:migration-term-a",
+                                    "glossary:migration-term-b"
+                            );
+                    assertThat(rows.getDouble("similarity")).isEqualTo(0.5);
+                    assertThat(rows.next()).isFalse();
                 }
                 try (var rows = statement.executeQuery("""
                         select auth_user_id

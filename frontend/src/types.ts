@@ -101,6 +101,10 @@ export interface DomainTerm {
   definition: string;
   status: DomainTermStatus;
   updatedAt: ApiDateTime;
+  source: "SPACE" | "SHARED";
+  categoryId: string | null;
+  categoryName: string | null;
+  editable: boolean;
 }
 
 export interface DomainTermListResponse {
@@ -131,6 +135,19 @@ export interface DeleteDomainTermResponse {
 export interface CreateSpaceRequest {
   name: string;
   description?: string | null;
+  glossaryCategoryIds?: string[];
+  customGlossaryCategories?: string[];
+}
+
+export interface GlossaryCategory {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+}
+
+export interface GlossaryCategoryListResponse {
+  categories: GlossaryCategory[];
 }
 
 export interface CreateSpaceResponse {
@@ -650,10 +667,11 @@ export interface KnowledgeGraphNode {
   id: string;
   sourceType: "projectKnowledge" | "transcript" | "meetingSummary" | "decision" | "actionItem" | "report" | "glossary";
   title: string;
+  description?: string | null;
   sourceMeetingId: string | null;
-  embeddingStatus: "COMPLETED";
+  embeddingStatus: "COMPLETED" | null;
   entityId?: string | null;
-  nodeType?: "MEETING" | "REPORT" | "DECISION" | "ACTION" | "TASK" | "PROJECT_KNOWLEDGE" | "TOPIC" | "PARTICIPANT" | null;
+  nodeType?: "MEETING" | "REPORT" | "DECISION" | "ACTION" | "TASK" | "PROJECT_KNOWLEDGE" | "GLOSSARY" | "TOPIC" | "PARTICIPANT" | null;
   connectionCount?: number;
   clusterIds?: string[];
   detailTarget?: { kind: string; id: string } | null;
@@ -804,6 +822,10 @@ export interface ReportCandidateResponse {
   unsupportedReason: UnsupportedReason | null;
   droppedCount: number;
   model: string;
+  generationMode: "AI_DIRECT" | "AI_HIERARCHICAL" | "EXTRACTIVE_FALLBACK";
+  degraded: boolean;
+  warnings: string[];
+  attemptCount: number;
 }
 
 export interface ExtractTaskCandidatesRequest {

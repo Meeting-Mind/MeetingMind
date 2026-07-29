@@ -39,6 +39,9 @@ class JdbcWorkspaceStoreIntegrationTest {
     private WorkspaceDomainService service;
 
     @Autowired
+    private SharedGlossaryStore sharedGlossaryStore;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @Autowired
@@ -242,6 +245,31 @@ class JdbcWorkspaceStoreIntegrationTest {
         assertThat(reloadedService.projectAiContextCandidates(owner.id(), space.space().id()).meetings())
                 .extracting(Meeting::id)
                 .containsExactly(meeting.meeting().id());
+    }
+
+    @Test
+    void persistsSelectedAndCustomGlossaryCategoriesAndFiltersSharedTerms() {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        User owner = store.saveUser(user("glossary-owner-" + suffix, now));
+
+        WorkspaceDomainService.SpaceCreationResult space = service.createSpace(
+                owner.id(),
+                "Glossary Space",
+                null,
+                List.of("glossary-category-finance"),
+                List.of("반도체 설계")
+        );
+
+        assertThat(sharedGlossaryStore.findSubscribedActive(space.space().id(), "roe"))
+                .extracting(SharedGlossaryStore.SharedGlossaryTerm::term)
+                .containsExactly("ROE");
+        assertThat(sharedGlossaryStore.findSubscribedActive(space.space().id(), "kpi")).isEmpty();
+        assertThat(jdbc.queryForObject(
+                "select name from space_custom_glossary_categories where space_id = ?",
+                String.class,
+                space.space().id()
+        )).isEqualTo("반도체 설계");
     }
 
     @Test

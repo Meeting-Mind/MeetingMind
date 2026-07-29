@@ -3,6 +3,7 @@ package com.meetingmind.demo.controller;
 import com.meetingmind.demo.auth.AuthService;
 import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.domain.DomainTerm;
+import com.meetingmind.demo.domain.DomainTermCatalogService;
 import com.meetingmind.demo.domain.DomainTermService;
 import com.meetingmind.demo.domain.WorkspaceDomainService;
 import com.meetingmind.demo.dto.CreateDomainTermRequest;
@@ -11,7 +12,6 @@ import com.meetingmind.demo.dto.DomainTermListResponse;
 import com.meetingmind.demo.dto.DomainTermMutationResponse;
 import com.meetingmind.demo.dto.UpdateDomainTermRequest;
 import jakarta.validation.Valid;
-import java.util.List;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -30,15 +30,18 @@ public class DomainTermController {
     private final AuthService authService;
     private final WorkspaceDomainService workspaceDomainService;
     private final DomainTermService domainTermService;
+    private final DomainTermCatalogService domainTermCatalogService;
 
     public DomainTermController(
             AuthService authService,
             WorkspaceDomainService workspaceDomainService,
-            DomainTermService domainTermService
+            DomainTermService domainTermService,
+            DomainTermCatalogService domainTermCatalogService
     ) {
         this.authService = authService;
         this.workspaceDomainService = workspaceDomainService;
         this.domainTermService = domainTermService;
+        this.domainTermCatalogService = domainTermCatalogService;
     }
 
     @GetMapping
@@ -49,9 +52,10 @@ public class DomainTermController {
             @RequestParam(required = false) String status
     ) {
         AuthUserResponse user = currentUser(authorizationHeader);
-        List<DomainTermListResponse.Term> terms = domainTermService.list(user.id(), spaceId, status, keyword)
-                .stream().map(DomainTermController::toResponse).toList();
-        return new DomainTermListResponse(terms);
+        return new DomainTermListResponse(domainTermCatalogService.list(user.id(), spaceId, status, keyword)
+                .stream()
+                .map(DomainTermController::toResponse)
+                .toList());
     }
 
     @PostMapping
@@ -96,9 +100,10 @@ public class DomainTermController {
         return user;
     }
 
-    private static DomainTermListResponse.Term toResponse(DomainTerm term) {
+    private static DomainTermListResponse.Term toResponse(DomainTermCatalogService.CatalogTerm term) {
         return new DomainTermListResponse.Term(
-                term.id(), term.term(), term.definition(), term.status().name(), term.updatedAt()
+                term.id(), term.term(), term.definition(), term.status().name(), term.updatedAt(),
+                term.source().name(), term.categoryId(), term.categoryName(), term.editable()
         );
     }
 

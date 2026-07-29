@@ -58,6 +58,8 @@ class ProxyRouteRegistryTest {
                 .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.GET, "/api/v1/calendar/events").orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
+        assertThat(registry.resolve(HttpMethod.GET, "/api/v1/glossary/categories").orElseThrow().service())
+                .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.PATCH, "/api/v1/spaces/" + spaceId).orElseThrow().service())
                 .isEqualTo(DownstreamService.CORE);
         assertThat(registry.resolve(HttpMethod.GET, "/api/v1/spaces/" + spaceId).orElseThrow().service())

@@ -98,7 +98,9 @@
 ```json
 {
   "name": "MeetingMind",
-  "description": "AI 회의 지식화 프로젝트"
+  "description": "AI 회의 지식화 프로젝트",
+  "glossaryCategoryIds": ["glossary-category-common-business", "glossary-category-it-software"],
+  "customGlossaryCategories": ["반도체 설계"]
 }
 ```
 
@@ -106,6 +108,10 @@
 
 - `name`: required, blank 금지
 - `description`: optional
+- `glossaryCategoryIds`: optional array. 명시하면 활성 카테고리를 여러 개 선택할 수 있으며 ID 중복과 알 수 없는 ID를 거부한다.
+- `customGlossaryCategories`: optional array. trim 후 1~100자, 대소문자 무시 중복 불가, 기존 카테고리명과 중복 불가.
+- 입력 상한: `glossaryCategoryIds` 50개, `customGlossaryCategories` 10개.
+- 두 카테고리 필드가 모두 생략되면 기존 클라이언트 호환을 위해 전체 공용 분야를 구독한다.
 
 ### Response
 

@@ -51,9 +51,19 @@ AI service가 검증을 마친 뒤 Backend에 반환하는 내부 API 응답은 
   "droppedCount": 0,
   "unsupported": false,
   "unsupportedReason": null,
-  "model": "gpt-4.1-mini"
+  "model": "gpt-4.1-mini",
+  "generationMode": "AI_DIRECT",
+  "degraded": false,
+  "warnings": [],
+  "attemptCount": 1
 }
 ```
+
+- `AI_DIRECT`: 단일 context에서 생성한다.
+- `AI_HIERARCHICAL`: 긴 회의를 구간별로 요약한 뒤 원본 source ID로 합성한다.
+- `EXTRACTIVE_FALLBACK`: AI 생성과 구조 검증이 실패해 전사 원문을 발췌한다. 이 모드는
+  `degraded=true`와 사용자 경고를 포함하며 결정·할 일을 추측하지 않는다.
+- 구조 또는 citation 검증 실패의 자동 재시도는 전체 생성 요청에서 최대 1회다.
 
 - provider 출력의 `supported`는 AI service 내부 판정값이다.
 - Backend가 받는 내부 API 응답은 `unsupported`와 `unsupportedReason`을 사용한다.
@@ -128,6 +138,9 @@ provider가 `supported=false`를 반환하거나 검증 가능한 요약 문장�
 - `LOW_RELEVANCE`: 회의록으로 정리할 관련 근거가 부족함
 - `MODEL_UNSUPPORTED`: provider가 구조화된 회의록을 만들 수 없다고 판정함
 - `UNVERIFIED_OUTPUT`: 생성된 요약의 citation을 검증하지 못함
+
+전사가 하나 이상 있으면 provider 장애나 재시도 실패 뒤에도 `EXTRACTIVE_FALLBACK` candidate를
+반환한다. 전사가 전혀 없을 때만 fallback 없이 `NO_EVIDENCE`로 종료한다.
 
 ## 기존 회의록
 

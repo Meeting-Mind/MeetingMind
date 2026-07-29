@@ -183,7 +183,11 @@ public class ReportCandidateService {
                 false,
                 null,
                 droppedCount,
-                aiResponse.model()
+                aiResponse.model(),
+                aiResponse.generationMode(),
+                aiResponse.degraded(),
+                aiResponse.warnings(),
+                aiResponse.attemptCount()
         );
     }
 

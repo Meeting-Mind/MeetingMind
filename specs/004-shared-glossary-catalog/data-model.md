@@ -50,11 +50,26 @@ Space별 분야 구독 상태.
 | updated_at | timestamptz | NOT NULL | |
 | updated_by_user_id | varchar(64) | FK → users | |
 
-**행이 없으면 구독 중으로 해석한다.** 조회는 `enabled = false` 행만 제외하는 `NOT EXISTS` 조건으로 구현한다.
+**해당 Space의 행이 하나도 없으면 전체 분야를 구독 중으로 해석한다.** 행이 하나라도 있으면 `enabled = true`인 분야만 구독한다. 이 구분으로 기존 Space는 전체 구독을 유지하고, 명시적으로 선택한 신규 Space는 이후 추가되는 전역 분야가 자동 구독되지 않는다.
 
-이렇게 둔 이유는 두 가지다. 첫째, 기존 Space와 신규 Space 모두 백필 없이 기본값(전체 구독)을 얻는다. 둘째, Space가 모든 분야를 끈 상태를 `enabled = false` 행으로 표현할 수 있다. "행이 없으면 전체 허용"만으로 처리하면 전부 끈 상태가 전체 허용으로 되돌아가 표현이 불가능해진다.
+기존 Space는 백필 없이 기본값(전체 구독)을 얻는다. 신규 Space는 활성 분야 전체에 대해 true/false 행을 저장하므로 선택 범위와 전부 끈 상태를 모두 표현할 수 있다.
 
-Space 생성 시점에 구독 행을 만들지 않으므로 `WorkspaceStore` 계열 코드는 변경하지 않는다.
+기존 Space는 구독 행이 없으면 전체 구독으로 해석한다. 신규 Space가 생성 요청에 `glossaryCategoryIds`를 명시하면 모든 활성 분야에 대해 선택 여부를 `enabled`로 저장한다.
+
+## space_custom_glossary_categories (V33)
+
+Space 생성 시 `기타`로 입력한 사용자 정의 분야다. 전역 공용 카탈로그에는 포함되지 않는다.
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| id | varchar(64) | PK | `space-glossary-custom-<uuid>` |
+| space_id | varchar(64) | NOT NULL, FK → spaces | |
+| name | varchar(100) | NOT NULL, 공백 불가 | Space 표시용 분야명 |
+| created_at | timestamptz | NOT NULL | |
+| created_by_user_id | varchar(64) | NOT NULL, FK → users | |
+
+- `ux_space_custom_glossary_category_name` — `(space_id, lower(name))` unique.
+- 사용자 정의 분야는 해당 Space 분류 정보이며, 연결된 `shared_domain_terms`가 없으므로 공용 용어 조회 범위를 넓히지 않는다.
 
 ## 조회 쿼리
 
@@ -64,11 +79,17 @@ from shared_domain_terms t
 join glossary_categories c on c.id = t.category_id and c.status = 'ACTIVE'
 where t.status = 'ACTIVE'
   and lower(t.term) = :term
-  and not exists (
-      select 1 from space_glossary_categories s
-      where s.space_id = :spaceId
-        and s.category_id = c.id
-        and s.enabled = false
+  and (
+      not exists (
+          select 1 from space_glossary_categories configured
+          where configured.space_id = :spaceId
+      )
+      or exists (
+          select 1 from space_glossary_categories selected
+          where selected.space_id = :spaceId
+            and selected.category_id = c.id
+            and selected.enabled = true
+      )
   )
 order by c.display_order, c.id
 limit 1
@@ -83,6 +104,7 @@ limit 1
 | glossary_categories | select | 카탈로그 관리는 런타임 작업이 아니다 |
 | shared_domain_terms | select | 용어 편집은 마이그레이션 또는 후속 관리자 경로로만 한다 |
 | space_glossary_categories | select, insert, update, delete | Space가 구독을 직접 바꾼다 |
+| space_custom_glossary_categories | select, insert, update, delete | Space 생성 시 직접 입력한 기타 분야를 해당 Space 범위에서 관리한다 |
 
 ## 시드 데이터 (V32)
 

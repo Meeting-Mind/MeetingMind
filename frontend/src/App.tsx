@@ -110,7 +110,7 @@ import {
   stopActiveMeetingTranscription,
   stopMeetingTranscription
 } from "./api/transcripts";
-import { archiveDomainTerm, createDomainTerm, fetchDomainTerms, updateDomainTerm } from "./api/terms";
+import { archiveDomainTerm, createDomainTerm, fetchDomainTerms, fetchGlossaryCategories, updateDomainTerm } from "./api/terms";
 import { highlightTranscriptTerms } from "./components/common/TranscriptTerm";
 import { ApiRequestError } from "./api/client";
 import { createInstantMeeting, createMeeting, deleteMeeting, fetchAccessibleMeetings, fetchMeetingDetail, fetchMeetings, updateMeeting } from "./api/meetings";
@@ -118,6 +118,7 @@ import { fetchMeetingLiveKitToken } from "./api/live";
 import type {
   CalendarEvent as ProjectCalendarEvent,
   DomainTerm,
+  GlossaryCategory,
   SpaceDetail,
   SpaceSummary,
   SpaceAiUsageResponse,
@@ -134,6 +135,121 @@ import type {
 } from "./types";
 
 // --- Components ---
+
+function useGlossaryCategorySelection(session: AuthSession | null, enabled: boolean) {
+  const [categories, setCategories] = useState<GlossaryCategory[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [otherSelected, setOtherSelected] = useState(false);
+  const [customCategory, setCustomCategory] = useState("");
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
+
+  useEffect(() => {
+    if (!enabled || !session) return;
+    let active = true;
+    setCategoryLoading(true);
+    setCategoryError("");
+    void fetchGlossaryCategories(session)
+      .then((response) => {
+        if (!active) return;
+        setCategories(response.categories);
+        setSelectedCategoryIds((current) => {
+          if (current.length > 0) return current;
+          const defaultCategory = response.categories.find((category) => category.slug === "common-business")
+            ?? response.categories[0];
+          return defaultCategory ? [defaultCategory.id] : [];
+        });
+      })
+      .catch((cause) => {
+        if (active) setCategoryError(cause instanceof Error ? cause.message : "용어 분야를 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (active) setCategoryLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [enabled, session]);
+
+  const toggleCategory = (categoryId: string) => {
+    setSelectedCategoryIds((current) => current.includes(categoryId)
+      ? current.filter((id) => id !== categoryId)
+      : [...current, categoryId]);
+  };
+
+  const reset = () => {
+    setSelectedCategoryIds([]);
+    setOtherSelected(false);
+    setCustomCategory("");
+    setCategoryError("");
+  };
+
+  return {
+    categories,
+    selectedCategoryIds,
+    otherSelected,
+    customCategory,
+    categoryLoading,
+    categoryError,
+    setOtherSelected,
+    setCustomCategory,
+    toggleCategory,
+    reset
+  };
+}
+
+function GlossaryCategoryFields({
+  selection,
+  korean
+}: {
+  selection: ReturnType<typeof useGlossaryCategorySelection>;
+  korean: boolean;
+}) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium text-foreground">{korean ? "용어 분야" : "Glossary categories"}</legend>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        {korean ? "여러 분야를 선택할 수 있으며 선택한 공용 용어가 사전과 회의 자막에 표시됩니다." : "Select multiple categories to show their shared terms in the dictionary and transcript."}
+      </p>
+      {selection.categoryLoading ? <p className="text-xs text-muted-foreground">{korean ? "분야를 불러오는 중..." : "Loading categories..."}</p> : null}
+      {selection.categoryError ? <p className="text-xs text-red-600" role="alert">{selection.categoryError}</p> : null}
+      {!selection.categoryLoading && !selection.categoryError ? (
+        <div className="grid max-h-44 grid-cols-2 gap-2 overflow-y-auto rounded-md border border-border bg-background p-3">
+          {selection.categories.map((category) => (
+            <label className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-xs text-foreground hover:bg-muted" key={category.id}>
+              <input
+                checked={selection.selectedCategoryIds.includes(category.id)}
+                className="mt-0.5 accent-primary"
+                onChange={() => selection.toggleCategory(category.id)}
+                type="checkbox"
+              />
+              <span>{category.name}</span>
+            </label>
+          ))}
+          <label className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-xs text-foreground hover:bg-muted">
+            <input
+              checked={selection.otherSelected}
+              className="mt-0.5 accent-primary"
+              onChange={(event) => selection.setOtherSelected(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{korean ? "기타 (직접 입력)" : "Other (type your own)"}</span>
+          </label>
+        </div>
+      ) : null}
+      {selection.otherSelected ? (
+        <input
+          aria-label={korean ? "기타 용어 분야" : "Other glossary category"}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+          maxLength={100}
+          onChange={(event) => selection.setCustomCategory(event.target.value)}
+          placeholder={korean ? "예: 반도체 설계" : "e.g. Semiconductor design"}
+          value={selection.customCategory}
+        />
+      ) : null}
+    </fieldset>
+  );
+}
 
 
 function renderMarkdownInline(value: string, keyPrefix: string) {
@@ -563,6 +679,7 @@ const AppShell = () => {
   const [createWorkspaceDescription, setCreateWorkspaceDescription] = useState("");
   const [createWorkspacePending, setCreateWorkspacePending] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState("");
+  const workspaceGlossarySelection = useGlossaryCategorySelection(session, createWorkspaceOpen);
   const [aiWidth, setAiWidth] = useState(400);
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState("");
@@ -649,18 +766,35 @@ const AppShell = () => {
     if (!name || createWorkspacePending) {
       return;
     }
+    const customCategory = workspaceGlossarySelection.customCategory.trim();
+    if (workspaceGlossarySelection.categoryLoading || workspaceGlossarySelection.categoryError) {
+      setCreateWorkspaceError("용어 분야를 불러온 뒤 다시 시도해 주세요.");
+      return;
+    }
+    if (!workspaceGlossarySelection.selectedCategoryIds.length
+        && (!workspaceGlossarySelection.otherSelected || !customCategory)) {
+      setCreateWorkspaceError("용어 분야를 하나 이상 선택하거나 입력해 주세요.");
+      return;
+    }
+    if (workspaceGlossarySelection.otherSelected && !customCategory) {
+      setCreateWorkspaceError("기타 용어 분야명을 입력해 주세요.");
+      return;
+    }
 
     setCreateWorkspacePending(true);
     setCreateWorkspaceError("");
     try {
       const created = await createSpace(authSession, {
         name,
-        description: createWorkspaceDescription.trim() || null
+        description: createWorkspaceDescription.trim() || null,
+        glossaryCategoryIds: workspaceGlossarySelection.selectedCategoryIds,
+        customGlossaryCategories: workspaceGlossarySelection.otherSelected ? [customCategory] : []
       });
       setCreateWorkspaceOpen(false);
       setWorkspaceMenuOpen(false);
       setCreateWorkspaceName("");
       setCreateWorkspaceDescription("");
+      workspaceGlossarySelection.reset();
       navigate(`/spaces/${encodeURIComponent(created.id)}`);
     } catch (cause) {
       setCreateWorkspaceError(cause instanceof Error ? cause.message : "워크스페이스를 생성하지 못했습니다.");
@@ -1049,11 +1183,12 @@ const AppShell = () => {
                 {korean ? "설명" : "Description"} <span className="font-normal text-muted-foreground">({korean ? "선택" : "optional"})</span>
                 <textarea className="mt-1.5 min-h-24 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50" onChange={(event) => setCreateWorkspaceDescription(event.target.value)} placeholder={korean ? "이 프로젝트의 목적을 입력하세요." : "What is this project about?"} value={createWorkspaceDescription} />
               </label>
+              <GlossaryCategoryFields korean={korean} selection={workspaceGlossarySelection} />
               {createWorkspaceError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{createWorkspaceError}</p> : null}
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <button className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted" disabled={createWorkspacePending} onClick={() => setCreateWorkspaceOpen(false)} type="button">{korean ? "취소" : "Cancel"}</button>
-              <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60" disabled={!createWorkspaceName.trim() || createWorkspacePending} onClick={() => void createWorkspaceFromMenu()} type="button">{createWorkspacePending ? (korean ? "생성 중..." : "Creating...") : (korean ? "워크스페이스 생성" : "Create workspace")}</button>
+              <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60" disabled={!createWorkspaceName.trim() || createWorkspacePending || workspaceGlossarySelection.categoryLoading || Boolean(workspaceGlossarySelection.categoryError)} onClick={() => void createWorkspaceFromMenu()} type="button">{createWorkspacePending ? (korean ? "생성 중..." : "Creating...") : (korean ? "워크스페이스 생성" : "Create workspace")}</button>
             </div>
           </section>
         </div>
@@ -1201,6 +1336,7 @@ const AppShell = () => {
 // 2. Workspace Home (/spaces)
 const WorkspaceHome = () => {
   const { session, setSession } = useAuthState();
+  const { locale } = useAppPreferences();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1221,6 +1357,7 @@ const WorkspaceHome = () => {
   const [createDescription, setCreateDescription] = useState("");
   const [createPending, setCreatePending] = useState(false);
   const [createError, setCreateError] = useState("");
+  const homeGlossarySelection = useGlossaryCategorySelection(session, createOpen);
   const [pendingInvitations, setPendingInvitations] = useState<Awaited<ReturnType<typeof fetchPendingSpaceInvitations>>["invitations"]>([]);
   const [invitationsOpen, setInvitationsOpen] = useState(false);
   const [invitationPendingId, setInvitationPendingId] = useState("");
@@ -1230,6 +1367,7 @@ const WorkspaceHome = () => {
   const [guestMeetings, setGuestMeetings] = useState<MeetingSummary[]>([]);
   const selectedGuestMeetingId = searchParams.get("meetingId") ?? "";
   const selectedGuestMeeting = guestMeetings.find((meeting) => meeting.id === selectedGuestMeetingId) ?? guestMeetings[0] ?? null;
+  const korean = locale === "ko";
 
   const loadSpaces = React.useCallback(async () => {
     if (!session) {
@@ -1329,13 +1467,29 @@ const WorkspaceHome = () => {
       setCreateError("프로젝트 이름을 입력해 주세요.");
       return;
     }
+    const customCategory = homeGlossarySelection.customCategory.trim();
+    if (homeGlossarySelection.categoryLoading || homeGlossarySelection.categoryError) {
+      setCreateError("용어 분야를 불러온 뒤 다시 시도해 주세요.");
+      return;
+    }
+    if (!homeGlossarySelection.selectedCategoryIds.length
+        && (!homeGlossarySelection.otherSelected || !customCategory)) {
+      setCreateError("용어 분야를 하나 이상 선택하거나 입력해 주세요.");
+      return;
+    }
+    if (homeGlossarySelection.otherSelected && !customCategory) {
+      setCreateError("기타 용어 분야명을 입력해 주세요.");
+      return;
+    }
 
     setCreatePending(true);
     setCreateError("");
     try {
       const created = await createSpace(session, {
         name: normalizedName,
-        description: createDescription.trim() || null
+        description: createDescription.trim() || null,
+        glossaryCategoryIds: homeGlossarySelection.selectedCategoryIds,
+        customGlossaryCategories: homeGlossarySelection.otherSelected ? [customCategory] : []
       });
       setSpaces((previous) => [
         {
@@ -1351,6 +1505,7 @@ const WorkspaceHome = () => {
       ]);
       setCreateName("");
       setCreateDescription("");
+      homeGlossarySelection.reset();
       setCreateOpen(false);
     } catch (cause) {
       setCreateError(cause instanceof Error ? cause.message : "프로젝트를 생성하지 못했습니다.");
@@ -1581,6 +1736,7 @@ const WorkspaceHome = () => {
                   value={createDescription}
                 />
               </div>
+              <GlossaryCategoryFields korean={korean} selection={homeGlossarySelection} />
               {createError ? <p className="text-xs text-red-600" role="alert">{createError}</p> : null}
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button
@@ -1594,7 +1750,7 @@ const WorkspaceHome = () => {
                 <button
                   className="px-4 py-2 rounded-md text-sm font-semibold bg-foreground text-background hover:bg-foreground/90 transition-colors"
                   data-testid="create-space-submit"
-                  disabled={createPending}
+                  disabled={createPending || homeGlossarySelection.categoryLoading || Boolean(homeGlossarySelection.categoryError)}
                   type="submit"
                 >
                   {createPending ? "Creating..." : "Create Space"}
@@ -4648,7 +4804,7 @@ const TermsDictionary = () => {
   }
 
   async function handleUpdateTerm() {
-    if (!session || !spaceId || !selected || !canManageTerms || saving) {
+    if (!session || !spaceId || !selected || !selected.editable || !canManageTerms || saving) {
       return;
     }
     if (!draftTerm.term.trim() || !draftTerm.definition.trim()) {
@@ -4673,7 +4829,7 @@ const TermsDictionary = () => {
   }
 
   async function handleArchiveTerm() {
-    if (!session || !spaceId || !selected || !canManageTerms || saving) {
+    if (!session || !spaceId || !selected || !selected.editable || !canManageTerms || saving) {
       return;
     }
     setSaving(true);
@@ -4764,7 +4920,7 @@ const TermsDictionary = () => {
             >
               <div className="flex items-center justify-between gap-2 mb-0.5">
                 <span className="text-sm font-semibold text-foreground">{t.term}</span>
-                <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${statusTone[t.status]}`}>{t.status}</span>
+                <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${t.source === "SHARED" ? "border-sky-200 bg-sky-50 text-sky-700" : statusTone[t.status]}`}>{t.source === "SHARED" ? (t.categoryName ?? "공용") : t.status}</span>
               </div>
               <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{t.definition}</p>
             </button>
@@ -4821,6 +4977,7 @@ const TermsDictionary = () => {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${statusTone[selectedTerm.status]}`}>{selectedTerm.status}</span>
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${selectedTerm.source === "SHARED" ? "border-sky-200 bg-sky-50 text-sky-700" : "border-border bg-muted text-muted-foreground"}`}>{selectedTerm.source === "SHARED" ? `공용 · ${selectedTerm.categoryName ?? "기본"}` : "Space 등록"}</span>
                 </div>
                 <h2 className="text-2xl font-bold text-foreground">{selectedTerm.term}</h2>
                 <p className="text-sm text-muted-foreground mt-0.5">Updated {formatUpdatedAt(selectedTerm.updatedAt)}</p>
@@ -4831,7 +4988,7 @@ const TermsDictionary = () => {
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Term</label>
                 <input
                   className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
-                  disabled={!canManageTerms || saving}
+                  disabled={!selectedTerm.editable || !canManageTerms || saving}
                   onChange={(event) => setDraftTerm((current) => ({ ...current, term: event.target.value }))}
                   value={draftTerm.term}
                 />
@@ -4840,17 +4997,17 @@ const TermsDictionary = () => {
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Definition</label>
                 <textarea
                   className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none disabled:opacity-60"
-                  disabled={!canManageTerms || saving}
+                  disabled={!selectedTerm.editable || !canManageTerms || saving}
                   onChange={(event) => setDraftTerm((current) => ({ ...current, definition: event.target.value }))}
                   rows={6}
                   value={draftTerm.definition}
                 />
               </div>
-              {!canManageTerms ? <p className="text-xs text-muted-foreground">현재 계정은 용어를 조회만 할 수 있습니다.</p> : null}
+              {!selectedTerm.editable ? <p className="text-xs text-muted-foreground">공용 용어는 읽기 전용입니다. 같은 용어를 Space에 직접 등록하면 프로젝트 정의가 우선 적용됩니다.</p> : !canManageTerms ? <p className="text-xs text-muted-foreground">현재 계정은 용어를 조회만 할 수 있습니다.</p> : null}
               {mutationError ? <p className="text-xs text-red-600">{mutationError}</p> : null}
               {notice ? <p className="text-xs text-emerald-700">{notice}</p> : null}
             </div>
-            <div className="flex gap-2">
+            {selectedTerm.editable ? <div className="flex gap-2">
               {selectedArchived ? (
                 <button
                   className="px-4 py-2 rounded-md bg-foreground text-background text-sm font-semibold hover:bg-foreground/90 transition-colors disabled:opacity-60"
@@ -4876,11 +5033,13 @@ const TermsDictionary = () => {
               >
                 Archive
               </button> : null}
-            </div>
+            </div> : null}
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Usage</p>
               <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground leading-relaxed">
-                등록된 프로젝트 용어는 Meeting AI와 Project AI가 근거를 해석할 때 우선 참고합니다.
+                {selectedTerm.source === "SHARED"
+                  ? "선택한 프로젝트 분야의 공용 용어입니다. 회의 자막과 용어 설명에서 AI 호출 없이 우선 사용됩니다."
+                  : "등록된 프로젝트 용어는 공용 용어보다 우선하며 Meeting AI와 Project AI가 같은 의미로 해석합니다."}
               </div>
             </div>
           </div>

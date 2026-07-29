@@ -46,6 +46,7 @@ public class ProxyRouteRegistry {
 
     private final List<ProxyRoute> routes = List.of(
             route(HttpMethod.GET, SPACES, DownstreamService.CORE),
+            route(HttpMethod.GET, "/api/v1/glossary/categories", DownstreamService.CORE),
             route(HttpMethod.PATCH, "/api/v1/auth/profile", DownstreamService.CORE),
             route(HttpMethod.POST, "/api/v1/assets/profile-image", DownstreamService.CORE),
             route(HttpMethod.GET, "/api/v1/assets/images/" + IMAGE_CATEGORY + "/" + IMAGE_OWNER_ID + "/" + IMAGE_FILENAME, DownstreamService.CORE),

@@ -23,6 +23,37 @@
 | 기본값 | 구독 설정이 없으면 모든 분야를 구독한 것으로 본다 | 설정 전에도 사전이 비어 있지 않다 |
 | 범위 | 스키마 + 시드 데이터 + 조회 연동까지 | 관리자 CRUD API와 구독 설정 UI는 후속 작업으로 분리한다 |
 
+## 확장 확정 사항 (2026-07-27)
+
+| 결정 | 내용 | 근거 |
+| --- | --- | --- |
+| Space 생성 | 활성 공용 용어 분야를 checkbox로 여러 개 선택한다 | 한 프로젝트가 IT와 금융처럼 여러 업무 분야를 함께 가질 수 있다 |
+| 기타 분야 | `기타` 선택 시 한 개 이상의 사용자 입력 분야명을 Space 범위로 저장한다 | 사용자 입력으로 전역 공용 카탈로그를 오염시키지 않는다 |
+| 중복 검증 | category ID와 사용자 입력 분야명은 각각 중복을 거부하고, 사용자 입력이 기존 분야명과 같아도 거부한다 | 같은 선택이 여러 경로로 저장되는 것을 막는다 |
+| 기존 Space 호환 | 선택 행이 없는 기존 Space는 계속 전체 분야 구독, 행이 있는 Space는 `enabled=true` 분야만 구독으로 해석한다 | 기존 Space를 유지하면서 신규 Space의 명시적 선택과 이후 추가 분야의 비자동 구독을 보장한다 |
+| 용어사전 노출 | Space 용어사전 목록에 Space 등록 용어와 구독 중 공용 용어를 함께 표시한다 | 공용 사전이 존재하지만 빈 화면으로 보이는 문제를 해결한다 |
+| 회의 화면 노출 | 같은 통합 목록을 자막 하이라이트에 사용하고 공용 용어는 읽기 전용으로 설명한다 | 목록과 회의 설명의 사전 범위를 일치시킨다 |
+| Knowledge 노드 | 활성 통합 용어를 Knowledge 그래프의 `GLOSSARY` 노드로 표시하고 선택 시 정의를 보여 준다 | 프로젝트에서 쓰는 용어를 회의·공식 지식과 함께 탐색할 수 있어야 한다 |
+
+### 확장 범위
+
+- `GET /api/v1/glossary/categories` 카탈로그 조회.
+- `POST /api/v1/spaces`에 `glossaryCategoryIds`, `customGlossaryCategories` 추가.
+- 신규 Space의 분야 선택을 `space_glossary_categories`에 명시적으로 저장.
+- `space_custom_glossary_categories` 신설(V33).
+- `GET /api/v1/spaces/{spaceId}/terms`에서 구독 공용 용어를 읽기 전용 항목으로 함께 반환.
+- `GET /api/v1/spaces/{spaceId}/knowledge/graph`에서 같은 통합 ACTIVE 목록을 `GLOSSARY` 노드로 반환.
+- Space 생성 화면 두 곳에 다중 선택과 `기타` 입력 UI 추가.
+- Live Transcript가 통합 용어 목록을 사용해 공용 용어도 선택 가능하게 표시.
+
+### Knowledge 노드 인수 기준
+
+- Space 등록 ACTIVE 용어와 구독 분야의 공용 ACTIVE 용어가 각각 안정적인 ID를 가진 노드로 보인다.
+- 같은 이름의 Space 용어와 공용 용어가 있으면 Space 용어 노드 하나만 보인다.
+- 용어 노드를 선택하면 용어 정의를 확인할 수 있다.
+- `nodeTypes=GLOSSARY` 필터를 지원하며 Space 접근 권한 검사를 통과한 사용자에게만 반환한다.
+- 이번 단계에서는 용어를 embedding하지 않으므로 의미 유사도 연결선은 만들지 않는다. 연결선 생성과 Project AI RAG 편입은 별도 색인 작업으로 남긴다.
+
 ## 범위
 
 ### 이번 구현

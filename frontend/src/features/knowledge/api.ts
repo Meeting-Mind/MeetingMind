@@ -99,6 +99,7 @@ function nodeKind(node: KnowledgeGraphNode): KnowledgeKind {
     case "DECISION": return "decision";
     case "ACTION":
     case "TASK": return "action";
+    case "GLOSSARY": return "glossary";
     case "PROJECT_KNOWLEDGE": return "manual";
     case "MEETING": return "summary";
     default:
@@ -149,6 +150,7 @@ export function buildGraphView(response: KnowledgeGraphResponse): KnowledgeGraph
     return {
       id: node.id,
       title: node.title,
+      description: node.description ?? null,
       kind: nodeKind(node),
       sourceMeetingId: node.sourceMeetingId,
       connectionCount,

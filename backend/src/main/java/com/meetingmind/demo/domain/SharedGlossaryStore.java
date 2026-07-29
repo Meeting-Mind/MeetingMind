@@ -1,5 +1,7 @@
 package com.meetingmind.demo.domain;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -14,12 +16,43 @@ public interface SharedGlossaryStore {
      */
     Optional<SharedGlossaryMatch> findSubscribedActiveExact(String spaceId, String normalizedTerm);
 
+    List<GlossaryCategory> findActiveCategories();
+
+    List<SharedGlossaryTerm> findSubscribedActive(String spaceId, String normalizedKeyword);
+
+    void configureSpaceCategories(
+            String spaceId,
+            String actorUserId,
+            List<String> selectedCategoryIds,
+            List<String> customCategoryNames,
+            Instant now
+    );
+
     record SharedGlossaryMatch(
             String termId,
             String term,
             String definition,
             String categorySlug,
             String categoryName
+    ) {
+    }
+
+    record GlossaryCategory(
+            String id,
+            String slug,
+            String name,
+            String description,
+            int displayOrder
+    ) {
+    }
+
+    record SharedGlossaryTerm(
+            String id,
+            String term,
+            String definition,
+            String categoryId,
+            String categoryName,
+            Instant updatedAt
     ) {
     }
 }

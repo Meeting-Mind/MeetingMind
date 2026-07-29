@@ -9,10 +9,29 @@ public record ReportCandidateGenerationResponse(
         boolean unsupported,
         String unsupportedReason,
         int droppedCount,
-        String model
+        String model,
+        String generationMode,
+        boolean degraded,
+        List<String> warnings,
+        int attemptCount
 ) {
     public ReportCandidateGenerationResponse {
         sources = sources == null ? List.of() : List.copyOf(sources);
+        generationMode = generationMode == null || generationMode.isBlank() ? "AI_DIRECT" : generationMode;
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        attemptCount = Math.max(1, attemptCount);
+    }
+
+    public ReportCandidateGenerationResponse(
+            Candidate candidate,
+            List<ReportAiGatewayResponse.Source> sources,
+            boolean unsupported,
+            String unsupportedReason,
+            int droppedCount,
+            String model
+    ) {
+        this(candidate, sources, unsupported, unsupportedReason, droppedCount, model,
+                "AI_DIRECT", false, List.of(), 1);
     }
 
     public record Candidate(

@@ -45,6 +45,76 @@ class WorkspaceDomainServiceTest {
     }
 
     @Test
+    void createSpaceStoresMultipleGlossaryCategoriesAndCustomCategory() {
+        InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
+        InMemorySharedGlossaryStore glossaryStore = new InMemorySharedGlossaryStore();
+        WorkspaceDomainService service = new WorkspaceDomainService(
+                store,
+                new SpaceAccessPolicy(),
+                new MeetingAccessPolicy(new SpaceAccessPolicy()),
+                glossaryStore,
+                FIXED_CLOCK
+        );
+        User owner = store.saveUser(new User(
+                "user-owner", "owner@meetingmind.ai", "Owner", null, "active",
+                FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
+        ));
+        glossaryStore.register("shared-common", "KPI", "공통 지표", "common-business", "공통 비즈니스", 10);
+        glossaryStore.register("shared-finance", "ROE", "자기자본이익률", "finance", "금융", 40);
+
+        WorkspaceDomainService.SpaceCreationResult created = service.createSpace(
+                owner.id(),
+                "MeetingMind",
+                null,
+                List.of("glossary-category-finance"),
+                List.of("반도체 설계")
+        );
+
+        assertThat(glossaryStore.findSubscribedActive(created.space().id(), null))
+                .extracting(SharedGlossaryStore.SharedGlossaryTerm::term)
+                .containsExactly("ROE");
+        assertThat(glossaryStore.customCategories(created.space().id())).containsExactly("반도체 설계");
+    }
+
+    @Test
+    void createSpaceRejectsDuplicateAndUnknownGlossaryCategories() {
+        InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
+        InMemorySharedGlossaryStore glossaryStore = new InMemorySharedGlossaryStore();
+        WorkspaceDomainService service = new WorkspaceDomainService(
+                store,
+                new SpaceAccessPolicy(),
+                new MeetingAccessPolicy(new SpaceAccessPolicy()),
+                glossaryStore,
+                FIXED_CLOCK
+        );
+        User owner = store.saveUser(new User(
+                "user-owner", "owner@meetingmind.ai", "Owner", null, "active",
+                FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
+        ));
+
+        assertThatThrownBy(() -> service.createSpace(
+                owner.id(), "Duplicate", null,
+                List.of("glossary-category-finance", "glossary-category-finance"),
+                List.of()
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+
+        assertThatThrownBy(() -> service.createSpace(
+                owner.id(), "Unknown", null,
+                List.of("glossary-category-unknown"),
+                List.of()
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+
+        assertThatThrownBy(() -> service.createSpace(
+                owner.id(), "Custom duplicate", null,
+                List.of("glossary-category-finance"),
+                List.of("금융")
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+    }
+
+    @Test
     void ownerCreatesMeetingAndBecomesActiveHost() {
         TestContext context = newContext();
         User owner = context.user("user-owner");

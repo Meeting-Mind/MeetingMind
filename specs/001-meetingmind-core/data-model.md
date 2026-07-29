@@ -271,6 +271,46 @@ Meeting AI 이력은 `(meetingId, userId)`로 격리한다. 다음 AI 요청에�
 - `updatedAt`
 - `archivedAt`
 
+### GlossaryCategory
+
+- `id`
+- `slug`: 전역 unique
+- `name`
+- `description`
+- `displayOrder`
+- `status`: ACTIVE, ARCHIVED
+
+### SharedDomainTerm
+
+- `id`
+- `categoryId`
+- `term`
+- `definition`
+- `status`: ACTIVE, ARCHIVED
+- `createdAt`
+- `updatedAt`
+- `archivedAt`
+
+### SpaceGlossaryCategory
+
+- `spaceId`
+- `categoryId`
+- `enabled`
+- `updatedAt`
+- `updatedByUserId`
+
+기존 Space는 행이 없으면 모든 활성 분야를 구독한다. 신규 Space가 생성 요청에 분야 배열을 명시하면 활성 분야 전체에 대해 선택 여부를 저장한다.
+
+### SpaceCustomGlossaryCategory
+
+- `id`
+- `spaceId`
+- `name`: Space 안에서 대소문자 무시 unique
+- `createdAt`
+- `createdByUserId`
+
+사용자 정의 분야는 Space 분류 정보이며 전역 `GlossaryCategory`나 `SharedDomainTerm`과 연결되지 않는다.
+
 ### EmbeddingChunk
 
 - `id`
@@ -310,11 +350,26 @@ Meeting AI 이력은 `(meetingId, userId)`로 격리한다. 다음 AI 요청에�
 
 ### KnowledgeGraph (Read Model)
 
-- 영속 entity를 추가하지 않는다. Space의 active `EmbeddingChunk`를 요청 시 source 단위 centroid로 집계하는 API projection이다.
+- Space의 active `EmbeddingChunk`를 요청 시 source 단위 centroid로 집계하고, RDS의
+  `KnowledgeGraphEdge` 보조 연결을 권한 필터 뒤에 합치는 API projection이다. 그래프 노드와
+  클러스터는 영속 entity로 만들지 않는다.
 - `KnowledgeCluster`: `id`, `label`, `sourceCount`, `nodes[]`
 - `KnowledgeGraphNode`: `id`, `sourceType`, `title`, `sourceMeetingId`, `embeddingStatus`
 - `KnowledgeGraphEdge`: `from`, `to`, `similarity`
 - Core permission prefilter 이후 AI가 전달받은 `spaceId`, `allowedMeetingIds`를 SQL scope에 강제한다. 원본 chunk content/vector와 권한 없는 meeting source는 응답에 포함하지 않는다.
+
+### KnowledgeGraphEdge
+
+- `id`
+- `spaceId`
+- `fromNodeId`: 정렬된 두 graph node ID 중 작은 값
+- `toNodeId`: 정렬된 두 graph node ID 중 큰 값
+- `similarity`: 0.0~1.0
+- `createdAt`
+
+`KnowledgeGraphEdge`는 Space별 무방향 보조 연결만 저장한다. node ID가 다형 read-model ID라
+물리 FK를 만들지 않으며, 조회 시 현재 그래프에 존재하고 사용자 권한으로 보이는 양 끝점만
+합친다. `(spaceId, fromNodeId, toNodeId)`는 unique이고 Core runtime role은 SELECT만 갖는다.
 
 ### Data Constraints
 
@@ -358,6 +413,7 @@ Meeting AI 이력은 `(meetingId, userId)`로 격리한다. 다음 AI 요청에�
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `ProjectAiMessage(spaceId, userId, createdAt)` index는 사용자별 Space 대화 조회에 사용한다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
+- `KnowledgeGraphEdge(spaceId, fromNodeId, toNodeId)`는 unique이며 `fromNodeId < toNodeId`를 강제한다.
 - `EmbeddingJob`은 `projectKnowledgeId`, `meetingId`, `attachmentId` 중 정확히 하나만 참조해야 한다.
 - `EmbeddingJob(projectKnowledgeId, generation)`, `EmbeddingJob(meetingId, generation)`, `EmbeddingJob(attachmentId, generation)`은 source별 unique다.
 - 동일 source의 active `EmbeddingChunk`는 최신 완료 generation만 사용한다. 새 generation 완료 전에는 기존 active chunk를 유지한다.
@@ -487,8 +543,8 @@ Core runtime role은 이 원자 교체를 위해 `chunk_source_segments`, `trans
 
 ## Knowledge Graph Read Model Extension
 
-Phase 1에서는 `GraphNode`, `GraphEdge`, `GraphCluster`, `Topic`을 영속 엔티티로
-추가하지 않는다. 기존 Meeting, MeetingReport, Decision, ActionItem, TaskCard,
+Phase 1의 `GraphNode`, `GraphCluster`, `Topic`은 영속 엔티티로 추가하지 않는다. 보조
+연결만 `KnowledgeGraphEdge`에 저장하며, 기존 Meeting, MeetingReport, Decision, ActionItem, TaskCard,
 ProjectKnowledge, DomainTerm와 active `EmbeddingChunk`를 권한 필터링한 뒤 그래프
 read model로 투영한다.
 

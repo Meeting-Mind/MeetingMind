@@ -158,7 +158,12 @@ export function MeetingReportPage({ session }: Props) {
       const droppedNotice = result.droppedCount > 0
         ? ` 근거를 확인할 수 없는 항목 ${result.droppedCount}개는 제외했습니다.`
         : "";
-      setMessages([message("ai", `회의록을 만들었습니다. 검토하고 고칠 수 있습니다.${droppedNotice}`)]);
+      const qualityNotice = result.degraded
+        ? ` ${result.warnings[0] ?? "AI 요약에 실패해 전사 발췌 초안을 만들었습니다."}`
+        : result.generationMode === "AI_HIERARCHICAL"
+          ? " 긴 회의를 구간별로 요약해 합성했습니다."
+          : "";
+      setMessages([message("ai", `회의록을 만들었습니다. 검토하고 고칠 수 있습니다.${qualityNotice}${droppedNotice}`)]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "회의록을 만들지 못했습니다.");
     } finally {

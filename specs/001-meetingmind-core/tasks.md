@@ -1183,3 +1183,39 @@ Perl이 없는 공식 Python 3.12.13 / Alpine 3.24 runtime으로 전환해 NonPr
 | T468 | [x] | backend/stt-lifecycle | Backend owner | Codex | T467 | Backend/STT `SttSessionRegistry.java`, `InternalTranscriptionController.java`, 관련 테스트 | 다른 활성 session이 남아 있으면 개별 stop/fail/reaper가 aggregate를 terminal로 바꾸지 않게 한다. | in-process, remote, cross-Pod row 경로에서 첫 session 종료 후 PROCESSING이 유지되고 마지막 session만 terminal 전이를 만든다. |
 | T469 | [x] | stt/segment-order | STT owner | Codex | T467 | `TranscriptionCoordinator.java`, `MeetingTranscriptRepository.java`, 관련 테스트 | 여러 session의 final segment sequence 계산을 회의 transcript row lock으로 직렬화한다. | sequence 조회·저장이 같은 pessimistic-write transaction 경계 안에서 수행된다. |
 | T470 | [ ] | verification/stt | Integration owner | Codex | T467,T468,T469 | Backend/STT 테스트, `specs/001-meetingmind-core/{contracts/live-stt-api,implement}.md` | 단위·통합 테스트와 2-user NonProd smoke 결과를 기록한다. | 자동 회귀가 통과하고 실제 두 참가자 발화/첫 퇴장 후 지속/마지막 퇴장 완료가 확인된다. |
+
+## M156 Persisted Knowledge Graph Edges
+
+### Milestone Goal
+
+NonProd Knowledge 노드 사이의 보조 연결을 RDS에 유지하고, 현재 사용자의 권한 범위에
+양 끝 노드가 모두 보일 때 기존 그래프 응답에 합친다.
+
+- [x] T471 [contracts/data] [owner: Codex] [agent: Codex] `knowledge_graph_edges`의 Space 범위, 무방향 canonical pair, runtime SELECT-only 권한과 기존 `from/to/similarity` 응답 호환을 문서화한다.
+- [x] T472 [backend] [owner: Codex] [agent: Codex] [depends: T471] V34 테이블, 저장 엣지 조회 store, 권한 필터 후 endpoint 검증과 AI 엣지 우선 중복 제거를 구현한다.
+- [x] T473 [data/nonprod] [owner: Codex] [agent: Codex] [depends: T472] NonProd RDS의 현재 embedding/통합 용어 노드를 결정적 순서로 연결하고 삽입 결과를 검증한다.
+- [x] T474 [deploy/verification] [owner: Codex] [agent: Codex] [depends: T473] Backend 전체/마이그레이션 테스트, Core 이미지 scan/ECR, V34 적용, ECS rollout, 공개 smoke와 Terraform drift 결과를 기록한다.
+
+## M157 AI Report Fast Relaxation
+
+### Milestone Goal
+
+AI Report의 근거 검증과 단일 회의 권한 경계는 유지하면서, 긴 회의가 앞쪽 source 12개에
+편중되어 후보 생성에 실패하는 비율을 가장 작은 변경으로 낮춘다. 이 milestone은 로컬 구현과
+검증까지만 수행하며 배포 환경에는 적용하지 않는다.
+
+- [x] T475 [contract] [owner: Codex] [agent: Codex] 최대 24개 source, score 우선/무점수 균등 표본, 기존 citation·권한·확정 기준 유지 정책을 문서화한다.
+- [x] T476 [ai/report] [owner: Codex] [agent: Codex] [depends: T475] report provider context가 무점수 source를 전체 순서에서 최대 24개까지 균등 선별하도록 구현하고 score 기반 우선순위를 유지한다.
+- [x] T477 [verification] [owner: Codex] [agent: Codex] [depends: T476] 긴 무점수 transcript와 score source 회귀 테스트, AI 전체 테스트와 compile 검증 결과를 기록한다. 배포는 실행하지 않는다.
+
+## M158 AI Report Guaranteed Draft Pipeline
+
+### Milestone Goal
+
+현재 회의 전사가 하나 이상이면 AI 직접 생성, 긴 회의 계층 합성, 또는 전사 발췌 fallback 중 하나로
+항상 검토 가능한 candidate를 만들고 생성 품질을 사용자에게 숨기지 않는다.
+
+- [x] T478 [contract] [owner: Codex] [agent: Codex] generation mode, degraded warning, 전체 요청당 구조 검증 재시도 1회, 전사 발췌 fallback 기준을 문서화한다.
+- [x] T479 [ai/report] [owner: Codex] [agent: Codex] [depends: T478] 24개 단위 병렬 map, 원본 citation 기반 reduce, 구조 실패 1회 재시도와 결정적 fallback을 구현한다.
+- [x] T480 [core/frontend] [owner: Codex] [agent: Codex] [depends: T479] Core가 생성 품질 metadata를 전달하고 Frontend가 계층 합성·fallback 경고를 표시한다.
+- [x] T481 [verification/deploy] [owner: Codex] [agent: Codex] [depends: T480] AI/Core/Frontend 전체 회귀, 이미지 scan, NonProd rollout과 공개 smoke를 완료한다.

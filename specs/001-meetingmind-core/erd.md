@@ -32,6 +32,7 @@ erDiagram
   SPACE ||--o{ TASK_CARD : has
   SPACE ||--o{ EMBEDDING_CHUNK : indexes
   SPACE ||--o{ EMBEDDING_JOB : runs
+  SPACE ||--o{ KNOWLEDGE_GRAPH_EDGE : connects
   SPACE ||--o{ AUDIT_LOG : records
 
   MEETING ||--o{ MEETING_PARTICIPANT : grants
@@ -381,6 +382,15 @@ erDiagram
     datetime completedAt
   }
 
+  KNOWLEDGE_GRAPH_EDGE {
+    string id PK
+    string spaceId FK
+    string fromNodeId
+    string toNodeId
+    double similarity
+    datetime createdAt
+  }
+
   CHUNK_SOURCE_SEGMENT {
     string id PK
     string chunkId FK
@@ -507,6 +517,9 @@ erDiagram
 - `MEETING_AI_MESSAGE`는 `(meetingId, userId, createdAt)` index를 두며, 현재 요청의 Meeting ACL 확인 뒤 같은 사용자와 회의의 최근 10개만 검색 문맥으로 전달한다. 이 행은 RAG source나 citation이 아니다.
 - `DOMAIN_TERM(spaceId, term)`은 active term 기준 unique다.
 - `DOMAIN_TERM.status`는 `ACTIVE`, `ARCHIVED` 중 하나다.
+- `GLOSSARY_CATEGORY`는 전역 공용 용어 분야이고 `SPACE_GLOSSARY_CATEGORY`가 Space별 다중 선택 상태를 저장한다.
+- `SPACE_CUSTOM_GLOSSARY_CATEGORY(spaceId, lower(name))`는 unique이며 전역 카탈로그나 공용 용어 소유자가 아니다.
+- 구독 행이 없는 기존 Space는 모든 활성 공용 분야를 구독한다. 신규 Space가 명시적으로 선택하면 모든 활성 분야의 enabled 상태를 저장한다.
 - `EMBEDDING_CHUNK(spaceId, scope, sourceType, sourceId)` index를 둔다.
 - `EMBEDDING_CHUNK.meetingId`는 meeting-scoped chunk일 때 required이고 ProjectKnowledge-only chunk에서는 null일 수 있다.
 - `CHUNK_SOURCE_SEGMENT(chunkId, segmentId)`는 unique다.
@@ -517,7 +530,7 @@ erDiagram
 - `EMBEDDING_CHUNK.embedding`은 target forward migration에서 `vector(1536)`으로 고정하고 cosine exact search를 사용한다.
 - `EMBEDDING_CHUNK.scope`는 query mode가 아니라 source 소유 범위다. meeting 산출물과 `meetingAttachment`는 `meeting`, ProjectKnowledge는 `project`로 저장한다.
 - Project AI는 권한 필터를 통과한 meeting-owned chunk와 ProjectKnowledge chunk를 함께 검색하며 동일 source를 project scope로 중복 임베딩하지 않는다.
-- KnowledgeGraph는 별도 테이블이 아닌 `EMBEDDING_CHUNK`의 active source snapshot에서 만드는 read model이다. SpaceMember와 MeetingParticipant 권한 필터를 통과한 source만 cluster/node/edge로 반환한다.
+- KnowledgeGraph node/cluster는 `EMBEDDING_CHUNK`의 active source snapshot에서 만드는 read model이다. `KNOWLEDGE_GRAPH_EDGE`는 Space별 보조 연결만 저장하며, SpaceMember와 MeetingParticipant 권한 필터를 통과해 양 끝 노드가 모두 보일 때만 응답에 합친다.
 
 ### Audit
 
@@ -527,9 +540,9 @@ erDiagram
 
 ## Draft Gaps
 
-## Knowledge Graph Projection (Non-persistent)
+## Knowledge Graph Projection (Hybrid)
 
-Knowledge Graph는 Phase 1에서 별도 테이블을 만들지 않는 read model이다.
+Knowledge Graph node와 cluster는 read model이고, 보조 edge만 RDS에 유지한다.
 
 ```text
 SPACE

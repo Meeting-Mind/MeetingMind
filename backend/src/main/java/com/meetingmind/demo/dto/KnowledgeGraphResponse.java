@@ -22,6 +22,7 @@ public record KnowledgeGraphResponse(
             String id,
             String sourceType,
             String title,
+            String description,
             String sourceMeetingId,
             String embeddingStatus
     ) {

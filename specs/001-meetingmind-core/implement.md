@@ -2509,3 +2509,83 @@
 - 남은 검증: 수정 이미지를 배포한 뒤 실제 두 사용자 microphone 발화가 모두 같은 dialogue에 서로 다른
   speaker로 쌓이고, 한 명 퇴장 후 남은 참가자의 자막이 지속되며, 마지막 session 종료 때만 transcript가
   terminal이 되는 NonProd smoke가 필요하다. 따라서 `T470`은 아직 완료 처리하지 않는다.
+
+## M156 Persisted Knowledge Graph Edges
+
+- 목표: 임베딩이 없는 용어를 포함한 현재 NonProd Knowledge 노드를 RDS의 보조 엣지로 연결하고,
+  별도 더미 타입을 화면이나 API에 노출하지 않은 채 기존 그래프 선으로 표시한다.
+- 데이터 모델: V34가 `knowledge_graph_edges`를 생성한다. Space FK, 정렬된 무방향
+  `from_node_id < to_node_id`, `(space_id, from_node_id, to_node_id)` unique, 0~1 similarity를
+  강제한다. Core runtime role에는 SELECT만 부여해 운영 요청이 엣지를 변경하지 못하게 한다.
+- NonProd 시드: `infra/aws/environments/nonprod-v2/knowledge-graph-edge-seed.sql`은 배포 시점의
+  active/completed embedding source와 Space/구독 공용 ACTIVE 용어를 합쳐, Space별 안정적인
+  의사 무작위 순서의 인접 노드를 연결한다. migration에 데이터를 넣지 않아 다른 환경에 자동으로
+  보조 연결을 심지 않으며, NonProd RDS에만 별도 실행한다.
+- Core: `KnowledgeGraphEdgeStore`가 Space 저장 엣지를 읽는다. 기존 AI/용어 노드와 요청 필터를
+  먼저 적용한 뒤 양 끝 node ID가 현재 visible set에 모두 있을 때만 추가한다. 같은 무방향 pair에
+  AI 의미 유사도 엣지가 있으면 AI 엣지를 우선한다.
+- API/Frontend: 응답은 기존 `from`, `to`, `similarity` 계약을 유지하므로 edge type이나 Frontend
+  모델 변경은 없다.
+- 검증: `KnowledgeGraphServiceTest`, Backend 전체 테스트, PostgreSQL `MigrationIntegrationTest`가
+  통과했다. 로컬 Trivy와 ECR enhanced scan 모두 HIGH/CRITICAL finding 0건을 확인했다.
+- NonProd 데이터: RDS Flyway schema를 V34로 올리고 15개 Space에 `knowledge_graph_edges`
+  2,197건을 삽입했다. migration runtime role의 SELECT 허용/INSERT 거부도 통합 테스트와 실제
+  역할 구성을 통해 확인했다.
+- 배포: Core 이미지 digest
+  `sha256:a206f2bbe926e583b9ba885134ffcefa2c67159539f14a6a9f483dc6766e4c2b`를 배포해 ECS task
+  definition `meetingmind-nonprod-v2-core:14`가 `HEALTHY`, rollout `COMPLETED`, desired/running
+  `1/1` 상태가 되었다. 애플리케이션 시작 로그에는 새 테이블 또는 DB 권한 오류가 없다.
+- 배포 후 확인: `https://app.meetingmind.co.kr/`와 `/api/v1/auth/session`이 모두 HTTP 200을
+  반환했고, 최종 `terraform plan -detailed-exitcode`는 exit 0과 `No changes`를 반환했다.
+  기존 `TranscriptProjectionReconciler`의 3개 회의 `AuthorizationException` 경고는 이번 변경과
+  무관하게 계속 관찰되며 별도 운영 이슈로 남긴다.
+
+## M157 AI Report Fast Relaxation
+
+- 판단: 생성 입력 최소 조건은 이미 내용 있는 source 1건으로 느슨하다. 실패 체감을 낮추기 위해
+  citation 검증을 제거하지 않고 provider가 보는 회의 범위를 넓힌다.
+- 빠른 완화 기준: report context 상한을 12개에서 24개로 늘린다. relevance score가 있으면 기존
+  high-score 우선순위를 유지하고, Backend transcript처럼 전부 무점수이면 원본 source 순서의
+  시작과 끝을 포함해 균등 선별한다. 기능별 token budget은 유지한다.
+- 유지 기준: 현재 meeting 이외 source 거부, 편집 권한, 요약/결정/할 일별 citation 검증,
+  검증 가능한 summary 최소 1문장, `CANDIDATE` 저장과 사용자 확정 절차는 바꾸지 않는다.
+- 제외 범위: chunk별 중간 요약 후 최종 합성, provider 재시도, 배포 환경 반영은 이번 빠른 변경에
+  포함하지 않는다.
+- 구현: `select_report_context_sources`가 source 수가 24개 이하이면 그대로 유지하고, 초과하면
+  score 존재 시 내림차순 상위 24개를, 전부 무점수이면 첫 source와 마지막 source를 포함한 균등
+  간격 24개를 선택한다. report provider prompt와 응답 citation 검증은 같은 선택 목록을 사용한다.
+- 검증: 무점수 source 30건에서 시작/중간/마지막을 포함한 24건이 선택되고, score source 27건에서
+  high-score 3건을 모두 보존하며 low-score 3건을 제외하는 대상 테스트 2건이 통과했다. 기존 로컬
+  AI 테스트 이미지에 저장소를 읽기 전용으로 마운트해 `python -m unittest discover -s tests`를
+  실행한 결과 217건 통과, 환경 의존 7건 skip, 실패 0건이었다. `python -m compileall app`도
+  통과했다. ECR push, Terraform, RDS, ECS 배포는 실행하지 않았다.
+
+## M158 AI Report Guaranteed Draft Pipeline
+
+- 긴 회의 합성: report source가 24개를 초과하면 시간 순서대로 24개씩 나누고 최대 4개 구간을
+  병렬 요약한다. 성공한 구간 요약을 원본 source ID와 함께 최종 reduce에 전달하므로 최종
+  citation은 중간 결과가 아니라 실제 회의 근거를 계속 가리킨다. 24개 이하는 기존 직접 생성을
+  유지한다.
+- 재시도와 fallback: 구조화 JSON 파싱 또는 citation 검증이 실패하면 전체 요청에서 딱 1회만
+  자동 재시도한다. 재시도 후에도 실패하거나 provider가 실패하면 최대 8개의 전사 문장에서
+  240자 이내 근거 발췌를 결정적으로 구성한다. 전사가 하나도 없을 때만 `NO_EVIDENCE`로 종료한다.
+- 품질 표기: AI, Core, Frontend 계약에 `generationMode`, `degraded`, `warnings`, `attemptCount`를
+  추가했다. 사용자는 직접 생성, 계층 합성, 전사 발췌 fallback을 구분할 수 있고 fallback 결과에는
+  검토가 필요하다는 경고가 표시된다. DB schema와 저장 포맷은 바꾸지 않았다.
+- 자동 검증: AI 전체 220건 통과/7건 skip/실패 0, Backend 전체 테스트 통과, Frontend 102건
+  통과와 production build 성공을 확인했다. 신규 회귀는 긴 30-source map/reduce, 원본 citation,
+  구조 실패 1회 재시도, 재시도 소진 및 provider 오류 fallback을 포함한다.
+- 이미지 검증: AI digest
+  `sha256:9303f285cadb4188f9807ec7b171e7f558ed1f51781bece7b234c1a17e80288f`, Core digest
+  `sha256:e51bc836eb02afc35e46b4cdc7e01f3544659d41b91844e6e38585aff3afc0f7`를 ECR에 올렸다.
+  로컬 Trivy와 ECR scan 모두 HIGH/CRITICAL finding 0건이었다.
+- NonProd 배포: Terraform의 정확한 저장 plan(2 add, 2 change, 2 destroy)을 적용했다. AI task
+  definition `meetingmind-nonprod-v2-ai:5`, Core `meetingmind-nonprod-v2-core:15`가 각각 위 digest로
+  `RUNNING`/`HEALTHY`, desired/running `1/1` 상태다. Frontend asset
+  `assets/index-Drcrs8dP.js`를 S3에 동기화하고 CloudFront invalidation
+  `I8IG2EYS5N23AJP5CFSR05XE2F` 완료를 확인했다.
+- 배포 후 확인: `https://app.meetingmind.co.kr/`와 `/api/v1/auth/session`은 모두 HTTP 200이고,
+  공개 HTML이 신규 asset을 참조한다. AI `/health`는 지속해서 200이며 Core도 정상 시작했다.
+  최종 `terraform plan -detailed-exitcode`는 exit 0과 `No changes`를 반환했다. 기존
+  `TranscriptProjectionReconciler`의 3개 회의 `AuthorizationException` 경고는 이번 변경과
+  무관한 선행 운영 이슈로 계속 관찰된다.

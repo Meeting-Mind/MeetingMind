@@ -36,6 +36,7 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | 음성/STT | 전사 | Transcript | 회의 음성에서 생성된 텍스트 전체 산출물. | Meeting에 속하며 여러 TranscriptSegment로 구성된다. | transcripts 또는 meetings.transcript_status | 회의록/Summary와 혼용 금지 | FR-STT-01, NFR-DATA-04 |
 | 음성/STT | 전사 세그먼트 | TranscriptSegment | 발화자, 시작/종료 시각, 텍스트를 가진 전사의 원본 단위. | EmbeddingChunk의 원본 출처가 된다. | transcript_segments | EmbeddingChunk와 혼용 금지 | FR-STT-05, NFR-DATA-01 |
 | AI/RAG | 임베딩 청크 | EmbeddingChunk | 검색/RAG 효율을 위해 여러 발화를 묶어 만든 벡터화 단위. | TranscriptSegment를 참조하고 scope/source metadata를 가진다. | embedding_chunks | 원본 전사로 취급 금지 | NFR-COST-02, NFR-DATA-01 |
+| AI/RAG | 저장 그래프 엣지 | KnowledgeGraphEdge | Knowledge 화면에서 유지할 Space 단위 무방향 보조 연결. | 현재 권한 범위에서 양 끝 노드가 모두 보일 때 그래프 응답에 합친다. | knowledge_graph_edges | 업무 인과관계나 근거 출처로 해석 금지 | FR-KNOW-02, NFR-AI-02 |
 | AI/RAG | 프로젝트 AI | ProjectAI | 프로젝트 내 접근 가능한 공식지식과 회의기록을 바탕으로 답변하는 AI 기능. | Space scope에서 동작하되 권한 필터를 먼저 적용한다. | /spaces/{spaceId}/ai/messages | MeetingAI와 혼용 금지 | FR-PBOT-01~05, NFR-AZ-04 |
 | AI/RAG | 회의 AI | MeetingAI | 단일 회의 범위의 전사, 결정, 회의록을 바탕으로 답변하는 AI 기능. | Meeting scope에서만 동작한다. | /meetings/{meetingId}/ai/messages | ProjectAI와 혼용 금지 | FR-MBOT-01~04 |
 | AI/RAG | 검색 범위 | SearchScope | AI 또는 검색이 참조할 수 있는 데이터 범위. PROJECT, MEETING 등으로 분리한다. | 권한 필터와 함께 평가한다. | scope, sourceScope | 프롬프트 문구만으로 제한했다고 표현 금지 | NFR-AZ-01~04 |
@@ -52,6 +53,7 @@ Google Sheets 용어집 시트의 전체 컬럼을 보존한 로컬 스냅샷이
 | 용어 | 공용 용어 | SharedDomainTerm | 관리자가 분야별로 미리 등록해 모든 Space에 제공하는 전역 기본 용어와 정의. | GlossaryCategory에 속하며 Space를 소유자로 갖지 않는다. | shared_domain_terms | DomainTerm과 혼용 금지. Space가 등록한 용어로 취급하지 않는다. | FR-TERM-02, NFR-COST-01 |
 | 용어 | 용어 분야 | GlossaryCategory | 공용 용어를 업무 분야 기준으로 묶은 분류. IT/소프트웨어, 금융, 의료처럼 산업이나 직무 단위로 나눈다. | SharedDomainTerm을 포함하고 Space 구독의 단위가 된다. | glossary_categories | 지식 폴더(KnowledgeFolder), 태그와 혼용 금지 | FR-TERM-02, FR-TERM-04 |
 | 용어 | 분야 구독 | SpaceGlossaryCategory | Space가 어떤 용어 분야를 제공받을지 정한 설정. 구독하지 않은 분야의 용어는 조회 단계에서 제외한다. | Space와 GlossaryCategory의 조인 엔티티. 행이 없으면 해당 분야를 구독 중으로 본다. | space_glossary_categories | 개인 설정으로 오해 금지. Space 단위로만 적용한다. | FR-TERM-04, NFR-AZ-01 |
+| 용어 | 사용자 정의 용어 분야 | SpaceCustomGlossaryCategory | Space 생성 시 `기타`로 직접 입력한 업무 분야명. 전역 공용 용어 분야를 새로 만들지 않으며 해당 Space의 분류 정보로만 저장한다. | Space에 속하며 한 Space 안에서 대소문자 무시 중복을 허용하지 않는다. | space_custom_glossary_categories | GlossaryCategory 또는 공용 카탈로그와 혼용 금지 | FR-DASH-01, FR-TERM-04 |
 | 알림 | 알림 | Notification | 회의 초대, 일정 시작, 권한 변경 같은 이벤트를 사용자에게 전달하는 메시지. | User 또는 SpaceMember를 대상으로 한다. | notifications | Invitation과 혼용 금지 | FR-CAL-05, FR-MREG-03 |
 | 감사 | 감사 로그 | AuditLog | 권한 부여/회수, 오너 이양, 데이터 삭제 등 주요 행위의 추적 기록. | actor, target, before/after, occurredAt을 가진다. | audit_logs | 일반 앱 로그와 혼용 금지 | FR-ACL-06, NFR-LOG-02 |
 | 데이터 | 보존 정책 | RetentionPolicy | 음성 원본, STT 원문, 삭제 데이터의 보관 기간과 삭제 기준. | Space 또는 Meeting 단위 정책값으로 적용 가능. | retention_policy, retentionUntil | 백업 정책과 혼용 금지 | POL-RETAIN-01~02 |
