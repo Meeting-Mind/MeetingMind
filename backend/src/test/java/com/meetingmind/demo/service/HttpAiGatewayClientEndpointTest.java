@@ -1,6 +1,7 @@
 package com.meetingmind.demo.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.demo.dto.KnowledgeGraphResponse;
@@ -15,6 +16,8 @@ import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -93,8 +96,7 @@ class HttpAiGatewayClientEndpointTest {
         HttpServer server = jsonServer(
                 "/api/internal/meeting-ai/generate-report",
                 captured,
-                "{\"summary\":\"회의 요약\",\"decisions\":[],\"actionItems\":[],\"markdown\":\"# 회의 요약\","
-                        + "\"sources\":[],\"unsupported\":false,\"model\":\"test\"}"
+                reportV2Fixture()
         );
         try {
             HttpReportAiGatewayClient client = new HttpReportAiGatewayClient(
@@ -115,12 +117,97 @@ class HttpAiGatewayClientEndpointTest {
                     ))
             ));
 
-            assertThat(response.summary()).isEqualTo("회의 요약");
+            assertThat(response.schemaVersion()).isEqualTo(2);
+            assertThat(response.summary()).singleElement().satisfies(summary -> {
+                assertThat(summary.text()).isEqualTo("QA 마감일을 확정했습니다.");
+                assertThat(summary.sourceIds()).containsExactly("segment-1");
+            });
             assertThat(captured.path()).isEqualTo("/api/internal/meeting-ai/generate-report");
             assertThat(captured.serviceToken()).isEqualTo(SERVICE_TOKEN);
             assertThat(captured.traceId()).isNotBlank();
             assertThat(captured.body()).contains("\"meetingId\":\"meeting-1\"");
             assertThat(captured.body()).contains("\"sourceId\":\"segment-1\"");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void reportGatewayTemporarilyAdaptsLegacyResponseDuringRollingDeployment() throws Exception {
+        CapturedRequest captured = new CapturedRequest();
+        HttpServer server = jsonServer(
+                "/api/internal/meeting-ai/generate-report",
+                captured,
+                "{\"summary\":\"회의 요약\",\"decisions\":[],\"actionItems\":[],\"markdown\":\"# 회의 요약\","
+                        + "\"sources\":[{\"sourceId\":\"segment-1\",\"type\":\"transcript\",\"title\":\"온프레 회의\","
+                        + "\"speaker\":\"민지\",\"time\":\"00:01:00\",\"text\":\"회의 근거\"}],"
+                        + "\"unsupported\":false,\"unsupportedReason\":null,\"model\":\"legacy-test\"}"
+        );
+        try {
+            HttpReportAiGatewayClient client = new HttpReportAiGatewayClient(
+                    HttpClient.newHttpClient(),
+                    new ObjectMapper(),
+                    baseUrl(server),
+                    SERVICE_TOKEN
+            );
+
+            ReportAiGatewayResponse response = client.generate(new ReportAiGatewayRequest(
+                    "space-1", "meeting-1", "온프레 회의", "markdown", List.of()
+            ));
+
+            assertThat(response.schemaVersion()).isEqualTo(1);
+            assertThat(response.summary()).singleElement().satisfies(summary -> {
+                assertThat(summary.text()).isEqualTo("회의 요약");
+                assertThat(summary.sourceIds()).containsExactly("segment-1");
+            });
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void reportGatewayNormalizesVersionlessStructuredResponseDuringRollingDeployment() throws Exception {
+        CapturedRequest captured = new CapturedRequest();
+        HttpServer server = jsonServer(
+                "/api/internal/meeting-ai/generate-report",
+                captured,
+                "{\"summary\":[{\"text\":\"회의 요약\",\"sourceIds\":[\"segment-1\"]}],"
+                        + "\"decisions\":[],\"actionItems\":[],\"sources\":[],\"droppedCount\":0,"
+                        + "\"unsupported\":false,\"unsupportedReason\":null,\"model\":\"versionless-test\"}"
+        );
+        try {
+            HttpReportAiGatewayClient client = new HttpReportAiGatewayClient(
+                    HttpClient.newHttpClient(), new ObjectMapper(), baseUrl(server), SERVICE_TOKEN
+            );
+
+            ReportAiGatewayResponse response = client.generate(new ReportAiGatewayRequest(
+                    "space-1", "meeting-1", "온프레 회의", "markdown", List.of()
+            ));
+
+            assertThat(response.schemaVersion()).isEqualTo(2);
+            assertThat(response.summary()).singleElement();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void reportGatewayRejectsUnknownStructuredResponseVersion() throws Exception {
+        CapturedRequest captured = new CapturedRequest();
+        HttpServer server = jsonServer(
+                "/api/internal/meeting-ai/generate-report",
+                captured,
+                "{\"schemaVersion\":3,\"summary\":[],\"decisions\":[],\"actionItems\":[],\"sources\":[],"
+                        + "\"unsupported\":true,\"unsupportedReason\":\"MODEL_UNSUPPORTED\",\"model\":\"future-test\"}"
+        );
+        try {
+            HttpReportAiGatewayClient client = new HttpReportAiGatewayClient(
+                    HttpClient.newHttpClient(), new ObjectMapper(), baseUrl(server), SERVICE_TOKEN
+            );
+
+            assertThatThrownBy(() -> client.generate(new ReportAiGatewayRequest(
+                    "space-1", "meeting-1", "온프레 회의", "markdown", List.of()
+            ))).isInstanceOf(AiGatewayException.class);
         } finally {
             server.stop(0);
         }
@@ -179,6 +266,13 @@ class HttpAiGatewayClientEndpointTest {
         });
         server.start();
         return server;
+    }
+
+    private static String reportV2Fixture() throws Exception {
+        return Files.readString(
+                Path.of("..", "specs", "001-meetingmind-core", "contracts", "fixtures", "report-ai-success-v2.json"),
+                StandardCharsets.UTF_8
+        );
     }
 
     private static String baseUrl(HttpServer server) {

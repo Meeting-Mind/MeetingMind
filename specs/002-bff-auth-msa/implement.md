@@ -851,3 +851,28 @@ Runtime matrix의 모든 거부 결과는 기대한 TLS, network, loader 또는 
 - 첫 Terraform plan은 Core/STT task definition replacement와 두 service update만 포함한 `2 add, 2 change, 2 destroy`였고 Core revision 8/STT revision 10을 배포했다. V28 포함 Core의 후속 plan은 Core task/service만 포함한 `1 add, 1 change, 1 destroy`였으며 저장 plan으로 Core revision 9를 배포했다. Core/STT는 desired/running `1/1`, pending 0, rollout `COMPLETED`, application container `HEALTHY`; STT target도 healthy이고 최종 plan은 `No changes`다.
 - 원문을 출력하지 않은 read-only 감사에서 `testin`은 STT `COMPLETED` 3건/49 segments/590자였지만 Core는 `PROCESSING` 3건/0 segments, embedding job/chunk 0건이었다. active/stopping session이 없는 세 회의만 STT ID·sequence·시간·text를 exact 검증하며 transaction backfill했고 `applied=3`, `segments=49`, `jobsExpected=3`으로 완료했다.
 - 최종 감사는 STT/Core 모두 `COMPLETED` 3건, 49 segments, 590자로 일치했다. AI worker는 embedding job 3건을 모두 `COMPLETED`로 처리했고 active transcript chunks 12개 전부 vectorized됐다. 일회성 감사/백필 task definition과 AI execution role의 임시 master-secret policy를 모두 제거했다.
+
+## T059-S11 Durable AI Evidence Reconciliation
+
+- 단일 root agent가 Core/Data/계약 순서로 구현했으며 병렬 작업이나 shared-file 충돌은 없었다. 기존 사용자의 `.gitignore`, AWS 문서 및 DNS/NonProd README 변경은 수정하지 않았다.
+- Core는 `PROCESSING`, `FAILED`, 또는 segment 없는 `COMPLETED` transcript를 최대 100개 이하의 설정 가능한 batch로 선택한다. NonProd에서는 30초 간격·20개 기본값으로 활성화하고, 각 meeting의 authoritative STT snapshot을 기존 Core→STT mTLS gateway로 조회한다.
+- terminal snapshot만 기존 원자 projection을 재사용한다. meeting ID 불일치, 시간 범위 overflow, provider/DB 오류는 원문 없이 meeting ID와 예외 종류만 기록하고 해당 후보에 격리한다. 첫 완료는 기존 `TRANSCRIPT_COMPLETED` trigger를, 이미 완료된 빈/변경 projection은 `FULL_REINDEX`를 사용해 AI worker가 새 generation을 처리하게 한다.
+- Project Knowledge 생성 transaction이 감사 로그의 Space를 찾지 못해 rollback되던 원인은 JPA/JDBC audit resolver가 `project_knowledge`를 조회하지 않은 것이었다. 두 persistence 경로 모두 `project_knowledge.id → space_id`를 지원해 공식 지식과 해당 embedding job이 실제로 커밋되게 했다.
+- DB migration이나 새 API는 없다. STT가 원본, Core가 report/Meeting AI/RAG용 derived projection이라는 소유권과 권한 선필터 원칙은 유지하며 ERD의 물리 relation도 바뀌지 않는다.
+- 검증은 `backend ./gradlew test`, 전용 pgvector PostgreSQL을 초기화한 `./scripts/run-db-tests.sh`, `backend ./gradlew bootJar`, `terraform validate`, `terraform fmt -check`, `git diff --check`가 통과했다. PostgreSQL 회귀는 Project Knowledge 감사 commit, 누락 projection 후보 선택, 동일 STT ID 복원과 `FULL_REINDEX` generation을 포함한다.
+- `terraform test`는 gitignored 실제 `terraform.tfvars`가 runtime/mTLS를 활성화해 foundation 기본값 단언과 충돌하면서 0 passed, 2 failed, 28 skipped였다. 이번 환경 변수 추가의 parse/validation은 통과했으며 테스트 실패는 새 assertion이나 리소스 오류가 아니라 기존 로컬 변수 격리 문제다.
+- 최초 구현 검증 시점에는 운영 상태를 변경하지 않았고, 아래 제한된 rollout과 자동 복구 검증을 별도 단계로 수행했다.
+- 첫 NonProd rollout은 Core revision 10과 digest `sha256:7e5d79a4b818f8ac52252acc084a8cd6f998789406a7f993ff47b8964a5e251f`를 배포했다. task는 healthy였지만 첫 reconciliation에서 후보 8건 중 상태만 조정 가능한 2건은 성공하고 segment 교체가 필요한 6건은 `permission denied for table transcript_segments`로 실패했다. 기존 V27/V28은 `chunk_source_segments` 최소 권한만 보완했고 원자 교체의 다음 두 delete 대상을 빠뜨린 것이 원인이었다.
+- append-only V29는 `meetingmind_core_app`에 `transcript_segments`, `meeting_speakers`의 `DELETE`만 추가한다. 전용 PostgreSQL V1→V29 privilege/projection test를 통과한 뒤 RDS-managed master secret을 제한적으로 주입한 일회성 ECS Flyway task로 v28→v29 한 건을 선적용했고 exit 0을 확인했다. 임시 execution-role policy는 삭제하고 task definition은 비활성화했다.
+- V29 포함 최종 ARM64 Core digest `sha256:f954a235e11cfb261fc20d25726c1ce58bcc6ed1177ee8e0e477375ee998e043`는 local Trivy와 ECR scan 모두 Alpine/JAR HIGH/CRITICAL 0건이다. 저장 plan은 Core task definition/service만 변경했고 revision 11은 desired/running `1/1`, pending 0, rollout `COMPLETED`, application `HEALTHY`다. 공개 root/session은 200이며 최종 Terraform refresh plan은 `No changes`다.
+- 권한 보완 직후 reconciliation은 후보 8건을 `projectedCount=8`, `failedCount=0`으로 처리했다. 완료 전사의 embedding generation 2가 attempt 1에서 성공해 29 chunks를 활성화했고 worker queue는 pending/processing 0이다. 남은 후보 7건은 authoritative STT 상태 자체가 `FAILED`인 terminal 기록이며, 로그인된 회의록/Meeting AI/Project AI source E2E 전까지 task는 open으로 유지한다.
+
+## T059-S12 Google Callback Remount Hotfix
+
+- 운영 `app.meetingmind.co.kr`에서 Google SDK, browser client ID, BFF/Auth 경계가 정상인 상태로 실제 Google 로그인과 `/spaces` 진입을 확인했다. Safari console의 `play.google.com/log` CORP 메시지는 Google telemetry 요청이며 로그인 credential 흐름의 실패 원인이 아니다.
+- 실제 무반응 원인은 `GoogleCredentialButton`이 module-global `initializedClientId`로 같은 client ID의 후속 SDK 초기화를 생략한 것이었다. 로그인 요청 중 화면이 unmount되면 Google SDK callback은 이전 컴포넌트의 `disabled=true` ref를 계속 보유했고, 로그인 화면 재진입 후 새 버튼을 눌러도 callback이 조용히 종료될 수 있었다.
+- Google script와 client ID별 SDK 초기화는 그대로 재사용하되 SDK callback은 module dispatcher만 참조하고, 버튼 컴포넌트가 마운트될 때마다 dispatcher의 현재 credential handler를 교체하도록 최소 수정했다. Google credential/API/CSRF 계약과 client ID는 바꾸지 않았다.
+- `frontend npm test` 99개와 `npm run build`가 통과했다. 새 Playwright 회귀는 첫 Google 요청을 보류한 채 로그인 화면을 unmount하고 다시 진입한 다음 SDK 초기화 1회를 유지하면서 두 번째 Google callback과 `/api/v1/auth/google` 요청이 실행되는 것을 검증해 1/1 통과했다.
+- 최종 build asset `index-CuNObSdC.js`를 NonProd private S3에 먼저 업로드하고 no-cache `index.html`을 마지막에 교체했다. CloudFront distribution `E3VEAX4F98BOIE` invalidation `IA2C8FBILNV1J6YIL8KFK9YH7L` 완료 후 원격 HTML/JS SHA-256이 로컬 build와 일치했다.
+- 운영 브라우저가 최종 asset을 로드한 상태에서 Google 로그인→로그아웃→새로고침 없는 `/login` 재진입→Google 재로그인이 모두 `/spaces`로 성공했다. 최종 load 이후 SDK 중복 초기화 경고는 없었고, 검증용 Browser session은 즉시 로그아웃해 T059-S12를 완료했다.
+- 2026-07-27: Space 생성 분야 선택 UI가 조회하는 `GET /api/v1/glossary/categories`를 Core allowlist에 추가했다. 경로는 고정 literal이며 다른 glossary 관리 경로는 열지 않았다. `ProxyRouteRegistryTest`로 Core 분류를 검증했다.

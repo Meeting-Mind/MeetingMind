@@ -735,6 +735,31 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
+    List<String> findTranscriptProjectionCandidateMeetingIds(int limit) {
+        return jdbc.query(
+                """
+                select transcript.meeting_id
+                from meeting_transcripts transcript
+                where transcript.purged_at is null
+                  and (
+                    transcript.status in ('PROCESSING', 'FAILED')
+                    or (
+                      transcript.status = 'COMPLETED'
+                      and not exists (
+                        select 1 from transcript_segments segment
+                        where segment.meeting_id = transcript.meeting_id
+                      )
+                    )
+                  )
+                order by transcript.updated_at, transcript.meeting_id
+                limit ?
+                """,
+                (rs, rowNum) -> rs.getString(1),
+                limit
+        );
+    }
+
+    @Override
     void replaceTranscriptProjection(
             String meetingId,
             List<MeetingSpeaker> speakers,
@@ -1247,13 +1272,17 @@ public class JdbcWorkspaceStore extends WorkspaceStore {
                 return jdbc.queryForObject("select space_id from task_cards where id = ?", String.class, resourceId);
             } catch (EmptyResultDataAccessException ignored) {
                 try {
-                    return jdbc.queryForObject(
-                            "select m.space_id from meeting_reports r join meetings m on m.id = r.meeting_id where r.id = ?",
-                            String.class,
-                            resourceId
-                    );
-                } catch (EmptyResultDataAccessException reportMissing) {
-                    throw new IllegalStateException("감사 로그의 Space를 찾을 수 없습니다: " + resourceId, reportMissing);
+                    return jdbc.queryForObject("select space_id from project_knowledge where id = ?", String.class, resourceId);
+                } catch (EmptyResultDataAccessException knowledgeMissing) {
+                    try {
+                        return jdbc.queryForObject(
+                                "select m.space_id from meeting_reports r join meetings m on m.id = r.meeting_id where r.id = ?",
+                                String.class,
+                                resourceId
+                        );
+                    } catch (EmptyResultDataAccessException reportMissing) {
+                        throw new IllegalStateException("감사 로그의 Space를 찾을 수 없습니다: " + resourceId, reportMissing);
+                    }
                 }
             }
         }

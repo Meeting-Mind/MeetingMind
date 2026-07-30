@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -49,7 +50,10 @@ class HttpMeetingAiGatewayClientTest {
             );
 
             AiChatResponse response = client.chat(new MeetingAiGatewayChatRequest(
-                    "space-1", "meeting-1", "무엇을 결정했나요?"
+                    "space-1",
+                    "meeting-1",
+                    "그래서 무엇을 결정했나요?",
+                    List.of(new MeetingAiGatewayChatRequest.HistoryTurn("USER", "배포 방식을 논의했어?"))
             ));
 
             assertThat(response.answer()).isEqualTo("회의 근거입니다.");
@@ -57,6 +61,7 @@ class HttpMeetingAiGatewayClientTest {
             assertThat(receivedToken.get()).isEqualTo("internal-test-token");
             assertThat(receivedTraceId.get()).isNotBlank();
             assertThat(receivedBody.get()).contains("\"meetingId\":\"meeting-1\"");
+            assertThat(receivedBody.get()).contains("\"history\":[{\"role\":\"USER\"");
         } finally {
             server.stop(0);
         }

@@ -55,7 +55,8 @@ export default defineConfig({
     {
       command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
       env: {
-        VITE_BFF_PROXY_TARGET: `http://127.0.0.1:${bffPort}`
+        VITE_BFF_PROXY_TARGET: `http://127.0.0.1:${bffPort}`,
+        VITE_GOOGLE_CLIENT_ID: "ci-e2e-google-client-id"
       },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

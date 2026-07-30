@@ -66,3 +66,4 @@ override.tf.json
 
 # Terraform backend configuration with real bucket names
 infra/aws/environments/nonprod-v2/backend.hcl
+infra/aws/environments/dns/backend.hcl

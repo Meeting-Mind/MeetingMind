@@ -55,23 +55,25 @@ public class WorkspaceDomainService {
     private final WorkspaceStore store;
     private final SpaceAccessPolicy spaceAccessPolicy;
     private final MeetingAccessPolicy meetingAccessPolicy;
+    private final SharedGlossaryStore sharedGlossaryStore;
     private final Clock clock;
 
     @Autowired
     public WorkspaceDomainService(
             WorkspaceStore store,
             SpaceAccessPolicy spaceAccessPolicy,
-            MeetingAccessPolicy meetingAccessPolicy
+            MeetingAccessPolicy meetingAccessPolicy,
+            SharedGlossaryStore sharedGlossaryStore
     ) {
-        this(store, spaceAccessPolicy, meetingAccessPolicy, Clock.systemUTC());
+        this(store, spaceAccessPolicy, meetingAccessPolicy, sharedGlossaryStore, Clock.systemUTC());
     }
 
     public WorkspaceDomainService(WorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy) {
-        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), Clock.systemUTC());
+        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), null, Clock.systemUTC());
     }
 
     WorkspaceDomainService(WorkspaceStore store, SpaceAccessPolicy spaceAccessPolicy, Clock clock) {
-        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), clock);
+        this(store, spaceAccessPolicy, new MeetingAccessPolicy(spaceAccessPolicy), null, clock);
     }
 
     WorkspaceDomainService(
@@ -80,9 +82,20 @@ public class WorkspaceDomainService {
             MeetingAccessPolicy meetingAccessPolicy,
             Clock clock
     ) {
+        this(store, spaceAccessPolicy, meetingAccessPolicy, null, clock);
+    }
+
+    WorkspaceDomainService(
+            WorkspaceStore store,
+            SpaceAccessPolicy spaceAccessPolicy,
+            MeetingAccessPolicy meetingAccessPolicy,
+            SharedGlossaryStore sharedGlossaryStore,
+            Clock clock
+    ) {
         this.store = store;
         this.spaceAccessPolicy = spaceAccessPolicy;
         this.meetingAccessPolicy = meetingAccessPolicy;
+        this.sharedGlossaryStore = sharedGlossaryStore;
         this.clock = clock;
     }
 
@@ -219,12 +232,85 @@ public class WorkspaceDomainService {
 
     @Transactional
     public SpaceCreationResult createSpace(String actorUserId, String name, String description) {
+        return createSpace(actorUserId, name, description, null, null);
+    }
+
+    @Transactional
+    public SpaceCreationResult createSpace(
+            String actorUserId,
+            String name,
+            String description,
+            List<String> glossaryCategoryIds,
+            List<String> customGlossaryCategories
+    ) {
         requireUser(actorUserId);
         validateRequired(name, "Space 이름은 필수입니다.");
+        GlossaryCategorySelection selection = validateGlossaryCategorySelection(
+                glossaryCategoryIds, customGlossaryCategories
+        );
         Instant now = Instant.now(clock);
         Space space = store.createSpace(name.trim(), blankToNull(description), null, actorUserId, now);
         SpaceMember owner = store.addSpaceMember(space.id(), actorUserId, SpaceRole.OWNER, now);
+        if (selection != null) {
+            sharedGlossaryStore.configureSpaceCategories(
+                    space.id(), actorUserId, selection.categoryIds(), selection.customNames(), now
+            );
+        }
         return new SpaceCreationResult(space, owner);
+    }
+
+    private GlossaryCategorySelection validateGlossaryCategorySelection(
+            List<String> categoryIds,
+            List<String> customCategories
+    ) {
+        if (categoryIds == null && customCategories == null) {
+            return null;
+        }
+        if (sharedGlossaryStore == null) {
+            throw new IllegalStateException("공용 용어 분야 저장소가 구성되지 않았습니다.");
+        }
+
+        List<String> requestedIds = categoryIds == null ? List.of() : categoryIds;
+        if (requestedIds.size() > 50) {
+            throw invalidRequest("용어 분야 선택 수가 허용 범위를 초과했습니다.");
+        }
+        LinkedHashSet<String> uniqueIds = new LinkedHashSet<>();
+        for (String categoryId : requestedIds) {
+            if (categoryId == null || categoryId.isBlank() || !uniqueIds.add(categoryId.trim())) {
+                throw invalidRequest("용어 분야는 중복 없이 선택해야 합니다.");
+            }
+        }
+
+        List<SharedGlossaryStore.GlossaryCategory> activeCategories = sharedGlossaryStore.findActiveCategories();
+        LinkedHashSet<String> activeIds = activeCategories.stream()
+                .map(SharedGlossaryStore.GlossaryCategory::id)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (!activeIds.containsAll(uniqueIds)) {
+            throw invalidRequest("알 수 없거나 비활성화된 용어 분야가 포함되어 있습니다.");
+        }
+
+        LinkedHashSet<String> existingNames = activeCategories.stream()
+                .map(category -> category.name().trim().toLowerCase(Locale.ROOT))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<String> requestedCustomCategories = customCategories == null ? List.of() : customCategories;
+        if (requestedCustomCategories.size() > 10) {
+            throw invalidRequest("기타 용어 분야는 최대 10개까지 입력할 수 있습니다.");
+        }
+        LinkedHashMap<String, String> normalizedCustomNames = new LinkedHashMap<>();
+        for (String customCategory : requestedCustomCategories) {
+            String name = customCategory == null ? "" : customCategory.trim();
+            if (name.isEmpty() || name.length() > 100) {
+                throw invalidRequest("기타 분야명은 1자 이상 100자 이하로 입력해야 합니다.");
+            }
+            String normalizedName = name.toLowerCase(Locale.ROOT);
+            if (existingNames.contains(normalizedName) || normalizedCustomNames.putIfAbsent(normalizedName, name) != null) {
+                throw invalidRequest("같은 용어 분야를 중복해서 입력할 수 없습니다.");
+            }
+        }
+        if (uniqueIds.isEmpty() && normalizedCustomNames.isEmpty()) {
+            throw invalidRequest("용어 분야를 하나 이상 선택하거나 입력해 주세요.");
+        }
+        return new GlossaryCategorySelection(List.copyOf(uniqueIds), List.copyOf(normalizedCustomNames.values()));
     }
 
     @Transactional
@@ -1626,7 +1712,7 @@ public class WorkspaceDomainService {
 
         MeetingTranscript existing = store.findMeetingTranscript(meetingId).orElse(null);
         if (existing != null && existing.status() == TranscriptStatus.PROCESSING) {
-            throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_ALREADY_PROCESSING", "이미 진행 중인 전사가 있습니다.");
+            return existing;
         }
         if (existing != null && existing.status() == TranscriptStatus.COMPLETED) {
             throw new AuthorizationException(HttpStatus.CONFLICT, "TRANSCRIPTION_ALREADY_COMPLETED", "완료된 전사가 있습니다.");
@@ -1761,6 +1847,30 @@ public class WorkspaceDomainService {
             List<RemoteTranscriptSegment> remoteSegments
     ) {
         requireTranscriptManagement(actorUserId, meetingId);
+        return projectRemoteMeetingTranscript(meetingId, remoteStatus, remoteSegments);
+    }
+
+    public List<String> transcriptProjectionCandidateMeetingIds(int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("projection reconciliation batch size must be between 1 and 100");
+        }
+        return store.findTranscriptProjectionCandidateMeetingIds(limit);
+    }
+
+    @Transactional
+    public MeetingTranscript reconcileRemoteMeetingTranscript(
+            String meetingId,
+            TranscriptStatus remoteStatus,
+            List<RemoteTranscriptSegment> remoteSegments
+    ) {
+        return projectRemoteMeetingTranscript(meetingId, remoteStatus, remoteSegments);
+    }
+
+    private MeetingTranscript projectRemoteMeetingTranscript(
+            String meetingId,
+            TranscriptStatus remoteStatus,
+            List<RemoteTranscriptSegment> remoteSegments
+    ) {
         store.lockMeeting(meetingId);
         requireMeeting(meetingId);
         MeetingTranscript current = store.findMeetingTranscript(meetingId)
@@ -2464,6 +2574,9 @@ public class WorkspaceDomainService {
     }
 
     public record SpaceCreationResult(Space space, SpaceMember owner) {
+    }
+
+    private record GlossaryCategorySelection(List<String> categoryIds, List<String> customNames) {
     }
 
     public record SpaceInvitationCreation(SpaceInvitation invitation, String token) {

@@ -191,6 +191,64 @@ class SttSessionRegistryTest {
         verify(workspaceDomainService).completeMeetingTranscript("meeting-1");
     }
 
+    @Test
+    void completesTheSharedTranscriptOnlyAfterTheLastParticipantSessionCloses() {
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        SttSessionRegistry registry = new SttSessionRegistry(
+                workspaceDomainService,
+                providerReturning((context, onTranscriptEvent, onError) -> mock(SttStreamClient.class)),
+                mock(LiveKitEgressService.class),
+                new InMemoryTranscriptAssembler()
+        );
+        String hostSession = registry.createMeetingSession("meeting-1", "meeting-1", "Host", "track-host");
+        String memberSession = registry.createMeetingSession("meeting-1", "meeting-1", "Member", "track-member");
+
+        registry.close(hostSession);
+
+        verify(workspaceDomainService, never()).completeMeetingTranscript("meeting-1");
+
+        registry.close(memberSession);
+
+        verify(workspaceDomainService).completeMeetingTranscript("meeting-1");
+    }
+
+    @Test
+    void participantFailureDoesNotFailTheSharedTranscriptWhileAnotherSessionIsActive() {
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        SttSessionRegistry registry = new SttSessionRegistry(
+                workspaceDomainService,
+                providerReturning((context, onTranscriptEvent, onError) -> mock(SttStreamClient.class)),
+                mock(LiveKitEgressService.class),
+                new InMemoryTranscriptAssembler()
+        );
+        String hostSession = registry.createMeetingSession("meeting-1", "meeting-1", "Host", "track-host");
+        String memberSession = registry.createMeetingSession("meeting-1", "meeting-1", "Member", "track-member");
+
+        registry.failAndClose(memberSession);
+
+        verify(workspaceDomainService, never()).failMeetingTranscript("meeting-1");
+
+        registry.close(hostSession);
+
+        verify(workspaceDomainService).completeMeetingTranscript("meeting-1");
+    }
+
+    @Test
+    void failsTheSharedTranscriptWhenTheLastParticipantSessionFails() {
+        WorkspaceDomainService workspaceDomainService = mock(WorkspaceDomainService.class);
+        SttSessionRegistry registry = new SttSessionRegistry(
+                workspaceDomainService,
+                providerReturning((context, onTranscriptEvent, onError) -> mock(SttStreamClient.class)),
+                mock(LiveKitEgressService.class),
+                new InMemoryTranscriptAssembler()
+        );
+        String sessionId = registry.createMeetingSession("meeting-1", "meeting-1", "Host", "track-host");
+
+        registry.failAndClose(sessionId);
+
+        verify(workspaceDomainService).failMeetingTranscript("meeting-1");
+    }
+
     private static SttProvider factoryReturning(SttStreamClient client) {
         return providerReturning((context, onTranscriptEvent, onError) -> client);
     }

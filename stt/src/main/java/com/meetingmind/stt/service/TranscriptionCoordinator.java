@@ -59,7 +59,7 @@ public class TranscriptionCoordinator {
     public MeetingTranscript startTranscript(String meetingId, String provider, Instant retentionUntil) {
         MeetingTranscript existing = transcriptRepository.findById(meetingId).orElse(null);
         if (existing != null && existing.status() == TranscriptStatus.PROCESSING) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 진행 중인 전사가 있습니다.");
+            return existing;
         }
         Instant now = Instant.now(clock);
         return transcriptRepository.save(new MeetingTranscript(
@@ -81,7 +81,7 @@ public class TranscriptionCoordinator {
     @Transactional
     public TranscriptSegment appendSegment(
             String meetingId, String speakerLabel, String speakerName, int startMs, int endMs, String text) {
-        requireProcessingTranscript(meetingId);
+        requireProcessingTranscriptForUpdate(meetingId);
         if (text == null || text.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "전사 내용은 비어 있을 수 없습니다.");
         }
@@ -108,7 +108,7 @@ public class TranscriptionCoordinator {
 
     @Transactional
     public MeetingTranscript completeTranscript(String meetingId) {
-        MeetingTranscript transcript = requireProcessingTranscript(meetingId);
+        MeetingTranscript transcript = requireProcessingTranscriptForUpdate(meetingId);
         Instant now = Instant.now(clock);
         return transcriptRepository.save(new MeetingTranscript(
                 transcript.meetingId(), TranscriptStatus.COMPLETED, transcript.provider(), transcript.language(),
@@ -119,7 +119,7 @@ public class TranscriptionCoordinator {
 
     @Transactional
     public MeetingTranscript failTranscript(String meetingId) {
-        MeetingTranscript transcript = requireProcessingTranscript(meetingId);
+        MeetingTranscript transcript = requireProcessingTranscriptForUpdate(meetingId);
         Instant now = Instant.now(clock);
         return transcriptRepository.save(new MeetingTranscript(
                 transcript.meetingId(), TranscriptStatus.FAILED, transcript.provider(), transcript.language(),
@@ -144,9 +144,13 @@ public class TranscriptionCoordinator {
                 .orElse(0);
     }
 
-    private MeetingTranscript requireProcessingTranscript(String meetingId) {
-        MeetingTranscript transcript = transcriptRepository.findById(meetingId)
+    private MeetingTranscript requireProcessingTranscriptForUpdate(String meetingId) {
+        MeetingTranscript transcript = transcriptRepository.findByMeetingIdForUpdate(meetingId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "전사를 찾을 수 없습니다."));
+        return requireProcessingTranscript(transcript);
+    }
+
+    private MeetingTranscript requireProcessingTranscript(MeetingTranscript transcript) {
         if (transcript.status() != TranscriptStatus.PROCESSING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "진행 중인 전사가 아닙니다.");
         }

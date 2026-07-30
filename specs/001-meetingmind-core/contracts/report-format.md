@@ -17,7 +17,7 @@ AI가 만드는 회의록의 출력 형식과 markdown 조립 규칙을 고정�
 - **원시 ID는 사람이 보는 곳에 나오지 않는다.** 각주 번호로 바꾸고 문서 끝에 발화자와 시각으로 적는다.
 - **시각은 회의 시작 기준이다**(`00:18`). 전사와 맞춰보기 쉽다.
 
-## AI 출력 스키마
+## AI provider 출력 스키마
 
 ```json
 {
@@ -36,11 +36,45 @@ AI가 만드는 회의록의 출력 형식과 markdown 조립 규칙을 고정�
 
 `markdown`은 **더 이상 AI가 만들지 않는다.**
 
+AI service가 검증을 마친 뒤 Backend에 반환하는 내부 API 응답은 provider 출력을 그대로
+노출하지 않고 다음 `schemaVersion: 2` 계약을 사용한다.
+
+```json
+{
+  "schemaVersion": 2,
+  "summary": [
+    { "text": "AI 검색 신규 기능의 베타 출시 범위와 일정을 확정했다.", "sourceIds": ["segment-a"] }
+  ],
+  "decisions": [],
+  "actionItems": [],
+  "sources": [],
+  "droppedCount": 0,
+  "unsupported": false,
+  "unsupportedReason": null,
+  "model": "gpt-4.1-mini",
+  "generationMode": "AI_DIRECT",
+  "degraded": false,
+  "warnings": [],
+  "attemptCount": 1
+}
+```
+
+- `AI_DIRECT`: 단일 context에서 생성한다.
+- `AI_HIERARCHICAL`: 긴 회의를 구간별로 요약한 뒤 원본 source ID로 합성한다.
+- `EXTRACTIVE_FALLBACK`: AI 생성과 구조 검증이 실패해 전사 원문을 발췌한다. 이 모드는
+  `degraded=true`와 사용자 경고를 포함하며 결정·할 일을 추측하지 않는다.
+- 구조 또는 citation 검증 실패의 자동 재시도는 전체 생성 요청에서 최대 1회다.
+
+- provider 출력의 `supported`는 AI service 내부 판정값이다.
+- Backend가 받는 내부 API 응답은 `unsupported`와 `unsupportedReason`을 사용한다.
+- `schemaVersion: 1` 문자열 요약 응답은 rolling deployment 동안 Backend가 한시적으로 변환한다.
+- `schemaVersion: 2` 전환이 확인되면 v1 호환 코드는 후속 release에서 제거한다.
+
 ### summary
 
 - 문장 배열이다. **길이 제한을 두지 않는다** — 회의가 길면 요약도 길어져야 한다.
 - 각 문장은 `sourceIds`가 비어 있으면 안 된다. 비면 그 문장을 버린다.
-- 서버는 문장들을 이어 붙여 `meeting_reports.summary` 컬럼에 저장한다. 기존 소비자(Project AI 색인)가 그대로 동작한다.
+- 서버는 문장들을 줄바꿈으로 이어 붙여 `meeting_reports.summary` 컬럼에 저장한다. 기존 소비자(Project AI 색인)가 그대로 동작한다.
 
 ### 근거 강제
 
@@ -81,7 +115,7 @@ AI가 만드는 회의록의 출력 형식과 markdown 조립 규칙을 고정�
 [2] {발화자} {시각} — {발언}
 
 ---
-MeetingMind가 이 회의의 전사만 사용해 생성했습니다.
+MeetingMind가 이 회의의 검증된 근거만 사용해 생성했습니다.
 ```
 
 규칙:
@@ -94,9 +128,19 @@ MeetingMind가 이 회의의 전사만 사용해 생성했습니다.
 
 ## 실패 표현
 
-`supported=false`이거나 근거를 갖춘 항목이 하나도 없으면 `unsupported=true`로 반환하고 `summary`, `decisions`, `actionItems`, `markdown`을 **모두 비운다**. 안내 문구를 `summary`에 넣지 않는다 — 정상 요약과 같은 자리에 들어가면 화면이 구분할 수 없다.
+provider가 `supported=false`를 반환하거나 검증 가능한 요약 문장이 하나도 없으면 `unsupported=true`로 반환하고 `summary`, `decisions`, `actionItems`, `sources`를 **모두 비운다**. 안내 문구를 `summary`에 넣지 않는다 — 정상 요약과 같은 자리에 들어가면 화면이 구분할 수 없다.
+
+검증 가능한 요약 문장이 하나라도 있으면 결정이나 할 일이 비어 있어도 성공이다. 토론·브리핑 회의를 명시적 결정이나 할 일이 없다는 이유로 실패시켜서는 안 된다.
 
 이유는 `unsupportedReason`으로 구분한다.
+
+- `NO_EVIDENCE`: 전달할 회의 source가 없음
+- `LOW_RELEVANCE`: 회의록으로 정리할 관련 근거가 부족함
+- `MODEL_UNSUPPORTED`: provider가 구조화된 회의록을 만들 수 없다고 판정함
+- `UNVERIFIED_OUTPUT`: 생성된 요약의 citation을 검증하지 못함
+
+전사가 하나 이상 있으면 provider 장애나 재시도 실패 뒤에도 `EXTRACTIVE_FALLBACK` candidate를
+반환한다. 전사가 전혀 없을 때만 fallback 없이 `NO_EVIDENCE`로 종료한다.
 
 ## 기존 회의록
 

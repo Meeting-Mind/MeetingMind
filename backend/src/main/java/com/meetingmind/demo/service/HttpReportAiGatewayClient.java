@@ -1,8 +1,10 @@
 package com.meetingmind.demo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingmind.demo.config.InternalHttpClientFactory;
+import com.meetingmind.demo.dto.ai.AiChatResponse;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayRequest;
 import com.meetingmind.demo.dto.ai.ReportAiGatewayResponse;
 import java.io.IOException;
@@ -87,7 +89,7 @@ this(
                     if (response.statusCode() < 200 || response.statusCode() >= 300) {
                         throw new AiGatewayException("AI provider returned " + response.statusCode());
                     }
-                    return objectMapper.readValue(response.body(), ReportAiGatewayResponse.class);
+                    return parseResponse(response.body());
                 } catch (JsonProcessingException exception) {
                     throw new AiGatewayException("AI request or response JSON is invalid.", exception);
                 } catch (IOException exception) {
@@ -100,6 +102,77 @@ this(
         } catch (AiGatewayGuardRejectedException exception) {
             throw new AiGatewayException("AI provider is temporarily unavailable.", exception);
         }
+    }
+
+    private ReportAiGatewayResponse parseResponse(String responseBody) throws JsonProcessingException {
+        JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode summary = root.get("summary");
+        if (summary != null && summary.isArray()) {
+            ReportAiGatewayResponse response = objectMapper.treeToValue(root, ReportAiGatewayResponse.class);
+            if (response.schemaVersion() != 0 && response.schemaVersion() != 2) {
+                throw new AiGatewayException("AI report response schema version is unsupported.");
+            }
+            if (response.schemaVersion() == 2) {
+                return response;
+            }
+            return new ReportAiGatewayResponse(
+                    2,
+                    response.summary(),
+                    response.decisions(),
+                    response.actionItems(),
+                    response.sources(),
+                    response.droppedCount(),
+                    response.unsupported(),
+                    response.unsupportedReason(),
+                    response.model(),
+                    response.usage()
+            );
+        }
+
+        LegacyReportAiGatewayResponse legacy = objectMapper.treeToValue(root, LegacyReportAiGatewayResponse.class);
+        var sources = legacy.sources() == null ? java.util.List.<ReportAiGatewayResponse.Source>of() : legacy.sources();
+        var sourceIds = sources.stream()
+                .map(ReportAiGatewayResponse.Source::sourceId)
+                .filter(HttpReportAiGatewayClient::hasText)
+                .distinct()
+                .toList();
+        var summaryRows = hasText(legacy.summary()) && !sourceIds.isEmpty()
+                ? java.util.List.of(new ReportAiGatewayResponse.SummarySentence(legacy.summary().trim(), sourceIds))
+                : java.util.List.<ReportAiGatewayResponse.SummarySentence>of();
+        String unsupportedReason = legacy.unsupported()
+                ? (hasText(legacy.unsupportedReason())
+                        ? legacy.unsupportedReason()
+                        : (sources.isEmpty() ? "NO_EVIDENCE" : "MODEL_UNSUPPORTED"))
+                : null;
+        return new ReportAiGatewayResponse(
+                1,
+                summaryRows,
+                legacy.decisions(),
+                legacy.actionItems(),
+                sources,
+                0,
+                legacy.unsupported(),
+                unsupportedReason,
+                legacy.model(),
+                legacy.usage()
+        );
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private record LegacyReportAiGatewayResponse(
+            String summary,
+            java.util.List<ReportAiGatewayResponse.Decision> decisions,
+            java.util.List<ReportAiGatewayResponse.ActionItem> actionItems,
+            String markdown,
+            java.util.List<ReportAiGatewayResponse.Source> sources,
+            boolean unsupported,
+            String unsupportedReason,
+            String model,
+            AiChatResponse.AiUsageMetrics usage
+    ) {
     }
 
     private static String stripTrailingSlash(String value) {

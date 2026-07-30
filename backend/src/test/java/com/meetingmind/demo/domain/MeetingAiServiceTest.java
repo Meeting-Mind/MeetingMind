@@ -20,6 +20,7 @@ import com.meetingmind.demo.dto.ai.TermExplanationResponse;
 import com.meetingmind.demo.service.AiGatewayException;
 import com.meetingmind.demo.service.AiSearchScopeResolver;
 import com.meetingmind.demo.service.MeetingAiGatewayClient;
+import com.meetingmind.demo.service.InMemoryMeetingAiHistoryStore;
 import com.meetingmind.demo.service.MeetingAiService;
 import java.time.Clock;
 import java.time.Instant;
@@ -87,6 +88,7 @@ class MeetingAiServiceTest {
         assertThat(context.gateway.captured.projectId()).isEqualTo(space.space().id());
         assertThat(context.gateway.captured.meetingId()).isEqualTo(meeting.meeting().id());
         assertThat(context.gateway.captured.question()).isEqualTo("후속 작업이 뭐야?");
+        assertThat(context.gateway.captured.history()).isEmpty();
         assertThat(context.store.findAiUsageEvents(space.space().id(), FIXED_CLOCK.instant().minusSeconds(60)))
                 .singleElement()
                 .satisfies(event -> {
@@ -95,6 +97,39 @@ class MeetingAiServiceTest {
                     assertThat(event.outputTokens()).isEqualTo(48);
                     assertThat(event.totalTokens()).isEqualTo(168);
                 });
+    }
+
+    @Test
+    void chatPassesOnlyPersistedMeetingConversationToTheNextRequest() {
+        TestContext context = newContext("user-member", "팀원");
+        User owner = context.user("user-owner");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.workspace.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult meeting = context.workspace.createMeeting(
+                owner.id(), space.space().id(), "정책 논의", SCHEDULED_AT, List.of(member.id())
+        );
+        context.history.append("other-meeting", member.id(), "USER", "다른 회의 질문", FIXED_CLOCK.instant());
+        context.history.append(meeting.meeting().id(), owner.id(), "USER", "다른 사용자 질문", FIXED_CLOCK.instant());
+
+        context.service.chat(
+                "Bearer access-token",
+                meeting.meeting().id(),
+                new BackendMeetingAiChatRequest("정책 차이는 뭐야?")
+        );
+        context.service.chat(
+                "Bearer access-token",
+                meeting.meeting().id(),
+                new BackendMeetingAiChatRequest("그래서 어떻게 하기로 했어?")
+        );
+
+        assertThat(context.gateway.captured.history())
+                .extracting(MeetingAiGatewayChatRequest.HistoryTurn::role)
+                .containsExactly("USER", "ASSISTANT");
+        assertThat(context.gateway.captured.history())
+                .extracting(MeetingAiGatewayChatRequest.HistoryTurn::content)
+                .containsExactly("정책 차이는 뭐야?", "응답");
+        assertThat(context.history.find(meeting.meeting().id(), member.id(), 10)).hasSize(4);
     }
 
     @Test
@@ -152,6 +187,7 @@ class MeetingAiServiceTest {
         InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
         WorkspaceDomainService workspace = new WorkspaceDomainService(store, new SpaceAccessPolicy(), FIXED_CLOCK);
         FakeMeetingAiGateway gateway = new FakeMeetingAiGateway();
+        InMemoryMeetingAiHistoryStore history = new InMemoryMeetingAiHistoryStore();
         MeetingAiService service = new MeetingAiService(
                 authService,
                 new AiSearchScopeResolver(
@@ -159,9 +195,11 @@ class MeetingAiServiceTest {
                         new MeetingAccessPolicy(new SpaceAccessPolicy())
                 ),
                 gateway,
-                workspace
+                history,
+                workspace,
+                FIXED_CLOCK
         );
-        return new TestContext(store, workspace, gateway, service);
+        return new TestContext(store, workspace, gateway, history, service);
     }
 
     private static void assertAuthz(Object error, HttpStatus status, String code) {
@@ -174,6 +212,7 @@ class MeetingAiServiceTest {
             InMemoryWorkspaceStore store,
             WorkspaceDomainService workspace,
             FakeMeetingAiGateway gateway,
+            InMemoryMeetingAiHistoryStore history,
             MeetingAiService service
     ) {
         User user(String id) {

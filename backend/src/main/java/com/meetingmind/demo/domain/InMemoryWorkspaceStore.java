@@ -553,6 +553,21 @@ public class InMemoryWorkspaceStore extends WorkspaceStore {
     }
 
     @Override
+    synchronized List<String> findTranscriptProjectionCandidateMeetingIds(int limit) {
+        return meetingTranscriptsByMeetingId.values().stream()
+                .filter(transcript -> transcript.purgedAt() == null)
+                .filter(transcript -> transcript.status() == TranscriptStatus.PROCESSING
+                        || transcript.status() == TranscriptStatus.FAILED
+                        || (transcript.status() == TranscriptStatus.COMPLETED
+                        && findTranscriptSegments(transcript.meetingId()).isEmpty()))
+                .sorted(java.util.Comparator.comparing(MeetingTranscript::updatedAt)
+                        .thenComparing(MeetingTranscript::meetingId))
+                .limit(limit)
+                .map(MeetingTranscript::meetingId)
+                .toList();
+    }
+
+    @Override
     synchronized void replaceTranscriptProjection(
             String meetingId,
             List<MeetingSpeaker> speakers,

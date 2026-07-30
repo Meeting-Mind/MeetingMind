@@ -1,0 +1,2 @@
+expected_aws_account_id    = "<aws-account-id>"
+cloudfront_distribution_id = "<cloudfront-distribution-id>"

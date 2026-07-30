@@ -5,9 +5,14 @@ import type {
   DeleteDomainTermResponse,
   DomainTermListResponse,
   DomainTermMutationResponse,
+  GlossaryCategoryListResponse,
   TermExplanationResponse,
   UpdateDomainTermRequest
 } from "../types";
+
+export async function fetchGlossaryCategories(_session: AuthSession): Promise<GlossaryCategoryListResponse> {
+  return requestJson<GlossaryCategoryListResponse>("/api/v1/glossary/categories", { headers: undefined });
+}
 
 export async function fetchDomainTerms(
   _session: AuthSession,

@@ -80,6 +80,69 @@ class MeetingTermExplanationServiceTest {
     }
 
     @Test
+    void subscribedSharedGlossaryTermAnswersWithoutCallingAi() {
+        TestContext context = newContext("user-member");
+        WorkspaceDomainService.MeetingCreationResult meeting = context.meetingWithMember();
+        context.sharedGlossaryStore.register(
+                "shared-term-fashion-retail-001", "SS", "봄·여름 시즌(Spring/Summer).",
+                "fashion-retail", "패션/리테일", 90
+        );
+
+        TermExplanationResponse response = context.service.explain(
+                "Bearer access-token", meeting.meeting().id(), " ss "
+        );
+
+        assertThat(response.explanation()).isEqualTo("봄·여름 시즌(Spring/Summer).");
+        assertThat(response.sourceType()).isEqualTo("glossary");
+        assertThat(response.model()).isEqualTo("shared-glossary");
+        assertThat(response.sources()).singleElement().satisfies(source -> {
+            assertThat(source.sourceId()).isEqualTo("shared-term-fashion-retail-001");
+            assertThat(source.title()).isEqualTo("패션/리테일");
+        });
+        assertThat(context.gateway.termRequest).isNull();
+    }
+
+    @Test
+    void spaceTermOverridesSharedGlossaryDefinition() {
+        TestContext context = newContext("user-member");
+        WorkspaceDomainService.MeetingCreationResult meeting = context.meetingWithMember();
+        context.sharedGlossaryStore.register(
+                "shared-term-common-business-001", "KPI", "핵심성과지표.",
+                "common-business", "공통 비즈니스", 10
+        );
+        context.termStore.save(new DomainTerm(
+                "term-1", meeting.meeting().spaceId(), "KPI", "우리 팀은 주간 활성 사용자로 본다.",
+                DomainTermStatus.ACTIVE, FIXED_CLOCK.instant(), FIXED_CLOCK.instant(), null
+        ));
+
+        TermExplanationResponse response = context.service.explain(
+                "Bearer access-token", meeting.meeting().id(), "KPI"
+        );
+
+        assertThat(response.explanation()).isEqualTo("우리 팀은 주간 활성 사용자로 본다.");
+        assertThat(response.model()).isEqualTo("local-glossary");
+        assertThat(context.gateway.termRequest).isNull();
+    }
+
+    @Test
+    void unsubscribedCategoryTermFallsBackToAiGateway() {
+        TestContext context = newContext("user-member");
+        WorkspaceDomainService.MeetingCreationResult meeting = context.meetingWithMember();
+        context.sharedGlossaryStore.register(
+                "shared-term-fashion-retail-001", "SS", "봄·여름 시즌(Spring/Summer).",
+                "fashion-retail", "패션/리테일", 90
+        );
+        context.sharedGlossaryStore.disableCategory(meeting.meeting().spaceId(), "fashion-retail");
+
+        TermExplanationResponse response = context.service.explain(
+                "Bearer access-token", meeting.meeting().id(), "SS"
+        );
+
+        assertThat(response.explanation()).isEqualTo("회의 검색 방식입니다.");
+        assertThat(context.gateway.termRequest).isNotNull();
+    }
+
+    @Test
     void deniedMeetingAccessDoesNotReachAiGateway() {
         TestContext context = newContext("user-outsider");
         User owner = context.user("user-owner");
@@ -106,20 +169,23 @@ class MeetingTermExplanationServiceTest {
         InMemoryWorkspaceStore workspaceStore = new InMemoryWorkspaceStore();
         WorkspaceDomainService workspace = new WorkspaceDomainService(workspaceStore, new SpaceAccessPolicy(), FIXED_CLOCK);
         InMemoryDomainTermStore termStore = new InMemoryDomainTermStore();
+        InMemorySharedGlossaryStore sharedGlossaryStore = new InMemorySharedGlossaryStore();
         FakeGateway gateway = new FakeGateway();
         MeetingTermExplanationService service = new MeetingTermExplanationService(
                 authService,
                 new AiSearchScopeResolver(workspace, new MeetingAccessPolicy(new SpaceAccessPolicy())),
                 termStore,
+                sharedGlossaryStore,
                 gateway
         );
-        return new TestContext(workspaceStore, workspace, termStore, gateway, service);
+        return new TestContext(workspaceStore, workspace, termStore, sharedGlossaryStore, gateway, service);
     }
 
     private record TestContext(
             InMemoryWorkspaceStore workspaceStore,
             WorkspaceDomainService workspace,
             InMemoryDomainTermStore termStore,
+            InMemorySharedGlossaryStore sharedGlossaryStore,
             FakeGateway gateway,
             MeetingTermExplanationService service
     ) {
@@ -127,6 +193,16 @@ class MeetingTermExplanationServiceTest {
             return workspaceStore.saveUser(new User(
                     id, id + "@meetingmind.ai", id, null, "active", FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
             ));
+        }
+
+        WorkspaceDomainService.MeetingCreationResult meetingWithMember() {
+            User owner = user("user-owner");
+            User member = user("user-member");
+            WorkspaceDomainService.SpaceCreationResult space = workspace.createSpace(owner.id(), "MeetingMind", null);
+            workspaceStore.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+            return workspace.createMeeting(
+                    owner.id(), space.space().id(), "RAG 설계", SCHEDULED_AT, List.of(member.id())
+            );
         }
     }
 

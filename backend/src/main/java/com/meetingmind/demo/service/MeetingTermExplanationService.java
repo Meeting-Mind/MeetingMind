@@ -5,6 +5,7 @@ import com.meetingmind.demo.auth.AuthUserResponse;
 import com.meetingmind.demo.authz.AuthorizationException;
 import com.meetingmind.demo.domain.DomainTerm;
 import com.meetingmind.demo.domain.DomainTermStore;
+import com.meetingmind.demo.domain.SharedGlossaryStore;
 import com.meetingmind.demo.dto.ai.AiSource;
 import com.meetingmind.demo.dto.ai.MeetingAiGatewayTermRequest;
 import com.meetingmind.demo.dto.ai.TermExplanationResponse;
@@ -25,17 +26,20 @@ public class MeetingTermExplanationService {
     private final AuthService authService;
     private final AiSearchScopeResolver scopeResolver;
     private final DomainTermStore domainTermStore;
+    private final SharedGlossaryStore sharedGlossaryStore;
     private final MeetingAiGatewayClient aiGatewayClient;
 
     public MeetingTermExplanationService(
             AuthService authService,
             AiSearchScopeResolver scopeResolver,
             DomainTermStore domainTermStore,
+            SharedGlossaryStore sharedGlossaryStore,
             MeetingAiGatewayClient aiGatewayClient
     ) {
         this.authService = authService;
         this.scopeResolver = scopeResolver;
         this.domainTermStore = domainTermStore;
+        this.sharedGlossaryStore = sharedGlossaryStore;
         this.aiGatewayClient = aiGatewayClient;
     }
 
@@ -45,7 +49,10 @@ public class MeetingTermExplanationService {
         AiSearchScopeResolver.MeetingSearchScope scope = scopeResolver.meetingScope(user.id(), meetingId);
         String term = rawTerm.trim();
 
-        DomainTerm dictionaryTerm = domainTermStore.findActiveExact(scope.spaceId(), normalize(term)).orElse(null);
+        String normalizedTerm = normalize(term);
+
+        // Space가 직접 등록한 정의를 공용 사전보다 먼저 본다. 같은 용어를 조직 맥락에 맞게 덮어쓸 수 있어야 한다.
+        DomainTerm dictionaryTerm = domainTermStore.findActiveExact(scope.spaceId(), normalizedTerm).orElse(null);
         if (dictionaryTerm != null) {
             return new TermExplanationResponse(
                     term,
@@ -55,6 +62,21 @@ public class MeetingTermExplanationService {
                     false,
                     null,
                     "local-glossary"
+            );
+        }
+
+        // 구독하지 않은 분야는 조회 단계에서 제외되므로 AI 컨텍스트로도 넘어가지 않는다.
+        SharedGlossaryStore.SharedGlossaryMatch sharedTerm =
+                sharedGlossaryStore.findSubscribedActiveExact(scope.spaceId(), normalizedTerm).orElse(null);
+        if (sharedTerm != null) {
+            return new TermExplanationResponse(
+                    term,
+                    sharedTerm.definition(),
+                    "glossary",
+                    List.of(new AiSource(sharedTerm.termId(), "glossary", sharedTerm.categoryName(), sharedTerm.definition())),
+                    false,
+                    null,
+                    "shared-glossary"
             );
         }
 

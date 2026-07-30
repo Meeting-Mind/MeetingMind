@@ -12,7 +12,7 @@ MeetingMind의 AWS 아키텍처 기준 문서다. 이전의 `architecture-aws-ec
 1. **인증된 사용자**는 브라우저로만 접근하고 액세스 토큰을 보유하지 않는다. 세션은 BFF가 발급한 opaque 쿠키뿐이다.
 2. **React SPA (Vite + TypeScript)** 가 회의·리포트·지식 화면을 제공한다.
 3. **MeetingMind Web API**는 same-origin `/api` 경로만 사용한다. 세션 쿠키 + CSRF로 호출하고 브라우저는 Core/Auth/AI를 직접 호출하지 않는다.
-4. **Edge (NonProd smoke 배포)** — 외부 가비아 DNS의 `app.meetingmind.co.kr`, 기존 `us-east-1` ACM 인증서, CloudFront와 OAC 기반 private S3 정적 origin을 사용한다. `/api/*`와 token-protected `/ws/egress-audio/*`만 ALB origin으로 전달한다. Route 53/WAF와 Terraform-managed ACM 발급은 정식 release gate에 남아 있다.
+4. **Edge (NonProd smoke 배포)** — `app.meetingmind.co.kr`, 기존 `us-east-1` ACM 인증서, CloudFront와 OAC 기반 private S3 정적 origin을 사용한다. `/api/*`와 token-protected `/ws/egress-audio/*`만 ALB origin으로 전달한다. DNS는 Route 53 퍼블릭 호스팅 영역이 담당하고 `app`은 CloudFront ALIAS(A/AAAA)다. 도메인 등록만 가비아에 남아 있다. WAF와 Terraform-managed ACM 발급은 정식 release gate에 남아 있다.
 5. **퍼블릭 서브넷 (2 AZ)** — Public ALB가 유일한 진입점이다. `/api/*`는 BFF 타깃 그룹으로, `/ws/egress-audio/*`는 Realtime STT 타깃 그룹으로 라우팅한다. Internet Gateway가 퍼블릭 라우트를, NAT Gateway가 프라이빗 서브넷 아웃바운드를, VPC 엔드포인트가 S3 게이트웨이와 ECR/Logs/Secrets 인터페이스를 담당한다.
 6. **프라이빗 앱 서브넷 (2 AZ)** — ECS Fargate 클러스터. 모든 서비스가 여기서만 돌고 서비스마다 태스크 롤·보안 그룹·CloudWatch 로그 그룹이 분리된다.
 7. **Session** — `Web BFF`(`:8081`)가 opaque 세션 쿠키와 CSRF를 관리하고, 허용 목록 경로만 내부 서비스로 프록시한다. Token Vault는 KMS 봉투 암호화를 사용한다.
@@ -36,7 +36,8 @@ MeetingMind의 AWS 아키텍처 기준 문서다. 이전의 `architecture-aws-ec
 ## 현재 배포 상태와 게이트
 
 - CloudFront, private S3/OAC, custom viewer domain과 `/api/*`·`/ws/egress-audio/*` ALB origin은 NonProd deployment smoke로 배포됐다.
-- ALB는 CloudFront origin-facing managed prefix list만 HTTP origin으로 허용한다. 별도 ALB HTTPS listener, WAF, Route 53, Terraform-managed ACM lifecycle은 아직 정식 release gate에 남아 있다.
+- Route 53 퍼블릭 호스팅 영역이 `meetingmind.co.kr` DNS를 담당한다. `infra/aws/environments/dns`가 소유하며, 환경 root보다 오래 사는 자원이라 nonprod-v2와 분리했다.
+- ALB는 CloudFront origin-facing managed prefix list만 HTTP origin으로 허용한다. 별도 ALB HTTPS listener, WAF, Terraform-managed ACM lifecycle은 아직 정식 release gate에 남아 있다.
 - Realtime STT는 ALB의 HTTPS `8083` target과 HTTP `9083` readiness target을 사용한다. 공개 경로는 `/ws/egress-audio/*` 하나뿐이며 token 없는 handshake는 `403`으로 닫힌다.
 
 ECS 서비스는 정의만으로 뜨지 않고 게이트를 통과해야 desired count가 올라간다.

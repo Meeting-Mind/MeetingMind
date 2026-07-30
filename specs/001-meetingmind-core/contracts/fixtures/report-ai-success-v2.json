@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "summary": [
+    {
+      "text": "QA 마감일을 확정했습니다.",
+      "sourceIds": ["segment-1"]
+    }
+  ],
+  "decisions": [
+    {
+      "title": "QA 마감 확정",
+      "rationale": null,
+      "sourceIds": ["segment-1"]
+    }
+  ],
+  "actionItems": [],
+  "sources": [
+    {
+      "sourceId": "segment-1",
+      "type": "transcript",
+      "title": "온프레 회의",
+      "speaker": "민지",
+      "time": "00:01:00",
+      "startMs": 60000,
+      "endMs": 65000,
+      "text": "QA 마감일을 확정했다."
+    }
+  ],
+  "droppedCount": 0,
+  "unsupported": false,
+  "unsupportedReason": null,
+  "model": "qwen2.5-14b-instruct-awq",
+  "usage": null
+}

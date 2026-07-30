@@ -169,6 +169,8 @@ public abstract class WorkspaceStore {
 
     abstract List<TranscriptSegment> findTranscriptSegments(String meetingId);
 
+    abstract List<String> findTranscriptProjectionCandidateMeetingIds(int limit);
+
     abstract void replaceTranscriptProjection(
             String meetingId,
             List<MeetingSpeaker> speakers,

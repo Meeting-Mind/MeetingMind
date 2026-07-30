@@ -32,7 +32,7 @@ function linkedNodes(node: GraphNodeVM, links: GraphLinkVM[]): GraphNodeVM[] {
   return neighbors.sort((a, b) => b.connectionCount - a.connectionCount);
 }
 
-/** 노드 선택 시 우측 슬라이드 프리뷰. projectKnowledge 노드는 본문까지 조회한다. */
+/** 노드 선택 시 우측 슬라이드 프리뷰. projectKnowledge는 본문, glossary는 정의를 보여준다. */
 export function NotePreviewPanel({
   spaceId,
   node,
@@ -86,6 +86,16 @@ export function NotePreviewPanel({
               <p className="mb-3 whitespace-pre-wrap text-xs leading-relaxed text-[var(--app-text)]">
                 {detailQuery.data.content}
               </p>
+            ) : null}
+            {!detailQuery.data && node.description ? (
+              <div className="mb-3">
+                <div className="mb-1 text-[10.5px] font-extrabold uppercase tracking-wider text-[var(--app-subtle)]">
+                  정의
+                </div>
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--app-text)]">
+                  {node.description}
+                </p>
+              </div>
             ) : null}
             {detailQuery.isError ? (
               <p className="mb-3 text-xs text-[var(--app-danger-text)]">본문을 불러오지 못했습니다.</p>

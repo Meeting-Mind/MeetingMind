@@ -96,6 +96,7 @@ Space의 RAG source를 의미 유사도 기준으로 묶어 Knowledge 화면에 
 ### Data Scope
 
 - active embedding generation의 `projectKnowledge` source와 권한 통과 meeting-owned source만 사용한다.
+- Space 등록 ACTIVE 용어와 구독 분야의 공용 ACTIVE 용어는 embedding 여부와 무관하게 `glossary` node로 함께 반환한다. 동명 용어는 Space 정의를 우선한다.
 - raw RAG chunk는 반환하지 않는다. 하나의 source에 여러 chunk가 있으면 source centroid로 집계한다.
 - cluster는 저장 entity가 아니라 현재 active embedding snapshot에서 계산하는 read model이다.
 
@@ -113,6 +114,7 @@ Space의 RAG source를 의미 유사도 기준으로 묶어 Knowledge 화면에 
           "id": "knowledge-001",
           "sourceType": "projectKnowledge",
           "title": "권한 설계 메모",
+          "description": null,
           "sourceMeetingId": null,
           "embeddingStatus": "COMPLETED"
         }
@@ -130,6 +132,11 @@ Space의 RAG source를 의미 유사도 기준으로 묶어 Knowledge 화면에 
 }
 ```
 
+`glossary` node는 `title`에 용어명, `description`에 정의를 반환하고 embedding 전에는
+`embeddingStatus=null`이다. 의미 유사도 edge는 용어 embedding 색인 이후에 생성할 수
+있으며, RDS의 `knowledge_graph_edges`에 저장된 보조 연결은 embedding 여부와 무관하게
+양 끝 노드가 현재 권한 범위에 모두 보일 때 같은 `from`/`to`/`similarity` 형식으로 합친다.
+
 ### Errors
 
 - `403 SPACE_ACCESS_DENIED`: SpaceMember가 아님
@@ -138,7 +145,8 @@ Space의 RAG source를 의미 유사도 기준으로 묶어 Knowledge 화면에 
 
 ### Notes
 
-- 유사도 threshold와 cluster 알고리즘은 AI 서버의 내부 구현이다. 현재 active source centroid cosine similarity `0.78` 이상 edge의 connected component를 cluster로 사용한다. API는 cluster label, source node, edge만 노출한다.
+- 유사도 threshold와 cluster 알고리즘은 AI 서버의 내부 구현이다. 현재 active source centroid cosine similarity `0.45` 이상이며 노드별 상위 3개 edge의 connected component를 cluster로 사용한다. API는 cluster label, source node, edge만 노출한다.
+- 저장 보조 연결은 별도 edge type을 응답에 추가하지 않는다. Core는 AI 엣지를 우선하고 같은 무방향 node pair의 저장 엣지는 중복 추가하지 않는다.
 - sourceMeetingId는 사용자가 해당 원본 회의를 읽을 수 있을 때만 반환한다.
 
 ## GET /api/v1/spaces/{spaceId}/knowledge/{knowledgeId}
@@ -381,6 +389,7 @@ Space 용어사전 목록을 조회한다.
 ### Data Scope
 
 - Space DomainTerm scope
+- Space가 구독 중인 SharedDomainTerm scope
 
 ### Query
 
@@ -401,7 +410,22 @@ Space 용어사전 목록을 조회한다.
       "term": "pgvector",
       "definition": "PostgreSQL에서 vector similarity search를 지원하는 확장입니다.",
       "status": "ACTIVE",
-      "updatedAt": "2026-07-09T10:00:00+09:00"
+      "updatedAt": "2026-07-09T10:00:00+09:00",
+      "source": "SPACE",
+      "categoryId": null,
+      "categoryName": null,
+      "editable": true
+    },
+    {
+      "id": "shared-term-it-software-001",
+      "term": "API",
+      "definition": "응용 프로그램 간 기능과 데이터를 요청하는 규약입니다.",
+      "status": "ACTIVE",
+      "updatedAt": "2026-07-09T10:00:00+09:00",
+      "source": "SHARED",
+      "categoryId": "glossary-category-it-software",
+      "categoryName": "IT/소프트웨어",
+      "editable": false
     }
   ]
 }
@@ -425,6 +449,31 @@ Space 용어사전 목록을 조회한다.
 ### Notes
 
 - Meeting AI 용어 설명은 이 목록 또는 indexed term cache를 우선 사용한다.
+- `status=ARCHIVED` 조회에는 Space 보관 용어만 반환한다.
+- 공용 용어는 읽기 전용이며 PATCH/DELETE 대상이 아니다.
+
+## GET /api/v1/glossary/categories
+
+Space 생성에서 선택할 활성 공용 용어 분야를 조회한다.
+
+### Auth and Permissions
+
+- 인증 필요
+
+### Response
+
+```json
+{
+  "categories": [
+    {
+      "id": "glossary-category-it-software",
+      "slug": "it-software",
+      "name": "IT/소프트웨어",
+      "description": "소프트웨어 개발과 서비스 운영에서 쓰이는 용어."
+    }
+  ]
+}
+```
 
 ## POST /api/v1/spaces/{spaceId}/terms
 
@@ -610,7 +659,7 @@ None.
 선택적 query parameter:
 
 - `query`: 제목·요약 검색어
-- `nodeTypes[]`: `MEETING`, `REPORT`, `DECISION`, `ACTION`, `TASK`, `PROJECT_KNOWLEDGE`, `TOPIC`, `PARTICIPANT`
+- `nodeTypes[]`: `MEETING`, `REPORT`, `DECISION`, `ACTION`, `TASK`, `PROJECT_KNOWLEDGE`, `GLOSSARY`, `TOPIC`, `PARTICIPANT`
 - `statuses[]`: 원본 엔티티의 canonical status
 - `meetingIds[]`: 요청 범위. 서버가 계산한 `allowedMeetingIds`와 교집합 처리한다.
 - `dateFrom`, `dateTo`: ISO-8601 instant 범위
@@ -634,6 +683,7 @@ None.
       "meetingId": "meeting-001",
       "title": "베타 출시 일정 확정",
       "summary": "다음 달 둘째 주에 베타를 시작한다.",
+      "description": null,
       "status": "CONFIRMED",
       "occurredAt": "2026-07-24T06:00:00Z",
       "clusterIds": ["cluster-topic-ai-search"],
@@ -675,7 +725,8 @@ ID 내부를 파싱하지 않고 `entityId`, `nodeType`, `detailTarget`을 사�
 ### Node and Edge Types
 
 노드 타입은 `MEETING`, `REPORT`, `DECISION`, `ACTION`, `TASK`,
-`PROJECT_KNOWLEDGE`, `TOPIC`, `PARTICIPANT`다. `PARTICIPANT`는 아래 개인정보
+`PROJECT_KNOWLEDGE`, `GLOSSARY`, `TOPIC`, `PARTICIPANT`다. `GLOSSARY`는
+Space의 통합 ACTIVE 용어 read model이며 `description`에 정의를 포함한다. `PARTICIPANT`는 아래 개인정보
 결정이 확정되기 전까지 응답에서 제외한다.
 
 엣지 타입은 `MEETING_DERIVED_REPORT`, `MEETING_DERIVED_DECISION`,
@@ -683,6 +734,10 @@ ID 내부를 파싱하지 않고 `entityId`, `nodeType`, `detailTarget`을 사�
 `REPORT_PUBLISHED_KNOWLEDGE`, `SHARED_TOPIC`, `KNOWLEDGE_REFERENCED_BY`,
 `PARTICIPANT_INVOLVED`다. 임베딩 유사도 엣지는 `SEMANTIC_SIMILARITY`로 구분하며,
 도메인 관계와 같은 의미로 취급하지 않는다.
+
+현재 호환 응답의 RDS 저장 연결은 `edgeType`을 노출하지 않고 기존
+`from`, `to`, `similarity`만 반환한다. 이 행은 Space 범위로 저장되며 Core가 권한 필터를
+적용한 뒤 양 끝 노드가 모두 보이는 경우에만 응답에 포함한다.
 
 ### Cluster Rules
 

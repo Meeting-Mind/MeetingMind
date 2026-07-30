@@ -89,7 +89,9 @@ public class SpaceController {
         WorkspaceDomainService.SpaceCreationResult result = workspaceDomainService.createSpace(
                 user.id(),
                 request.name(),
-                request.description()
+                request.description(),
+                request.glossaryCategoryIds(),
+                request.customGlossaryCategories()
         );
         return new CreateSpaceResponse(
                 result.space().id(),

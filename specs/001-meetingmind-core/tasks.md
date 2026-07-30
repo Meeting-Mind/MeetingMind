@@ -1124,6 +1124,18 @@ Landing 단계의 실제 적용 스타일을 새 design-taste 기준과 MeetingM
 - [x] T450 [audit/coverage] [owner: Claude] `#56` 유입분의 검증 커버리지를 실측한다. `cert-loader`(Go)와 `ai/envoy`는 CI job이 실제로 test/vet과 실기동까지 덮고 있어 공백이 아니었다. 실제 공백은 `application-mtls.yml` 4종(어떤 테스트도 프로파일을 활성화하지 않음)과 `infra/aws` Terraform(CI job 부재)이다. 부수로 SnakeYAML 중복키 전수 검사를 수행해 YAML 26개가 통과했다.
 - [ ] T450.1 [test/mtls] [owner: Infra/Deploy] [depends: T450] `application-mtls.yml` 4종의 Spring context 기동을 검증한다. CI가 envoy에서 하듯 self-signed 인증서를 만들어 프로파일을 활성화하고 context가 뜨는지 확인한다. YAML 파싱 통과는 property binding 성공을 뜻하지 않는다. 배포 인프라 영역이므로 해당 담당자가 진행한다.
 - [ ] T450.2 [ci/terraform] [owner: Infra/Deploy] [depends: T450] `infra/aws` Terraform에 `fmt`/`validate` CI job을 추가한다. 현재 terraform job 자체가 없다. 배포 인프라 영역이므로 해당 담당자가 진행한다.
+
+## M153 Contextual RAG Answer Quality
+
+### Milestone Goal
+
+후속 질문과 질문 의도에 맞는 근거 회수율을 높이고, 개선 전후를 실제 검색 단계에서 검증한다.
+
+- [x] T456 [contracts/data] [owner: Codex] [agent: Codex] Meeting AI history와 contextual multi-query retrieval 계약을 `contracts/ai-api.md`, `data-model.md`, `plan.md`에 고정한다.
+- [x] T457 [backend/history] [owner: Codex] [agent: Codex] [depends: T456] `(meetingId,userId)` Meeting AI history persistence와 최근 10개 internal request 전달을 구현한다. 예상 파일: `backend/src/main/java/**`, `backend/src/main/resources/db/migration/V31__create_meeting_ai_messages.sql`, Backend tests.
+- [x] T458 [ai/retrieval] [owner: Codex] [agent: Codex] [depends: T456,T457] raw/contextual query fusion, summary/decision/action intent source 우선순위, 후보 확대와 중복 제거를 기존 PostgreSQL/in-memory retriever 위에 구현한다. 예상 파일: `ai/app/main.py`, `ai/tests/**`.
+- [x] T459 [verification] [owner: Codex] [agent: Codex] [depends: T457,T458] 후속 질문, paraphrase, 의도별 source, 근거 없음, cross-scope 회귀와 Backend/AI 전체 테스트를 실행하고 `implement.md`에 결과를 기록한다.
+- [ ] T460 [ops/calibration] [owner: AI/Deploy] [depends: T459] 배포 후 실제 한국어 질문 세트로 `unsupportedReason`, contextual query 사용률, 근거 적중률을 비교하고 threshold 조정 또는 transcript chunk 재색인 필요성을 결정한다. 고정 threshold를 증거 없이 낮추지 않는다.
 - [x] T449 [smoke/report-generate] [owner: Claude] [depends: T445] `SMK-003` 잔여: 회의록 **본문** AI 생성 경로(`/api/internal/meeting-ai/generate-report`)를 실 provider로 검증한다. 이 endpoint는 자체 검색을 하지 않고 Backend가 전달한 source만 쓴다. 실제 transcript 37건으로 양성 1건, scope 가드 음성 2건(다른 회의 source 혼입, 허용되지 않은 source type)을 확인한다. 응답 필드가 `supported`가 아니라 `unsupported`라는 점에 주의한다.
 - [x] T448 [smoke/project-ai] [owner: Claude] [depends: T447] `SMK-004`: Project AI가 확정 회의록을 근거로 답하고 citation을 붙이는지 실 provider로 검증한다. 양성 2건(서로 다른 Space)과 음성 3건(`LOW_RELEVANCE`, `NO_EVIDENCE`, 교차 Space)을 함께 둔다. unsupported 응답이 `sources`를 비우므로 응답 단정만으로는 검색 누출 여부를 구분할 수 없어, `PostgresRagRetriever`를 직접 호출해 모델과 무관하게 scope 강제를 확인한다. Backend public 경로 end-to-end는 범위 밖이다.
 - [x] T447 [smoke/embedding-worker] [owner: Claude] [depends: T445] `SMK-003` provider tier: embedding worker가 `REPORT_CONFIRMED` 작업을 실제로 소비해 `embedding_chunks`에 `source_type='report'`로 적재하는지 실 provider(OpenAI `text-embedding-3-small`, 1536차원)로 검증한다. worker는 미구현이 아니라 **local에서 실행 경로가 없는 것**이 문제였다. `scripts/run-ai.sh`는 FastAPI app만 띄우고 `compose.local.yml`의 `meetingmind-ai-worker`는 `profiles: ["ai"]` 뒤에 있어 기본 `up`으로 뜨지 않는다. `scripts/run-embedding-worker.sh`를 추가해 실행 경로를 만든다.
@@ -1144,3 +1156,76 @@ Perl이 없는 공식 Python 3.12.13 / Alpine 3.24 runtime으로 전환해 NonPr
 | T436 | [x] | ci/security-gate | Codex | Codex | T435 | `.github/workflows/ci.yml` | AI image에 한해 `--ignore-unfixed` 없는 Trivy HIGH/CRITICAL gate를 적용해 ECR과 다른 false-pass를 막는다. | local final image 전체 HIGH/CRITICAL 0, CI AI command 정적 검토와 `git diff --check` 통과. |
 | T437 | [x] | ecr/security-scan | 사용자+Codex | Codex | T436, 사용자 push 승인 | ECR `meetingmind-nonprod-v2-ai`, 새 immutable tag | 사용자 승인 후 local-scanned single ARM64 manifest를 push하고 returned child digest로 scan을 조회한다. | ECR tag `c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`가 동일 digest `sha256:c3ee717afe7da78823d13779bbda0956834fe815c7f7f7ab1c29209dd6dd45be`로 등록됐고 scan `COMPLETE`, findings `[]`, severity `{}`이다. |
 | T438 | [x] | docs/closeout | Codex | Codex | T437 | `specs/001-meetingmind-core/{tasks,implement}.md`, `.specify/memory/session-handoff.local.md` | 실제 image digest, size, test, Trivy, ECR 결과와 남은 MEDIUM/LOW를 기록한다. | 실행 결과가 문서와 일치하고 Terraform/ECS/runtime 미변경 및 미실행 사유가 남아 있다. |
+
+## M154 Grounded Summary-only Report Generation
+
+### Milestone Goal
+
+검증 가능한 요약만 있는 회의도 저장하고, AI/Core/Frontend의 회의록 응답 계약과 실패 사유를 일치시킨다.
+
+- [x] T461 [contracts] [owner: Codex] [agent: Codex] AI 내부 `schemaVersion: 2` 구조화 응답, Core Markdown 조립, summary-only 성공 조건, public 실패 사유 계약을 `contracts/{ai-api,meeting-api,report-format}.md`와 `plan.md`에 고정한다.
+- [x] T462 [ai] [owner: Codex] [agent: Codex] [depends: T461] `GenerateReportResponse`에 `schemaVersion: 2`를 명시하고 근거 요약 배열/선택적 decision-action/unsupported reason 계약을 유지한다.
+- [x] T463 [backend] [owner: Codex] [agent: Codex] [depends: T461,T462] 신규 DTO, rolling v1 호환 어댑터, Core citation 재검증, summary-only candidate 저장, deterministic Markdown과 `unsupportedReason`/`droppedCount` 전달을 구현한다.
+- [x] T464 [frontend] [owner: Codex] [agent: Codex] [depends: T463] 실패 사유별 안내, 비정상 `candidate=null` 계약 오류 처리, 제외 항목 수 알림을 연결한다.
+- [x] T465 [verification] [owner: Codex] [agent: Codex] [depends: T462,T463,T464] AI 217건(외부 조건 7 skip), Backend 233건(환경 조건 15 skip), Frontend 101건과 production build, `git diff --check`를 통과하고 결과를 `implement.md`에 기록한다.
+- [ ] T466 [deploy] [owner: AI/Backend Deploy] [depends: T465] 호환 Core -> schema v2 AI 순서로 배포하고 summary-only 실제 회의를 검증한 뒤 다음 release에서 v1 어댑터 제거 여부를 결정한다.
+
+## M155 Multi-participant Live STT
+
+### Milestone Goal
+
+회의 참가자별 microphone track egress/STT session을 동시에 허용하고, 마지막 활성 session의 종료
+전까지 회의 단위 transcript가 `PROCESSING`을 유지되도록 한다.
+
+| ID | Status | Area | Owner | Agent | Depends On | Files | Task | Completion |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T467 | [x] | backend/stt-start | Backend owner | Codex | T302 | `WorkspaceDomainService.java`, `MeetingTranscriptionController.java`, 관련 테스트 | Core `PROCESSING` start를 멱등 처리하고 remote의 선제 409를 제거한다. | 두 번째 참가자가 기존 transcript를 공유하면서 자기 track용 gateway session을 시작한다. |
+| T468 | [x] | backend/stt-lifecycle | Backend owner | Codex | T467 | Backend/STT `SttSessionRegistry.java`, `InternalTranscriptionController.java`, 관련 테스트 | 다른 활성 session이 남아 있으면 개별 stop/fail/reaper가 aggregate를 terminal로 바꾸지 않게 한다. | in-process, remote, cross-Pod row 경로에서 첫 session 종료 후 PROCESSING이 유지되고 마지막 session만 terminal 전이를 만든다. |
+| T469 | [x] | stt/segment-order | STT owner | Codex | T467 | `TranscriptionCoordinator.java`, `MeetingTranscriptRepository.java`, 관련 테스트 | 여러 session의 final segment sequence 계산을 회의 transcript row lock으로 직렬화한다. | sequence 조회·저장이 같은 pessimistic-write transaction 경계 안에서 수행된다. |
+| T470 | [ ] | verification/stt | Integration owner | Codex | T467,T468,T469 | Backend/STT 테스트, `specs/001-meetingmind-core/{contracts/live-stt-api,implement}.md` | 단위·통합 테스트와 2-user NonProd smoke 결과를 기록한다. | 자동 회귀가 통과하고 실제 두 참가자 발화/첫 퇴장 후 지속/마지막 퇴장 완료가 확인된다. |
+
+## M156 Persisted Knowledge Graph Edges
+
+### Milestone Goal
+
+NonProd Knowledge 노드 사이의 보조 연결을 RDS에 유지하고, 현재 사용자의 권한 범위에
+양 끝 노드가 모두 보일 때 기존 그래프 응답에 합친다.
+
+- [x] T471 [contracts/data] [owner: Codex] [agent: Codex] `knowledge_graph_edges`의 Space 범위, 무방향 canonical pair, runtime SELECT-only 권한과 기존 `from/to/similarity` 응답 호환을 문서화한다.
+- [x] T472 [backend] [owner: Codex] [agent: Codex] [depends: T471] V34 테이블, 저장 엣지 조회 store, 권한 필터 후 endpoint 검증과 AI 엣지 우선 중복 제거를 구현한다.
+- [x] T473 [data/nonprod] [owner: Codex] [agent: Codex] [depends: T472] NonProd RDS의 현재 embedding/통합 용어 노드를 결정적 순서로 연결하고 삽입 결과를 검증한다.
+- [x] T474 [deploy/verification] [owner: Codex] [agent: Codex] [depends: T473] Backend 전체/마이그레이션 테스트, Core 이미지 scan/ECR, V34 적용, ECS rollout, 공개 smoke와 Terraform drift 결과를 기록한다.
+
+## M157 AI Report Fast Relaxation
+
+### Milestone Goal
+
+AI Report의 근거 검증과 단일 회의 권한 경계는 유지하면서, 긴 회의가 앞쪽 source 12개에
+편중되어 후보 생성에 실패하는 비율을 가장 작은 변경으로 낮춘다. 이 milestone은 로컬 구현과
+검증까지만 수행하며 배포 환경에는 적용하지 않는다.
+
+- [x] T475 [contract] [owner: Codex] [agent: Codex] 최대 24개 source, score 우선/무점수 균등 표본, 기존 citation·권한·확정 기준 유지 정책을 문서화한다.
+- [x] T476 [ai/report] [owner: Codex] [agent: Codex] [depends: T475] report provider context가 무점수 source를 전체 순서에서 최대 24개까지 균등 선별하도록 구현하고 score 기반 우선순위를 유지한다.
+- [x] T477 [verification] [owner: Codex] [agent: Codex] [depends: T476] 긴 무점수 transcript와 score source 회귀 테스트, AI 전체 테스트와 compile 검증 결과를 기록한다. 배포는 실행하지 않는다.
+
+## M158 AI Report Guaranteed Draft Pipeline
+
+### Milestone Goal
+
+현재 회의 전사가 하나 이상이면 AI 직접 생성, 긴 회의 계층 합성, 또는 전사 발췌 fallback 중 하나로
+항상 검토 가능한 candidate를 만들고 생성 품질을 사용자에게 숨기지 않는다.
+
+- [x] T478 [contract] [owner: Codex] [agent: Codex] generation mode, degraded warning, 전체 요청당 구조 검증 재시도 1회, 전사 발췌 fallback 기준을 문서화한다.
+- [x] T479 [ai/report] [owner: Codex] [agent: Codex] [depends: T478] 24개 단위 병렬 map, 원본 citation 기반 reduce, 구조 실패 1회 재시도와 결정적 fallback을 구현한다.
+- [x] T480 [core/frontend] [owner: Codex] [agent: Codex] [depends: T479] Core가 생성 품질 metadata를 전달하고 Frontend가 계층 합성·fallback 경고를 표시한다.
+- [x] T481 [verification/deploy] [owner: Codex] [agent: Codex] [depends: T480] AI/Core/Frontend 전체 회귀, 이미지 scan, NonProd rollout과 공개 smoke를 완료한다.
+
+## M159 Google Sign-in E2E CI Environment
+
+### Milestone Goal
+
+개인 `frontend/.env`나 운영 Google OAuth 설정을 저장소에 포함하지 않고도 Google callback 회귀
+테스트가 CI의 격리된 Frontend 서버에서 결정적으로 실행되도록 한다.
+
+- [x] T482 [frontend/test-config] [owner: Codex] [agent: Codex] Playwright Frontend web server에 테스트 전용 `VITE_GOOGLE_CLIENT_ID` placeholder를 주입한다. 애플리케이션 코드, 로컬 `.env`, 운영 OAuth 설정은 변경하지 않는다.
+- [x] T483 [verification] [owner: Codex] [agent: Codex] [depends: T482] 실패했던 Google callback 시나리오와 전체 Playwright suite를 CI 모드에서 재실행하고 결과를 `implement.md`에 기록한다.

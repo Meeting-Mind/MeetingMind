@@ -221,9 +221,9 @@ Valkey IAM+TLS를 유지한다. ALB HTTP origin은 AWS-managed CloudFront origin
 list에서만 접근할 수 있고, `app.meetingmind.co.kr`가 private S3/OAC 정적 asset, `/api/*`
 BFF origin과 token-protected `/ws/egress-audio/*` Realtime STT origin을 same-origin으로 제공한다. 기존 ACM 인증서는 CloudFront 요구사항에 따라
 `us-east-1`에 있어야 한다. 이 root는 CloudFront alias, 인증서 참조, `TLSv1.2_2021`만 관리하고
-가비아의 `app` CNAME과 ACM 발급·DNS 검증 레코드는 외부 관리 상태로 둔다. Realtime STT public
+DNS 레코드는 `environments/dns`가 소유한다. ACM 발급·DNS 검증은 아직 외부 관리 상태다. Realtime STT public
 WebSocket은 `PUBLIC_WS_BASE_URL`, session-bound HMAC token, CloudFront-only ALB ingress를 모두 요구하며
-그 밖의 STT public route는 열지 않는다. Route 53, Terraform-managed ACM, WAF 정식 정책, autoscaling,
+그 밖의 STT public route는 열지 않는다. Terraform-managed ACM, WAF 정식 정책, autoscaling,
 SLO와 장애·부하 검증은 이 smoke의 완료 조건이 아니므로 T048/T049/T059와 정식 release gate는
 계속 open이다. `frontend_custom_domain = null`이면 제한된 기본 CloudFront 도메인 fallback을 쓴다.
 Google OAuth client ID는 공개 식별자이므로 Terraform 변수로 task environment에 전달한다. BFF를
@@ -243,13 +243,14 @@ enable_http_smoke_listener = true
 
 ## 10. 아직 이 root가 만들지 않는 것
 
-- Route 53, ACM 인증서 발급·DNS 검증, ALB HTTPS listener와 정식 WAF 정책
+- ACM 인증서 발급·DNS 검증, ALB HTTPS listener와 정식 WAF 정책
+- Route 53 호스팅 영역과 DNS 레코드 (`environments/dns`가 소유한다)
 - custom domain을 포함한 정식 edge release와 LiveKit WSS 검증
 - offline NonProd CA material, TLS bundle secret version과 실제 인증서 발급 (cert-loader delivery/IAM/volume source는 T047-B3에서 구현됨)
 - AI Envoy sidecar와 rotation runbook의 실제 구현
 - Production account/state
 - 기존 수작업 환경 삭제
 
-현재 NonProd custom domain 연결은 외부 가비아 DNS와 기존 ACM 인증서를 전제로 한다. Terraform이
-이 외부 prerequisite 자체를 만들지는 않는다. 기존 환경 삭제는 V2 cutover 및 rollback 관측이
-끝난 뒤 별도 승인으로 수행한다.
+현재 NonProd custom domain 연결은 `environments/dns`의 Route 53 호스팅 영역과, 그 밖에서 발급된
+기존 ACM 인증서를 전제로 한다. 이 root는 인증서 ARN을 `frontend_custom_domain`으로 주입받을 뿐
+발급하지 않는다. 기존 환경 삭제는 V2 cutover 및 rollback 관측이 끝난 뒤 별도 승인으로 수행한다.

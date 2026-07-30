@@ -249,6 +249,17 @@ legacy Backend access token의 subject는 `User.id`다. T034 이후 목표 Auth 
 
 Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개를 시간순으로 반환하고, 다음 AI 요청에는 최근 10개만 비신뢰 대화 문맥으로 전달한다. 이력은 RAG source나 citation이 아니므로 현재 요청의 권한 scope와 source allowlist를 대체할 수 없다.
 
+### MeetingAiMessage
+
+- `id`
+- `meetingId`
+- `userId`: 대화를 생성한 인증 사용자
+- `role`: USER, ASSISTANT
+- `content`
+- `createdAt`
+
+Meeting AI 이력은 `(meetingId, userId)`로 격리한다. 다음 AI 요청에는 최근 10개만 시간순으로 전달한다. 이력은 후속 질문의 생략된 대상을 복원하기 위한 비신뢰 검색 문맥이며 RAG source나 citation이 아니다. Core는 현재 요청마다 회의 접근 권한을 먼저 확인하고, AI 검색 SQL은 이력 내용과 무관하게 동일한 단일 `meetingId` scope를 강제한다.
+
 ### DomainTerm
 
 - `id`
@@ -259,6 +270,46 @@ Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개
 - `createdAt`
 - `updatedAt`
 - `archivedAt`
+
+### GlossaryCategory
+
+- `id`
+- `slug`: 전역 unique
+- `name`
+- `description`
+- `displayOrder`
+- `status`: ACTIVE, ARCHIVED
+
+### SharedDomainTerm
+
+- `id`
+- `categoryId`
+- `term`
+- `definition`
+- `status`: ACTIVE, ARCHIVED
+- `createdAt`
+- `updatedAt`
+- `archivedAt`
+
+### SpaceGlossaryCategory
+
+- `spaceId`
+- `categoryId`
+- `enabled`
+- `updatedAt`
+- `updatedByUserId`
+
+기존 Space는 행이 없으면 모든 활성 분야를 구독한다. 신규 Space가 생성 요청에 분야 배열을 명시하면 활성 분야 전체에 대해 선택 여부를 저장한다.
+
+### SpaceCustomGlossaryCategory
+
+- `id`
+- `spaceId`
+- `name`: Space 안에서 대소문자 무시 unique
+- `createdAt`
+- `createdByUserId`
+
+사용자 정의 분야는 Space 분류 정보이며 전역 `GlossaryCategory`나 `SharedDomainTerm`과 연결되지 않는다.
 
 ### EmbeddingChunk
 
@@ -299,11 +350,26 @@ Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개
 
 ### KnowledgeGraph (Read Model)
 
-- 영속 entity를 추가하지 않는다. Space의 active `EmbeddingChunk`를 요청 시 source 단위 centroid로 집계하는 API projection이다.
+- Space의 active `EmbeddingChunk`를 요청 시 source 단위 centroid로 집계하고, RDS의
+  `KnowledgeGraphEdge` 보조 연결을 권한 필터 뒤에 합치는 API projection이다. 그래프 노드와
+  클러스터는 영속 entity로 만들지 않는다.
 - `KnowledgeCluster`: `id`, `label`, `sourceCount`, `nodes[]`
 - `KnowledgeGraphNode`: `id`, `sourceType`, `title`, `sourceMeetingId`, `embeddingStatus`
 - `KnowledgeGraphEdge`: `from`, `to`, `similarity`
 - Core permission prefilter 이후 AI가 전달받은 `spaceId`, `allowedMeetingIds`를 SQL scope에 강제한다. 원본 chunk content/vector와 권한 없는 meeting source는 응답에 포함하지 않는다.
+
+### KnowledgeGraphEdge
+
+- `id`
+- `spaceId`
+- `fromNodeId`: 정렬된 두 graph node ID 중 작은 값
+- `toNodeId`: 정렬된 두 graph node ID 중 큰 값
+- `similarity`: 0.0~1.0
+- `createdAt`
+
+`KnowledgeGraphEdge`는 Space별 무방향 보조 연결만 저장한다. node ID가 다형 read-model ID라
+물리 FK를 만들지 않으며, 조회 시 현재 그래프에 존재하고 사용자 권한으로 보이는 양 끝점만
+합친다. `(spaceId, fromNodeId, toNodeId)`는 unique이고 Core runtime role은 SELECT만 갖는다.
 
 ### Data Constraints
 
@@ -347,6 +413,7 @@ Project AI 이력은 `(spaceId, userId)`로 격리한다. 목록은 최신 50개
 - `DomainTerm(spaceId, term)`은 active term 기준 unique다.
 - `ProjectAiMessage(spaceId, userId, createdAt)` index는 사용자별 Space 대화 조회에 사용한다.
 - `EmbeddingChunk(spaceId, scope, sourceType, sourceId)`는 RAG 권한 필터와 재색인을 위해 index를 둔다.
+- `KnowledgeGraphEdge(spaceId, fromNodeId, toNodeId)`는 unique이며 `fromNodeId < toNodeId`를 강제한다.
 - `EmbeddingJob`은 `projectKnowledgeId`, `meetingId`, `attachmentId` 중 정확히 하나만 참조해야 한다.
 - `EmbeddingJob(projectKnowledgeId, generation)`, `EmbeddingJob(meetingId, generation)`, `EmbeddingJob(attachmentId, generation)`은 source별 unique다.
 - 동일 source의 active `EmbeddingChunk`는 최신 완료 generation만 사용한다. 새 generation 완료 전에는 기존 active chunk를 유지한다.
@@ -360,6 +427,8 @@ Backend는 아래 논리 구조의 `TranscriptSegment` 원천을 PostgreSQL에 �
 
 STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용 중심으로 쌓인다.
 분리 배포에서 STT DB가 authoritative source이며 Core DB의 `TranscriptSegment`는 report/task/AI/RAG용 derived projection이다. Core는 stop 성공 후 mTLS snapshot을 pull해 meeting 단위로 원자적 교체하고, `source=stt-remote`와 STT의 speaker/segment ID를 보존한다. 물리 relation은 바뀌지 않으며 STT DB로의 FK나 cross-DB join을 추가하지 않는다.
+remote mode의 Core reconciliation은 자신의 `MeetingTranscript` 중 `PROCESSING`, `FAILED`, 또는 segment가 없는 `COMPLETED` 행만 제한된 batch 후보로 선택한다. 새 테이블이나 cross-DB 관계는 추가하지 않고, authoritative snapshot이 terminal일 때만 기존 원자 projection을 재사용한다.
+Core runtime role은 이 원자 교체를 위해 `chunk_source_segments`, `transcript_segments`, `meeting_speakers`의 기존 projection 삭제 권한만 사용한다. AI가 소유하는 chunk provenance 쓰기 권한은 Core에 부여하지 않는다.
 
 - `id`: segment id
 - `meetingId`
@@ -423,6 +492,7 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 
 - Backend가 권한을 평가하고 AI는 전달받은 검색 범위를 SQL에서 강제한다. AI는 SpaceRole 또는 MeetingParticipant를 재평가하지 않는다.
 - vector cosine 후보와 `pg_trgm` 후보는 각각 원점수를 보존하고 RRF로 순위를 결합한다.
+- 후속 질문은 원문 질문과 최근 대화를 결합한 문맥화 질문을 각각 검색하고, 두 결과를 rank fusion한 뒤 의도별 source type 우선순위를 적용한다. 대화 이력은 검색어 해석에만 사용하고 근거로 반환하지 않는다.
 - 관련도 threshold는 embedding model별 설정으로 관리하고 한국어 근거 있음/없음 평가 질의 30-50건으로 보정한다.
 - 근거 0건 또는 관련도 미달이면 LLM을 호출하지 않고 `unsupported=true`를 반환한다.
 - supported 답변은 검색 결과에 존재하는 `sourceIds`를 최소 1개 포함해야 한다. public `sources`에는 실제 인용된 source만 반환한다.
@@ -473,8 +543,8 @@ STT 기반 회의 다이얼로그 원천 데이터는 발화자와 발화 내용
 
 ## Knowledge Graph Read Model Extension
 
-Phase 1에서는 `GraphNode`, `GraphEdge`, `GraphCluster`, `Topic`을 영속 엔티티로
-추가하지 않는다. 기존 Meeting, MeetingReport, Decision, ActionItem, TaskCard,
+Phase 1의 `GraphNode`, `GraphCluster`, `Topic`은 영속 엔티티로 추가하지 않는다. 보조
+연결만 `KnowledgeGraphEdge`에 저장하며, 기존 Meeting, MeetingReport, Decision, ActionItem, TaskCard,
 ProjectKnowledge, DomainTerm와 active `EmbeddingChunk`를 권한 필터링한 뒤 그래프
 read model로 투영한다.
 

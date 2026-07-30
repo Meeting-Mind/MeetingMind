@@ -45,6 +45,76 @@ class WorkspaceDomainServiceTest {
     }
 
     @Test
+    void createSpaceStoresMultipleGlossaryCategoriesAndCustomCategory() {
+        InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
+        InMemorySharedGlossaryStore glossaryStore = new InMemorySharedGlossaryStore();
+        WorkspaceDomainService service = new WorkspaceDomainService(
+                store,
+                new SpaceAccessPolicy(),
+                new MeetingAccessPolicy(new SpaceAccessPolicy()),
+                glossaryStore,
+                FIXED_CLOCK
+        );
+        User owner = store.saveUser(new User(
+                "user-owner", "owner@meetingmind.ai", "Owner", null, "active",
+                FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
+        ));
+        glossaryStore.register("shared-common", "KPI", "공통 지표", "common-business", "공통 비즈니스", 10);
+        glossaryStore.register("shared-finance", "ROE", "자기자본이익률", "finance", "금융", 40);
+
+        WorkspaceDomainService.SpaceCreationResult created = service.createSpace(
+                owner.id(),
+                "MeetingMind",
+                null,
+                List.of("glossary-category-finance"),
+                List.of("반도체 설계")
+        );
+
+        assertThat(glossaryStore.findSubscribedActive(created.space().id(), null))
+                .extracting(SharedGlossaryStore.SharedGlossaryTerm::term)
+                .containsExactly("ROE");
+        assertThat(glossaryStore.customCategories(created.space().id())).containsExactly("반도체 설계");
+    }
+
+    @Test
+    void createSpaceRejectsDuplicateAndUnknownGlossaryCategories() {
+        InMemoryWorkspaceStore store = new InMemoryWorkspaceStore();
+        InMemorySharedGlossaryStore glossaryStore = new InMemorySharedGlossaryStore();
+        WorkspaceDomainService service = new WorkspaceDomainService(
+                store,
+                new SpaceAccessPolicy(),
+                new MeetingAccessPolicy(new SpaceAccessPolicy()),
+                glossaryStore,
+                FIXED_CLOCK
+        );
+        User owner = store.saveUser(new User(
+                "user-owner", "owner@meetingmind.ai", "Owner", null, "active",
+                FIXED_CLOCK.instant(), FIXED_CLOCK.instant()
+        ));
+
+        assertThatThrownBy(() -> service.createSpace(
+                owner.id(), "Duplicate", null,
+                List.of("glossary-category-finance", "glossary-category-finance"),
+                List.of()
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+
+        assertThatThrownBy(() -> service.createSpace(
+                owner.id(), "Unknown", null,
+                List.of("glossary-category-unknown"),
+                List.of()
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+
+        assertThatThrownBy(() -> service.createSpace(
+                owner.id(), "Custom duplicate", null,
+                List.of("glossary-category-finance"),
+                List.of("금융")
+        )).isInstanceOf(AuthorizationException.class)
+                .satisfies(error -> assertAuthz(error, HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+    }
+
+    @Test
     void ownerCreatesMeetingAndBecomesActiveHost() {
         TestContext context = newContext();
         User owner = context.user("user-owner");
@@ -808,6 +878,27 @@ class WorkspaceDomainServiceTest {
     }
 
     @Test
+    void meetingParticipantsShareTheExistingProcessingTranscript() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        User member = context.user("user-member");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        context.store.addSpaceMember(space.space().id(), member.id(), SpaceRole.MEMBER, FIXED_CLOCK.instant());
+        WorkspaceDomainService.MeetingCreationResult meeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Shared STT", SCHEDULED_AT, List.of()
+        );
+        context.service.addMeetingParticipant(owner.id(), meeting.meeting().id(), member.id(), "VIEWER", "member");
+
+        MeetingTranscript hostTranscript = context.service.startMeetingTranscript(
+                owner.id(), meeting.meeting().id(), "soniox-realtime");
+        MeetingTranscript memberTranscript = context.service.startMeetingTranscript(
+                member.id(), meeting.meeting().id(), "soniox-realtime");
+
+        assertThat(memberTranscript).isSameAs(hostTranscript);
+        assertThat(memberTranscript.status()).isEqualTo(TranscriptStatus.PROCESSING);
+    }
+
+    @Test
     void remoteTranscriptProjectionIsIdempotentAndReindexesOnlyChangedCompletedSnapshot() {
         CountingWorkspaceStore store = new CountingWorkspaceStore();
         WorkspaceDomainService service = new WorkspaceDomainService(store, new SpaceAccessPolicy(), FIXED_CLOCK);
@@ -863,6 +954,37 @@ class WorkspaceDomainServiceTest {
                 .isEqualTo("수정된 전사 내용");
         assertThat(store.projectionReplacements).isEqualTo(2);
         assertThat(store.embeddingReindexes).isEqualTo(1);
+    }
+
+    @Test
+    void reconciliationCandidatesIncludeIncompleteAndEmptyCompletedTranscripts() {
+        TestContext context = newContext();
+        User owner = context.user("user-owner");
+        WorkspaceDomainService.SpaceCreationResult space = context.service.createSpace(owner.id(), "MeetingMind", null);
+        WorkspaceDomainService.MeetingCreationResult processingMeeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Processing", SCHEDULED_AT, List.of()
+        );
+        WorkspaceDomainService.MeetingCreationResult completedMeeting = context.service.createMeeting(
+                owner.id(), space.space().id(), "Completed", SCHEDULED_AT.plusHours(1), List.of()
+        );
+        context.service.startMeetingTranscript(owner.id(), processingMeeting.meeting().id(), "soniox-realtime");
+        context.service.startMeetingTranscript(owner.id(), completedMeeting.meeting().id(), "soniox-realtime");
+        context.service.reconcileRemoteMeetingTranscript(
+                completedMeeting.meeting().id(),
+                TranscriptStatus.COMPLETED,
+                List.of(new WorkspaceDomainService.RemoteTranscriptSegment(
+                        "segment-1", "speaker-1", "화자 1", "Owner", 100, 900, "완료된 전사"
+                ))
+        );
+
+        assertThat(context.service.transcriptProjectionCandidateMeetingIds(20))
+                .contains(processingMeeting.meeting().id())
+                .doesNotContain(completedMeeting.meeting().id());
+
+        context.store.replaceTranscriptProjection(completedMeeting.meeting().id(), List.of(), List.of());
+
+        assertThat(context.service.transcriptProjectionCandidateMeetingIds(20))
+                .contains(processingMeeting.meeting().id(), completedMeeting.meeting().id());
     }
 
     private TestContext newContext() {

@@ -2456,3 +2456,150 @@
 - 양성 대조를 함께 둔 이유: GUEST가 자기 회의를 읽을 수 있어야 셋업이 유효하다. 셋업이 잘못돼 모든 접근이 거부되는 상태는 거부 단정만으로는 통과처럼 보이지만 아무것도 증명하지 못한다. 따라서 `meetingDetail(guest, invitedMeeting)`이 성공하는 것을 먼저 단정한다.
 - 범위 한계: 브라우저 기반 수동 확인은 여전히 남는다. 이 테스트가 고정하는 것은 서버 권한 경계이며, UI가 그 경계를 우회하는 경로(예: 클라이언트에만 있는 필터)는 다루지 않는다.
 - 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.GuestSpaceAclNegativeIntegrationTest` -> 1건 실행/0 skip/통과. 전체는 Backend 210건/실패 0/skip 3(provider-gated)다.
+
+## M153 Contextual RAG Answer Quality
+
+- 문제 원인: Meeting AI는 대화형 UI와 달리 현재 질문만 AI에 전달해 `그래서`, `그럼`, `그거` 같은 후속 질문의 검색어가 사라졌다. Project AI는 최근 이력을 최종 모델 prompt에만 넣고 검색 query에는 반영하지 않았다. 두 경로 모두 고정 top-k 결과를 바로 사용해 질문 의도와 다른 source가 상위에 올 가능성이 있었다.
+- Core: `MeetingAiMessage`를 `(meetingId, userId)`로 영속화하고 회의 ACL을 확인한 뒤 같은 사용자·회의의 최근 10개 turn만 internal Meeting AI request에 전달한다. 성공한 응답의 USER/ASSISTANT 쌍만 저장한다. 이력은 RAG 근거나 citation이 아닌 비신뢰 query 문맥이다.
+- AI retrieval: 원문 질문은 항상 검색한다. 최근 이력이 있고 질문에 후속 지시어가 있을 때 최근 사용자 질문을 결합한 contextual query를 추가한다. Meeting은 query별 후보 12개에서 최종 8개, Project는 query별 후보 16개에서 최종 8개를 rank fusion·중복 제거한다. summary/decision/action/general intent에 맞춰 동일 scope 안에서 source type 우선순위를 조정한다.
+- 안전 경계: Meeting의 단일 `meetingId`, Project의 `projectId + allowedMeetingIds`, Backend 선행 ACL, citation source 검증, `LOW_RELEVANCE` evidence gate는 그대로 유지했다. 대화 이력이나 모델의 과거 답변은 source가 될 수 없으며 relevance threshold를 낮추지 않았다.
+- 관측성: 질문이나 이력 원문을 남기지 않고 `scope`, `intent`, `queryCount`, `contextualQuery`, `candidateCount`, `resultCount`, `sourceTypeCount`만 구조화 로그에 허용했다.
+- migration 충돌 방지: 운영에 이미 적용된 V29의 정확한 SQL(blob `735068c4e90481088bbbc25b382eea6edc57cfee`)을 `V29__grant_core_transcript_projection_delete.sql`로 복원했다. 동시에 추가된 공용 용어 사전 V30은 수정하지 않고 Meeting AI 이력 테이블을 V31로 배정했다. `meetingmind_core_app`에는 `SELECT, INSERT`만 부여하고 `UPDATE, DELETE`는 부여하지 않았다.
+- 검증: `./scripts/run-db-tests.sh --tests com.meetingmind.demo.MigrationIntegrationTest` 1건 통과. `cd backend && ./gradlew test` 223건 / 실패 0 / skip 15. 전체 저장소를 read-only mount한 AI 이미지에서 `python -m unittest discover -s tests` 216건 / 실패 0 / skip 7. 후속 질문 raw/contextual 검색, 사용자·회의 이력 격리, action/decision source 우선순위, 동일 Project scope, citation 제한을 신규 회귀 테스트로 고정했다.
+- 남은 운영 검증: 이번 단계는 외부 provider 과금이 없는 자동 회귀까지 완료했다. 배포 후 실제 한국어 질문 세트로 전후 적중률과 `unsupportedReason` 분포를 측정한 뒤 threshold calibration 또는 transcript chunk 재설계·재색인을 별도 결정한다(`T460`).
+
+## M154 Grounded Summary-only Report Generation
+
+- 원인: AI service는 근거가 붙은 `summary[]`와 선택적인 decision/action item을 반환하도록 이미 바뀌었지만, Core의 `ReportAiGatewayResponse`는 구형 `summary: String`과 AI 생성 `markdown`을 계속 요구했다. 배포된 구형 provider 정책은 명시적 결정이나 할 일이 없으면 `unsupported`로 판정해, 같은 저장 전사를 Meeting AI는 검색할 수 있어도 회의록 후보는 만들지 못했다.
+- 계약: AI 내부 응답을 `schemaVersion: 2`로 고정하고 `summary[]`, `decisions[]`, `actionItems[]`, `sources[]`, `droppedCount`, `unsupported`, `unsupportedReason`, `model`, `usage`를 사용한다. Markdown은 AI 응답에서 제거하고 Core가 만든다. 같은 JSON fixture를 AI HTTP boundary와 Java gateway 역직렬화 테스트가 함께 읽어 schema drift를 막는다.
+- AI: provider prompt에 "검증 가능한 summary가 하나 이상이면 decision/action item이 비어 있어도 supported=true"를 명시했다. `GenerateReportResponse`는 `schemaVersion: 2`를 반환한다. 요약이 모두 citation 검증에서 제외된 경우만 `UNVERIFIED_OUTPUT`이다.
+- Core: AI에 실제로 전달한 single-meeting source ID를 기준으로 summary/decision/action citation을 다시 검증한다. 잘못된 decision/action은 해당 항목만 제외하고 `droppedCount`에 더하며, summary가 하나 이상 남으면 candidate를 저장한다. summary 텍스트와 Markdown, 각주 번호, 근거 목록은 동일한 검증 결과에서 조립한다. 빈 decision/action 절은 만들지 않는다.
+- rolling compatibility: Core gateway는 구형 문자열 요약 v1과 전환 중 생성된 versionless 구조화 응답을 읽어 v2 DTO로 정규화한다. 명시된 미지원 schema version은 거부한다. 배포 순서는 호환 Core -> v2 AI이며, 실제 전환 확인 후 다음 release에서 v1 어댑터를 제거한다(`T466`). 이번 작업에서는 배포하지 않았다.
+- Frontend: `unsupportedReason`별로 근거 없음, 낮은 관련성, 모델 미지원, citation 검증 실패를 구분한다. 결정/할 일 부재 문구를 제거했고, `unsupported=false + candidate=null` 또는 `unsupported=true + candidate!=null`은 계약 오류로 처리한다. 제외된 항목 수가 있으면 생성/편집 메시지에 알린다.
+- 데이터 영향: DB 컬럼과 관계는 바뀌지 않는다. `meeting_reports.summary`, `markdown`, `source_ids`에 신규 candidate부터 새 형식이 저장되므로 migration, `data-model.md`, ERD 변경은 없다. 참석자 수는 권한 검사에서 이미 읽은 active `MeetingParticipant` 목록을 재사용해 Markdown metadata에 넣으며 추가 조회나 공용 context 변경은 만들지 않았다.
+- 검증: AI Docker 고정 환경 `python -m unittest discover -s tests` 217건 / 실패 0 / skip 7. Backend `./gradlew test` 233건 / 실패 0 / skip 15. Frontend `npm test` 101건 / 실패 0, `npm run build` 통과. `python3 -m compileall app tests/test_meeting_ai.py`와 `git diff --check`도 통과했다. 신규 회귀는 summary-only 성공, forged summary 거부, 개별 항목 drop, 근거 번호 순서, unsupported reason 전달, v1/versionless v2 rolling 호환, unknown schema 거부, Frontend reason 문구를 포함한다.
+
+## M155 Multi-participant Live STT
+
+- 원인: 참가자마다 `LocalTrackPublished`에서 자기 microphone track으로 start를 호출하지만 Core와 remote
+  STT가 회의 단위 `MeetingTranscript=PROCESSING`을 중복 시작으로 판단해 409를 반환했다. host가 회의
+  시작 직후 먼저 publish하므로 사실상 host session만 생성됐다.
+- 시작 수정: `WorkspaceDomainService.startMeetingTranscript`와 remote
+  `TranscriptionCoordinator.startTranscript`는 기존 `PROCESSING` row를 저장/audit 갱신 없이 그대로
+  반환한다. `MeetingTranscriptionController`도 remote status가 `PROCESSING`이면 Core aggregate를 공유한
+  뒤 참가자의 `trackId`와 `displayName`으로 새 gateway session/Track Egress를 시작한다.
+- 종료 수정: in-process registry는 sessions map을, remote registry는 sessions map과 shared DB의
+  `ACTIVE`/`STOPPING` session row를 함께 확인한다. remote는 현재 row를 먼저 `COMPLETED`/`FAILED`로
+  갱신해 자기 자신을 활성 session 집계에서 제외한다. 다른 session이 남아 있으면 aggregate 상태를
+  유지하고 마지막 session만 complete/fail을 수행한다. stale reaper와 cross-Pod stop도 같은 규칙을
+  사용하며, stop controller의 선제 complete와 FAILED session의 PROCESSING→COMPLETED 보정은 제거했다.
+- 동시 저장 수정: remote `appendSegment`, `completeTranscript`, `failTranscript`는
+  `meeting_transcripts` row의 pessimistic write lock을 획득한다. 참가자별 final segment가 동시에 도착해도
+  sequence count와 insert가 회의별로 직렬화되고 마지막 session terminal 전이도 중복 실행되지 않는다.
+- 계약/범위: Frontend, API request/response shape, DB schema와 권한 정책은 바꾸지 않았다. 계약 문서의
+  "회의당 활성 session 1개" 및 "개별 stop 즉시 COMPLETED" 설명을 다중 session aggregate 규칙으로
+  갱신했다. 실제 speaker displayName 전달은 이미 구현돼 있어 추가 변경하지 않았다.
+- 자동 검증:
+  - `cd backend && ./gradlew test` → 성공.
+  - `cd stt && ./gradlew test` → 성공.
+  - `./scripts/run-db-tests.sh --tests com.meetingmind.demo.domain.JdbcWorkspaceStoreIntegrationTest` → 격리
+    PostgreSQL 5435에서 성공.
+  - 신규 회귀는 Core/remote PROCESSING 멱등성, 두 session 중 첫 stop/fail 후 aggregate 유지, 마지막
+    stop/fail terminal 전이, cross-Pod persisted row, stale reaper, controller 비선제 완료를 포함한다.
+- 남은 검증: 수정 이미지를 배포한 뒤 실제 두 사용자 microphone 발화가 모두 같은 dialogue에 서로 다른
+  speaker로 쌓이고, 한 명 퇴장 후 남은 참가자의 자막이 지속되며, 마지막 session 종료 때만 transcript가
+  terminal이 되는 NonProd smoke가 필요하다. 따라서 `T470`은 아직 완료 처리하지 않는다.
+
+## M156 Persisted Knowledge Graph Edges
+
+- 목표: 임베딩이 없는 용어를 포함한 현재 NonProd Knowledge 노드를 RDS의 보조 엣지로 연결하고,
+  별도 더미 타입을 화면이나 API에 노출하지 않은 채 기존 그래프 선으로 표시한다.
+- 데이터 모델: V34가 `knowledge_graph_edges`를 생성한다. Space FK, 정렬된 무방향
+  `from_node_id < to_node_id`, `(space_id, from_node_id, to_node_id)` unique, 0~1 similarity를
+  강제한다. Core runtime role에는 SELECT만 부여해 운영 요청이 엣지를 변경하지 못하게 한다.
+- NonProd 시드: `infra/aws/environments/nonprod-v2/knowledge-graph-edge-seed.sql`은 배포 시점의
+  active/completed embedding source와 Space/구독 공용 ACTIVE 용어를 합쳐, Space별 안정적인
+  의사 무작위 순서의 인접 노드를 연결한다. migration에 데이터를 넣지 않아 다른 환경에 자동으로
+  보조 연결을 심지 않으며, NonProd RDS에만 별도 실행한다.
+- Core: `KnowledgeGraphEdgeStore`가 Space 저장 엣지를 읽는다. 기존 AI/용어 노드와 요청 필터를
+  먼저 적용한 뒤 양 끝 node ID가 현재 visible set에 모두 있을 때만 추가한다. 같은 무방향 pair에
+  AI 의미 유사도 엣지가 있으면 AI 엣지를 우선한다.
+- API/Frontend: 응답은 기존 `from`, `to`, `similarity` 계약을 유지하므로 edge type이나 Frontend
+  모델 변경은 없다.
+- 검증: `KnowledgeGraphServiceTest`, Backend 전체 테스트, PostgreSQL `MigrationIntegrationTest`가
+  통과했다. 로컬 Trivy와 ECR enhanced scan 모두 HIGH/CRITICAL finding 0건을 확인했다.
+- NonProd 데이터: RDS Flyway schema를 V34로 올리고 15개 Space에 `knowledge_graph_edges`
+  2,197건을 삽입했다. migration runtime role의 SELECT 허용/INSERT 거부도 통합 테스트와 실제
+  역할 구성을 통해 확인했다.
+- 배포: Core 이미지 digest
+  `sha256:a206f2bbe926e583b9ba885134ffcefa2c67159539f14a6a9f483dc6766e4c2b`를 배포해 ECS task
+  definition `meetingmind-nonprod-v2-core:14`가 `HEALTHY`, rollout `COMPLETED`, desired/running
+  `1/1` 상태가 되었다. 애플리케이션 시작 로그에는 새 테이블 또는 DB 권한 오류가 없다.
+- 배포 후 확인: `https://app.meetingmind.co.kr/`와 `/api/v1/auth/session`이 모두 HTTP 200을
+  반환했고, 최종 `terraform plan -detailed-exitcode`는 exit 0과 `No changes`를 반환했다.
+  기존 `TranscriptProjectionReconciler`의 3개 회의 `AuthorizationException` 경고는 이번 변경과
+  무관하게 계속 관찰되며 별도 운영 이슈로 남긴다.
+
+## M157 AI Report Fast Relaxation
+
+- 판단: 생성 입력 최소 조건은 이미 내용 있는 source 1건으로 느슨하다. 실패 체감을 낮추기 위해
+  citation 검증을 제거하지 않고 provider가 보는 회의 범위를 넓힌다.
+- 빠른 완화 기준: report context 상한을 12개에서 24개로 늘린다. relevance score가 있으면 기존
+  high-score 우선순위를 유지하고, Backend transcript처럼 전부 무점수이면 원본 source 순서의
+  시작과 끝을 포함해 균등 선별한다. 기능별 token budget은 유지한다.
+- 유지 기준: 현재 meeting 이외 source 거부, 편집 권한, 요약/결정/할 일별 citation 검증,
+  검증 가능한 summary 최소 1문장, `CANDIDATE` 저장과 사용자 확정 절차는 바꾸지 않는다.
+- 제외 범위: chunk별 중간 요약 후 최종 합성, provider 재시도, 배포 환경 반영은 이번 빠른 변경에
+  포함하지 않는다.
+- 구현: `select_report_context_sources`가 source 수가 24개 이하이면 그대로 유지하고, 초과하면
+  score 존재 시 내림차순 상위 24개를, 전부 무점수이면 첫 source와 마지막 source를 포함한 균등
+  간격 24개를 선택한다. report provider prompt와 응답 citation 검증은 같은 선택 목록을 사용한다.
+- 검증: 무점수 source 30건에서 시작/중간/마지막을 포함한 24건이 선택되고, score source 27건에서
+  high-score 3건을 모두 보존하며 low-score 3건을 제외하는 대상 테스트 2건이 통과했다. 기존 로컬
+  AI 테스트 이미지에 저장소를 읽기 전용으로 마운트해 `python -m unittest discover -s tests`를
+  실행한 결과 217건 통과, 환경 의존 7건 skip, 실패 0건이었다. `python -m compileall app`도
+  통과했다. ECR push, Terraform, RDS, ECS 배포는 실행하지 않았다.
+
+## M158 AI Report Guaranteed Draft Pipeline
+
+- 긴 회의 합성: report source가 24개를 초과하면 시간 순서대로 24개씩 나누고 최대 4개 구간을
+  병렬 요약한다. 성공한 구간 요약을 원본 source ID와 함께 최종 reduce에 전달하므로 최종
+  citation은 중간 결과가 아니라 실제 회의 근거를 계속 가리킨다. 24개 이하는 기존 직접 생성을
+  유지한다.
+- 재시도와 fallback: 구조화 JSON 파싱 또는 citation 검증이 실패하면 전체 요청에서 딱 1회만
+  자동 재시도한다. 재시도 후에도 실패하거나 provider가 실패하면 최대 8개의 전사 문장에서
+  240자 이내 근거 발췌를 결정적으로 구성한다. 전사가 하나도 없을 때만 `NO_EVIDENCE`로 종료한다.
+- 품질 표기: AI, Core, Frontend 계약에 `generationMode`, `degraded`, `warnings`, `attemptCount`를
+  추가했다. 사용자는 직접 생성, 계층 합성, 전사 발췌 fallback을 구분할 수 있고 fallback 결과에는
+  검토가 필요하다는 경고가 표시된다. DB schema와 저장 포맷은 바꾸지 않았다.
+- 자동 검증: AI 전체 220건 통과/7건 skip/실패 0, Backend 전체 테스트 통과, Frontend 102건
+  통과와 production build 성공을 확인했다. 신규 회귀는 긴 30-source map/reduce, 원본 citation,
+  구조 실패 1회 재시도, 재시도 소진 및 provider 오류 fallback을 포함한다.
+- 이미지 검증: AI digest
+  `sha256:9303f285cadb4188f9807ec7b171e7f558ed1f51781bece7b234c1a17e80288f`, Core digest
+  `sha256:e51bc836eb02afc35e46b4cdc7e01f3544659d41b91844e6e38585aff3afc0f7`를 ECR에 올렸다.
+  로컬 Trivy와 ECR scan 모두 HIGH/CRITICAL finding 0건이었다.
+- NonProd 배포: Terraform의 정확한 저장 plan(2 add, 2 change, 2 destroy)을 적용했다. AI task
+  definition `meetingmind-nonprod-v2-ai:5`, Core `meetingmind-nonprod-v2-core:15`가 각각 위 digest로
+  `RUNNING`/`HEALTHY`, desired/running `1/1` 상태다. Frontend asset
+  `assets/index-Drcrs8dP.js`를 S3에 동기화하고 CloudFront invalidation
+  `I8IG2EYS5N23AJP5CFSR05XE2F` 완료를 확인했다.
+- 배포 후 확인: `https://app.meetingmind.co.kr/`와 `/api/v1/auth/session`은 모두 HTTP 200이고,
+  공개 HTML이 신규 asset을 참조한다. AI `/health`는 지속해서 200이며 Core도 정상 시작했다.
+  최종 `terraform plan -detailed-exitcode`는 exit 0과 `No changes`를 반환했다. 기존
+  `TranscriptProjectionReconciler`의 3개 회의 `AuthorizationException` 경고는 이번 변경과
+  무관한 선행 운영 이슈로 계속 관찰된다.
+
+## M159 Google Sign-in E2E CI Environment
+
+- 원인: Google callback E2E는 브라우저에 Google Identity API mock을 주입했지만 로그인 화면은
+  `VITE_GOOGLE_CLIENT_ID`가 있을 때만 `GoogleCredentialButton`을 렌더링한다. 로컬에서는 Git에서
+  제외된 `frontend/.env`가 이 값을 제공해 통과했고, `.env`가 없는 GitHub Actions에서는 mock 버튼이
+  생성되지 않아 locator가 30초 후 timeout 됐다.
+- 수정: `frontend/playwright.config.ts`가 띄우는 Frontend dev server에만
+  `VITE_GOOGLE_CLIENT_ID=ci-e2e-google-client-id`를 전달한다. 값은 실제 Google 요청에 쓰이지 않는
+  테스트 placeholder이며, 테스트가 `window.google`과 인증 API를 모두 mock한다. 개인 `.env`, 운영
+  client ID, 애플리케이션 runtime 분기는 변경하지 않았다.
+- 검증: `CI=true`와 격리 포트를 사용한 대상 Google callback E2E 1건이 통과했다. 같은 조건의
+  `npm run test:e2e` 전체 결과는 12건 통과, LiveKit credential이 필요한 opt-in media test 1건 skip,
+  실패 0건이다.

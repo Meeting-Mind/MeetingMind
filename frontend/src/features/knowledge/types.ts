@@ -37,6 +37,7 @@ export const KNOWLEDGE_KIND_COLOR_VARS: Record<KnowledgeKind, string> = {
 export interface GraphNodeVM extends SimulationNodeDatum {
   id: string;
   title: string;
+  description: string | null;
   kind: KnowledgeKind;
   sourceMeetingId: string | null;
   connectionCount: number;

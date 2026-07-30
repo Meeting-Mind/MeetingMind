@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { ReportAssistant, type AssistantMessage } from "../features/report/ReportAssistant";
 import { ReportDocument } from "../features/report/ReportDocument";
 import { diffReport, type ReportDiff } from "../features/report/diff";
+import { reportUnsupportedMessage } from "../features/report/unsupported";
 import type {
   AiSource,
   ReportCandidateActionItem,
@@ -23,6 +24,7 @@ import type {
   ReportDetailResponse,
   ReportDownloadFormat,
   StoredReportCandidate,
+  UnsupportedReason,
 } from "../types";
 
 type Props = { session: AuthSession | null };
@@ -64,14 +66,6 @@ function fromCandidate(candidate: StoredReportCandidate): ReportView {
   };
 }
 
-/** `unsupportedReason`을 사람이 읽을 문장으로 옮긴다. 일반 오류로 뭉뚱그리지 않는다. */
-function unsupportedMessage(): { title: string; why: string } {
-  return {
-    title: "전사에서 결정이나 할 일을 찾지 못함",
-    why: "회의가 짧거나 잡담 위주일 때 나타납니다. AI는 근거 없이 내용을 지어내지 않습니다.",
-  };
-}
-
 let messageSeq = 0;
 function message(role: AssistantMessage["role"], text: string): AssistantMessage {
   messageSeq += 1;
@@ -87,6 +81,7 @@ export function MeetingReportPage({ session }: Props) {
   const [suggestion, setSuggestion] = useState<ReportView | null>(null);
   const [diff, setDiff] = useState<ReportDiff | null>(null);
   const [unsupported, setUnsupported] = useState(false);
+  const [unsupportedReason, setUnsupportedReason] = useState<UnsupportedReason | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -144,16 +139,31 @@ export function MeetingReportPage({ session }: Props) {
     setPending(true);
     setError("");
     setUnsupported(false);
+    setUnsupportedReason(null);
     try {
       const result = await generateReportCandidate(session, meetingId);
-      if (!result.candidate) {
-        // 서버가 근거 부족으로 만들지 못한 경우다. 고장과 구분해서 보여준다.
+      if (result.unsupported) {
+        if (result.candidate) {
+          throw new Error("회의록 생성 응답 상태가 올바르지 않습니다.");
+        }
         setUnsupported(true);
+        setUnsupportedReason(result.unsupportedReason);
         return;
+      }
+      if (!result.candidate) {
+        throw new Error("회의록 생성 결과가 없습니다.");
       }
       setReport(fromCandidate(result.candidate));
       setSources(result.sources);
-      setMessages([message("ai", "회의록을 만들었습니다. 검토하고 고칠 수 있습니다.")]);
+      const droppedNotice = result.droppedCount > 0
+        ? ` 근거를 확인할 수 없는 항목 ${result.droppedCount}개는 제외했습니다.`
+        : "";
+      const qualityNotice = result.degraded
+        ? ` ${result.warnings[0] ?? "AI 요약에 실패해 전사 발췌 초안을 만들었습니다."}`
+        : result.generationMode === "AI_HIERARCHICAL"
+          ? " 긴 회의를 구간별로 요약해 합성했습니다."
+          : "";
+      setMessages([message("ai", `회의록을 만들었습니다. 검토하고 고칠 수 있습니다.${qualityNotice}${droppedNotice}`)]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "회의록을 만들지 못했습니다.");
     } finally {
@@ -170,16 +180,26 @@ export function MeetingReportPage({ session }: Props) {
     setMessages((current) => [...current, message("user", instruction)]);
     try {
       const result = await editMeetingReportWithAi(session, meetingId, report.id, instruction);
-      if (!result.candidate) {
-        setMessages((current) => [...current, message("ai", "요청한 수정을 만들지 못했습니다. 다르게 요청해 보세요.")]);
+      if (result.unsupported) {
+        if (result.candidate) {
+          throw new Error("회의록 수정 응답 상태가 올바르지 않습니다.");
+        }
+        const reason = reportUnsupportedMessage(result.unsupportedReason);
+        setMessages((current) => [...current, message("ai", `${reason.title} ${reason.why}`)]);
         return;
+      }
+      if (!result.candidate) {
+        throw new Error("회의록 수정 결과가 없습니다.");
       }
       const next = fromCandidate(result.candidate);
       setSuggestion(next);
       // 서버는 무엇을 바꿨는지 알려주지 않는다. 이전 상태와 비교해 직접 계산한다.
       setDiff(diffReport(report, next));
       setSources(result.sources);
-      setMessages((current) => [...current, message("ai", "수정을 준비했습니다. 바뀔 내용을 확인하세요.")]);
+      const droppedNotice = result.droppedCount > 0
+        ? ` 근거를 확인할 수 없는 항목 ${result.droppedCount}개는 제외했습니다.`
+        : "";
+      setMessages((current) => [...current, message("ai", `수정을 준비했습니다. 바뀔 내용을 확인하세요.${droppedNotice}`)]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "수정 제안을 만들지 못했습니다.");
     } finally {
@@ -256,7 +276,7 @@ export function MeetingReportPage({ session }: Props) {
   }
 
   if (unsupported || (!report && transcriptState !== "loading")) {
-    const reason = unsupportedMessage();
+    const reason = reportUnsupportedMessage(unsupportedReason);
     return (
       <div className="report-page">
         <div className="report-empty">
